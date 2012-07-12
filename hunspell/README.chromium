@@ -1,0 +1,20 @@
+Name: hunspell
+URL: http://hunspell.sourceforge.net/
+Version: 1.2.12
+
+Description:
+This is a partial copy of Hunspell 1.2.12 with the following changes:
+* Remove '#include "config.h"' from src/hunspell/hunspell.hxx
+* Remove '#include "config.h"' from src/hunspell/license.hunspell
+* Change src/hunspell/filemgr.hxx and src/hunspell/filemgr.cxx to use
+  LineIterator.
+* Add ScropedHashEntry, which creates temporary hentry objects, to
+  src/hunspell/suggestmgr.cxx
+* Change the input params of the constructors to receive a BDICTReader instead
+  of a file path.
+The patch is in google.patch.
+
+All dictionaries used by Chromium has been checked in to the
+'third_party/hunspell_dictionaries' directory. They have several additions over
+the default myspell/hunspell dictionaries.
+(See 'third_party/hunspell_dictionaries/README.chromium' for their details.)

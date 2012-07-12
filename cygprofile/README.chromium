@@ -1,0 +1,28 @@
+Name: CygProfiler instrumentation for -finstrument-functions
+Short Name: CygProfiler
+URL: http://www.logix.cz/michal/devel/CygProfiler/
+Version: 0
+Date: N/A
+Revision: N/A
+License: public domain
+License File: cyg-profile.h
+Security Critical: No
+
+Description:
+Implementation of instrumentation functions for use with gcc's
+-finstrument-functions option.
+
+Local Modifications:
+09/07/2011: Original unmodified version of code added to third_party
+
+09/08/2011: cyg-profile.c was removed and replaced with the cyg-profile.cc file.
+The style has been changed to fit Google's style guide.  Logging and format
+changed to log only first entry of a function.  Logs virtual address of code
+section which contains profiled code, and logs timestamps of calls.  The
+implementation was also made thread-safe with the use of stdlib sets and a
+pthread mutex.
+
+01/23/2012: Android: enable profiling on first __cyg_profile_func_enter() call.
+This is useful to profile the large number of static initializers used
+by Chromium on this platform.
+

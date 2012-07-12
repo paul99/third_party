@@ -1,0 +1,13 @@
+Index: common/unicode/unistr.h
+===================================================================
+--- common/unicode/unistr.h	(revision 75773)
++++ common/unicode/unistr.h	(working copy)
+@@ -4089,7 +4089,7 @@
+ #if defined(__GNUC__)
+   // Ticket #7039: Clip length to the maximum valid length to the end of addressable memory given the starting address
+   // This is only an issue when using GCC and certain optimizations are turned on.
+-  return extract(start, _length, dst, dst!=0 ? ((dst >= (char*)((size_t)-1) - UINT32_MAX) ? (((char*)UINT32_MAX) - dst) : UINT32_MAX) : 0, codepage);
++  return extract(start, _length, dst, dst!=0 ? ((dst >= (char*)((size_t)-1) - UINT32_MAX) ? static_cast<unsigned int>((((char*)UINT32_MAX) - dst)) : UINT32_MAX) : 0, codepage);
+ #else
+   return extract(start, _length, dst, dst!=0 ? 0xffffffff : 0, codepage);
+ #endif
