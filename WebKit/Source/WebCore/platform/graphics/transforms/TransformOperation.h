@@ -28,13 +28,13 @@
 #include "FloatSize.h"
 #include "TransformationMatrix.h"
 #include <wtf/PassRefPtr.h>
-#include <wtf/RefCounted.h>
+#include <wtf/ThreadSafeRefCounted.h>
 
 namespace WebCore {
 
 // CSS Transforms (may become part of CSS3)
 
-class TransformOperation : public RefCounted<TransformOperation> {
+class TransformOperation : public ThreadSafeRefCounted<TransformOperation> {
 public:
     enum OperationType {
         SCALE_X, SCALE_Y, SCALE, 
