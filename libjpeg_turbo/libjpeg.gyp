@@ -174,7 +174,11 @@
                 }]
               ],
             }],
-
+            [ 'target_arch=="mipsel"', {
+              'sources': [
+                'jsimd_none.c',
+              ],
+            }],
             # Build rules for an asm file.
             # On Windows, we use the precompiled yasm binary. On Linux, we build
             # our patched yasm and use it except when use_system_yasm is 1. On
@@ -245,7 +249,7 @@
               'rule_name': 'assemble',
               'extension': 'asm',
               'conditions': [
-                [ 'target_arch!="arm"', {
+                [ 'target_arch != "arm" and target_arch != "mipsel"', {
                   'inputs': [ '<(yasm_path)', ],
                   'outputs': [
                     '<(shared_generated_dir)/<(RULE_INPUT_ROOT).<(object_suffix)',
