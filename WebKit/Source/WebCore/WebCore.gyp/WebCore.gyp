@@ -1737,18 +1737,6 @@
     # See https://bugs.webkit.org/show_bug.cgi?id=62916.
     {
       'target_name': 'webcore_arm_neon',
-      'type': 'static_library',
-      'dependencies': [
-        'webcore_prerequisites',
-      ],
-      'hard_dependency': 1,
-      'sources': [
-        '<@(webcore_files)',
-      ],
-      'sources/': [
-        ['exclude', '.*'],
-        ['include', 'platform/graphics/filters/arm/.*NEON\\.(cpp|h)'],
-      ],
       'conditions': [
         ['OS=="android"', {
           'cflags!': ['-mthumb'],
@@ -1757,8 +1745,18 @@
         ['OS=="android" and target_arch=="ia32"', {
           'cflags!': ['-marm'],
         }],
+        ['OS=="android" and target_arch=="mips"', {
+          'cflags!': ['-marm'],
+        }],
         ['OS=="linux" and target_arch=="arm"', {
           'cflags': ['-marm'],
+          'conditions': [
+            ['OS=="android"', {
+              'cflags!': ['-mthumb'],
+            }],
+          ],
+        },{  # target_arch!="arm"
+          'type': 'none',
         }],
       ],
     },
