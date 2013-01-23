@@ -210,7 +210,7 @@
                 ],
               },
             }],
-            [ 'OS=="linux" or (OS=="android" and target_arch!="arm")', {
+            [ 'OS=="linux" or (OS=="android" and target_arch!="arm" and target_arch!="mipsel")', {
               'conditions': [
                 [ 'use_system_yasm==0', {
                   'dependencies': [
