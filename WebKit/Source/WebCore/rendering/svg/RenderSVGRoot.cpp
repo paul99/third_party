@@ -441,6 +441,14 @@ void RenderSVGRoot::addResourceForClientInvalidation(RenderSVGResourceContainer*
     static_cast<RenderSVGRoot*>(svgRoot)->m_resourcesNeedingToInvalidateClients.add(resource);
 }
 
+bool RenderSVGRoot::hasRelativeLogicalHeight() const
+{
+    SVGSVGElement* svg = static_cast<SVGSVGElement*>(node());
+    ASSERT(svg);
+
+    return svg->intrinsicHeight(SVGSVGElement::IgnoreCSSProperties).isPercent();
+}
+
 }
 
 #endif // ENABLE(SVG)

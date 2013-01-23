@@ -39,6 +39,8 @@
 #include "cc/CCThread.h"
 #include "cc/CCThreadProxy.h"
 
+using namespace std;
+
 namespace {
 static int numLayerTreeInstances;
 }
@@ -71,6 +73,7 @@ CCLayerTreeHost::CCLayerTreeHost(CCLayerTreeHostClient* client, const CCSettings
     , m_minPageScaleFactor(1)
     , m_maxPageScaleFactor(1)
     , m_triggerIdlePaints(true)
+    , m_partialTextureUpdateRequests(0)
 {
     ASSERT(CCProxy::isMainThread());
     numLayerTreeInstances++;
@@ -89,6 +92,12 @@ bool CCLayerTreeHost::initialize()
         m_proxy = CCSingleThreadProxy::create(this);
     m_proxy->start();
 
+    // Create the texture manager so the layer renderer can give it some pre-allocated textures.
+    // FIXME: We don't have the maximum texture size or format yet, so those are set in
+    // CCThreadProxy::initializeLayerRendererOnImplThread(), which is called directly below.
+    m_contentsTextureManager = TextureManager::create(TextureManager::highLimitBytes(m_settings.viewportSize),
+                                                      TextureManager::reclaimLimitBytes(m_settings.viewportSize),
+                                                      1024);
     if (!m_proxy->initializeLayerRenderer())
         return false;
 
@@ -98,11 +107,8 @@ bool CCLayerTreeHost::initialize()
     m_settings.acceleratePainting = m_proxy->layerRendererCapabilities().usingAcceleratedPainting;
 
     // Update m_settings based on partial update capability.
-    m_settings.partialTextureUpdates = m_settings.partialTextureUpdates && m_proxy->partialTextureUpdateCapability();
+    m_settings.maxPartialTextureUpdates = min(m_settings.maxPartialTextureUpdates, m_proxy->maxPartialTextureUpdates());
 
-    m_contentsTextureManager = TextureManager::create(TextureManager::highLimitBytes(viewportSize()),
-                                                      TextureManager::reclaimLimitBytes(viewportSize()),
-                                                      m_proxy->layerRendererCapabilities().maxTextureSize);
     return true;
 }
 
@@ -149,8 +155,14 @@ void CCLayerTreeHost::beginCommitOnImplThread(CCLayerTreeHostImpl* hostImpl)
     ASSERT(CCProxy::isImplThread());
     TRACE_EVENT("CCLayerTreeHost::commitTo", this, 0);
 
-    contentsTextureManager()->reduceMemoryToLimit(TextureManager::reclaimLimitBytes(viewportSize()));
-    contentsTextureManager()->deleteEvictedTextures(hostImpl->contentsTextureAllocator());
+    // Make space for 10% of free textures.
+    size_t reclaimLimit = contentsTextureManager()->preferredMemoryLimitBytes();
+    size_t desiredFreeBytes = reclaimLimit / 10;
+
+    // Make room for some free textures. This may evict free textures too,
+    // but they will just be converted back to free textures below.
+    contentsTextureManager()->reduceMemoryToLimit(reclaimLimit - desiredFreeBytes);
+    contentsTextureManager()->deleteEvictedTextures(hostImpl->contentsTextureAllocator(), true);
 }
 
 // This function commits the CCLayerTreeHost to an impl tree. When modifying
@@ -413,6 +425,9 @@ void CCLayerTreeHost::updateLayers(LayerChromium* rootLayer)
         CCLayerTreeHostCommon::calculateDrawTransformsAndVisibility(rootLayer, rootLayer, identityMatrix, identityMatrix, m_updateList, rootRenderSurface->layerList(), layerRendererCapabilities().maxTextureSize);
     }
 
+    // Reset partial texture update requests.
+    m_partialTextureUpdateRequests = 0;
+
     reserveUiTextures();
     reserveVisibleTextures();
 
@@ -423,7 +438,7 @@ void CCLayerTreeHost::updateLayers(LayerChromium* rootLayer)
     size_t preferredLimitBytes = TextureManager::reclaimLimitBytes(m_viewportSize);
     size_t maxLimitBytes = TextureManager::highLimitBytes(m_viewportSize);
     contentsTextureManager()->reduceMemoryToLimit(preferredLimitBytes);
-    if (contentsTextureManager()->currentMemoryUseBytes() >= preferredLimitBytes)
+    if (contentsTextureManager()->currentMemoryUseBytes() > preferredLimitBytes)
         return;
 
     // Idle painting should fail when we hit the preferred memory limit,
@@ -593,6 +608,20 @@ void CCLayerTreeHost::stopRateLimiter(GraphicsContext3D* context)
         it->second->stop();
         m_rateLimiters.remove(it);
     }
+}
+
+bool CCLayerTreeHost::bufferedUpdates()
+{
+    return m_settings.maxPartialTextureUpdates != numeric_limits<size_t>::max();
+}
+
+bool CCLayerTreeHost::requestPartialTextureUpdate()
+{
+    if (m_partialTextureUpdateRequests >= m_settings.maxPartialTextureUpdates)
+        return false;
+
+    m_partialTextureUpdateRequests++;
+    return true;
 }
 
 void CCLayerTreeHost::deleteTextureAfterCommit(PassOwnPtr<ManagedTexture> texture)

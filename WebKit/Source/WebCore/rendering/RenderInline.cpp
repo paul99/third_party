@@ -243,8 +243,7 @@ void RenderInline::addChildIgnoringContinuation(RenderObject* newChild, RenderOb
         // inline into continuations.  This involves creating an anonymous block box to hold
         // |newChild|.  We then make that block box a continuation of this inline.  We take all of
         // the children after |beforeChild| and put them in a clone of this object.
-        RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyle(style());
-        newStyle->setDisplay(BLOCK);
+        RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyleWithDisplay(style(), BLOCK);
 
         RenderBlock* newBox = new (renderArena()) RenderBlock(document() /* anonymous box */);
         newBox->setStyle(newStyle.release());
@@ -383,7 +382,7 @@ void RenderInline::splitFlow(RenderObject* beforeChild, RenderBlock* newBlockBox
         madeNewBeforeBlock = true;
     }
 
-    RenderBlock* post = block->createAnonymousBlockWithSameTypeAs(pre);
+    RenderBlock* post = toRenderBlock(pre->createAnonymousBoxWithSameTypeAs(block));
 
     RenderObject* boxFirst = madeNewBeforeBlock ? block->firstChild() : pre->nextSibling();
     if (madeNewBeforeBlock)
@@ -1244,6 +1243,11 @@ void RenderInline::dirtyLineBoxes(bool fullLayout)
         }
     } else
         m_lineBoxes.dirtyLineBoxes();
+}
+
+void RenderInline::deleteLineBoxTree()
+{
+    m_lineBoxes.deleteLineBoxTree(renderArena());
 }
 
 InlineFlowBox* RenderInline::createInlineFlowBox() 

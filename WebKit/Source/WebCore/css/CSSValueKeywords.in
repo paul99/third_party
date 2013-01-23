@@ -620,6 +620,7 @@ listitem
 media-fullscreen-button
 media-mute-button
 media-play-button
+media-overlay-play-button
 media-seek-back-button
 media-seek-forward-button
 media-rewind-button

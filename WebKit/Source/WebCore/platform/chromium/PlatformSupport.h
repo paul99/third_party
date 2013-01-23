@@ -214,6 +214,8 @@ public:
     static int highMemoryUsageMB();
     // Delta of memory usage growth (vs. last actualMemoryUsageMB()) to force GC when memory usage is high.
     static int highUsageDeltaMB();
+    // Maximum memory for textures.
+    static int maxTextureMemoryUsageMB();
 
     // MimeType -----------------------------------------------------------
     static bool isSupportedImageMIMEType(const String& mimeType);

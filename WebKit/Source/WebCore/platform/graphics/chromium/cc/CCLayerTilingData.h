@@ -54,8 +54,8 @@ public:
     void setTileSize(const IntSize&);
     const IntSize& tileSize() const { return m_tileSize; }
     // Change the border texel setting. This may invalidate all existing tiles.
-    void setBorderTexelOption(BorderTexelOption);
-    bool hasBorderTexels() const { return m_tilingData.borderTexels(); }
+    void setBorderTexelOption(BorderTexelOption, int borderSize);
+    bool hasBorderTexels() const { return m_tilingData.borderTexels() > 0; }
 
     bool isEmpty() const { return !m_tilingData.numTiles() || !tiles().size(); }
 

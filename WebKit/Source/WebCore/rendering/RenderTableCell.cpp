@@ -168,6 +168,7 @@ void RenderTableCell::updateLogicalWidth(LayoutUnit w)
 
 void RenderTableCell::layout()
 {
+    updateFirstLetter();
     layoutBlock(cellWidthChanged());
     setCellWidthChanged(false);
 }
@@ -1090,6 +1091,14 @@ void RenderTableCell::scrollbarsChanged(bool horizontalScrollbarChanged, bool ve
         setIntrinsicPaddingAfter(newAfterPadding);
     } else
         setIntrinsicPaddingAfter(intrinsicPaddingAfter() - scrollbarHeight);
+}
+
+RenderTableCell* RenderTableCell::createAnonymousWithParentRenderer(const RenderObject* parent)
+{
+    RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyleWithDisplay(parent->style(), TABLE_CELL);
+    RenderTableCell* newCell = new (parent->renderArena()) RenderTableCell(parent->document() /* is anonymous */);
+    newCell->setStyle(newStyle.release());
+    return newCell;
 }
 
 } // namespace WebCore

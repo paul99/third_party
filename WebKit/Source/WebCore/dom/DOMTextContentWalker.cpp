@@ -27,6 +27,7 @@
 
 #if OS(ANDROID)
 
+#include "Document.h"
 #include "Range.h"
 #include "TextIterator.h"
 #include "VisiblePosition.h"
@@ -35,47 +36,60 @@
 
 namespace WebCore {
 
-static PassRefPtr<Range> getRange(const Position& start, const Position& end)
+DOMTextContentWalker::DOMTextContentWalker(const VisiblePosition& visiblePosition, unsigned maxLength)
+    : m_positionOffsetInContent(0)
 {
-    return VisibleSelection(start.parentAnchoredEquivalent(), end.parentAnchoredEquivalent(), DOWNSTREAM).firstRange();
-}
+    if (visiblePosition.isNull())
+        return;
 
-DOMTextContentWalker::DOMTextContentWalker(const VisiblePosition& position, unsigned maxLength)
-    : m_hitOffsetInContent(0)
-{
     const unsigned halfMaxLength = maxLength / 2;
-    RefPtr<Range> forwardRange = makeRange(position, endOfDocument(position));
-    if (!forwardRange)
-        return;
-    CharacterIterator forwardChar(forwardRange.get(), TextIteratorStopsOnFormControls);
-    forwardChar.advance(maxLength - halfMaxLength);
+    CharacterIterator forwardIterator(makeRange(visiblePosition, endOfDocument(visiblePosition)).get(), TextIteratorStopsOnFormControls);
+    if (!forwardIterator.atEnd())
+        forwardIterator.advance(maxLength - halfMaxLength);
 
-    // No forward contents, started inside form control.
-    if (getRange(position.deepEquivalent(), forwardChar.range()->startPosition())->text().length() == 0)
+    Position position = visiblePosition.deepEquivalent().parentAnchoredEquivalent();
+    Document* document = position.document();
+    RefPtr<Range> forwardRange = forwardIterator.range();
+    if (!forwardRange || !Range::create(document, position, forwardRange->startPosition())->text().length()) {
+        ASSERT(forwardRange);
         return;
+    }
 
-    RefPtr<Range> backwardsRange = makeRange(startOfDocument(position), position);
-    if (!backwardsRange)
+    BackwardsCharacterIterator backwardsIterator(makeRange(startOfDocument(visiblePosition), visiblePosition).get(), TextIteratorStopsOnFormControls);
+    if (!backwardsIterator.atEnd())
+        backwardsIterator.advance(halfMaxLength);
+
+    RefPtr<Range> backwardsRange = backwardsIterator.range();
+    if (!backwardsRange) {
+        ASSERT(backwardsRange);
         return;
-    BackwardsCharacterIterator backwardsChar(backwardsRange.get(), TextIteratorStopsOnFormControls);
-    backwardsChar.advance(halfMaxLength);
+    }
 
-    m_hitOffsetInContent = getRange(backwardsChar.range()->endPosition(), position.deepEquivalent())->text().length();
-    m_contentRange = getRange(backwardsChar.range()->endPosition(), forwardChar.range()->startPosition());
+    m_positionOffsetInContent = Range::create(document, backwardsRange->endPosition(), position)->text().length();
+    m_contentRange = Range::create(document, backwardsRange->endPosition(), forwardRange->startPosition());
+    ASSERT(m_contentRange);
 }
 
-PassRefPtr<Range> DOMTextContentWalker::contentOffsetsToRange(unsigned startInContent, unsigned endInContent)
+PassRefPtr<Range> DOMTextContentWalker::contentOffsetsToRange(unsigned startOffsetInContent, unsigned endOffsetInContent)
 {
-    if (startInContent >= endInContent || endInContent > content().length())
+    if (startOffsetInContent >= endOffsetInContent || endOffsetInContent > content().length())
         return 0;
 
     CharacterIterator iterator(m_contentRange.get());
-    iterator.advance(startInContent);
 
+    ASSERT(!iterator.atEnd());
+    iterator.advance(startOffsetInContent);
+
+    ASSERT(iterator.range());
     Position start = iterator.range()->startPosition();
-    iterator.advance(endInContent - startInContent);
+
+    ASSERT(!iterator.atEnd());
+    iterator.advance(endOffsetInContent - startOffsetInContent);
+
+    ASSERT(iterator.range());
     Position end = iterator.range()->startPosition();
-    return getRange(start, end);
+
+    return Range::create(start.document(), start, end);
 }
 
 String DOMTextContentWalker::content() const
@@ -87,7 +101,7 @@ String DOMTextContentWalker::content() const
 
 unsigned DOMTextContentWalker::hitOffsetInContent() const
 {
-    return m_hitOffsetInContent;
+    return m_positionOffsetInContent;
 }
 
 } // namespace WebCore

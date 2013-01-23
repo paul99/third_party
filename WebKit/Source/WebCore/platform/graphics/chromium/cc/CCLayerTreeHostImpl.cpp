@@ -42,6 +42,7 @@
 #include <wtf/CurrentTime.h>
 
 #if OS(ANDROID)
+#include "cc/CCScrollbarAndroid.h"
 #include "cc/CCTimer.h"
 #endif
 
@@ -460,8 +461,12 @@ bool CCLayerTreeHostImpl::initializeLayerRenderer(PassRefPtr<GraphicsContext3D> 
     OwnPtr<LayerRendererChromium> layerRenderer;
     layerRenderer = LayerRendererChromium::create(this, context);
 
-    if (m_layerRenderer)
+    if (m_layerRenderer) {
+#if OS(ANDROID)
+        CCScrollbarAndroid::resetScrollbarOverlay(m_layerRenderer.get());
+#endif
         m_layerRenderer->close();
+    }
 
     m_layerRenderer = layerRenderer.release();
     return m_layerRenderer;
@@ -775,15 +780,14 @@ void CCLayerTreeHostImpl::pinchGestureUpdate(float magnifyDelta,
 
     if (!m_scrollLayerImpl)
         return;
-
-    if (m_prevPinchAnchor == IntPoint())
-        m_prevPinchAnchor = anchor;
+    m_currentlyScrollingLayerImpl = m_scrollLayerImpl.get();
 
     // Keep the center-of-pinch anchor specified by (x, y) in a stable
     // position over the course of the magnify.
-    FloatPoint prevScaleAnchor(m_prevPinchAnchor.x() / m_pageScaleDelta, m_prevPinchAnchor.y() / m_pageScaleDelta);
+    FloatPoint prevScaleAnchor(anchor.x() / m_pageScaleDelta, anchor.y() / m_pageScaleDelta);
     setPageScaleDelta(m_pageScaleDelta * magnifyDelta);
     FloatPoint newScaleAnchor(anchor.x() / m_pageScaleDelta, anchor.y() / m_pageScaleDelta);
+
     FloatSize move = prevScaleAnchor - newScaleAnchor;
 
     m_prevPinchAnchor = anchor;

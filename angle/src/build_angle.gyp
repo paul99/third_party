@@ -3,16 +3,10 @@
 # found in the LICENSE file.
 
 {
-  'variables': {
-    'chromium_code': 1,
-  },
   'target_defaults': {
     'defines': [
       'ANGLE_DISABLE_TRACE',
       'ANGLE_COMPILE_OPTIMIZATION_LEVEL=D3DCOMPILE_OPTIMIZATION_LEVEL0',
-    ],
-    'cflags!': [
-      '-Wall',
     ],
   },
   'targets': [

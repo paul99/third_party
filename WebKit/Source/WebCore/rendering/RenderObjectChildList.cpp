@@ -75,6 +75,9 @@ RenderObject* RenderObjectChildList::removeChildNode(RenderObject* owner, Render
 {
     ASSERT(oldChild->parent() == owner);
 
+    if (oldChild->isFloatingOrPositioned())
+        toRenderBox(oldChild)->removeFloatingOrPositionedChildFromBlockLists();
+
     // So that we'll get the appropriate dirty bit set (either that a normal flow child got yanked or
     // that a positioned child got yanked).  We also repaint, so that the area exposed when the child
     // disappears gets repainted properly.
@@ -470,6 +473,11 @@ void RenderObjectChildList::updateBeforeAfterContent(RenderObject* owner, Pseudo
         insertBefore = insertBefore->firstChild();
     }
 
+    // Nothing goes before the intruded run-in, not even generated content.
+    if (insertBefore && insertBefore->isRunIn() && owner->isRenderBlock()
+        && toRenderBlock(owner)->runInIsPlacedIntoSiblingBlock(insertBefore))
+        insertBefore = insertBefore->nextSibling();
+
     // Generated content consists of a single container that houses multiple children (specified
     // by the content property).  This generated content container gets the pseudo-element style set on it.
     RenderObject* generatedContentContainer = 0;
@@ -536,6 +544,14 @@ void RenderObjectChildList::updateBeforeAfterContent(RenderObject* owner, Pseudo
                 renderer->destroy();
         }
     }
+
+    if (!generatedContentContainer)
+        return;
+
+    // Handle placement of run-ins. We do the run-in placement at the end since generatedContentContainer can get destroyed.
+    RenderObject* generatedContentContainerImmediateParent = generatedContentContainer->parent();
+    if (generatedContentContainerImmediateParent->isRenderBlock())
+        toRenderBlock(generatedContentContainerImmediateParent)->placeRunInIfNeeded(generatedContentContainer, PlaceGeneratedRunIn);
 }
 
 } // namespace WebCore

@@ -249,6 +249,7 @@ void WebCompositorInputHandlerImpl::handleInputEvent(const WebInputEvent& event)
         m_expectPinchUpdateEnd = true;
 #endif
         m_inputHandlerClient->pinchGestureBegin();
+        m_scrollStarted = true;
         m_client->didHandleInputEvent();
         return;
     } else if (event.type == WebInputEvent::GesturePinchEnd) {

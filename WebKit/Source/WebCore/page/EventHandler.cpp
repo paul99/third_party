@@ -3240,7 +3240,7 @@ bool EventHandler::handleTouchEvent(const PlatformTouchEvent& event)
         // with the mouse (or finger in this case) being pressed.
         switch (pointState) {
         case PlatformTouchPoint::TouchPressed:
-            hitType = HitTestRequest::Active;
+            hitType = HitTestRequest::Active | HitTestRequest::ReadOnly;
             break;
         case PlatformTouchPoint::TouchMoved:
             hitType = HitTestRequest::Active | HitTestRequest::MouseMove | HitTestRequest::ReadOnly;

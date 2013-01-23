@@ -81,10 +81,6 @@
       },  # Debug
       'Release': {
         'inherit_from': ['Common'],
-        'cflags': [
-          '-Wno-unused-but-set-variable',
-          '-Wno-maybe-uninitialized',
-        ],
         'msvs_settings': {
           'VCCLCompilerTool': {
             'Optimization': '2',  # /Os

@@ -40,7 +40,6 @@
 #include "RenderSVGResourceMarker.h"
 #include "RenderSVGResourceSolidColor.h"
 #include "SVGPathData.h"
-#include "SVGPathElement.h"
 #include "SVGRenderSupport.h"
 #include "SVGResources.h"
 #include "SVGResourcesCache.h"
@@ -79,9 +78,10 @@ void RenderSVGShape::createShape()
     m_path = adoptPtr(new Path);
     ASSERT(isEmpty());
 
-    SVGPathElement* element = static_cast<SVGPathElement*>(node());
+    SVGStyledTransformableElement* element = static_cast<SVGStyledTransformableElement*>(node());
     updatePathFromGraphicsElement(element, path());
     processZeroLengthSubpaths();
+    processMarkerPositions();
 }
 
 bool RenderSVGShape::isEmpty() const
@@ -182,10 +182,8 @@ void RenderSVGShape::layout()
     }
 
     // Invalidate all resources of this client if our layout changed.
-    if (everHadLayout() && selfNeedsLayout()) {
+    if (everHadLayout() && selfNeedsLayout())
         SVGResourcesCache::clientLayoutChanged(this);
-        m_markerLayoutInfo.clear();
-    }
 
     // At this point LayoutRepainter already grabbed the old bounds,
     // recalculate them now so repaintAfterLayout() uses the new bounds.
@@ -207,6 +205,22 @@ bool RenderSVGShape::shouldStrokeZeroLengthSubpath() const
     // Spec(11.4): Any zero length subpath shall not be stroked if the "stroke-linecap" property has a value of butt
     // but shall be stroked if the "stroke-linecap" property has a value of round or square
     return style()->svgStyle()->hasStroke() && style()->svgStyle()->capStyle() != ButtCap;
+}
+
+bool RenderSVGShape::shouldGenerateMarkerPositions() const
+{
+    if (!style()->svgStyle()->hasMarkers())
+        return false;
+
+    SVGStyledTransformableElement* element = static_cast<SVGStyledTransformableElement*>(node());
+    if (!element->supportsMarkers())
+        return false;
+
+    SVGResources* resources = SVGResourcesCache::cachedResourcesForRenderObject(this);
+    if (!resources)
+        return false;
+
+    return resources->markerStart() || resources->markerMid() || resources->markerEnd();
 }
 
 FloatRect RenderSVGShape::zeroLengthSubpathRect(const FloatPoint& linecapPosition, float strokeWidth) const
@@ -340,9 +354,8 @@ void RenderSVGShape::paint(PaintInfo& paintInfo, const IntPoint&)
                     childPaintInfo.context->setShouldAntialias(false);
 
                 fillAndStrokePath(childPaintInfo.context);
-
-                if (svgStyle->hasMarkers())
-                    m_markerLayoutInfo.drawMarkers(childPaintInfo);
+                if (!m_markerPositions.isEmpty())
+                    drawMarkers(childPaintInfo);
             }
 
             SVGRenderSupport::finishRenderSVGContent(this, childPaintInfo, savedInfo.context);
@@ -389,30 +402,40 @@ bool RenderSVGShape::nodeAtFloatPoint(const HitTestRequest& request, HitTestResu
     return false;
 }
 
-FloatRect RenderSVGShape::calculateMarkerBoundsIfNeeded()
+static inline RenderSVGResourceMarker* markerForType(SVGMarkerType type, RenderSVGResourceMarker* markerStart, RenderSVGResourceMarker* markerMid, RenderSVGResourceMarker* markerEnd)
 {
-    SVGElement* svgElement = static_cast<SVGElement*>(node());
-    ASSERT(svgElement && svgElement->document());
-    if (!svgElement->isStyled())
-        return FloatRect();
+    switch (type) {
+    case StartMarker:
+        return markerStart;
+    case MidMarker:
+        return markerMid;
+    case EndMarker:
+        return markerEnd;
+    }
 
-    SVGStyledElement* styledElement = static_cast<SVGStyledElement*>(svgElement);
-    if (!styledElement->supportsMarkers())
-        return FloatRect();
+    ASSERT_NOT_REACHED();
+    return 0;
+}
 
-    ASSERT(style()->svgStyle()->hasMarkers());
+FloatRect RenderSVGShape::markerRect(float strokeWidth) const
+{
+    ASSERT(!m_markerPositions.isEmpty());
 
     SVGResources* resources = SVGResourcesCache::cachedResourcesForRenderObject(this);
-    if (!resources)
-        return FloatRect();
+    ASSERT(resources);
 
     RenderSVGResourceMarker* markerStart = resources->markerStart();
     RenderSVGResourceMarker* markerMid = resources->markerMid();
     RenderSVGResourceMarker* markerEnd = resources->markerEnd();
-    if (!markerStart && !markerMid && !markerEnd)
-        return FloatRect();
+    ASSERT(markerStart || markerMid || markerEnd);
 
-    return m_markerLayoutInfo.calculateBoundaries(markerStart, markerMid, markerEnd, strokeWidth(), path());
+    FloatRect boundaries;
+    unsigned size = m_markerPositions.size();
+    for (unsigned i = 0; i < size; ++i) {
+        if (RenderSVGResourceMarker* marker = markerForType(m_markerPositions[i].type, markerStart, markerMid, markerEnd))
+            boundaries.unite(marker->markerBoundaries(marker->markerTransformation(m_markerPositions[i].origin, m_markerPositions[i].angle, strokeWidth)));
+    }
+    return boundaries;
 }
 
 void RenderSVGShape::updateCachedBoundaries()
@@ -451,15 +474,33 @@ float RenderSVGShape::strokeWidth() const
 void RenderSVGShape::inflateWithStrokeAndMarkerBounds()
 {
     const SVGRenderStyle* svgStyle = style()->svgStyle();
-    FloatRect strokeRect;
     if (svgStyle->hasStroke()) {
         BoundingRectStrokeStyleApplier strokeStyle(this, style());
         m_strokeAndMarkerBoundingBox.unite(path().strokeBoundingRect(&strokeStyle));
     }
-    if (svgStyle->hasMarkers()) {
-        FloatRect markerBounds = calculateMarkerBoundsIfNeeded();
-        if (!markerBounds.isEmpty())
-            m_strokeAndMarkerBoundingBox.unite(markerBounds);
+    if (!m_markerPositions.isEmpty())
+        m_strokeAndMarkerBoundingBox.unite(markerRect(strokeWidth()));
+}
+
+void RenderSVGShape::drawMarkers(PaintInfo& paintInfo)
+{
+    ASSERT(!m_markerPositions.isEmpty());
+
+    SVGResources* resources = SVGResourcesCache::cachedResourcesForRenderObject(this);
+    if (!resources)
+        return;
+
+    RenderSVGResourceMarker* markerStart = resources->markerStart();
+    RenderSVGResourceMarker* markerMid = resources->markerMid();
+    RenderSVGResourceMarker* markerEnd = resources->markerEnd();
+    if (!markerStart && !markerMid && !markerEnd)
+        return;
+
+    float strokeWidth = this->strokeWidth();
+    unsigned size = m_markerPositions.size();
+    for (unsigned i = 0; i < size; ++i) {
+        if (RenderSVGResourceMarker* marker = markerForType(m_markerPositions[i].type, markerStart, markerMid, markerEnd))
+            marker->draw(paintInfo, marker->markerTransformation(m_markerPositions[i].origin, m_markerPositions[i].angle, strokeWidth));
     }
 }
 
@@ -476,6 +517,20 @@ void RenderSVGShape::processZeroLengthSubpaths()
     SVGSubpathData subpathData(m_zeroLengthLinecapLocations);
     m_path->apply(&subpathData, SVGSubpathData::updateFromPathElement);
     subpathData.pathIsDone();
+}
+
+void RenderSVGShape::processMarkerPositions()
+{
+    m_markerPositions.clear();
+
+    if (!shouldGenerateMarkerPositions())
+        return;
+
+    ASSERT(m_path);
+
+    SVGMarkerData markerData(m_markerPositions);
+    m_path->apply(&markerData, SVGMarkerData::updateFromPathElement);
+    markerData.pathIsDone();
 }
 
 }

@@ -359,7 +359,7 @@ void RenderBoxModelObject::styleDidChange(StyleDifference diff, const RenderStyl
     updateBoxModelInfoFromStyle();
     
     if (requiresLayer()) {
-        if (!layer()) {
+        if (!layer() && layerCreationAllowedForSubtree()) {
             if (s_wasFloating && isFloating())
                 setChildNeedsLayout(true);
             m_layer = new (renderArena()) RenderLayer(this);
@@ -1391,6 +1391,14 @@ static inline bool includesEdge(BorderEdgeFlags flags, BoxSide side)
     return flags & edgeFlagForSide(side);
 }
 
+static inline bool includesAdjacentEdges(BorderEdgeFlags flags)
+{
+    return (flags & (TopBorderEdge | RightBorderEdge)) == (TopBorderEdge | RightBorderEdge)
+        || (flags & (RightBorderEdge | BottomBorderEdge)) == (RightBorderEdge | BottomBorderEdge)
+        || (flags & (BottomBorderEdge | LeftBorderEdge)) == (BottomBorderEdge | LeftBorderEdge)
+        || (flags & (LeftBorderEdge | TopBorderEdge)) == (LeftBorderEdge | TopBorderEdge);
+}
+
 inline bool edgesShareColor(const BorderEdge& firstEdge, const BorderEdge& secondEdge)
 {
     return firstEdge.color == secondEdge.color;
@@ -1622,7 +1630,11 @@ void RenderBoxModelObject::paintBorderSides(GraphicsContext* graphicsContext, co
 void RenderBoxModelObject::paintTranslucentBorderSides(GraphicsContext* graphicsContext, const RenderStyle* style, const RoundedRect& outerBorder, const RoundedRect& innerBorder,
                                                        const BorderEdge edges[], BackgroundBleedAvoidance bleedAvoidance, bool includeLogicalLeftEdge, bool includeLogicalRightEdge, bool antialias)
 {
-    BorderEdgeFlags edgesToDraw = AllBorderEdges;
+    BorderEdgeFlags edgesToDraw = 0;
+    for (int i = BSTop; i <= BSLeft; ++i)
+        if (edges[i].shouldRender())
+            edgesToDraw |= edgeFlagForSide(static_cast<BoxSide>(i));
+
     while (edgesToDraw) {
         // Find undrawn edges sharing a color.
         Color commonColor;
@@ -1644,7 +1656,7 @@ void RenderBoxModelObject::paintTranslucentBorderSides(GraphicsContext* graphics
                 commonColorEdgeSet |= edgeFlagForSide(currSide);
         }
 
-        bool useTransparencyLayer = commonColor.hasAlpha();
+        bool useTransparencyLayer = includesAdjacentEdges(commonColorEdgeSet) && commonColor.hasAlpha();
         if (useTransparencyLayer) {
             graphicsContext->beginTransparencyLayer(static_cast<float>(commonColor.alpha()) / 255);
             commonColor = Color(commonColor.red(), commonColor.green(), commonColor.blue());
@@ -2826,6 +2838,43 @@ void RenderBoxModelObject::mapAbsoluteToLocalPoint(bool fixed, bool useTransform
         transformState.applyTransform(t, preserve3D ? TransformState::AccumulateTransform : TransformState::FlattenTransform);
     } else
         transformState.move(containerOffset.width(), containerOffset.height(), preserve3D ? TransformState::AccumulateTransform : TransformState::FlattenTransform);
+}
+
+void RenderBoxModelObject::moveChildTo(RenderBoxModelObject* toBoxModelObject, RenderObject* child, RenderObject* beforeChild, bool fullRemoveInsert)
+{
+    // FIXME: We need a performant way to handle clearing positioned objects from our list that are
+    // in |child|'s subtree so we could just clear them here. Because of this, we assume that callers
+    // have cleared their positioned objects list for child moves (!fullRemoveInsert) to avoid any badness.
+    ASSERT(!fullRemoveInsert || !isRenderBlock() || !toRenderBlock(this)->hasPositionedObjects());
+
+    ASSERT(this == child->parent());
+    ASSERT(!beforeChild || toBoxModelObject == beforeChild->parent());
+    if (fullRemoveInsert && (toBoxModelObject->isRenderBlock() || toBoxModelObject->isRenderInline())) {
+        // Takes care of adding the new child correctly if toBlock and fromBlock
+        // have different kind of children (block vs inline).
+        toBoxModelObject->addChild(virtualChildren()->removeChildNode(this, child), beforeChild);
+    } else
+        toBoxModelObject->virtualChildren()->insertChildNode(toBoxModelObject, virtualChildren()->removeChildNode(this, child, fullRemoveInsert), beforeChild, fullRemoveInsert);
+}
+
+void RenderBoxModelObject::moveChildrenTo(RenderBoxModelObject* toBoxModelObject, RenderObject* startChild, RenderObject* endChild, RenderObject* beforeChild, bool fullRemoveInsert)
+{
+    // This condition is rarely hit since this function is usually called on
+    // anonymous blocks which can no longer carry positioned objects (see r120761)
+    // or when fullRemoveInsert is false.
+    if (fullRemoveInsert && isRenderBlock()) {
+        RenderBlock* block = toRenderBlock(this);
+        if (block->hasPositionedObjects())
+            block->removePositionedObjects(0);
+    }
+
+    ASSERT(!beforeChild || toBoxModelObject == beforeChild->parent());
+    for (RenderObject* child = startChild; child && child != endChild; ) {
+        // Save our next sibling as moveChildTo will clear it.
+        RenderObject* nextSibling = child->nextSibling();
+        moveChildTo(toBoxModelObject, child, beforeChild, fullRemoveInsert);
+        child = nextSibling;
+    }
 }
 
 } // namespace WebCore

@@ -37,19 +37,19 @@ class VisiblePosition;
 // Explore the DOM tree to find the text contents up to a limit
 // around a position in a given text node.
 class DOMTextContentWalker {
-  WTF_MAKE_NONCOPYABLE(DOMTextContentWalker);
+    WTF_MAKE_NONCOPYABLE(DOMTextContentWalker);
 public:
-  DOMTextContentWalker(const VisiblePosition& position, unsigned maxLength);
+    DOMTextContentWalker(const VisiblePosition& position, unsigned maxLength);
 
-  String content() const;
-  unsigned hitOffsetInContent() const;
+    String content() const;
+    unsigned hitOffsetInContent() const;
 
-  // Convert start/end positions in the content text string into a text range.
-  PassRefPtr<Range> contentOffsetsToRange(unsigned startInContent, unsigned endInContent);
+    // Convert start/end positions in the content text string into a text range.
+    PassRefPtr<Range> contentOffsetsToRange(unsigned startInContent, unsigned endInContent);
 
 private:
-  RefPtr<Range> m_contentRange;
-  size_t m_hitOffsetInContent;
+    RefPtr<Range> m_contentRange;
+    size_t m_positionOffsetInContent;
 };
 
 } // namespace WebCore

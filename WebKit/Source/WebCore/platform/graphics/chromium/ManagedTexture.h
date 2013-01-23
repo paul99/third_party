@@ -49,23 +49,21 @@ public:
     bool isValid(const IntSize&, unsigned format);
     bool reserve(const IntSize&, unsigned format);
     void unreserve();
+    void releaseTexture();
     bool isReserved()
     {
         ASSERT(m_textureManager);
         return m_textureManager->isProtected(m_token);
     }
 
-    void allocate(TextureAllocator*);
+    // return true if texture is newly allocated
+    bool allocate(TextureAllocator*);
     void bindTexture(GraphicsContext3D*, TextureAllocator*);
     void framebufferTexture2D(GraphicsContext3D*, TextureAllocator*);
 
     IntSize size() const { return m_size; }
     unsigned format() const { return m_format; }
     unsigned textureId() const { return m_textureId; }
-
-    // Steal token and textureId by instantiates a new texture using existing
-    // member variables.
-    PassOwnPtr<ManagedTexture> steal();
 
 private:
     explicit ManagedTexture(TextureManager*);

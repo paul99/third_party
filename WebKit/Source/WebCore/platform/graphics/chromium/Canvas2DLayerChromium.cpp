@@ -135,9 +135,11 @@ void Canvas2DLayerChromium::updateCompositorResources(GraphicsContext3D* context
     if (!m_backTextureId || !m_frontTexture || !m_frontTexture->isValid(m_size, GraphicsContext3D::RGBA))
         return;
 
-    m_frontTexture->allocate(updater.allocator());
-    updater.copier()->copyTexture(context, m_backTextureId, m_frontTexture->textureId(), m_size);
-    GLC(context, context->flush());
+    bool newAlloc = m_frontTexture->allocate(updater.allocator());
+    if (!m_updateRect.isEmpty() || newAlloc) {
+        updater.copier()->copyTexture(context, m_backTextureId, m_frontTexture->textureId(), m_size);
+        GLC(context, context->flush());
+    }
 }
 
 void Canvas2DLayerChromium::pushPropertiesTo(CCLayerImpl* layer)

@@ -29,16 +29,17 @@
 
 namespace WebCore {
 
-PassOwnPtr<CCTileDrawQuad> CCTileDrawQuad::create(const CCSharedQuadState* sharedQuadState, const IntRect& quadRect, const IntRect& opaqueRect, Platform3DObject textureId, const IntPoint& textureOffset, const IntSize& textureSize, GC3Dint textureFilter, bool swizzleContents, bool leftEdgeAA, bool topEdgeAA, bool rightEdgeAA, bool bottomEdgeAA)
+PassOwnPtr<CCTileDrawQuad> CCTileDrawQuad::create(const CCSharedQuadState* sharedQuadState, const IntRect& quadRect, const IntRect& opaqueRect, Platform3DObject textureId, const IntPoint& textureOffset, const IntSize& textureSize, int downsamplingFactor, GC3Dint textureFilter, bool swizzleContents, bool leftEdgeAA, bool topEdgeAA, bool rightEdgeAA, bool bottomEdgeAA)
 {
-    return adoptPtr(new CCTileDrawQuad(sharedQuadState, quadRect, opaqueRect, textureId, textureOffset, textureSize, textureFilter, swizzleContents, leftEdgeAA, topEdgeAA, rightEdgeAA, bottomEdgeAA));
+    return adoptPtr(new CCTileDrawQuad(sharedQuadState, quadRect, opaqueRect, textureId, textureOffset, textureSize, downsamplingFactor, textureFilter, swizzleContents, leftEdgeAA, topEdgeAA, rightEdgeAA, bottomEdgeAA));
 }
 
-CCTileDrawQuad::CCTileDrawQuad(const CCSharedQuadState* sharedQuadState, const IntRect& quadRect, const IntRect& opaqueRect, Platform3DObject textureId, const IntPoint& textureOffset, const IntSize& textureSize, GC3Dint textureFilter, bool swizzleContents, bool leftEdgeAA, bool topEdgeAA, bool rightEdgeAA, bool bottomEdgeAA)
+CCTileDrawQuad::CCTileDrawQuad(const CCSharedQuadState* sharedQuadState, const IntRect& quadRect, const IntRect& opaqueRect, Platform3DObject textureId, const IntPoint& textureOffset, const IntSize& textureSize, int downsamplingFactor, GC3Dint textureFilter, bool swizzleContents, bool leftEdgeAA, bool topEdgeAA, bool rightEdgeAA, bool bottomEdgeAA)
     : CCDrawQuad(sharedQuadState, CCDrawQuad::TiledContent, quadRect)
     , m_textureId(textureId)
     , m_textureOffset(textureOffset)
     , m_textureSize(textureSize)
+    , m_downsamplingFactor(downsamplingFactor)
     , m_textureFilter(textureFilter)
     , m_swizzleContents(swizzleContents)
     , m_leftEdgeAA(leftEdgeAA)

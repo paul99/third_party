@@ -64,7 +64,7 @@ public:
     virtual void setVisible(bool);
     virtual void start();
     virtual void stop();
-    virtual bool partialTextureUpdateCapability() const;
+    virtual size_t maxPartialTextureUpdates() const;
 
     // CCLayerTreeHostImplClient implementation
     virtual void didVSyncOnImplThread(double frameBeginMonotonic, double currentFrameIntervalInSec);
@@ -76,9 +76,11 @@ public:
     // CCSchedulerClient implementation
     virtual bool canDraw();
     virtual bool hasMoreResourceUpdates() const;
+    virtual bool hasMorePreallocations() const;
     virtual void scheduledActionBeginFrame();
     virtual void scheduledActionDrawAndSwap();
     virtual void scheduledActionUpdateMoreResources();
+    virtual void scheduledActionPreallocateMoreResources();
     virtual void scheduledActionCommit();
 
 private:
@@ -108,6 +110,14 @@ private:
     void initializeLayerRendererOnImplThread(GraphicsContext3D*, CCCompletionEvent*, bool* initializeSucceeded, LayerRendererCapabilities*, int* compositorIdentifier);
     void setVisibleOnImplThread(CCCompletionEvent*, bool visible);
     void layerTreeHostClosedOnImplThread(CCCompletionEvent*);
+
+    // These two calls must occur with the main thread blocked.
+    void initialPreallocateResourcesOnImplThread();
+    void takePreallocatedTexturesFromImplThread();
+
+    size_t calcUploadsPerFrameOnImplThread();
+    void cleanupPreallocationsOnImplThread();
+    void preallocateOnImplThread(size_t maxPreallocs);
 
     // Accessed on main thread only.
     bool m_animateRequested;
@@ -145,6 +155,9 @@ private:
     OwnPtr<CCDelayedBFACTimerAdapter> m_delayedBFACTimerAdapterOnImplThread;
     friend class CCDelayedBFACTimerAdapter;
     CCCompletionEvent* m_delayedBFACCompletionEventOnImplThread;
+
+    size_t m_numTexturesToPreallocateOnImplThread;
+    Vector<unsigned> m_preallocatedTexturesOnImplThread;
 };
 
 }

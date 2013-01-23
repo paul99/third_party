@@ -33,6 +33,9 @@ CCScheduler::CCScheduler(CCSchedulerClient* client, PassOwnPtr<CCFrameRateContro
     : m_client(client)
     , m_frameRateController(frameRateController)
     , m_updateMoreResourcesPending(false)
+    , m_isInDraw(false)
+    , m_setNeedsCommitAfterDraw(false)
+    , m_setNeedsRedrawAfterDraw(false)
 {
     ASSERT(m_client);
     m_frameRateController->setClient(this);
@@ -52,12 +55,22 @@ void CCScheduler::setVisible(bool visible)
 
 void CCScheduler::setNeedsCommit()
 {
+    if (m_isInDraw) {
+        m_setNeedsCommitAfterDraw = true;
+        return;
+    }
+
     m_stateMachine.setNeedsCommit();
     processScheduledActions();
 }
 
 void CCScheduler::setNeedsRedraw()
 {
+    if (m_isInDraw) {
+        m_setNeedsRedrawAfterDraw = true;
+        return;
+    }
+
     m_stateMachine.setNeedsRedraw();
     processScheduledActions();
 }
@@ -96,6 +109,11 @@ CCSchedulerStateMachine::Action CCScheduler::nextAction()
 
 void CCScheduler::processScheduledActions()
 {
+    // The pre-allocation flag affects scheduling and vsync,
+    // so make sure it is up-to-date.
+    m_stateMachine.setHasMorePreallocations(m_client->hasMorePreallocations());
+    m_stateMachine.setHasMoreResourceUpdates(m_client->hasMoreResourceUpdates());
+
     // Early out so we don't spam TRACE_EVENTS with useless processScheduledActions.
     if (nextAction() == CCSchedulerStateMachine::ACTION_NONE) {
         m_frameRateController->setActive(m_stateMachine.vsyncCallbackNeeded());
@@ -116,7 +134,13 @@ void CCScheduler::processScheduledActions()
             m_client->scheduledActionBeginFrame();
             break;
         case CCSchedulerStateMachine::ACTION_BEGIN_UPDATE_MORE_RESOURCES:
-            m_client->scheduledActionUpdateMoreResources();
+            // Preallocations shouldn't occur in update frames. However,
+            // a preallocation could occur just before we start updating,
+            // so we need to delay the first update in this one case.
+            // FIXME: This cancellation of updates along with the rest
+            // of this logic should happen in the state machine.
+            if (!m_stateMachine.havePreallocatedSinceVSync())
+                m_client->scheduledActionUpdateMoreResources();
             if (!m_client->hasMoreResourceUpdates()) {
                 // If we were just told to update resources, but there are no
                 // more pending, then tell the state machine that the
@@ -127,17 +151,33 @@ void CCScheduler::processScheduledActions()
             } else
                 m_updateMoreResourcesPending = true;
             break;
+        case CCSchedulerStateMachine::ACTION_PREALLOCATE_MORE_RESOURCES:
+            ASSERT(m_client->hasMorePreallocations());
+            m_client->scheduledActionPreallocateMoreResources();
+            break;
         case CCSchedulerStateMachine::ACTION_COMMIT:
             m_client->scheduledActionCommit();
             break;
         case CCSchedulerStateMachine::ACTION_DRAW:
+            m_isInDraw = true;
             m_client->scheduledActionDrawAndSwap();
+            m_isInDraw = false;
             m_frameRateController->didBeginFrame();
+            if (m_setNeedsCommitAfterDraw) {
+                setNeedsCommit();
+                m_setNeedsCommitAfterDraw = false;
+            }
+            if (m_setNeedsRedrawAfterDraw) {
+                setNeedsRedraw();
+                m_setNeedsRedrawAfterDraw = false;
+            }
             break;
         }
     } while (action != CCSchedulerStateMachine::ACTION_NONE);
 
     // Activate or deactivate the frame rate controller.
+    // Update hasMorePreallocations as client might have changed (and we need this for vsync).
+    m_stateMachine.setHasMorePreallocations(m_client->hasMorePreallocations());
     m_frameRateController->setActive(m_stateMachine.vsyncCallbackNeeded());
 }
 

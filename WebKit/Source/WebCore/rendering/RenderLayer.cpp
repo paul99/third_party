@@ -2040,7 +2040,7 @@ PassRefPtr<Scrollbar> RenderLayer::createScrollbar(ScrollbarOrientation orientat
     RenderObject* actualRenderer = renderer()->node() ? renderer()->node()->shadowAncestorNode()->renderer() : renderer();
     bool hasCustomScrollbarStyle = actualRenderer->isBox() && actualRenderer->style()->hasPseudoStyle(SCROLLBAR);
     if (hasCustomScrollbarStyle)
-        widget = RenderScrollbar::createCustomScrollbar(this, orientation, toRenderBox(actualRenderer));
+        widget = RenderScrollbar::createCustomScrollbar(this, orientation, actualRenderer->node());
     else {
         widget = Scrollbar::createNativeScrollbar(this, orientation, RegularScrollbar);
         if (orientation == HorizontalScrollbar)
@@ -2056,14 +2056,10 @@ void RenderLayer::destroyScrollbar(ScrollbarOrientation orientation)
 {
     RefPtr<Scrollbar>& scrollbar = orientation == HorizontalScrollbar ? m_hBar : m_vBar;
     if (scrollbar) {
-        if (scrollbar->isCustomScrollbar())
-            toRenderScrollbar(scrollbar.get())->clearOwningRenderer();
-        else {
-            if (orientation == HorizontalScrollbar)
-                willRemoveHorizontalScrollbar(scrollbar.get());
-            else
-                willRemoveVerticalScrollbar(scrollbar.get());
-        }
+        if (orientation == HorizontalScrollbar)
+            willRemoveHorizontalScrollbar(scrollbar.get());
+        else
+            willRemoveVerticalScrollbar(scrollbar.get());
 
         scrollbar->removeFromParent();
         scrollbar->disconnectFromScrollableArea();
@@ -4044,6 +4040,26 @@ GraphicsLayer* RenderLayer::layerForScrollCorner() const
 }
 
 #if OS(ANDROID)
+static bool hasScrollableAxis(const RenderBox* box)
+{
+    // RenderBox::canBeScrolledAndHasScrollableArea() produces false positives
+    // if the scrolling properties of the box are asymmetric. For example, if
+    // the box has hidden horizontal overflow, auto vertical overflow, and its
+    // content is wider than the client box, the box will be considered
+    // scrollable even though it cannot actually be scrolled. These false
+    // positives are corrected below.
+    if (!box->canBeScrolledAndHasScrollableArea())
+        return false;
+
+    if ((box->hasAutoHorizontalScrollbar() || box->scrollsOverflowX()) && box->scrollWidth() != box->clientWidth())
+        return true;
+
+    if ((box->hasAutoVerticalScrollbar() || box->scrollsOverflowY()) && box->scrollHeight() != box->clientHeight())
+        return true;
+
+    return false;
+}
+
 // This call shall be deferred until a commit,
 // when the render tree is guaranteed to have an updated layout.
 void RenderLayer::updateNonFastScrollableRegion()
@@ -4073,7 +4089,7 @@ void RenderLayer::updateNonFastScrollableRegion()
             break;
 
         RenderBox* box = o->isBox() ? toRenderBox(o) : 0;
-        if (!o->hasTransform() && (o->isWidget () || (box && box->canBeScrolledAndHasScrollableArea()))) {
+        if (!o->hasTransform() && (o->isWidget() || (box && hasScrollableAxis(box)))) {
             Vector<FloatQuad> quads;
             o->absoluteQuads(quads);
             for (size_t i = 0; i < quads.size(); i++) {

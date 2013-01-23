@@ -25,12 +25,13 @@
 #include "TagNodeList.h"
 
 #include "Element.h"
+#include "NodeRareData.h"
 #include <wtf/Assertions.h>
 
 namespace WebCore {
 
 TagNodeList::TagNodeList(PassRefPtr<Node> rootNode, const AtomicString& namespaceURI, const AtomicString& localName)
-    : DynamicSubtreeNodeList(rootNode)
+    : DynamicSubtreeNodeList(rootNode, RootedAtNode, DoNotInvalidateOnAttributeChange)
     , m_namespaceURI(namespaceURI)
     , m_localName(localName)
 {
@@ -40,17 +41,37 @@ TagNodeList::TagNodeList(PassRefPtr<Node> rootNode, const AtomicString& namespac
 TagNodeList::~TagNodeList()
 {
     if (m_namespaceURI == starAtom)
-        rootNode()->removeCachedTagNodeList(this, m_localName);
+        ownerNode()->nodeLists()->removeCacheWithAtomicName(this, DynamicNodeList::TagNodeListType, m_localName);
     else
-        rootNode()->removeCachedTagNodeList(this, QualifiedName(nullAtom, m_localName, m_namespaceURI));
+        ownerNode()->nodeLists()->removeCacheWithQualifiedName(this, m_namespaceURI, m_localName);
 }
 
 bool TagNodeList::nodeMatches(Element* testNode) const
 {
+    // Implements http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#concept-getelementsbytagnamens
     if (m_localName != starAtom && m_localName != testNode->localName())
         return false;
 
     return m_namespaceURI == starAtom || m_namespaceURI == testNode->namespaceURI();
+}
+
+HTMLTagNodeList::HTMLTagNodeList(PassRefPtr<Node> rootNode, const AtomicString& localName)
+    : TagNodeList(rootNode, starAtom, localName)
+    , m_loweredLocalName(localName.lower())
+{
+}
+
+bool HTMLTagNodeList::nodeMatches(Element* testNode) const
+{
+    // Implements http://dvcs.w3.org/hg/domcore/raw-file/tip/Overview.html#concept-getelementsbytagname
+    if (m_localName != starAtom) {
+        const AtomicString& localName = testNode->isHTMLElement() ? m_loweredLocalName : m_localName;
+        if (localName != testNode->localName())
+            return false;
+    }
+
+    ASSERT(m_namespaceURI == starAtom);
+    return true;
 }
 
 } // namespace WebCore

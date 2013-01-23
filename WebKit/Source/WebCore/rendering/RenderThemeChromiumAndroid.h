@@ -41,6 +41,8 @@ public:
 
     virtual bool delegatesMenuListRendering() const { return true; }
 
+    virtual bool paintMediaOverlayPlayButton(RenderObject*, const PaintInfo&, const IntRect&) OVERRIDE;
+
 #if ENABLE(TOUCH_EVENTS)
     virtual Color platformTapHighlightColor() const {
         return RenderThemeChromiumAndroid::defaultTapHighlightColor;

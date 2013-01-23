@@ -104,6 +104,8 @@ COMPILE_ASSERT(sizeof(RenderObject) == sizeof(SameSizeAsRenderObject), RenderObj
 
 bool RenderObject::s_affectsParentBlock = false;
 
+RenderObjectAncestorLineboxDirtySet* RenderObject::s_ancestorLineboxDirtySet = 0;
+
 void* RenderObject::operator new(size_t sz, RenderArena* renderArena)
 {
     return renderArena->allocate(sz);
@@ -217,7 +219,6 @@ RenderObject::RenderObject(Node* node)
 
 RenderObject::~RenderObject()
 {
-    ASSERT(!node() || documentBeingDestroyed() || !frame()->view() || frame()->view()->layoutRoot() != this);
 #ifndef NDEBUG
     ASSERT(!m_hasAXObject);
     renderObjectCounter.decrement();
@@ -260,43 +261,12 @@ bool RenderObject::isHTMLMarquee() const
     return node() && node()->renderer() == this && node()->hasTagName(marqueeTag);
 }
 
-static bool isBeforeAfterContentGeneratedByAncestor(RenderObject* renderer, RenderObject* beforeAfterContent)
-{
-    while (renderer) {
-        if (renderer->generatingNode() == beforeAfterContent->generatingNode())
-            return true;
-        renderer = renderer->parent();
-    }
-    return false;
-}
-
-RenderTable* RenderObject::createAnonymousTable() const
-{
-    RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyle(style());
-    newStyle->setDisplay(TABLE);
-
-    RenderTable* table = new (renderArena()) RenderTable(document() /* is anonymous */);
-    table->setStyle(newStyle.release());
-    return table;
-}
-
 void RenderObject::addChild(RenderObject* newChild, RenderObject* beforeChild)
 {
     RenderObjectChildList* children = virtualChildren();
     ASSERT(children);
     if (!children)
         return;
-
-    RenderObject* beforeContent = 0;
-    bool beforeChildHasBeforeAndAfterContent = false;
-    if (beforeChild && (beforeChild->isTable() || beforeChild->isTableSection() || beforeChild->isTableRow() || beforeChild->isTableCell())) {
-        beforeContent = beforeChild->beforePseudoElementRenderer();
-        RenderObject* afterContent = beforeChild->afterPseudoElementRenderer();
-        if (beforeContent && afterContent && isBeforeAfterContentGeneratedByAncestor(this, beforeContent)) {
-            beforeChildHasBeforeAndAfterContent = true;
-            beforeContent->destroy();
-        }
-    }
 
     bool needsTable = false;
 
@@ -324,7 +294,7 @@ void RenderObject::addChild(RenderObject* newChild, RenderObject* beforeChild)
         if (afterChild && afterChild->isAnonymous() && afterChild->isTable() && !afterChild->isBeforeContent())
             table = toRenderTable(afterChild);
         else {
-            table = createAnonymousTable();
+            table = RenderTable::createAnonymousWithParentRenderer(this);
             addChild(table, beforeChild);
         }
         table->addChild(newChild);
@@ -336,8 +306,16 @@ void RenderObject::addChild(RenderObject* newChild, RenderObject* beforeChild)
     if (newChild->isText() && newChild->style()->textTransform() == CAPITALIZE)
         toRenderText(newChild)->transformText();
 
-    if (beforeChildHasBeforeAndAfterContent)
-        children->updateBeforeAfterContent(this, BEFORE);
+    // SVG creates renderers for <g display="none">, as SVG requires children of hidden
+    // <g>s to have renderers - at least that's how our implementation works. Consider:
+    // <g display="none"><foreignObject><body style="position: relative">FOO...
+    // - requiresLayer() would return true for the <body>, creating a new RenderLayer
+    // - when the document is painted, both layers are painted. The <body> layer doesn't
+    //   know that it's inside a "hidden SVG subtree", and thus paints, even if it shouldn't.
+    // To avoid the problem alltogether, detect early if we're inside a hidden SVG subtree
+    // and stop creating layers at all for these cases - they're not used anyways.
+    if (newChild->hasLayer() && !layerCreationAllowedForSubtree())
+        toRenderBoxModelObject(newChild)->layer()->removeOnlyThisLayer();
 }
 
 void RenderObject::removeChild(RenderObject* oldChild)
@@ -347,12 +325,6 @@ void RenderObject::removeChild(RenderObject* oldChild)
     if (!children)
         return;
 
-    // We do this here instead of in removeChildNode, since the only extremely low-level uses of remove/appendChildNode
-    // cannot affect the positioned object list, and the floating object list is irrelevant (since the list gets cleared on
-    // layout anyway).
-    if (oldChild->isFloatingOrPositioned())
-        toRenderBox(oldChild)->removeFloatingOrPositionedChildFromBlockLists();
-        
     children->removeChildNode(this, oldChild);
 }
 
@@ -789,14 +761,26 @@ RenderBlock* RenderObject::firstLineBlock() const
 
 static inline bool objectIsRelayoutBoundary(const RenderObject* object)
 {
-    // FIXME: In future it may be possible to broaden this condition in order to improve performance.
-    // Table cells are excluded because even when their CSS height is fixed, their height()
-    // may depend on their contents.
-    return object->isTextControl()
+    // FIXME: In future it may be possible to broaden these conditions in order to improve performance.
+    if (object->isTextControl())
+        return true;
+
 #if ENABLE(SVG)
-        || object->isSVGRoot()
+    if (object->isSVGRoot())
+        return true;
 #endif
-        || (object->hasOverflowClip() && !object->style()->width().isIntrinsicOrAuto() && !object->style()->height().isIntrinsicOrAuto() && !object->style()->height().isPercent() && !object->isTableCell());
+
+    if (!object->hasOverflowClip())
+        return false;
+
+    if (object->style()->width().isIntrinsicOrAuto() || object->style()->height().isIntrinsicOrAuto() || object->style()->height().isPercent())
+        return false;
+
+    // Table parts can't be relayout roots since the table is responsible for layouting all the parts.
+    if (object->isTablePart())
+        return false;
+
+    return true;
 }
 
 void RenderObject::markContainingBlocksForLayout(bool scheduleRelayout, RenderObject* newRoot)
@@ -896,20 +880,36 @@ RenderBlock* RenderObject::containingBlock() const
 {
     RenderObject* o = parent();
     if (!isText() && m_style->position() == FixedPosition) {
-        while (o && !o->isRenderView() && !(o->hasTransform() && o->isRenderBlock()))
+        while (o) {
+            if (o->isRenderView())
+                break;
+            if (o->hasTransform() && o->isRenderBlock())
+                break;
+#if ENABLE(SVG)
+            // foreignObject is the containing block for its contents.
+            if (o->isSVGForeignObject())
+                break;
+#endif
             o = o->parent();
+        }
+        ASSERT(!o->isAnonymousBlock());
     } else if (!isText() && m_style->position() == AbsolutePosition) {
-        while (o && (o->style()->position() == StaticPosition || (o->isInline() && !o->isReplaced())) && !o->isRenderView() && !(o->hasTransform() && o->isRenderBlock())) {
+        while (o) {
             // For relpositioned inlines, we return the nearest non-anonymous enclosing block. We don't try
             // to return the inline itself.  This allows us to avoid having a positioned objects
             // list in all RenderInlines and lets us return a strongly-typed RenderBlock* result
             // from this method.  The container() method can actually be used to obtain the
             // inline directly.
+            if (!o->style()->position() == StaticPosition && !(o->isInline() && !o->isReplaced()))
+                break;
+            if (o->isRenderView())
+                break;
+            if (o->hasTransform() && o->isRenderBlock())
+                break;
+
             if (o->style()->position() == RelativePosition && o->isInline() && !o->isReplaced()) {
-                RenderBlock* relPositionedInlineContainingBlock = o->containingBlock();
-                while (relPositionedInlineContainingBlock->isAnonymousBlock())
-                    relPositionedInlineContainingBlock = relPositionedInlineContainingBlock->containingBlock();
-                return relPositionedInlineContainingBlock;
+                o = o->containingBlock();
+                break;
             }
 #if ENABLE(SVG)
             if (o->isSVGForeignObject()) //foreignObject is the containing block for contents inside it
@@ -918,6 +918,9 @@ RenderBlock* RenderObject::containingBlock() const
 
             o = o->parent();
         }
+
+        while (o && o->isAnonymousBlock())
+            o = o->containingBlock();
     } else {
         while (o && ((o->isInline() && !o->isReplaced()) || !o->isRenderBlock()))
             o = o->parent();
@@ -1936,9 +1939,15 @@ void RenderObject::setStyle(PassRefPtr<RenderStyle> style)
     if (m_style->outlineWidth() > 0 && m_style->outlineSize() > maximalOutlineSize(PaintPhaseOutline))
         toRenderView(document()->renderer())->setMaximalOutlineSize(m_style->outlineSize());
 
+    bool doesNotNeedLayout = !m_parent || isText();
+
     styleDidChange(diff, oldStyle.get());
 
-    if (!m_parent || isText())
+    // FIXME: |this| might be destroyed here. This can currently happen for a RenderTextFragment when
+    // its first-letter block gets an update in RenderTextFragment::styleDidChange. For RenderTextFragment(s),
+    // we will safely bail out with the doesNotNeedLayout flag. We might want to broaden this condition
+    // in the future as we move renderer changes out of layout and into style changes.
+    if (doesNotNeedLayout)
         return;
 
     // Now that the layer (if any) has been updated, we need to adjust the diff again,
@@ -2113,14 +2122,13 @@ void RenderObject::propagateStyleToAnonymousChildren(bool blockChildrenOnly)
             continue;
 #endif
 
-        RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyle(style());
+        RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyleWithDisplay(style(), child->style()->display());
         if (style()->specifiesColumns()) {
             if (child->style()->specifiesColumns())
                 newStyle->inheritColumnPropertiesFrom(style());
             if (child->style()->columnSpan())
                 newStyle->setColumnSpan(ColumnSpanAll);
         }
-        newStyle->setDisplay(child->style()->display());
         child->setStyle(newStyle.release());
     }
 }
@@ -2384,6 +2392,11 @@ RenderObject* RenderObject::container(RenderBoxModelObject* repaintContainer, bo
         while (o && o->parent() && !(o->hasTransform() && o->isRenderBlock())) {
             if (repaintContainerSkipped && o == repaintContainer)
                 *repaintContainerSkipped = true;
+#if ENABLE(SVG)
+            // foreignObject is the containing block for its contents.
+            if (o->isSVGForeignObject())
+                break;
+#endif
             o = o->parent();
         }
     } else if (pos == AbsolutePosition) {
@@ -2412,7 +2425,7 @@ bool RenderObject::isSelectionBorder() const
 
 inline void RenderObject::clearLayoutRootIfNeeded() const
 {
-    if (node() && !documentBeingDestroyed() && frame()) {
+    if (!documentBeingDestroyed() && frame()) {
         if (FrameView* view = frame()->view()) {
             if (view->layoutRoot() == this) {
                 ASSERT_NOT_REACHED();
@@ -2475,6 +2488,8 @@ void RenderObject::willBeDestroyed()
         setHasLayer(false);
         toRenderBoxModelObject(this)->destroyLayer();
     }
+
+    setAncestorLineBoxDirty(false);
 
     clearLayoutRootIfNeeded();
 }

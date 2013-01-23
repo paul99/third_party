@@ -54,6 +54,7 @@ public:
     void setContainerSize(const IntSize& containerSize) { m_containerSize = containerSize; }
 
     virtual bool hasRelativeDimensions() const;
+    virtual bool hasRelativeLogicalHeight() const;
 
     // The flag is cleared at the beginning of each layout() pass. Elements then call this
     // method during layout when they are invalidated by a filter.

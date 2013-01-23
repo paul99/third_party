@@ -54,6 +54,11 @@ public:
         return adoptPtr(new TextureManager(maxMemoryLimitBytes, preferredMemoryLimitBytes, maxTextureSize));
     }
 
+    // Good tile size for a given viewport size
+    static size_t defaultTileSize(const IntSize& viewportSize);
+    // Maximum texture uploads per-frame given the above tile size
+    static size_t maxUploadsPerFrame(const IntSize& viewportSize, bool redrawPending);
+
     // Absolute maximum limit for texture allocations for this instance.
     static size_t highLimitBytes(const IntSize& viewportSize);
     // Preferred texture size limit given the viewport size.
@@ -63,10 +68,15 @@ public:
 
     static size_t memoryUseBytes(const IntSize&, GC3Denum format);
 
+    void setMaxTextureSize(size_t maxTextureSize) { m_maxTextureSize = maxTextureSize; }
+    size_t defaultSize() const { return m_defaultSize; }
+    GC3Denum defaultFormat() const { return m_defaultFormat; }
+    void setDefaultDimensions(size_t size, GC3Denum format) { m_defaultSize = size; m_defaultFormat = format; }
+
     void setMaxMemoryLimitBytes(size_t);
-    size_t maxMemoryLimitBytes() { return m_maxMemoryLimitBytes; }
+    size_t maxMemoryLimitBytes() const { return m_maxMemoryLimitBytes; }
     void setPreferredMemoryLimitBytes(size_t);
-    size_t preferredMemoryLimitBytes() { return m_preferredMemoryLimitBytes; }
+    size_t preferredMemoryLimitBytes() const { return m_preferredMemoryLimitBytes; }
 
     TextureToken getToken();
     void releaseToken(TextureToken);
@@ -80,12 +90,15 @@ public:
     bool isProtected(TextureToken);
 
     unsigned allocateTexture(TextureAllocator*, TextureToken);
-    void deleteEvictedTextures(TextureAllocator*);
+    void deleteEvictedTextures(TextureAllocator*, bool recycle = false);
 
     void evictAndDeleteAllTextures(TextureAllocator*);
 
     void reduceMemoryToLimit(size_t);
     size_t currentMemoryUseBytes() const { return m_memoryUseBytes; }
+
+    size_t desiredPreAllocationsRemaining();
+    void takePreAllocatedTextures(Vector<unsigned>& textureIds, IntSize, GC3Denum format, TextureAllocator*);
 
 private:
     TextureManager(size_t maxMemoryLimitBytes, size_t preferredMemoryLimitBytes, int maxTextureSize);
@@ -95,6 +108,7 @@ private:
         GC3Denum format;
         unsigned textureId;
         bool isProtected;
+        bool isFree;
 #ifndef NDEBUG
         TextureAllocator* allocator;
 #endif
@@ -102,7 +116,7 @@ private:
 
     void addTexture(TextureToken, TextureInfo);
     void removeTexture(TextureToken, TextureInfo);
-    unsigned replaceTexture(TextureToken, TextureInfo);
+    unsigned recycleTexture(TextureToken, TextureInfo);
 
     typedef HashMap<TextureToken, TextureInfo> TextureMap;
     TextureMap m_textures;
@@ -112,6 +126,8 @@ private:
     size_t m_preferredMemoryLimitBytes;
     size_t m_memoryUseBytes;
     int m_maxTextureSize;
+    size_t m_defaultSize;
+    GC3Denum m_defaultFormat;
     TextureToken m_nextToken;
 
     struct EvictionEntry {
@@ -122,6 +138,9 @@ private:
         TextureAllocator* allocator;
 #endif
     };
+
+    bool hasDefaultDimensions(const TextureInfo& info);
+    bool hasDefaultDimensions(const EvictionEntry& info);
 
     Vector<EvictionEntry> m_evictedTextures;
 };

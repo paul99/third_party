@@ -35,26 +35,37 @@ CCSchedulerStateMachine::CCSchedulerStateMachine()
     , m_needsRedraw(false)
     , m_needsForcedRedraw(false)
     , m_needsCommit(false)
+    , m_hasMorePreallocations(false)
+    , m_hasMoreResourceUpdates(false)
     , m_updateMoreResourcesPending(false)
     , m_insideVSync(false)
     , m_visible(false)
-    , m_canDraw(true) { }
+    , m_canDraw(true)
+    , m_havePreallocatedSinceVSync(false) { }
 
 CCSchedulerStateMachine::Action CCSchedulerStateMachine::nextAction() const
 {
     bool canDraw = m_currentFrameNumber != m_lastFrameNumberWhereDrawWasCalled;
     bool shouldDraw = (m_needsRedraw && m_insideVSync && m_visible && canDraw && m_canDraw) || m_needsForcedRedraw;
+    bool shouldPreallocate = m_hasMorePreallocations
+                             && !m_hasMoreResourceUpdates
+                             && !m_havePreallocatedSinceVSync
+                             && m_visible;
     switch (m_commitState) {
     case COMMIT_STATE_IDLE:
         if (shouldDraw)
             return ACTION_DRAW;
         if (m_needsCommit && m_visible)
             return ACTION_BEGIN_FRAME;
+        if (shouldPreallocate)
+            return ACTION_PREALLOCATE_MORE_RESOURCES;
         return ACTION_NONE;
 
     case COMMIT_STATE_FRAME_IN_PROGRESS:
         if (shouldDraw)
             return ACTION_DRAW;
+        if (shouldPreallocate)
+            return ACTION_PREALLOCATE_MORE_RESOURCES;
         return ACTION_NONE;
 
     case COMMIT_STATE_UPDATING_RESOURCES:
@@ -97,6 +108,14 @@ void CCSchedulerStateMachine::updateState(Action action)
         m_updateMoreResourcesPending = true;
         return;
 
+    case ACTION_PREALLOCATE_MORE_RESOURCES:
+        // We don't need a redraw, and we don't need a commit
+        // either as the next commit from webkit will pick up
+        // the textures before any updates occur. However, make
+        // sure we don't preallocate more than once per frame.
+        m_havePreallocatedSinceVSync = true;
+        return;
+
     case ACTION_COMMIT:
         if (m_needsCommit || !m_visible)
             m_commitState = COMMIT_STATE_WAITING_FOR_FIRST_DRAW;
@@ -121,17 +140,18 @@ void CCSchedulerStateMachine::updateState(Action action)
 bool CCSchedulerStateMachine::vsyncCallbackNeeded() const
 {
     if (!m_visible) {
-        if (m_needsForcedRedraw)
+        if (m_needsForcedRedraw || m_updateMoreResourcesPending)
             return true;
 
         return false;
     }
 
-    return m_needsRedraw || m_needsForcedRedraw || m_updateMoreResourcesPending;
+    return m_needsRedraw || m_needsForcedRedraw || m_updateMoreResourcesPending || m_hasMorePreallocations;
 }
 
 void CCSchedulerStateMachine::didEnterVSync()
 {
+    m_havePreallocatedSinceVSync = false;
     m_insideVSync = true;
 }
 

@@ -49,8 +49,10 @@ SkPictureCanvasLayerTextureUpdater::~SkPictureCanvasLayerTextureUpdater()
 {
 }
 
-void SkPictureCanvasLayerTextureUpdater::prepareToUpdate(const IntRect& contentRect, const IntSize& /* tileSize */, int /* borderTexels */, float contentsScale, IntRect* resultingOpaqueRect)
+void SkPictureCanvasLayerTextureUpdater::prepareToUpdate(const IntRect& contentRect, const IntSize& /* tileSize */, int /* borderTexels */, float contentsScale, IntRect* resultingOpaqueRect, int downsamplingFactor)
 {
+    ASSERT(downsamplingFactor == 1);
+
     SkCanvas* canvas = m_picture.beginRecording(contentRect.width(), contentRect.height());
     PlatformContextSkia platformContext(canvas);
     platformContext.setDeferred(true);

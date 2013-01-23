@@ -41,13 +41,13 @@ class IntPoint;
 
 class TilingData {
 public:
-    TilingData(int maxTextureSize, int totalSizeX, int totalSizeY, bool hasBorderTexels);
+    TilingData(int maxTextureSize, int totalSizeX, int totalSizeY, int borderTexels);
     void setTotalSize(int totalSizeX, int totalSizeY);
     void setMaxTextureSize(int);
     int maxTextureSize() const { return m_maxTextureSize; }
     int totalSizeX() const { return m_totalSizeX; }
     int totalSizeY() const { return m_totalSizeY; }
-    void setHasBorderTexels(bool);
+    void setBorderTexels(int);
     int borderTexels() const { return m_borderTexels; }
 
     int numTiles() const { return numTilesX() * numTilesY(); }
@@ -86,7 +86,7 @@ private:
     int m_maxTextureSize;
     int m_totalSizeX;
     int m_totalSizeY;
-    int m_borderTexels; // 0 or 1
+    int m_borderTexels; // 0 or border size
 
     // computed values:
     int m_numTilesX;

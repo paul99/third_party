@@ -456,7 +456,8 @@ void RenderBlock::addChildToAnonymousColumnBlocks(RenderObject* newChild, Render
     }
         
     // Split our anonymous blocks.
-    RenderObject* newBeforeChild = splitAnonymousBlocksAroundChild(beforeChild);
+    RenderObject* newBeforeChild = splitAnonymousBoxesAroundChild(beforeChild);
+
     
     // Create a new anonymous box of the appropriate type.
     RenderBlock* newBox = newChildHasColumnSpan ? createAnonymousColumnSpanBlock() : createAnonymousColumnsBlock();
@@ -529,14 +530,6 @@ void RenderBlock::splitBlocks(RenderBlock* fromBlock, RenderBlock* toBlock,
     if (beforeChild && childrenInline())
         deleteLineBoxTree();
 
-    // We have to remove the descendant child from our positioned objects list
-    // before we do the split and move some of the children to cloneBlock. Since
-    // we are doing layout anyway, it is easier to blow away the entire list, than
-    // traversing down the subtree looking for positioned childs and then remove them
-    // from our positioned objects list.
-    if (beforeChild)
-        removePositionedObjects(0);
-
     // Now take all of the children from beforeChild to the end and remove
     // them from |this| and place them in the clone.
     moveChildrenTo(cloneBlock, beforeChild, 0, true);
@@ -551,7 +544,13 @@ void RenderBlock::splitBlocks(RenderBlock* fromBlock, RenderBlock* toBlock,
     RenderBoxModelObject* curr = toRenderBoxModelObject(parent());
     RenderBoxModelObject* currChild = this;
     RenderObject* currChildNextSibling = currChild->nextSibling();
-    
+    bool documentUsesBeforeAfterRules = document()->usesBeforeAfterRules(); 
+
+    // Note: |this| can be destroyed inside this loop if it is an empty anonymous
+    // block and we try to call updateBeforeAfterContent inside which removes the
+    // generated content and additionally cleans up |this| empty anonymous block.
+    // See RenderBlock::removeChild(). DO NOT reference any local variables to |this|
+    // after this point.
     while (curr && curr != fromBlock) {
         ASSERT(curr->isRenderBlock());
         
@@ -578,7 +577,7 @@ void RenderBlock::splitBlocks(RenderBlock* fromBlock, RenderBlock* toBlock,
         // has to move into the inline continuation.  Call updateBeforeAfterContent to ensure that the inline's :after
         // content gets properly destroyed.
         bool isLastChild = (currChildNextSibling == blockCurr->lastChild());
-        if (document()->usesBeforeAfterRules())
+        if (documentUsesBeforeAfterRules)
             blockCurr->children()->updateBeforeAfterContent(blockCurr, AFTER);
         if (isLastChild && currChildNextSibling != blockCurr->lastChild())
             currChildNextSibling = 0; // We destroyed the last child, so now we need to update
@@ -656,94 +655,6 @@ void RenderBlock::splitFlow(RenderObject* beforeChild, RenderBlock* newBlockBox,
     post->setNeedsLayoutAndPrefWidthsRecalc();
 }
 
-RenderObject* RenderBlock::splitAnonymousBlocksAroundChild(RenderObject* beforeChild)
-{
-    if (beforeChild->isTablePart())
-        beforeChild = splitTablePartsAroundChild(beforeChild);
-
-    while (beforeChild->parent() != this) {
-        RenderBlock* blockToSplit = toRenderBlock(beforeChild->parent());
-        if (blockToSplit->firstChild() != beforeChild) {
-            // We have to split the parentBlock into two blocks.
-            RenderBlock* post = createAnonymousBlockWithSameTypeAs(blockToSplit);
-            post->setChildrenInline(blockToSplit->childrenInline());
-            RenderBlock* parentBlock = toRenderBlock(blockToSplit->parent());
-            parentBlock->children()->insertChildNode(parentBlock, post, blockToSplit->nextSibling());
-            blockToSplit->moveChildrenTo(post, beforeChild, 0, blockToSplit->hasLayer());
-            post->setNeedsLayoutAndPrefWidthsRecalc();
-            blockToSplit->setNeedsLayoutAndPrefWidthsRecalc();
-            beforeChild = post;
-        } else
-            beforeChild = blockToSplit;
-    }
-    return beforeChild;
-}
-
-static void markTableForSectionAndCellRecalculation(RenderObject* child)
-{
-    RenderObject* curr = child;
-    while (!curr->isTable()) {
-        if (curr->isTableSection())
-            toRenderTableSection(curr)->setNeedsCellRecalc();
-        curr = curr->parent();
-    }
-
-    RenderTable* table = toRenderTable(curr);
-    table->setNeedsSectionRecalc();
-    table->setNeedsLayoutAndPrefWidthsRecalc();
-}
-
-static void moveAllTableChildrenTo(RenderObject* fromTablePart, RenderTable* toTable, RenderObject* startChild)
-{
-    for (RenderObject* curr = startChild; curr;) {
-        // Need to store next sibling as we won't have access to it
-        // after we are removed from table.
-        RenderObject* next = curr->nextSibling();
-        fromTablePart->removeChild(curr);
-        toTable->addChild(curr);
-        if (curr->isTableSection())
-            toRenderTableSection(curr)->setNeedsCellRecalc();
-        curr->setNeedsLayoutAndPrefWidthsRecalc();
-        curr = next; 
-    }
-
-    // This marks fromTable for section and cell recalculation.
-    markTableForSectionAndCellRecalculation(fromTablePart);
-
-    // startChild is now part of toTable. This marks toTable for section and cell recalculation.
-    markTableForSectionAndCellRecalculation(startChild);
-}
-
-RenderObject* RenderBlock::splitTablePartsAroundChild(RenderObject* beforeChild)
-{
-    ASSERT(beforeChild->isTablePart());
-
-    while (beforeChild->parent() != this) {
-        RenderObject* tablePartToSplit = beforeChild->parent();
-        if (!tablePartToSplit->isTablePart() && !tablePartToSplit->isTable())
-            break;
-        if (tablePartToSplit->firstChild() != beforeChild) {
-            // Get our table container.
-            RenderObject* curr = tablePartToSplit;
-            while (!curr->isTable())
-                curr = curr->parent();
-            RenderTable* table = toRenderTable(curr);
-
-            // Create an anonymous table container next to our table container.
-            RenderBlock* parentBlock = toRenderBlock(table->parent());
-            RenderTable* postTable = parentBlock->createAnonymousTable();
-            parentBlock->children()->insertChildNode(parentBlock, postTable, table->nextSibling());
-            
-            // Move all the children from beforeChild to the newly created anonymous table container.
-            moveAllTableChildrenTo(tablePartToSplit, postTable, beforeChild);
-
-            beforeChild = postTable;
-        } else
-            beforeChild = tablePartToSplit;
-    }
-    return beforeChild;
-}
-
 void RenderBlock::makeChildrenAnonymousColumnBlocks(RenderObject* beforeChild, RenderBlock* newBlockBox, RenderObject* newChild)
 {
     RenderBlock* pre = 0;
@@ -755,7 +666,7 @@ void RenderBlock::makeChildrenAnonymousColumnBlocks(RenderObject* beforeChild, R
     block->deleteLineBoxTree();
 
     if (beforeChild && beforeChild->parent() != this)
-        beforeChild = splitAnonymousBlocksAroundChild(beforeChild);
+        beforeChild = splitAnonymousBoxesAroundChild(beforeChild);
 
     if (beforeChild != firstChild()) {
         pre = block->createAnonymousColumnsBlock();
@@ -859,7 +770,7 @@ void RenderBlock::addChildIgnoringAnonymousColumnBlocks(RenderObject* newChild, 
                 return;
             }
 
-            beforeChild = splitTablePartsAroundChild(beforeChild);
+            beforeChild = splitAnonymousBoxesAroundChild(beforeChild);
 
             ASSERT(beforeChild->parent() == this);
             if (beforeChild->parent() != this) {
@@ -876,6 +787,10 @@ void RenderBlock::addChildIgnoringAnonymousColumnBlocks(RenderObject* newChild, 
             beforeChild = beforeChildContainer;
         }
     }
+
+    // Nothing goes before the intruded run-in.
+    if (beforeChild && beforeChild->isRunIn() && runInIsPlacedIntoSiblingBlock(beforeChild))
+        beforeChild = beforeChild->nextSibling();
 
     // Check for a spanning element in columns.
     RenderBlock* columnsBlockAncestor = columnsBlockForSpanningElement(newChild);
@@ -957,6 +872,9 @@ void RenderBlock::addChildIgnoringAnonymousColumnBlocks(RenderObject* newChild, 
     }
 
     RenderBox::addChild(newChild, beforeChild);
+ 
+    // Handle placement of run-ins.
+    placeRunInIfNeeded(newChild, DoNotPlaceGeneratedRunIn);
 
     if (madeBoxesNonInline && parent() && isAnonymousBlock() && parent()->isRenderBlock())
         toRenderBlock(parent())->removeLeftoverAnonymousBlock(this);
@@ -1045,36 +963,6 @@ RootInlineBox* RenderBlock::createAndAppendRootInlineBox()
     return rootBox;
 }
 
-void RenderBlock::moveChildTo(RenderBlock* toBlock, RenderObject* child, RenderObject* beforeChild, bool fullRemoveInsert)
-{
-    ASSERT(this == child->parent());
-    ASSERT(!beforeChild || toBlock == beforeChild->parent());
-    if (fullRemoveInsert) {
-        // Takes care of adding the new child correctly if toBlock and fromBlock
-        // have different kind of children (block vs inline).
-        toBlock->addChildIgnoringContinuation(children()->removeChildNode(this, child), beforeChild);
-    } else
-        toBlock->children()->insertChildNode(toBlock, children()->removeChildNode(this, child, false), beforeChild, false);
-}
-
-void RenderBlock::moveChildrenTo(RenderBlock* toBlock, RenderObject* startChild, RenderObject* endChild, RenderObject* beforeChild, bool fullRemoveInsert)
-{
-    ASSERT(!beforeChild || toBlock == beforeChild->parent());
-    RenderObject* nextChild = startChild;
-    while (nextChild && nextChild != endChild) {
-        RenderObject* child = nextChild;
-        nextChild = child->nextSibling();
-        if (fullRemoveInsert) {
-            // Takes care of adding the new child correctly if toBlock and fromBlock
-            // have different kind of children (block vs inline).
-            toBlock->addChildIgnoringContinuation(children()->removeChildNode(this, child), beforeChild);
-        } else
-            toBlock->children()->insertChildNode(toBlock, children()->removeChildNode(this, child, false), beforeChild, false);
-        if (child == endChild)
-            return;
-    }
-}
-
 void RenderBlock::makeChildrenNonInline(RenderObject *insertionPoint)
 {    
     // makeChildrenNonInline takes a block whose children are *all* inline and it
@@ -1094,6 +982,13 @@ void RenderBlock::makeChildrenNonInline(RenderObject *insertionPoint)
         return;
 
     deleteLineBoxTree();
+
+    // Since we are going to have block children, we have to move
+    // back the run-in to its original place.
+    if (child->isRunIn()) {
+        moveRunInToOriginalPosition(child);
+        child = firstChild();
+    }
 
     while (child) {
         RenderObject *inlineRunStart, *inlineRunEnd;
@@ -1229,7 +1124,7 @@ void RenderBlock::removeChild(RenderObject* oldChild)
             // to clear out inherited column properties by just making a new style, and to also clear the
             // column span flag if it is set.
             ASSERT(!inlineChildrenBlock->continuation());
-            RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyle(style());
+            RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyleWithDisplay(style(), BLOCK);
             children()->removeChildNode(this, inlineChildrenBlock, inlineChildrenBlock->hasLayer());
             inlineChildrenBlock->setStyle(newStyle);
             
@@ -1773,8 +1668,7 @@ bool RenderBlock::handleSpecialChild(RenderBox* child, const MarginInfo& marginI
 {
     // Handle in the given order
     return handlePositionedChild(child, marginInfo)
-        || handleFloatingChild(child, marginInfo)
-        || handleRunInChild(child);
+        || handleFloatingChild(child, marginInfo);
 }
 
 
@@ -1798,77 +1692,145 @@ bool RenderBlock::handleFloatingChild(RenderBox* child, const MarginInfo& margin
     return false;
 }
 
-bool RenderBlock::handleRunInChild(RenderBox* child)
+static void destroyRunIn(RenderBoxModelObject* runIn)
 {
-    // See if we have a run-in element with inline children.  If the
-    // children aren't inline, then just treat the run-in as a normal
-    // block.
-    if (!child->isRunIn() || !child->childrenInline())
-        return false;
+    ASSERT(runIn->isRunIn());
+    ASSERT(!runIn->firstChild());
+
+    // Delete our line box tree. This is needed as our children got moved
+    // and our line box tree is no longer valid.
+    if (runIn->isRenderBlock())
+        toRenderBlock(runIn)->deleteLineBoxTree();
+    else if (runIn->isRenderInline())
+        toRenderInline(runIn)->deleteLineBoxTree();
+    else
+        ASSERT_NOT_REACHED();
+
+    runIn->destroy();
+}
+
+void RenderBlock::placeRunInIfNeeded(RenderObject* newChild, PlaceGeneratedRunInFlag flag)
+{
+    if (newChild->isRunIn() && (flag == PlaceGeneratedRunIn || !newChild->isBeforeOrAfterContent()))
+        moveRunInUnderSiblingBlockIfNeeded(newChild);
+    else if (RenderObject* prevSibling = newChild->previousSibling()) {
+        if (prevSibling->isRunIn() && (flag == PlaceGeneratedRunIn || !newChild->isBeforeOrAfterContent()))
+            moveRunInUnderSiblingBlockIfNeeded(prevSibling);
+    }
+}
+
+RenderBoxModelObject* RenderBlock::createReplacementRunIn(RenderBoxModelObject* runIn)
+{
+    ASSERT(runIn->isRunIn());
+
+    // First we destroy any :before/:after content. It will be regenerated by the new run-in.
+    // Exception is if the run-in itself is generated.
+    if (runIn->style()->styleType() != BEFORE && runIn->style()->styleType() != AFTER) {
+        RenderObject* generatedContent;
+        if (runIn->getCachedPseudoStyle(BEFORE) && (generatedContent = runIn->beforePseudoElementRenderer()))
+            generatedContent->destroy();
+        if (runIn->getCachedPseudoStyle(AFTER) && (generatedContent = runIn->afterPseudoElementRenderer()))
+            generatedContent->destroy();
+    }
+
+    bool newRunInShouldBeBlock = !runIn->isRenderBlock();
+    Node* runInNode = runIn->node();
+    RenderBoxModelObject* newRunIn = 0;
+    if (newRunInShouldBeBlock)
+        newRunIn = new (renderArena()) RenderBlock(runInNode ? runInNode : document());
+    else
+        newRunIn = new (renderArena()) RenderInline(runInNode ? runInNode : document());
+    newRunIn->setStyle(runIn->style());
+ 
+    runIn->moveAllChildrenTo(newRunIn, true);
+
+    // If the run-in had an element, we need to set the new renderer.
+    if (runInNode)
+        runInNode->setRenderer(newRunIn);
+
+    return newRunIn;
+}
+
+void RenderBlock::moveRunInUnderSiblingBlockIfNeeded(RenderObject* runIn)
+{
+    ASSERT(runIn->isRunIn());
+
+    // See if we have inline children. If the children aren't inline,
+    // then just treat the run-in as a normal block.
+    if (!runIn->childrenInline())
+        return;
 
     // FIXME: We don't handle non-block elements with run-in for now.
-    if (!child->isRenderBlock())
-        return false;
+    if (!runIn->isRenderBlock())
+        return;
 
-    // Run-in child shouldn't intrude into the sibling block if it is part of a
+    // We shouldn't run in into the sibling block if we are part of a
     // continuation chain. In that case, treat it as a normal block.
-    if (child->isElementContinuation() || child->virtualContinuation())
-        return false;
+    if (runIn->isElementContinuation() || runIn->virtualContinuation())
+        return;
 
     // Check if this node is allowed to run-in. E.g. <select> expects its renderer to
     // be a RenderListBox or RenderMenuList, and hence cannot be a RenderInline run-in.
-    Node* runInNode = child->node();
+    Node* runInNode = runIn->node();
     if (runInNode && runInNode->hasTagName(selectTag))
-        return false;
+        return;
 
-    RenderBlock* blockRunIn = toRenderBlock(child);
-    RenderObject* curr = blockRunIn->nextSibling();
-    if (!curr || !curr->isRenderBlock() || !curr->childrenInline() || curr->isRunIn() || curr->isAnonymous() || curr->isFloatingOrPositioned())
-        return false;
+    RenderObject* curr = runIn->nextSibling();
+    if (!curr || !curr->isRenderBlock() || !curr->childrenInline())
+        return;
 
-    RenderBlock* currBlock = toRenderBlock(curr);
+    // Per CSS3, "A run-in cannot run in to a block that already starts with a
+    // run-in or that itself is a run-in".
+    if (curr->isRunIn() || (curr->firstChild() && curr->firstChild()->isRunIn()))
+        return;
 
-    // First we destroy any :before/:after content. It will be regenerated by the new inline.
-    // Exception is if the run-in itself is generated.
-    if (child->style()->styleType() != BEFORE && child->style()->styleType() != AFTER) {
-        RenderObject* generatedContent;
-        if (child->getCachedPseudoStyle(BEFORE) && (generatedContent = child->beforePseudoElementRenderer()))
-            generatedContent->destroy();
-        if (child->getCachedPseudoStyle(AFTER) && (generatedContent = child->afterPseudoElementRenderer()))
-            generatedContent->destroy();
-    }
+    if (curr->isAnonymous() || curr->isFloatingOrPositioned())
+        return;
 
-    // Remove the old child.
-    children()->removeChildNode(this, blockRunIn);
+    RenderBoxModelObject* oldRunIn = toRenderBoxModelObject(runIn);
+    RenderBoxModelObject* newRunIn = createReplacementRunIn(oldRunIn);
+    destroyRunIn(oldRunIn);
 
-    // Create an inline.
-    RenderInline* inlineRunIn = new (renderArena()) RenderInline(runInNode ? runInNode : document());
-    inlineRunIn->setStyle(blockRunIn->style());
-
-    // Move the nodes from the old child to the new child
-    for (RenderObject* runInChild = blockRunIn->firstChild(); runInChild;) {
-        RenderObject* nextSibling = runInChild->nextSibling();
-        blockRunIn->children()->removeChildNode(blockRunIn, runInChild);
-        inlineRunIn->addChild(runInChild); // Use addChild instead of appendChildNode since it handles correct placement of the children relative to :after-generated content.
-        runInChild = nextSibling;
-    }
-
-    // Now insert the new child under |currBlock|. Use addChild instead of insertChildNode since it handles correct placement of the children, esp where we cannot insert
+    // Now insert the new child under |curr| block. Use addChild instead of insertChildNode
+    // since it handles correct placement of the children, especially where we cannot insert
     // anything before the first child. e.g. details tag. See https://bugs.webkit.org/show_bug.cgi?id=58228.
-    currBlock->addChild(inlineRunIn, currBlock->firstChild());
-    
-    // If the run-in had an element, we need to set the new renderer.
-    if (runInNode)
-        runInNode->setRenderer(inlineRunIn);
+    curr->addChild(newRunIn, curr->firstChild());
 
-    // Destroy the block run-in, which includes deleting its line box tree.
-    blockRunIn->deleteLineBoxTree();
-    blockRunIn->destroy();
+    // Make sure that |this| get a layout since its run-in child moved.
+    curr->setNeedsLayoutAndPrefWidthsRecalc();
+}
 
-    // The block acts like an inline, so just null out its
-    // position.
-    
+bool RenderBlock::runInIsPlacedIntoSiblingBlock(RenderObject* runIn)
+{
+    ASSERT(runIn->isRunIn());
+
+    // If we don't have a parent, we can't be moved into our sibling block.
+    if (!parent())
+        return false;
+
+    // An intruded run-in needs to be an inline.
+    if (!runIn->isRenderInline())
+        return false;
+
     return true;
+}
+
+void RenderBlock::moveRunInToOriginalPosition(RenderObject* runIn)
+{
+    ASSERT(runIn->isRunIn());
+
+    if (!runInIsPlacedIntoSiblingBlock(runIn))
+        return;
+
+    RenderBoxModelObject* oldRunIn = toRenderBoxModelObject(runIn);
+    RenderBoxModelObject* newRunIn = createReplacementRunIn(oldRunIn);
+    destroyRunIn(oldRunIn);
+
+    // Add the run-in block as our previous sibling.
+    parent()->addChild(newRunIn, this);
+
+    // Make sure that the parent holding the new run-in gets layout.
+    parent()->setNeedsLayoutAndPrefWidthsRecalc();
 }
 
 LayoutUnit RenderBlock::collapseMargins(RenderBox* child, MarginInfo& marginInfo)
@@ -2231,8 +2193,7 @@ void RenderBlock::layoutBlockChildren(bool relayoutChildren, LayoutUnit& maxFloa
         // Make sure we layout children if they need it.
         // FIXME: Technically percentage height objects only need a relayout if their percentage isn't going to be turned into
         // an auto value.  Add a method to determine this, so that we can avoid the relayout.
-        RenderStyle* childStyle = child->style();
-        if (relayoutChildren || ((childStyle->logicalHeight().isPercent() || childStyle->logicalMinHeight().isPercent() || childStyle->logicalMaxHeight().isPercent()) && !isRenderView()))
+        if (relayoutChildren || (child->hasRelativeLogicalHeight() && !isRenderView()))
             child->setChildNeedsLayout(true, false);
 
         // If relayoutChildren is set and the child has percentage padding or an embedded content box, we also need to invalidate the childs pref widths.
@@ -3864,16 +3825,48 @@ HashSet<RenderBox*>* RenderBlock::percentHeightDescendants() const
     return gPercentHeightDescendantsMap ? gPercentHeightDescendantsMap->get(this) : 0;
 }
 
-#if !ASSERT_DISABLED
+bool RenderBlock::hasPercentHeightContainerMap()
+{
+    return gPercentHeightContainerMap;
+}
+
 bool RenderBlock::hasPercentHeightDescendant(RenderBox* descendant)
 {
-    ASSERT(descendant);
-    if (!gPercentHeightContainerMap)
-        return false;
-    HashSet<RenderBlock*>* containerSet = gPercentHeightContainerMap->take(descendant);
-    return containerSet && containerSet->size();
+    // We don't null check gPercentHeightContainerMap since the caller
+    // already ensures this and we need to call this function on every
+    // descendant in clearPercentHeightDescendantsFrom().
+    ASSERT(gPercentHeightContainerMap);
+    return gPercentHeightContainerMap->contains(descendant);
 }
-#endif
+
+void RenderBlock::removePercentHeightDescendantIfNeeded(RenderBox* descendant)
+{
+    // We query the map directly, rather than looking at style's
+    // logicalHeight()/logicalMinHeight()/logicalMaxHeight() since those
+    // can change with writing mode/directional changes.
+    if (!hasPercentHeightContainerMap())
+        return;
+
+    if (!hasPercentHeightDescendant(descendant))
+        return;
+
+    removePercentHeightDescendant(descendant);
+}
+
+void RenderBlock::clearPercentHeightDescendantsFrom(RenderBox* parent)
+{
+    ASSERT(gPercentHeightContainerMap);
+    for (RenderObject* curr = parent->firstChild(); curr; curr = curr->nextInPreOrder(parent)) {
+        if (!curr->isBox())
+            continue;
+ 
+        RenderBox* box = toRenderBox(curr);
+        if (!hasPercentHeightDescendant(box))
+            continue;
+
+        removePercentHeightDescendant(box);
+    }
+}
 
 template <RenderBlock::FloatingObject::Type FloatTypeValue>
 inline void RenderBlock::FloatIntervalSearchAdapter<FloatTypeValue>::collectIfNeeded(const IntervalType& interval) const
@@ -6022,6 +6015,9 @@ void RenderBlock::updateFirstLetter()
                 remainingText->setFirstLetter(newFirstLetter);
                 toRenderBoxModelObject(newFirstLetter)->setFirstLetterRemainingText(remainingText);
             }
+            // To prevent removal of single anonymous block in RenderBlock::removeChild and causing
+            // |nextSibling| to go stale, we remove the old first letter using removeChildNode first.
+            firstLetterContainer->virtualChildren()->removeChildNode(firstLetterContainer, firstLetter);
             firstLetter->destroy();
             firstLetter = newFirstLetter;
             firstLetterContainer->addChild(firstLetter, nextSibling);
@@ -6538,52 +6534,13 @@ void RenderBlock::addFocusRingRects(Vector<LayoutRect>& rects, const LayoutPoint
         inlineElementContinuation()->addFocusRingRects(rects, flooredLayoutPoint(additionalOffset + inlineElementContinuation()->containingBlock()->location() - location()));
 }
 
-RenderBlock* RenderBlock::createAnonymousBlock(bool isFlexibleBox) const
+RenderBox* RenderBlock::createAnonymousBoxWithSameTypeAs(const RenderObject* parent) const
 {
-    RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyle(style());
-
-    RenderBlock* newBox = 0;
-    if (isFlexibleBox) {
-        newStyle->setDisplay(BOX);
-        newBox = new (renderArena()) RenderDeprecatedFlexibleBox(document() /* anonymous box */);
-    } else {
-        newStyle->setDisplay(BLOCK);
-        newBox = new (renderArena()) RenderBlock(document() /* anonymous box */);
-    }
-
-    newBox->setStyle(newStyle.release());
-    return newBox;
-}
-
-RenderBlock* RenderBlock::createAnonymousBlockWithSameTypeAs(RenderBlock* otherAnonymousBlock) const
-{
-    if (otherAnonymousBlock->isAnonymousColumnsBlock())
-        return createAnonymousColumnsBlock();
-    if (otherAnonymousBlock->isAnonymousColumnSpanBlock())
-        return createAnonymousColumnSpanBlock();
-    return createAnonymousBlock(otherAnonymousBlock->style()->display() == BOX);
-}
-
-RenderBlock* RenderBlock::createAnonymousColumnsBlock() const
-{
-    RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyle(style());
-    newStyle->inheritColumnPropertiesFrom(style());
-    newStyle->setDisplay(BLOCK);
-
-    RenderBlock* newBox = new (renderArena()) RenderBlock(document() /* anonymous box */);
-    newBox->setStyle(newStyle.release());
-    return newBox;
-}
-
-RenderBlock* RenderBlock::createAnonymousColumnSpanBlock() const
-{
-    RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyle(style());
-    newStyle->setColumnSpan(ColumnSpanAll);
-    newStyle->setDisplay(BLOCK);
-
-    RenderBlock* newBox = new (renderArena()) RenderBlock(document() /* anonymous box */);
-    newBox->setStyle(newStyle.release());
-    return newBox;
+    if (isAnonymousColumnsBlock())
+        return createAnonymousColumnsWithParentRenderer(parent);
+    if (isAnonymousColumnSpanBlock())
+        return createAnonymousColumnSpanWithParentRenderer(parent);
+    return createAnonymousWithParentRendererAndDisplay(parent, style()->display());
 }
 
 bool RenderBlock::hasNextPage(LayoutUnit logicalOffset, PageBoundaryRule pageBoundaryRule) const
@@ -7306,6 +7263,46 @@ TextRun RenderBlock::constructTextRun(RenderObject* context, const Font& font, c
 {
     return constructTextRun(context, font, string.characters(), string.length(), style, expansion, flags);
 }
+
+RenderBlock* RenderBlock::createAnonymousWithParentRendererAndDisplay(const RenderObject* parent, EDisplay display)
+{
+    // FIXME: Do we need to cover the new flex box here ?
+    // FIXME: Do we need to convert all our inline displays to block-type in the anonymous logic ?
+    EDisplay newDisplay;
+    RenderBlock* newBox = 0;
+    if (display == BOX || display == INLINE_BOX) {
+        newBox = new (parent->renderArena()) RenderDeprecatedFlexibleBox(parent->document() /* anonymous box */);
+        newDisplay = BOX;
+    } else {
+        newBox = new (parent->renderArena()) RenderBlock(parent->document() /* anonymous box */);
+        newDisplay = BLOCK;
+    }
+
+    RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyleWithDisplay(parent->style(), newDisplay);
+    newBox->setStyle(newStyle.release());
+    return newBox;
+}
+
+RenderBlock* RenderBlock::createAnonymousColumnsWithParentRenderer(const RenderObject* parent)
+{
+    RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyleWithDisplay(parent->style(), BLOCK);
+    newStyle->inheritColumnPropertiesFrom(parent->style());
+
+    RenderBlock* newBox = new (parent->renderArena()) RenderBlock(parent->document() /* anonymous box */);
+    newBox->setStyle(newStyle.release());
+    return newBox;
+}
+
+RenderBlock* RenderBlock::createAnonymousColumnSpanWithParentRenderer(const RenderObject* parent)
+{
+    RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyleWithDisplay(parent->style(), BLOCK);
+    newStyle->setColumnSpan(ColumnSpanAll);
+
+    RenderBlock* newBox = new (parent->renderArena()) RenderBlock(parent->document() /* anonymous box */);
+    newBox->setStyle(newStyle.release());
+    return newBox;
+}
+
 #ifndef NDEBUG
 
 void RenderBlock::showLineTreeAndMark(const InlineBox* markedBox1, const char* markedLabel1, const InlineBox* markedBox2, const char* markedLabel2, const RenderObject* obj) const

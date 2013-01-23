@@ -135,6 +135,12 @@ public:
         unsigned span;
     };
 
+    void forceSectionsRecalc()
+    {
+        setNeedsSectionRecalc();
+        recalcSections();
+    }
+
     Vector<ColumnStruct>& columns() { return m_columns; }
     Vector<LayoutUnit>& columnPositions() { return m_columnPos; }
     RenderTableSection* header() const { return m_head; }
@@ -209,6 +215,12 @@ public:
     {
         if (m_needsSectionRecalc)
             recalcSections();
+    }
+
+    static RenderTable* createAnonymousWithParentRenderer(const RenderObject*);
+    virtual RenderBox* createAnonymousBoxWithSameTypeAs(const RenderObject* parent) const OVERRIDE
+    {
+        return createAnonymousWithParentRenderer(parent);
     }
 
 protected:

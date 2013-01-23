@@ -110,7 +110,10 @@ private:
     void createTilerIfNeeded();
     void setTilingOption(TilingOption);
 
-    void prepareToUpdateTiles(bool idle, int left, int top, int right, int bottom);
+    bool tileOnlyNeedsPartialUpdate(UpdatableTile*);
+    bool tileNeedsBufferedUpdate(UpdatableTile*);
+
+    void prepareToUpdateTiles(bool idle, int left, int top, int right, int bottom, int downsamplingFactor = 1);
     IntRect idlePaintRect(const IntRect& visibleLayerRect);
 
 #if OS(ANDROID)

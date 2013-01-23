@@ -933,33 +933,6 @@ unsigned Node::nodeIndex() const
     return count;
 }
 
-static void removeNodeListCacheIfPossible(Node* node, NodeRareData* data)
-{
-    if (!data->nodeLists()->isEmpty())
-        return;
-    data->clearNodeLists();
-    node->treeScope()->removeNodeListCache();
-}
-
-void Node::registerDynamicSubtreeNodeList(DynamicSubtreeNodeList* list)
-{
-    NodeRareData* data = ensureRareData();
-    // We haven't been receiving notifications while there were no registered lists, so the cache is invalid now.
-    if (data->nodeLists() && (!treeScope() || !treeScope()->hasNodeListCaches()))
-        data->nodeLists()->invalidateCaches();
-
-    data->ensureNodeLists(this)->m_listsWithCaches.add(list);
-}
-
-void Node::unregisterDynamicSubtreeNodeList(DynamicSubtreeNodeList* list)
-{
-    ASSERT(hasRareData());
-    ASSERT(rareData()->nodeLists());
-    NodeRareData* data = rareData();
-    data->nodeLists()->m_listsWithCaches.remove(list);
-    removeNodeListCacheIfPossible(this, data);
-}
-
 void Node::invalidateNodeListsCacheAfterAttributeChanged(const QualifiedName& attrName)
 {
     if (hasRareData() && isAttributeNode()) {
@@ -973,9 +946,13 @@ void Node::invalidateNodeListsCacheAfterAttributeChanged(const QualifiedName& at
 #if ENABLE(MICRODATA)
         && attrName != itemscopeAttr
         && attrName != itempropAttr
+        && attrName != itemtypeAttr
 #endif
-        && attrName != nameAttr)
+        && attrName != nameAttr
+        && attrName != forAttr)
         return;
+
+    document()->clearNodeListCaches();
 
     if (!treeScope()->hasNodeListCaches())
         return;
@@ -988,8 +965,7 @@ void Node::invalidateNodeListsCacheAfterAttributeChanged(const QualifiedName& at
         if (!data->nodeLists())
             continue;
 
-        data->nodeLists()->invalidateCachesThatDependOnAttributes();
-        removeNodeListCacheIfPossible(node, data);
+        data->nodeLists()->invalidateCaches(&attrName);
     }
 }
 
@@ -998,8 +974,11 @@ void Node::invalidateNodeListsCacheAfterChildrenChanged()
     if (hasRareData())
         rareData()->clearChildNodeListCache();
 
+    document()->clearNodeListCaches();
+
     if (!treeScope()->hasNodeListCaches())
         return;
+
     for (Node* node = this; node; node = node->parentNode()) {
         if (!node->hasRareData())
             continue;
@@ -1008,75 +987,12 @@ void Node::invalidateNodeListsCacheAfterChildrenChanged()
             continue;
 
         data->nodeLists()->invalidateCaches();
-
-        NodeListsNodeData::NodeListSet::iterator end = data->nodeLists()->m_listsWithCaches.end();
-        for (NodeListsNodeData::NodeListSet::iterator it = data->nodeLists()->m_listsWithCaches.begin(); it != end; ++it)
-            (*it)->invalidateCache();
-
-        removeNodeListCacheIfPossible(node, data);
     }
 }
 
-void Node::notifyLocalNodeListsLabelChanged()
+NodeListsNodeData* Node::nodeLists()
 {
-    if (!hasRareData())
-        return;
-    NodeRareData* data = rareData();
-    if (!data->nodeLists())
-        return;
-
-    if (data->nodeLists()->m_labelsNodeListCache)
-        data->nodeLists()->m_labelsNodeListCache->invalidateCache();
-}
-
-void Node::removeCachedClassNodeList(ClassNodeList* list, const String& className)
-{
-    ASSERT(rareData());
-    ASSERT(rareData()->nodeLists());
-
-    NodeListsNodeData* data = rareData()->nodeLists();
-    ASSERT_UNUSED(list, list == data->m_classNodeListCache.get(className));
-    data->m_classNodeListCache.remove(className);
-}
-
-void Node::removeCachedNameNodeList(NameNodeList* list, const String& nodeName)
-{
-    ASSERT(rareData());
-    ASSERT(rareData()->nodeLists());
-
-    NodeListsNodeData* data = rareData()->nodeLists();
-    ASSERT_UNUSED(list, list == data->m_nameNodeListCache.get(nodeName));
-    data->m_nameNodeListCache.remove(nodeName);
-}
-
-void Node::removeCachedTagNodeList(TagNodeList* list, const AtomicString& name)
-{
-    ASSERT(rareData());
-    ASSERT(rareData()->nodeLists());
-
-    NodeListsNodeData* data = rareData()->nodeLists();
-    ASSERT_UNUSED(list, list == data->m_tagNodeListCache.get(name.impl()));
-    data->m_tagNodeListCache.remove(name.impl());
-}
-
-void Node::removeCachedTagNodeList(TagNodeList* list, const QualifiedName& name)
-{
-    ASSERT(rareData());
-    ASSERT(rareData()->nodeLists());
-
-    NodeListsNodeData* data = rareData()->nodeLists();
-    ASSERT_UNUSED(list, list == data->m_tagNodeListCacheNS.get(name.impl()));
-    data->m_tagNodeListCacheNS.remove(name.impl());
-}
-
-void Node::removeCachedLabelsNodeList(DynamicSubtreeNodeList* list)
-{
-    ASSERT(rareData());
-    ASSERT(rareData()->nodeLists());
-
-    NodeListsNodeData* data = rareData()->nodeLists();
-    ASSERT_UNUSED(list, list == data->m_labelsNodeListCache);
-    data->m_labelsNodeListCache = 0;
+    return hasRareData() ? rareData()->nodeLists() : 0;
 }
 
 void Node::removeCachedChildNodeList()
@@ -1613,19 +1529,9 @@ PassRefPtr<NodeList> Node::getElementsByTagName(const AtomicString& localName)
     if (localName.isNull())
         return 0;
 
-    String name = localName;
     if (document()->isHTMLDocument())
-        name = localName.lower();
-
-    AtomicString localNameAtom = name;
-
-    pair<NodeListsNodeData::TagNodeListCache::iterator, bool> result = ensureRareData()->ensureNodeLists(this)->m_tagNodeListCache.add(localNameAtom, 0);
-    if (!result.second)
-        return PassRefPtr<TagNodeList>(result.first->second);
-
-    RefPtr<TagNodeList> list = TagNodeList::create(this, starAtom, localNameAtom);
-    result.first->second = list.get();
-    return list.release();   
+        return ensureRareData()->ensureNodeLists(this)->addCacheWithAtomicName<HTMLTagNodeList>(this, DynamicNodeList::TagNodeListType, localName);
+    return ensureRareData()->ensureNodeLists(this)->addCacheWithAtomicName<TagNodeList>(this, DynamicNodeList::TagNodeListType, localName);
 }
 
 PassRefPtr<NodeList> Node::getElementsByTagNameNS(const AtomicString& namespaceURI, const AtomicString& localName)
@@ -1636,43 +1542,17 @@ PassRefPtr<NodeList> Node::getElementsByTagNameNS(const AtomicString& namespaceU
     if (namespaceURI == starAtom)
         return getElementsByTagName(localName);
 
-    String name = localName;
-    if (document()->isHTMLDocument())
-        name = localName.lower();
-
-    AtomicString localNameAtom = name;
-
-    pair<NodeListsNodeData::TagNodeListCacheNS::iterator, bool> result
-        = ensureRareData()->ensureNodeLists(this)->m_tagNodeListCacheNS.add(QualifiedName(nullAtom, localNameAtom, namespaceURI).impl(), 0);
-    if (!result.second)
-        return PassRefPtr<TagNodeList>(result.first->second);
-
-    RefPtr<TagNodeList> list = TagNodeList::create(this, namespaceURI.isEmpty() ? nullAtom : namespaceURI, localNameAtom);
-    result.first->second = list.get();
-    return list.release();
+    return ensureRareData()->ensureNodeLists(this)->addCacheWithQualifiedName(this, namespaceURI.isEmpty() ? nullAtom : namespaceURI, localName);
 }
 
 PassRefPtr<NodeList> Node::getElementsByName(const String& elementName)
 {
-    pair<NodeListsNodeData::NameNodeListCache::iterator, bool> result = ensureRareData()->ensureNodeLists(this)->m_nameNodeListCache.add(elementName, 0);
-    if (!result.second)
-        return PassRefPtr<NodeList>(result.first->second);
-
-    RefPtr<NameNodeList> list = NameNodeList::create(this, elementName);
-    result.first->second = list.get();
-    return list.release();
+    return ensureRareData()->ensureNodeLists(this)->addCacheWithAtomicName<NameNodeList>(this, DynamicNodeList::NameNodeListType, elementName);
 }
 
 PassRefPtr<NodeList> Node::getElementsByClassName(const String& classNames)
 {
-    pair<NodeListsNodeData::ClassNodeListCache::iterator, bool> result
-        = ensureRareData()->ensureNodeLists(this)->m_classNodeListCache.add(classNames, 0);
-    if (!result.second)
-        return PassRefPtr<NodeList>(result.first->second);
-
-    RefPtr<ClassNodeList> list = ClassNodeList::create(this, classNames);
-    result.first->second = list.get();
-    return list.release();
+    return ensureRareData()->ensureNodeLists(this)->addCacheWithName<ClassNodeList>(this, DynamicNodeList::ClassNodeListType, classNames);
 }
 
 PassRefPtr<Element> Node::querySelector(const String& selectors, ExceptionCode& ec)
@@ -2218,23 +2098,6 @@ FloatPoint Node::convertFromPage(const FloatPoint& p) const
     return p;
 }
 
-#if ENABLE(MICRODATA)
-void Node::itemTypeAttributeChanged()
-{
-    Node * rootNode = document();
-
-    if (!rootNode->hasRareData())
-        return;
-
-    NodeRareData* data = rootNode->rareData();
-
-    if (!data->nodeLists())
-        return;
-
-    data->nodeLists()->invalidateMicrodataItemListCaches();
-}
-#endif
-
 #ifndef NDEBUG
 
 static void appendAttributeDesc(const Node* node, String& string, const QualifiedName& name, const char* attrDesc)
@@ -2353,67 +2216,26 @@ void Node::showTreeForThisAcrossFrame() const
 
 // --------
 
-void NodeListsNodeData::invalidateCaches()
+void NodeListsNodeData::invalidateCaches(const QualifiedName* attrName)
 {
-    if (m_labelsNodeListCache)
-        m_labelsNodeListCache->invalidateCache();
-    TagNodeListCache::const_iterator tagCacheEnd = m_tagNodeListCache.end();
-    for (TagNodeListCache::const_iterator it = m_tagNodeListCache.begin(); it != tagCacheEnd; ++it)
+    NodeListAtomicNameCacheMap::const_iterator atomicNameCacheEnd = m_atomicNameCaches.end();
+    for (NodeListAtomicNameCacheMap::const_iterator it = m_atomicNameCaches.begin(); it != atomicNameCacheEnd; ++it) {
+        if (!attrName || it->second->shouldInvalidateOnAttributeChange())
+            it->second->invalidateCache();
+    }
+
+    NodeListNameCacheMap::const_iterator nameCacheEnd = m_nameCaches.end();
+    for (NodeListNameCacheMap::const_iterator it = m_nameCaches.begin(); it != nameCacheEnd; ++it) {
+        if (!attrName || it->second->shouldInvalidateOnAttributeChange())
+            it->second->invalidateCache();
+    }
+
+    if (!attrName)
+        return;
+
+    TagNodeListCacheNS::iterator tagCacheEnd = m_tagNodeListCacheNS.end();
+    for (TagNodeListCacheNS::iterator it = m_tagNodeListCacheNS.begin(); it != tagCacheEnd; ++it)
         it->second->invalidateCache();
-    TagNodeListCacheNS::const_iterator tagCacheNSEnd = m_tagNodeListCacheNS.end();
-    for (TagNodeListCacheNS::const_iterator it = m_tagNodeListCacheNS.begin(); it != tagCacheNSEnd; ++it)
-        it->second->invalidateCache();
-    invalidateCachesThatDependOnAttributes();
-}
-
-void NodeListsNodeData::invalidateCachesThatDependOnAttributes()
-{
-    ClassNodeListCache::iterator classCacheEnd = m_classNodeListCache.end();
-    for (ClassNodeListCache::iterator it = m_classNodeListCache.begin(); it != classCacheEnd; ++it)
-        it->second->invalidateCache();
-
-    NameNodeListCache::iterator nameCacheEnd = m_nameNodeListCache.end();
-    for (NameNodeListCache::iterator it = m_nameNodeListCache.begin(); it != nameCacheEnd; ++it)
-        it->second->invalidateCache();
-    if (m_labelsNodeListCache)
-        m_labelsNodeListCache->invalidateCache();
-
-#if ENABLE(MICRODATA)
-    invalidateMicrodataItemListCaches();
-#endif
-}
-
-#if ENABLE(MICRODATA)
-void NodeListsNodeData::invalidateMicrodataItemListCaches()
-{
-    MicroDataItemListCache::iterator itemListCacheEnd = m_microDataItemListCache.end();
-    for (MicroDataItemListCache::iterator it = m_microDataItemListCache.begin(); it != itemListCacheEnd; ++it)
-        it->second->invalidateCache();
-}
-#endif
-
-bool NodeListsNodeData::isEmpty() const
-{
-    if (!m_listsWithCaches.isEmpty())
-        return false;
-
-    if (!m_tagNodeListCache.isEmpty())
-        return false;
-    if (!m_tagNodeListCacheNS.isEmpty())
-        return false;
-    if (!m_classNodeListCache.isEmpty())
-        return false;
-    if (!m_nameNodeListCache.isEmpty())
-        return false;
-#if ENABLE(MICRODATA)
-    if (!m_microDataItemListCache.isEmpty())
-        return false;
-#endif
-
-    if (m_labelsNodeListCache)
-        return false;
-
-    return true;
 }
 
 void Node::getSubresourceURLs(ListHashSet<KURL>& urls) const

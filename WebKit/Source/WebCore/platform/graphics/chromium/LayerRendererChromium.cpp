@@ -566,8 +566,9 @@ void LayerRendererChromium::drawTileQuad(const CCTileDrawQuad* quad)
     const float epsilon = 1 / 1024.0f;
     float clampX = min(0.5, clampRect.width() / 2.0 - epsilon);
     float clampY = min(0.5, clampRect.height() / 2.0 - epsilon);
-    clampRect.inflateX(-clampX);
-    clampRect.inflateY(-clampY);
+    clampRect.inflateX(-clampX * quad->downsamplingFactor());
+    clampRect.inflateY(-clampY * quad->downsamplingFactor());
+
     FloatSize clampOffset = clampRect.minXMinYCorner() - FloatRect(tileRect).minXMinYCorner();
 
     FloatPoint textureOffset = quad->textureOffset() + clampOffset +
@@ -580,7 +581,8 @@ void LayerRendererChromium::drawTileQuad(const CCTileDrawQuad* quad)
     float vertexTexScaleY = tileRect.height() / clampRect.height();
 
     // Map to normalized texture coordinates.
-    const IntSize& textureSize = quad->textureSize();
+    IntSize textureSize = quad->textureSize();
+    textureSize.scale(quad->downsamplingFactor());
     float fragmentTexTranslateX = textureOffset.x() / textureSize.width();
     float fragmentTexTranslateY = textureOffset.y() / textureSize.height();
     float fragmentTexScaleX = clampRect.width() / textureSize.width();

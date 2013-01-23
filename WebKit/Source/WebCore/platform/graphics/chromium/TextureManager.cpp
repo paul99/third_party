@@ -29,6 +29,7 @@
 #include "TextureManager.h"
 
 #include "LayerRendererChromium.h"
+#include "PlatformSupport.h"
 
 using namespace std;
 
@@ -36,6 +37,15 @@ namespace WebCore {
 
 
 namespace {
+
+size_t maxMemoryLimitForDevice()
+{
+    static int maxTextureLimit = -1;
+    if (maxTextureLimit == -1)
+        maxTextureLimit = PlatformSupport::maxTextureMemoryUsageMB();
+    return maxTextureLimit;
+}
+
 size_t memoryLimitBytes(size_t viewportMultiplier, const IntSize& viewportSize, size_t minMegabytes, size_t maxMegabytes)
 {
     if (viewportSize.isEmpty())
@@ -44,13 +54,47 @@ size_t memoryLimitBytes(size_t viewportMultiplier, const IntSize& viewportSize, 
 }
 }
 
+size_t TextureManager::defaultTileSize(const IntSize& viewportSize)
+{
+    int num256Tiles = (viewportSize.height() * viewportSize.width()) / (256 * 256);
+    if (num256Tiles <= 36)
+        return 256;
+    else
+        return 512;
+}
+
+size_t TextureManager::maxUploadsPerFrame(const IntSize& viewportSize, bool redrawPending)
+{
+    // Here is some data that guided these choices
+    // Nexus 7 / Galaxy Nexus / Manta / Mako:
+    // - 4/6 tiles per row for portrait/landscape
+    // - 18-24 tiles visible on tablets
+    // - 15-20 tiles visible on phones.
+
+    // 6 256x256 textures is better than 5 as we we can
+    // upload an entire row and prevent an extra 16ms delay
+    // before painting again. Similarly 3 512x512 tiles does
+    // this in 2 frames.
+    // When not animating/scrolling, 24 textures will always
+    // complete a full frame at once, while only adding
+    // ~1 frame of initial scroll-start latency.
+
+    size_t tileSize = defaultTileSize(viewportSize);
+    if (tileSize == 256)
+        return redrawPending ? 6 : 24;
+    if (tileSize == 512)
+        return redrawPending ? 3 : 24;
+    ASSERT_NOT_REACHED();
+    return 5;
+}
+
 size_t TextureManager::highLimitBytes(const IntSize& viewportSize)
 {
     size_t viewportMultiplier, minMegabytes, maxMegabytes;
     viewportMultiplier = 24;
 #if OS(ANDROID)
     minMegabytes = 48;
-    maxMegabytes = 96;
+    maxMegabytes = maxMemoryLimitForDevice();
 #else
     minMegabytes = 64;
     maxMegabytes = 128;
@@ -64,7 +108,7 @@ size_t TextureManager::reclaimLimitBytes(const IntSize& viewportSize)
     viewportMultiplier = 18;
 #if OS(ANDROID)
     minMegabytes = 32;
-    maxMegabytes = 64;
+    maxMegabytes = maxMemoryLimitForDevice() * 3 / 4;
 #else
     minMegabytes = 32;
     maxMegabytes = 64;
@@ -104,6 +148,8 @@ TextureManager::TextureManager(size_t maxMemoryLimitBytes, size_t preferredMemor
     , m_preferredMemoryLimitBytes(preferredMemoryLimitBytes)
     , m_memoryUseBytes(0)
     , m_maxTextureSize(maxTextureSize)
+    , m_defaultSize(256)
+    , m_defaultFormat(GraphicsContext3D::RGBA)
     , m_nextToken(1)
 {
 }
@@ -127,6 +173,10 @@ TextureToken TextureManager::getToken()
 
 void TextureManager::releaseToken(TextureToken token)
 {
+    // It is unsafe to call find() with a null token
+    ASSERT(token);
+    if (!token)
+        return;
     TextureMap::iterator it = m_textures.find(token);
     if (it != m_textures.end())
         removeTexture(token, it->second);
@@ -185,17 +235,27 @@ void TextureManager::reduceMemoryToLimit(size_t limit)
     }
 }
 
-unsigned TextureManager::replaceTexture(TextureToken newToken, TextureInfo newInfo)
+unsigned TextureManager::recycleTexture(TextureToken newToken, TextureInfo newInfo)
 {
+#if !ASSERT_DISABLED
+    bool reachedNotFree = false;
     for (ListHashSet<TextureToken>::iterator lruIt = m_textureLRUSet.begin(); lruIt != m_textureLRUSet.end(); ++lruIt) {
         TextureToken token = *lruIt;
         TextureInfo info = m_textures.get(token);
-        if (info.isProtected)
-            continue;
-        if (!info.textureId)
-            continue;
-        if (newInfo.size != info.size || newInfo.format != info.format)
-            continue;
+        // Check that free textures are always first in the list.
+        if (!info.isFree)
+            reachedNotFree = true;
+        ASSERT(reachedNotFree || info.isFree);
+    }
+#endif
+    if (!hasDefaultDimensions(newInfo))
+        return 0;
+    for (ListHashSet<TextureToken>::iterator lruIt = m_textureLRUSet.begin(); lruIt != m_textureLRUSet.end(); ++lruIt) {
+        TextureToken token = *lruIt;
+        TextureInfo info = m_textures.get(token);
+        // If we have reached non-free textures, exit early.
+        if (!info.isFree)
+            break;
         newInfo.textureId = info.textureId;
 #ifndef NDEBUG
         newInfo.allocator = info.allocator;
@@ -218,17 +278,35 @@ void TextureManager::addTexture(TextureToken token, TextureInfo info)
     m_textureLRUSet.add(token);
 }
 
-void TextureManager::deleteEvictedTextures(TextureAllocator* allocator)
+void TextureManager::deleteEvictedTextures(TextureAllocator* allocator, bool recycle)
 {
-    if (allocator) {
-        for (size_t i = 0; i < m_evictedTextures.size(); ++i) {
-            if (m_evictedTextures[i].textureId) {
+    if (!allocator) {
+        m_evictedTextures.clear();
+        return;
+    }
+    for (size_t i = 0; i < m_evictedTextures.size(); ++i) {
+        if (!m_evictedTextures[i].textureId)
+            continue;
 #ifndef NDEBUG
-                ASSERT(m_evictedTextures[i].allocator == allocator);
+        ASSERT(m_evictedTextures[i].allocator == allocator);
 #endif
-                allocator->deleteTexture(m_evictedTextures[i].textureId, m_evictedTextures[i].size, m_evictedTextures[i].format);
-            }
+        if (!recycle || !hasDefaultDimensions(m_evictedTextures[i]) || currentMemoryUseBytes() >= preferredMemoryLimitBytes()) {
+            allocator->deleteTexture(m_evictedTextures[i].textureId, m_evictedTextures[i].size, m_evictedTextures[i].format);
+            continue;
         }
+        TextureInfo info;
+        info.size = m_evictedTextures[i].size;
+        info.format = m_evictedTextures[i].format;
+        info.textureId = m_evictedTextures[i].textureId;
+        info.isProtected = false;
+        info.isFree = true;
+#ifndef NDEBUG
+        info.allocator = m_evictedTextures[i].allocator;
+#endif
+        TextureToken token = getToken();
+        m_textures.add(token, info);
+        m_textureLRUSet.insertBefore(m_textureLRUSet.begin(), token);
+        m_memoryUseBytes += memoryUseBytes(info.size, info.format);
     }
     m_evictedTextures.clear();
 }
@@ -237,7 +315,7 @@ void TextureManager::evictAndDeleteAllTextures(TextureAllocator* allocator)
 {
     unprotectAllTextures();
     reduceMemoryToLimit(0);
-    deleteEvictedTextures(allocator);
+    deleteEvictedTextures(allocator, false);
 }
 
 void TextureManager::removeTexture(TextureToken token, TextureInfo info)
@@ -299,18 +377,95 @@ bool TextureManager::requestTexture(TextureToken token, IntSize size, unsigned f
     info.format = format;
     info.textureId = 0;
     info.isProtected = true;
+    info.isFree = false;
 #ifndef NDEBUG
     info.allocator = 0;
 #endif
-    // Avoid churning by reusing the texture if it is about to be reclaimed and
-    // it has the same size and format as the requesting texture.
-    if (m_memoryUseBytes + memoryRequiredBytes > m_preferredMemoryLimitBytes) {
-        textureId = replaceTexture(token, info);
-        if (textureId)
-            return true;
-    }
+    // Avoid churning by reusing same-sized textures that are free.
+    textureId = recycleTexture(token, info);
+    if (textureId)
+        return true;
+
     addTexture(token, info);
     return true;
+}
+
+size_t TextureManager::desiredPreAllocationsRemaining()
+{
+    if (currentMemoryUseBytes() >= preferredMemoryLimitBytes())
+        return 0;
+
+    size_t freeMemoryBytes = 0;
+    for (ListHashSet<TextureToken>::iterator tokenIt = m_textureLRUSet.begin(); tokenIt != m_textureLRUSet.end(); ++tokenIt) {
+        TextureInfo info = m_textures.get(*tokenIt);
+        // All free textures are at the start of the list.
+        if (!info.isFree)
+            break;
+        ASSERT(info.textureId);
+        if (!info.isProtected)
+            freeMemoryBytes += memoryUseBytes(info.size, info.format);
+    }
+
+    // Preallocate at most 20% of memory as free textures.
+    size_t maxPreallocatedBytes = preferredMemoryLimitBytes() / 5;
+    if (freeMemoryBytes >= maxPreallocatedBytes)
+        return 0;
+    maxPreallocatedBytes -= freeMemoryBytes;
+
+    // Count evicted recyclable as part of our current memory use,
+    // since they will be reclaimed for recycling.
+    // FIXME: This should probably be accounted for in currentMemoryUseBytes()
+    size_t willBeFreeBytes = 0;
+    for (Vector<EvictionEntry>::iterator it = m_evictedTextures.begin(); it != m_evictedTextures.end(); ++it) {
+        if (hasDefaultDimensions(*it));
+            willBeFreeBytes += memoryUseBytes(it->size, it->format);
+    }
+    size_t actualMemoryUseBytes = currentMemoryUseBytes() + willBeFreeBytes;
+    if (actualMemoryUseBytes >= preferredMemoryLimitBytes())
+        return 0;
+
+    size_t memoryRemaining = preferredMemoryLimitBytes() - actualMemoryUseBytes;
+    size_t desiredPreallocatedBytes = min(maxPreallocatedBytes, memoryRemaining);
+
+    return desiredPreallocatedBytes / memoryUseBytes(IntSize(m_defaultSize, m_defaultSize), m_defaultFormat);
+}
+
+void TextureManager::takePreAllocatedTextures(Vector<unsigned>& textureIds, IntSize size, GC3Denum format, TextureAllocator* allocator)
+{
+    ASSERT(size.width() == (int)m_defaultSize && size.height() == (int)m_defaultSize);
+    ASSERT(format == m_defaultFormat);
+
+    // For each texture, create a free texture token that is available for immediate recycling.
+    for (size_t i = 0; i < textureIds.size(); i++) {
+        TextureInfo info;
+        info.size = size;
+        info.format = format;
+        info.textureId = textureIds[i];
+        info.isProtected = false;
+        info.isFree = true;
+#ifndef NDEBUG
+        info.allocator = allocator;
+#endif
+        TextureToken token = getToken();
+        m_textures.add(token, info);
+        m_textureLRUSet.insertBefore(m_textureLRUSet.begin(), token);
+        m_memoryUseBytes += memoryUseBytes(size, format);
+    }
+    textureIds.clear();
+}
+
+bool TextureManager::hasDefaultDimensions(const TextureInfo& info)
+{
+    return info.size.width() == (int)defaultSize()
+        && info.size.height() == (int)defaultSize()
+        && info.format == defaultFormat();
+}
+
+bool TextureManager::hasDefaultDimensions(const EvictionEntry& info)
+{
+    return info.size.width() == (int)defaultSize()
+        && info.size.height() == (int)defaultSize()
+        && info.format == defaultFormat();
 }
 
 }

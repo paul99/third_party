@@ -36,6 +36,7 @@
 #include "RenderStyle.h"
 #include "TextAffinity.h"
 #include "TransformationMatrix.h"
+#include <wtf/HashSet.h>
 #include <wtf/UnusedParam.h>
 
 #if USE(CG) || USE(CAIRO) || USE(SKIA) || PLATFORM(QT)
@@ -96,6 +97,11 @@ enum BoxSide {
     BSLeft
 };
 
+enum PlaceGeneratedRunInFlag {
+    PlaceGeneratedRunIn,
+    DoNotPlaceGeneratedRunIn
+};
+
 const int caretWidth = 1;
 
 #if ENABLE(DASHBOARD_SUPPORT)
@@ -115,6 +121,8 @@ struct DashboardRegionValue {
     int type;
 };
 #endif
+
+typedef WTF::HashSet<const RenderObject*> RenderObjectAncestorLineboxDirtySet;
 
 #ifndef NDEBUG
 const int showTreeCharacterOffset = 39;
@@ -244,8 +252,6 @@ public:
     // again.  We have to make sure the render tree updates as needed to accommodate the new
     // normal flow object.
     void handleDynamicFloatPositionChange();
-
-    RenderTable* createAnonymousTable() const;
     
     // RenderObject tree manipulation
     //////////////////////////////////////////
@@ -397,6 +403,23 @@ public:
     void setChildrenInline(bool b) { m_bitfields.setChildrenInline(b); }
     bool hasColumns() const { return m_bitfields.hasColumns(); }
     void setHasColumns(bool b = true) { m_bitfields.setHasColumns(b); }
+
+    bool ancestorLineBoxDirty() const { return s_ancestorLineboxDirtySet && s_ancestorLineboxDirtySet->contains(this); }
+    void setAncestorLineBoxDirty(bool b = true)
+    {
+        if (b) {
+            if (!s_ancestorLineboxDirtySet)
+                s_ancestorLineboxDirtySet = new RenderObjectAncestorLineboxDirtySet;
+            s_ancestorLineboxDirtySet->add(this);
+            setNeedsLayout(true);
+        } else if (s_ancestorLineboxDirtySet) {
+            s_ancestorLineboxDirtySet->remove(this);
+            if (s_ancestorLineboxDirtySet->isEmpty()) {
+                delete s_ancestorLineboxDirtySet;
+                s_ancestorLineboxDirtySet = 0;
+            }
+        }
+    }
 
     bool inRenderFlowThread() const { return m_bitfields.inRenderFlowThread(); }
     void setInRenderFlowThread(bool b = true) { m_bitfields.setInRenderFlowThread(b); }
@@ -880,6 +903,8 @@ public:
     RenderObject* rendererForRootBackground();
 
 protected:
+    inline bool layerCreationAllowedForSubtree() const;
+
     // Overrides should call the superclass at the end
     virtual void styleWillChange(StyleDifference, const RenderStyle* newStyle);
     // Overrides should call the superclass at the start
@@ -917,6 +942,8 @@ private:
     RenderObject* m_parent;
     RenderObject* m_previous;
     RenderObject* m_next;
+
+    static RenderObjectAncestorLineboxDirtySet* s_ancestorLineboxDirtySet;
 
 #ifndef NDEBUG
     bool m_hasAXObject             : 1;
@@ -1080,6 +1107,7 @@ inline void RenderObject::setNeedsLayout(bool b, bool markParents)
         setNeedsSimplifiedNormalFlowLayout(false);
         setNormalChildNeedsLayout(false);
         setNeedsPositionedMovementLayout(false);
+        setAncestorLineBoxDirty(false);
     }
 }
 
@@ -1139,6 +1167,20 @@ inline void RenderObject::setSelectionStateIfNeeded(SelectionState state)
         return;
 
     setSelectionState(state);
+}
+
+inline bool RenderObject::layerCreationAllowedForSubtree() const
+{
+#if ENABLE(SVG)
+    RenderObject* parentRenderer = parent();
+    while (parentRenderer) {
+        if (parentRenderer->isSVGHiddenContainer())
+            return false;
+        parentRenderer = parentRenderer->parent();
+    }
+#endif
+
+    return true;
 }
 
 inline void makeMatrixRenderable(TransformationMatrix& matrix, bool has3DRendering)

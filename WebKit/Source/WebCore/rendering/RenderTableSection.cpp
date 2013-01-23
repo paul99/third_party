@@ -161,11 +161,7 @@ void RenderTableSection::addChild(RenderObject* child, RenderObject* beforeChild
             return;
         }
 
-        RenderObject* row = new (renderArena()) RenderTableRow(document() /* anonymous table row */);
-        RefPtr<RenderStyle> newStyle = RenderStyle::create();
-        newStyle->inheritFrom(style());
-        newStyle->setDisplay(TABLE_ROW);
-        row->setStyle(newStyle.release());
+        RenderObject* row = RenderTableRow::createAnonymousWithParentRenderer(this);
         addChild(row, beforeChild);
         row->addChild(child);
         return;
@@ -185,9 +181,8 @@ void RenderTableSection::addChild(RenderObject* child, RenderObject* beforeChild
     if (!beforeChild)
         setRowLogicalHeightToRowStyleLogicalHeightIfNotRelative(m_grid[insertionRow]);
 
-    // If the next renderer is actually wrapped in an anonymous table row, we need to go up and find that.
-    while (beforeChild && beforeChild->parent() != this)
-        beforeChild = beforeChild->parent();
+    if (beforeChild && beforeChild->parent() != this)
+        beforeChild = splitAnonymousBoxesAroundChild(beforeChild);
 
     ASSERT(!beforeChild || beforeChild->isTableRow());
     RenderBox::addChild(child, beforeChild);
@@ -424,6 +419,8 @@ LayoutUnit RenderTableSection::calcRowLogicalHeight()
 void RenderTableSection::layout()
 {
     ASSERT(needsLayout());
+    ASSERT(!needsCellRecalc());
+    ASSERT(!table()->needsSectionRecalc());
 
     LayoutStateMaintainer statePusher(view(), this, locationOffset(), style()->isFlippedBlocksWritingMode());
     for (RenderObject* child = children()->firstChild(); child; child = child->nextSibling()) {
@@ -1376,6 +1373,14 @@ CollapsedBorderValue& RenderTableSection::cachedCollapsedBorder(const RenderTabl
     HashMap<pair<const RenderTableCell*, int>, CollapsedBorderValue>::iterator it = m_cellsCollapsedBorders.find(make_pair(cell, side));
     ASSERT(it != m_cellsCollapsedBorders.end());
     return it->second;
+}
+
+RenderTableSection* RenderTableSection::createAnonymousWithParentRenderer(const RenderObject* parent)
+{
+    RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyleWithDisplay(parent->style(), TABLE_ROW_GROUP);
+    RenderTableSection* newSection = new (parent->renderArena()) RenderTableSection(parent->document() /* is anonymous */);
+    newSection->setStyle(newStyle.release());
+    return newSection;
 }
 
 } // namespace WebCore

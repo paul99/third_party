@@ -40,7 +40,7 @@ PassOwnPtr<CCLayerTilingData> CCLayerTilingData::create(const IntSize& tileSize,
 }
 
 CCLayerTilingData::CCLayerTilingData(const IntSize& tileSize, BorderTexelOption border)
-    : m_tilingData(max(tileSize.width(), tileSize.height()), 0, 0, border == HasBorderTexels)
+    : m_tilingData(max(tileSize.width(), tileSize.height()), 0, 0, border == HasBorderTexels ? 1 : 0)
 {
     setTileSize(tileSize);
 }
@@ -56,14 +56,14 @@ void CCLayerTilingData::setTileSize(const IntSize& size)
     m_tilingData.setMaxTextureSize(max(size.width(), size.height()));
 }
 
-void CCLayerTilingData::setBorderTexelOption(BorderTexelOption borderTexelOption)
+void CCLayerTilingData::setBorderTexelOption(BorderTexelOption borderTexelOption, int borderSize)
 {
     bool borderTexels = borderTexelOption == HasBorderTexels;
-    if (hasBorderTexels() == borderTexels)
+    if (m_tilingData.borderTexels() == borderSize)
         return;
 
     reset();
-    m_tilingData.setHasBorderTexels(borderTexels);
+    m_tilingData.setBorderTexels(borderTexels ? borderSize : 0);
 }
 
 const CCLayerTilingData& CCLayerTilingData::operator=(const CCLayerTilingData& tiler)
@@ -125,6 +125,10 @@ IntRect CCLayerTilingData::tileRect(const Tile* tile) const
 void CCLayerTilingData::setBounds(const IntSize& size)
 {
     m_tilingData.setTotalSize(size.width(), size.height());
+    if (size.isEmpty()) {
+        m_tiles.clear();
+        return;
+    }
 
     // Any tiles completely outside our new bounds are invalid and should be dropped.
     int left, top, right, bottom;

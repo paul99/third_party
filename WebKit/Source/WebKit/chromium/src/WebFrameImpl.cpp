@@ -1383,13 +1383,34 @@ void WebFrameImpl::selectWordAroundPosition(Frame* frame, VisiblePosition pos)
 
     if (frame->selection()->shouldChangeSelection(selection)) {
 #if OS(ANDROID)
-        bool allWhitespaces = true;
-        RefPtr<Range> firstRange = selection.firstRange();
-        String text = firstRange.get() ? firstRange->text() : "";
-        for (size_t i = 0; i < text.length(); ++i) {
-            if (!isSpaceOrNewline(text[i])) {
-                allWhitespaces = false;
-                break;
+        bool allWhitespaces = isSpaceOrNewline(pos.characterAfter());
+        bool selectionChanged = false;
+
+        VisiblePosition startPosition;
+        if (selection.start().isNotNull()) {
+            startPosition = pos;
+            while (startPosition.isNotNull() && comparePositions(startPosition, selection.start()) > 0) {
+                if (allWhitespaces && !isSpaceOrNewline(startPosition.characterBefore()))
+                    allWhitespaces = false;
+                if (startPosition.characterBefore() == '.') {
+                    selectionChanged = true;
+                    break;
+                }
+                startPosition = startPosition.previous();
+            }
+        }
+
+        VisiblePosition endPosition;
+        if (selection.end().isNotNull()) {
+            endPosition = pos;
+            while (endPosition.isNotNull() && comparePositions(endPosition, selection.end()) < 0) {
+                if (allWhitespaces && !isSpaceOrNewline(endPosition.characterAfter()))
+                    allWhitespaces = false;
+                endPosition = endPosition.next();
+                if (endPosition.characterAfter() == '.') {
+                    selectionChanged = true;
+                    break;
+                }
             }
         }
 
@@ -1397,6 +1418,15 @@ void WebFrameImpl::selectWordAroundPosition(Frame* frame, VisiblePosition pos)
             VisibleSelection emptySelection(selection.visibleStart(), selection.visibleStart(), DOWNSTREAM);
             frame->selection()->setSelection(emptySelection);
             return;
+        }
+
+        if (selectionChanged) {
+            if (startPosition.isNull())
+                startPosition = selection.start();
+            if (endPosition.isNull())
+                endPosition = selection.end();
+            selection.setBase(startPosition);
+            selection.setExtent(endPosition);
         }
 #endif
         TextGranularity granularity = selection.isRange() ? WordGranularity : CharacterGranularity;

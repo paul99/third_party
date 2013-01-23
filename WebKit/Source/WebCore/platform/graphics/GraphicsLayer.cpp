@@ -106,6 +106,10 @@ GraphicsLayer::~GraphicsLayer()
 #if !OS(ANDROID) // FIXME: Enable this assert http://b/5633681.
     ASSERT(!s_inPaintContents);
 #endif
+
+    if (m_replicatedLayer)
+        m_replicatedLayer->setReplicatedByLayer(0);
+
     removeAllChildren();
     removeFromParent();
 }
@@ -266,6 +270,12 @@ void GraphicsLayer::noteDeviceOrPageScaleFactorChangedIncludingDescendants()
 
 void GraphicsLayer::setReplicatedByLayer(GraphicsLayer* layer)
 {
+    if (m_replicaLayer == layer)
+        return;
+
+    if (m_replicaLayer)
+        m_replicaLayer->setReplicatedLayer(0);
+
     if (layer)
         layer->setReplicatedLayer(this);
 

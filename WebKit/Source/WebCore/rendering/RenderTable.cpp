@@ -159,9 +159,8 @@ void RenderTable::addChild(RenderObject* child, RenderObject* beforeChild)
         wrapInAnonymousSection = true;
 
     if (!wrapInAnonymousSection) {
-        // If the next renderer is actually wrapped in an anonymous table section, we need to go up and find that.
-        while (beforeChild && beforeChild->parent() != this)
-            beforeChild = beforeChild->parent();
+        if (beforeChild && beforeChild->parent() != this)
+            beforeChild = splitAnonymousBoxesAroundChild(beforeChild);
 
         RenderBox::addChild(child, beforeChild);
         return;
@@ -192,11 +191,8 @@ void RenderTable::addChild(RenderObject* child, RenderObject* beforeChild)
 
     if (beforeChild && !beforeChild->isTableSection() && beforeChild->style()->display() != TABLE_CAPTION && beforeChild->style()->display() != TABLE_COLUMN_GROUP)
         beforeChild = 0;
-    RenderTableSection* section = new (renderArena()) RenderTableSection(document() /* anonymous */);
-    RefPtr<RenderStyle> newStyle = RenderStyle::create();
-    newStyle->inheritFrom(style());
-    newStyle->setDisplay(TABLE_ROW_GROUP);
-    section->setStyle(newStyle.release());
+
+    RenderTableSection* section = RenderTableSection::createAnonymousWithParentRenderer(this);
     addChild(section, beforeChild);
     section->addChild(child);
 }
@@ -760,6 +756,8 @@ RenderTableCol* RenderTable::colElement(unsigned col, bool* startEdge, bool* end
 
 void RenderTable::recalcSections() const
 {
+    ASSERT(m_needsSectionRecalc);
+
     m_head = 0;
     m_foot = 0;
     m_firstBody = 0;
@@ -1247,6 +1245,14 @@ bool RenderTable::nodeAtPoint(const HitTestRequest& request, HitTestResult& resu
     }
 
     return false;
+}
+
+RenderTable* RenderTable::createAnonymousWithParentRenderer(const RenderObject* parent)
+{
+    RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyleWithDisplay(parent->style(), TABLE);
+    RenderTable* newTable = new (parent->renderArena()) RenderTable(parent->document() /* is anonymous */);
+    newTable->setStyle(newStyle.release());
+    return newTable;
 }
 
 }

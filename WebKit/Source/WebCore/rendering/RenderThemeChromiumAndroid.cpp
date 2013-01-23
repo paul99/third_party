@@ -30,6 +30,7 @@
 #include "Color.h"
 #include "PaintInfo.h"
 #include "PlatformSupport.h"
+#include "RenderMediaControlsChromium.h"
 #include "RenderObject.h"
 #include "RenderProgress.h"
 #include "RenderSlider.h"
@@ -79,6 +80,18 @@ void RenderThemeChromiumAndroid::adjustInnerSpinButtonStyle(CSSStyleSelector*, R
         style->setWidth(Length(size.width(), Fixed));
         style->setMinWidth(Length(size.width(), Fixed));
     }
+}
+
+bool RenderThemeChromiumAndroid::paintMediaOverlayPlayButton(RenderObject* object, const PaintInfo& paintInfo, const IntRect& rect)
+{
+#if ENABLE(VIDEO)
+    return RenderMediaControlsChromium::paintMediaControlsPart(MediaOverlayPlayButton, object, paintInfo, rect);
+#else
+    UNUSED_PARAM(object);
+    UNUSED_PARAM(paintInfo);
+    UNUSED_PARAM(rect);
+    return false;
+#endif
 }
 
 int RenderThemeChromiumAndroid::menuListArrowPadding() const

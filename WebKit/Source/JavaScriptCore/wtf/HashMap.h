@@ -126,6 +126,21 @@ namespace WTF {
 
         void checkConsistency() const;
 
+        // Adapts pair<iterator, bool> to HashMap::AddResult, For m18 security fix merge 134088.
+        // The trunk change that added the AddResult type is http://trac.webkit.org/changeset/112555.
+        // We can't merge it into m18 because it changed so many files and depends on a lot of refactoring changes in JavaScriptCore and WTF.
+        class AddResult {
+        public:
+            typedef HashMap::iterator HashMapIterator;
+            AddResult(const pair<HashMapIterator, bool>& p)
+                : iterator(p.first)
+                , isNewEntry(p.second)
+            { }
+
+            HashMapIterator iterator;
+            bool isNewEntry;
+        };
+
     private:
         pair<iterator, bool> inlineAdd(const KeyType&, MappedPassInReferenceType);
 

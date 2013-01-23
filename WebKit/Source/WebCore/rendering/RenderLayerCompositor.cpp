@@ -515,7 +515,7 @@ void RenderLayerCompositor::repaintOnCompositingChange(RenderLayer* layer)
 
 // The bounds of the GraphicsLayer created for a compositing layer is the union of the bounds of all the descendant
 // RenderLayers that are rendered by the composited RenderLayer.
-LayoutRect RenderLayerCompositor::calculateCompositedBounds(const RenderLayer* layer, const RenderLayer* ancestorLayer)
+LayoutRect RenderLayerCompositor::calculateCompositedBounds(const RenderLayer* layer, const RenderLayer* ancestorLayer) const
 {
     if (!canBeComposited(layer))
         return LayoutRect();
@@ -1641,11 +1641,21 @@ bool RenderLayerCompositor::isFixedPositionInView(const RenderLayer* layer, Rend
         return false;
 
 #if OS(ANDROID)
-    // FIXME: Check if this is applicable to other platforms.
-    // Elements invisible in the current view don't get their own layer.
-    FrameView* frameView = m_renderView->frameView();
-    if (frameView && !layer->absoluteBoundingBox().intersects(LayoutRect(frameView->scrollXForFixedPosition(), frameView->scrollYForFixedPosition(), frameView->layoutWidth(), frameView->layoutHeight())))
-        return false;
+    // M18-only hack, shouldn't be required if culling is good enough.
+    RenderObject* renderer = layer->renderer();
+    RenderStyle* style = renderer->style();
+    // Check if the element is painted behind the root content: i.e. it has
+    // negative z-index and is part of the root stacking context.
+    if (!style->hasAutoZIndex() && style->zIndex() < 0) {
+        for(;;) {
+            renderer = renderer->parent();
+            if (!renderer || renderer->isRoot())
+                return false;
+            style = renderer->style();
+            if (!style->hasAutoZIndex())
+                break;
+        }
+    }
 #endif
 
     return true;

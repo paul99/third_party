@@ -15,7 +15,7 @@
  */
 
 
-#if	!defined(__ARM_HAVE_NEON)
+#if SK_ARM_NEON_IS_NONE
 #error	this file can be used only when the NEON unit is enabled
 #endif
 
@@ -169,7 +169,7 @@ static void SCALE_NOFILTER_NAME(const SkBitmapProcState& s,
 #endif
         }
 	/* loop doesn't adjust count */
-	count -= (count>>2);
+	count %= 4;
 #endif
         uint16_t* xx = (uint16_t*)xy;
         for (i = count; i > 0; --i) {
@@ -539,7 +539,7 @@ static void PERSP_FILTER_NAME(const SkBitmapProcState& s,
     }
 }
 
-static SkBitmapProcState::MatrixProc MAKENAME(_Procs)[] = {
+const SkBitmapProcState::MatrixProc MAKENAME(_Procs_neon)[] = {
     SCALE_NOFILTER_NAME,
     SCALE_FILTER_NAME,
     AFFINE_NOFILTER_NAME,

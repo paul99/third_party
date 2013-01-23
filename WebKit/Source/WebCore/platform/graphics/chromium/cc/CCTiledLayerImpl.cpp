@@ -47,7 +47,7 @@ class ManagedTexture;
 class DrawableTile : public CCLayerTilingData::Tile {
     WTF_MAKE_NONCOPYABLE(DrawableTile);
 public:
-    DrawableTile() : m_textureId(0) { }
+    DrawableTile() : m_textureId(0), m_downsamplingFactor(1) { }
 
     Platform3DObject textureId() const { return m_textureId; }
     void setTextureId(Platform3DObject textureId) { m_textureId = textureId; }
@@ -55,9 +55,13 @@ public:
     const IntRect& opaqueRect() const { return m_opaqueRect; }
     void setOpaqueRect(const IntRect& opaqueRect) { m_opaqueRect = opaqueRect; }
 
+    int downsamplingFactor() const { return m_downsamplingFactor; }
+    void setDownsamplingFactor(int downsamplingFactor) { m_downsamplingFactor = downsamplingFactor; }
+
 private:
     Platform3DObject m_textureId;
     IntRect m_opaqueRect;
+    int m_downsamplingFactor;
 };
 
 CCTiledLayerImpl::CCTiledLayerImpl(int id)
@@ -187,7 +191,7 @@ void CCTiledLayerImpl::appendQuads(CCQuadList& quadList, const CCSharedQuadState
             bool bottomEdgeAA = j == m_tiler->numTilesY() - 1 && useAA;
 
             const GC3Dint textureFilter = m_tiler->hasBorderTexels() ? GraphicsContext3D::LINEAR : GraphicsContext3D::NEAREST;
-            quadList.append(CCTileDrawQuad::create(sharedQuadState, tileRect, tileOpaqueRect, tile->textureId(), textureOffset, textureSize, textureFilter, contentsSwizzled(), leftEdgeAA, topEdgeAA, rightEdgeAA, bottomEdgeAA));
+            quadList.append(CCTileDrawQuad::create(sharedQuadState, tileRect, tileOpaqueRect, tile->textureId(), textureOffset, textureSize, tile->downsamplingFactor(), textureFilter, contentsSwizzled(), leftEdgeAA, topEdgeAA, rightEdgeAA, bottomEdgeAA));
 
             if (hasDebugBorders()) {
                 Color color(debugBorderColor().red(), debugBorderColor().green(), debugBorderColor().blue(), debugTileBorderAlpha);
@@ -206,13 +210,14 @@ void CCTiledLayerImpl::setTilingData(const CCLayerTilingData& tiler)
     *m_tiler = tiler;
 }
 
-void CCTiledLayerImpl::pushTileProperties(int i, int j, Platform3DObject textureId, const IntRect& opaqueRect)
+void CCTiledLayerImpl::pushTileProperties(int i, int j, Platform3DObject textureId, const IntRect& opaqueRect, int downsamplingFactor)
 {
     DrawableTile* tile = tileAt(i, j);
     if (!tile)
         tile = createTile(i, j);
     tile->setTextureId(textureId);
     tile->setOpaqueRect(opaqueRect);
+    tile->setDownsamplingFactor(downsamplingFactor);
 }
 
 } // namespace WebCore

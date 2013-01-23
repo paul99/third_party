@@ -273,11 +273,6 @@
     'variables': {
       'optimize': 'max',
     },
-    'cflags_cc!': ['-Werror', '-Wall'],
-    'cflags_cc': ['-Wno-error', '-Wno-all', '-fno-builtin-sin', '-fno-builtin-cos', '-Wno-uninitialized', '-ffreestanding'],
-    'cflags!': ['-Werror', '-Wall'],
-    'cflags': ['-Wno-error', '-Wno-all', '-fno-builtin-sin', '-fno-builtin-cos', '-Wno-uninitialized', '-ffreestanding'],
-
   },
 
   'conditions': [
@@ -1425,6 +1420,13 @@
       'sources/': [
         ['exclude', 'AllInOne\\.cpp$'],
       ],
+      'conditions': [
+        ['OS!="android"', {
+          'sources/': [
+            ['exclude', 'Android\\.cpp$'],
+          ],
+        }],
+      ],
     },
     {
       'target_name': 'webcore_svg',
@@ -1751,6 +1753,9 @@
         ['OS=="android"', {
           'cflags!': ['-mthumb'],
           'cflags': ['-marm'],
+        }],
+        ['OS=="android" and target_arch=="ia32"', {
+          'cflags!': ['-marm'],
         }],
         ['OS=="linux" and target_arch=="arm"', {
           'cflags': ['-marm'],

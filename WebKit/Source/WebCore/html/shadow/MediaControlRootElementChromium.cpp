@@ -69,10 +69,13 @@ MediaControlRootElementChromium::MediaControlRootElementChromium(Document* docum
 {
 }
 
+// MediaControls::create() for Android is defined in MediaControlRootElementChromiumAndroid.cpp.
+#if !OS(ANDROID)
 PassRefPtr<MediaControls> MediaControls::create(Document* document)
 {
     return MediaControlRootElementChromium::create(document);
 }
+#endif
 
 PassRefPtr<MediaControlRootElementChromium> MediaControlRootElementChromium::create(Document* document)
 {
@@ -81,68 +84,76 @@ PassRefPtr<MediaControlRootElementChromium> MediaControlRootElementChromium::cre
 
     RefPtr<MediaControlRootElementChromium> controls = adoptRef(new MediaControlRootElementChromium(document));
 
+    if (controls->initializeControls(document))
+        return controls.release();
+
+    return 0;
+}
+
+bool MediaControlRootElementChromium::initializeControls(Document* document)
+{
     RefPtr<MediaControlPanelElement> panel = MediaControlPanelElement::create(document);
 
     ExceptionCode ec;
 
     RefPtr<MediaControlPlayButtonElement> playButton = MediaControlPlayButtonElement::create(document);
-    controls->m_playButton = playButton.get();
+    m_playButton = playButton.get();
     panel->appendChild(playButton.release(), ec, true);
     if (ec)
-        return 0;
+        return false;
 
     RefPtr<MediaControlTimelineContainerElement> timelineContainer = MediaControlTimelineContainerElement::create(document);
 
-    RefPtr<MediaControlTimelineElement> timeline = MediaControlTimelineElement::create(document, controls.get());
-    controls->m_timeline = timeline.get();
+    RefPtr<MediaControlTimelineElement> timeline = MediaControlTimelineElement::create(document, this);
+    m_timeline = timeline.get();
     timelineContainer->appendChild(timeline.release(), ec, true);
     if (ec)
-        return 0;
+        return false;
 
     RefPtr<MediaControlCurrentTimeDisplayElement> currentTimeDisplay = MediaControlCurrentTimeDisplayElement::create(document);
-    controls->m_currentTimeDisplay = currentTimeDisplay.get();
+    m_currentTimeDisplay = currentTimeDisplay.get();
     timelineContainer->appendChild(currentTimeDisplay.release(), ec, true);
     if (ec)
-        return 0;
+        return false;
 
-    controls->m_timelineContainer = timelineContainer.get();
+    m_timelineContainer = timelineContainer.get();
     panel->appendChild(timelineContainer.release(), ec, true);
     if (ec)
-        return 0;
+        return false;
 
 #if OS(ANDROID)
-    RefPtr<MediaControlFullscreenButtonElement> fullscreenButton = MediaControlFullscreenButtonElement::create(document, controls.get());
-    controls->m_fullscreenButton = fullscreenButton.get();
+    RefPtr<MediaControlFullscreenButtonElement> fullscreenButton = MediaControlFullscreenButtonElement::create(document, this);
+    m_fullscreenButton = fullscreenButton.get();
     panel->appendChild(fullscreenButton.release(), ec, true);
     if (ec)
-        return 0;
+        return false;
 #else
-    RefPtr<MediaControlPanelMuteButtonElement> panelMuteButton = MediaControlPanelMuteButtonElement::create(document, controls.get());
-    controls->m_panelMuteButton = panelMuteButton.get();
+    RefPtr<MediaControlPanelMuteButtonElement> panelMuteButton = MediaControlPanelMuteButtonElement::create(document, this);
+    m_panelMuteButton = panelMuteButton.get();
     panel->appendChild(panelMuteButton.release(), ec, true);
     if (ec)
-        return 0;
+        return false;
 
     RefPtr<MediaControlVolumeSliderContainerElement> volumeSliderContainer = MediaControlVolumeSliderContainerElement::create(document);
 
     RefPtr<MediaControlVolumeSliderElement> slider = MediaControlVolumeSliderElement::create(document);
-    controls->m_volumeSlider = slider.get();
+    m_volumeSlider = slider.get();
     volumeSliderContainer->appendChild(slider.release(), ec, true);
     if (ec)
-        return 0;
+        return false;
 
-    controls->m_volumeSliderContainer = volumeSliderContainer.get();
+    m_volumeSliderContainer = volumeSliderContainer.get();
     panel->appendChild(volumeSliderContainer.release(), ec, true);
     if (ec)
-        return 0;
+        return false;
 #endif
 
-    controls->m_panel = panel.get();
-    controls->appendChild(panel.release(), ec, true);
+    m_panel = panel.get();
+    appendChild(panel.release(), ec, true);
     if (ec)
-        return 0;
+        return false;
 
-    return controls.release();
+    return true;
 }
 
 void MediaControlRootElementChromium::setMediaController(MediaControllerInterface* controller)

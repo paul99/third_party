@@ -27,7 +27,9 @@
 #include "cc/CCThreadProxy.h"
 
 #include "GraphicsContext3D.h"
+#include "IntSize.h"
 #include "LayerRendererChromium.h"
+#include "TextureManager.h"
 #include "TraceEvent.h"
 #include "cc/CCDelayBasedTimeSource.h"
 #include "cc/CCFrameRateController.h"
@@ -43,8 +45,6 @@
 using namespace WTF;
 
 namespace {
-
-static const size_t textureUpdatesPerFrame = 0;
 
 // Measured in seconds.
 static const double contextRecreationTickRate = 0.03;
@@ -87,6 +87,7 @@ CCThreadProxy::CCThreadProxy(CCLayerTreeHost* layerTreeHost)
     , m_finishAllRenderingCompletionEventOnImplThread(0)
     , m_commitCompletionEventOnImplThread(0)
     , m_nextFrameIsNewlyCommittedFrameOnImplThread(false)
+    , m_numTexturesToPreallocateOnImplThread(0)
 {
     TRACE_EVENT("CCThreadProxy::CCThreadProxy", this, 0);
     ASSERT(isMainThread());
@@ -281,13 +282,17 @@ void CCThreadProxy::setVisibleOnImplThread(CCCompletionEvent* completion, bool v
 {
     TRACE_EVENT("CCThreadProxy::setVisibleOnImplThread", this, visible ? "true" : "false");
     ASSERT(isImplThread());
-    if (!visible)
+
+    if (!visible) {
+        cleanupPreallocationsOnImplThread();
         m_layerTreeHost->didBecomeInvisibleOnImplThread(m_layerTreeHostImpl.get());
+    }
     m_schedulerOnImplThread->setVisible(visible);
     m_layerTreeHostImpl->setVisible(visible);
     if (visible) {
         m_schedulerOnImplThread->setNeedsCommit();
         m_schedulerOnImplThread->setNeedsRedraw();
+        initialPreallocateResourcesOnImplThread();
     }
     completion->signal();
 }
@@ -451,6 +456,21 @@ void CCThreadProxy::beginFrameCompleteOnImplThread(CCCompletionEvent* completion
     ASSERT(m_schedulerOnImplThread);
     ASSERT(m_schedulerOnImplThread->commitPending());
 
+    // Now that the main thread is blocked, give the texture manager all the
+    // textures we have pre-allocated on the impl thread.
+    takePreallocatedTexturesFromImplThread();
+
+    if (!m_layerTreeHostImpl) {
+        completion->signal();
+        return;
+    }
+
+    ASSERT(!m_currentTextureUpdaterOnImplThread || deferred);
+    if (!m_currentTextureUpdaterOnImplThread) {
+        m_currentTextureUpdaterOnImplThread = adoptPtr(new CCTextureUpdater(m_layerTreeHostImpl->contentsTextureAllocator(), m_layerTreeHostImpl->layerRenderer()->textureCopier()));
+        m_layerTreeHost->updateCompositorResources(m_layerTreeHostImpl->context(), *m_currentTextureUpdaterOnImplThread);
+    }
+
     double now = monotonicallyIncreasingTime();
     if (m_schedulerOnImplThread->frameRateController()->hasNextTickTime() && !deferred) {
       double nextTickTime = m_schedulerOnImplThread->frameRateController()->nextTickTime();
@@ -463,17 +483,7 @@ void CCThreadProxy::beginFrameCompleteOnImplThread(CCCompletionEvent* completion
       }
     }
 
-    if (!m_layerTreeHostImpl) {
-        completion->signal();
-        return;
-    }
-
     m_commitCompletionEventOnImplThread = completion;
-
-    ASSERT(!m_currentTextureUpdaterOnImplThread);
-    m_currentTextureUpdaterOnImplThread = adoptPtr(new CCTextureUpdater(m_layerTreeHostImpl->contentsTextureAllocator(), m_layerTreeHostImpl->layerRenderer()->textureCopier()));
-    m_layerTreeHost->updateCompositorResources(m_layerTreeHostImpl->context(), *m_currentTextureUpdaterOnImplThread);
-
     m_schedulerOnImplThread->beginFrameComplete();
 }
 
@@ -499,11 +509,95 @@ bool CCThreadProxy::canDraw()
     return m_layerTreeHostImpl->canDraw();
 }
 
+size_t CCThreadProxy::calcUploadsPerFrameOnImplThread()
+{
+    bool redrawPending = m_schedulerOnImplThread->redrawPending();
+    bool redrawPendingAfterDraw = m_schedulerOnImplThread->redrawPendingAfterDraw();
+    bool frameReallyPending = canDraw() && (redrawPending || redrawPendingAfterDraw);
+    return TextureManager::maxUploadsPerFrame(m_layerTreeHostImpl->settings().viewportSize, frameReallyPending);
+}
+
+void CCThreadProxy::cleanupPreallocationsOnImplThread()
+{
+    if (!m_layerTreeHostImpl->contentsTextureAllocator()) return;
+    GC3Denum bestTextureFormat = m_layerTreeHostImpl->layerRendererCapabilities().bestTextureFormat;
+    size_t size = TextureManager::defaultTileSize(m_layerTreeHostImpl->settings().viewportSize);
+    IntSize defaultTextureSize(size, size);
+
+    for(size_t i = 0; i < m_preallocatedTexturesOnImplThread.size(); i++)
+        m_layerTreeHostImpl->contentsTextureAllocator()->deleteTexture(m_preallocatedTexturesOnImplThread[i], defaultTextureSize, bestTextureFormat);
+    m_preallocatedTexturesOnImplThread.clear();
+}
+
+void CCThreadProxy::preallocateOnImplThread(size_t maxPreallocs)
+{
+    GC3Denum bestTextureFormat = m_layerTreeHostImpl->layerRendererCapabilities().bestTextureFormat;
+    size_t size = TextureManager::defaultTileSize(m_layerTreeHostImpl->settings().viewportSize);
+    IntSize defaultTextureSize(size, size);
+
+    for (size_t i = 0; i < maxPreallocs && m_preallocatedTexturesOnImplThread.size() < m_numTexturesToPreallocateOnImplThread; i++)
+        m_preallocatedTexturesOnImplThread.append(m_layerTreeHostImpl->contentsTextureAllocator()->createTexture(defaultTextureSize, bestTextureFormat));
+}
+
 void CCThreadProxy::scheduledActionUpdateMoreResources()
 {
     TRACE_EVENT("CCThreadProxy::scheduledActionUpdateMoreResources", this, 0);
     ASSERT(m_currentTextureUpdaterOnImplThread);
-    m_currentTextureUpdaterOnImplThread->update(m_layerTreeHostImpl->context(), textureUpdatesPerFrame > 0 ? textureUpdatesPerFrame : 99999);
+
+    // Give the textures to the texture manager. Resource
+    // updates occur during commits when the main thread is blocked.
+    takePreallocatedTexturesFromImplThread();
+
+    size_t updates = calcUploadsPerFrameOnImplThread();
+    m_currentTextureUpdaterOnImplThread->update(m_layerTreeHostImpl->context(), updates);
+}
+
+bool CCThreadProxy::hasMorePreallocations() const
+{
+    return m_preallocatedTexturesOnImplThread.size() < m_numTexturesToPreallocateOnImplThread;
+}
+
+void CCThreadProxy::takePreallocatedTexturesFromImplThread()
+{
+    if (!m_preallocatedTexturesOnImplThread.isEmpty()) {
+        GC3Denum bestTextureFormat = m_layerTreeHostImpl->layerRendererCapabilities().bestTextureFormat;
+        size_t size = TextureManager::defaultTileSize(m_layerTreeHostImpl->settings().viewportSize);
+        IntSize defaultTextureSize(size, size);
+
+        // Take the textures accumulated on the impl thread into the texture manager.
+        // Then, update how much is left to preallocate given the current state of
+        // the texture manager.
+        TextureAllocator* allocator = m_layerTreeHostImpl->contentsTextureAllocator();
+        m_layerTreeHost->contentsTextureManager()->takePreAllocatedTextures(m_preallocatedTexturesOnImplThread, defaultTextureSize, bestTextureFormat, allocator);
+    }
+    m_numTexturesToPreallocateOnImplThread = m_layerTreeHost->contentsTextureManager()->desiredPreAllocationsRemaining();
+}
+
+void CCThreadProxy::initialPreallocateResourcesOnImplThread()
+{
+    // This sets the how many textures we should pre-allocate.
+    takePreallocatedTexturesFromImplThread();
+
+    // The this initial allocation preallocates the desired amount in one shot.
+    preallocateOnImplThread(m_numTexturesToPreallocateOnImplThread);
+
+    // Give the textures to the texture manager and flush
+    // to trigger the GPU to begin the allocation work.
+    takePreallocatedTexturesFromImplThread();
+    m_layerTreeHostImpl->layerRenderer()->context()->flush();
+}
+
+void CCThreadProxy::scheduledActionPreallocateMoreResources()
+{
+    TRACE_EVENT("CCThreadProxy::scheduledActionPreallocateMoreResources", this, 0);
+
+    size_t preallocateCount = calcUploadsPerFrameOnImplThread();
+    preallocateOnImplThread(preallocateCount);
+
+    // This occurs on the impl thread only, so flush the commands to the GPU, but
+    // do not touch anything on the main thread. The textures will be picked
+    // up before updates occur whenever the main thread is blocked.
+    m_layerTreeHostImpl->layerRenderer()->context()->flush();
 }
 
 void CCThreadProxy::scheduledActionCommit()
@@ -630,6 +724,11 @@ void CCThreadProxy::initializeLayerRendererOnImplThread(GraphicsContext3D* conte
 
         m_inputHandlerOnImplThread = CCInputHandler::create(m_layerTreeHostImpl.get());
         *compositorIdentifier = m_inputHandlerOnImplThread->identifier();
+
+        // FIXME: Move this to TextureManager initialization once we can get these values earlier.
+        m_layerTreeHost->contentsTextureManager()->setMaxTextureSize(capabilities->maxTextureSize);
+        m_layerTreeHost->contentsTextureManager()->setDefaultDimensions(TextureManager::defaultTileSize(m_layerTreeHostImpl->settings().viewportSize),
+                                                                        capabilities->bestTextureFormat);
     }
 
     completion->signal();
@@ -639,6 +738,9 @@ void CCThreadProxy::layerTreeHostClosedOnImplThread(CCCompletionEvent* completio
 {
     TRACE_EVENT("CCThreadProxy::layerTreeHostClosedOnImplThread", this, 0);
     ASSERT(isImplThread());
+
+    cleanupPreallocationsOnImplThread();
+
     m_layerTreeHost->deleteContentsTexturesOnImplThread(m_layerTreeHostImpl->contentsTextureAllocator());
     m_inputHandlerOnImplThread.clear();
     m_layerTreeHostImpl.clear();
@@ -648,9 +750,12 @@ void CCThreadProxy::layerTreeHostClosedOnImplThread(CCCompletionEvent* completio
     completion->signal();
 }
 
-bool CCThreadProxy::partialTextureUpdateCapability() const
+size_t CCThreadProxy::maxPartialTextureUpdates() const
 {
-    return !textureUpdatesPerFrame;
+    // Disable all partial updates since this causes slow paths for two reasons:
+    // - Partial updates are not double-buffered, so they will update on-screen textures (upload slow path).
+    // - Partial updates are not 'aligned' to multiples of 16 (upload slow path, specifically on Mantaray).
+    return 0;
 }
 
 } // namespace WebCore

@@ -249,19 +249,16 @@ void RenderBox::willBeDestroyed()
 {
     clearOverrideSize();
 
-    RenderStyle* styleToUse = style();
-    if (styleToUse && (styleToUse->logicalHeight().isPercent() || styleToUse->logicalMinHeight().isPercent() || styleToUse->logicalMaxHeight().isPercent()))
-        RenderBlock::removePercentHeightDescendant(this);
+    if (style()) {
+        RenderBlock::removePercentHeightDescendantIfNeeded(this);
 
-    // If this renderer is owning renderer for the frameview's custom scrollbars,
-    // we need to clear it from the scrollbar. See webkit bug 64737.
-    if (styleToUse && styleToUse->hasPseudoStyle(SCROLLBAR) && frame() && frame()->view())
-        frame()->view()->clearOwningRendererForCustomScrollbars(this);
-
-    // If the following assertion fails, logicalHeight()/logicalMinHeight()/
-    // logicalMaxHeight() values are changed from a percent value to a non-percent
-    // value during laying out. It causes a use-after-free bug.
-    ASSERT(!RenderBlock::hasPercentHeightDescendant(this));
+        if (RenderView* view = this->view()) {
+            if (FrameView* frameView = view->frameView()) {
+                if (style()->position() == FixedPosition)
+                    frameView->removeFixedObject();
+            }
+        }
+    }
 
     RenderBoxModelObject::willBeDestroyed();
 }
@@ -343,12 +340,16 @@ void RenderBox::styleWillChange(StyleDifference diff, const RenderStyle* newStyl
 
 void RenderBox::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
 {
+    // Horizontal writing mode definition is updated in RenderBoxModelObject::updateBoxModelInfoFromStyle,
+    // (as part of the RenderBoxModelObject::styleDidChange call below). So, we can safely cache the horizontal
+    // writing mode value before style change here.
+    bool oldHorizontalWritingMode = isHorizontalWritingMode();
+
     RenderBoxModelObject::styleDidChange(diff, oldStyle);
 
     RenderStyle* newStyle = style();
     if (needsLayout() && oldStyle) {
-        if (oldStyle && (oldStyle->logicalHeight().isPercent() || oldStyle->logicalMinHeight().isPercent() || oldStyle->logicalMaxHeight().isPercent()))
-            RenderBlock::removePercentHeightDescendant(this);
+        RenderBlock::removePercentHeightDescendantIfNeeded(this);
 
         // Normally we can do optimized positioning layout for absolute/fixed positioned objects. There is one special case, however, which is
         // when the positioned object's margin-before is changed. In this case the parent has to get a layout in order to run margin collapsing
@@ -357,6 +358,10 @@ void RenderBox::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle
             && parent() && !parent()->normalChildNeedsLayout())
             parent()->setChildNeedsLayout(true);
     }
+
+    if (RenderBlock::hasPercentHeightContainerMap() && firstChild()
+        && oldHorizontalWritingMode != isHorizontalWritingMode())
+        RenderBlock::clearPercentHeightDescendantsFrom(this);
 
     // If our zoom factor changes and we have a defined scrollLeft/Top, we need to adjust that value into the
     // new zoomed coordinate space.
@@ -416,7 +421,7 @@ void RenderBox::updateBoxModelInfoFromStyle()
         setHasBoxDecorations(true);
 
     setPositioned(styleToUse->isPositioned());
-    setFloating(styleToUse->isFloating() && (!isPositioned() || styleToUse->floating() == PositionedFloat));
+    setFloating(!isPositioned() && styleToUse->isFloating());
 
     // We also handle <body> and <html>, whose overflow applies to the viewport.
     if (styleToUse->overflowX() != OVISIBLE && !isRootObject && (isRenderBlock() || isTableRow() || isTableSection())) {
@@ -3922,6 +3927,59 @@ bool RenderBox::hasRelativeDimensions() const
     return style()->height().isPercent() || style()->width().isPercent()
             || style()->maxHeight().isPercent() || style()->maxWidth().isPercent()
             || style()->minHeight().isPercent() || style()->minWidth().isPercent();
+}
+
+bool RenderBox::hasRelativeLogicalHeight() const
+{
+    return style()->logicalHeight().isPercent()
+            || style()->logicalMinHeight().isPercent()
+            || style()->logicalMaxHeight().isPercent();
+}
+
+static void markBoxForRelayoutAfterSplit(RenderBox* box)
+{
+    // FIXME: The table code should handle that automatically. If not,
+    // we should fix it and remove the table part checks.
+    if (box->isTable()) {
+        // Because we may have added some sections with already computed column structures, we need to
+        // sync the table structure with them now. This avoids crashes when adding new cells to the table.
+        toRenderTable(box)->forceSectionsRecalc();
+    } else if (box->isTableSection())
+        toRenderTableSection(box)->setNeedsCellRecalc();
+
+    box->setNeedsLayoutAndPrefWidthsRecalc();
+}
+
+RenderObject* RenderBox::splitAnonymousBoxesAroundChild(RenderObject* beforeChild)
+{
+    bool didSplitParentAnonymousBoxes = false;
+
+    while (beforeChild->parent() != this) {
+        RenderBox* boxToSplit = toRenderBox(beforeChild->parent());
+        if (boxToSplit->firstChild() != beforeChild && boxToSplit->isAnonymous()) {
+            didSplitParentAnonymousBoxes = true;
+
+            // We have to split the parent box into two boxes and move children
+            // from |beforeChild| to end into the new post box.
+            RenderBox* postBox = boxToSplit->createAnonymousBoxWithSameTypeAs(this);
+            postBox->setChildrenInline(boxToSplit->childrenInline());
+            RenderBox* parentBox = toRenderBox(boxToSplit->parent());
+            parentBox->virtualChildren()->insertChildNode(parentBox, postBox, boxToSplit->nextSibling());
+            boxToSplit->moveChildrenTo(postBox, beforeChild, 0, true);
+
+            markBoxForRelayoutAfterSplit(boxToSplit);
+            markBoxForRelayoutAfterSplit(postBox);
+
+            beforeChild = postBox;
+        } else
+            beforeChild = boxToSplit;
+    }
+
+    if (didSplitParentAnonymousBoxes)
+        markBoxForRelayoutAfterSplit(this);
+
+    ASSERT(beforeChild->parent() == this);
+    return beforeChild;
 }
 
 } // namespace WebCore

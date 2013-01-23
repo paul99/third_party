@@ -42,23 +42,30 @@ namespace cygprofile {
 
 const int kMaxFileNameSizeSize = 100;
 #ifdef __ANDROID__
-const char* kDefaultFileName = "/sdcard/cyglog.%d";
-static pthread_once_t gInitOnce;
+static const char kDefaultFileName[] = "/sdcard/cyglog.%d";
 #else
 const char* kDefaultFileName = "cyglog.%d";
 #endif
 const int kMaxLineSize = 512;
 
-FILE* gLogFile = NULL;
-volatile bool gCygProfileEnabled = false;
-char gCygProfileFileName[kMaxFileNameSizeSize+1];
+static FILE* gLogFile = NULL;
+static volatile bool gCygProfileEnabled = false;
+static char gCygProfileFileName[kMaxFileNameSizeSize + 1];
 
 // Keeps track of all functions that have been logged.
-std::set<void*>* gFunctionsCalled = NULL;
+static std::set<void*>* gFunctionsCalled = NULL;
+
+#ifndef PTHREAD_RECURSIVE_MUTEX_INITIALIZER
+#  ifdef PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
+#    define PTHREAD_RECURSIVE_MUTEX_INITIALIZER PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP
+#  else
+#    error MISSING PTHREAD_RECURSIVE_MUTEX_INITIALIZER DEFINITION!
+#  endif
+#endif
 
 // Ensure thread safety (see __cyg_profile_func_enter)
-pthread_mutex_t gMutex = PTHREAD_MUTEX_INITIALIZER;
-volatile unsigned int gLockOwner = -1;
+static pthread_mutex_t gMutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER;
+static unsigned int gDepth = 0;
 
 #ifdef __cplusplus
 extern "C" {
@@ -88,19 +95,15 @@ void __cyg_profile_func_enter(void* this_fn, void* call_site) {
   struct timeval timestamp;
   long mtime;
   time_t seconds;
-#ifdef __ANDROID__
-  // On Android, enable profiling as soon as this function is called.
-  // This is necessary to profile static initializers.
-  pthread_once(&gInitOnce, cygprofile_enable);
-#endif
-  if (gCygProfileEnabled && gLogFile) {
-    // If this thread is the gLockOwner that means that instrumented code is
-    // being called in the critical section (i.e. body of if-statment below).
-    // The instrumentation is ignored to avoid infinte recursion.
-    if (gLockOwner != pthread_self()) {
-      pthread_mutex_lock(&gMutex);
-      gLockOwner = pthread_self();
-      // gFunctionsCalled is initialized in cygprofile_enabled
+  pthread_mutex_lock(&gMutex);
+  // avoid recursive calls
+  if (gDepth == 0) {
+    gDepth += 1;
+    if (!gCygProfileEnabled) {
+      cygprofile_enable();
+    }
+    if (gCygProfileEnabled && gLogFile) {
+      // gFunctionsCalled is initialized in cygprofile_enable()
       if (gFunctionsCalled && gFunctionsCalled->find(this_fn) ==
           gFunctionsCalled->end()) {
         gettimeofday(&timestamp, NULL);
@@ -111,10 +114,10 @@ void __cyg_profile_func_enter(void* this_fn, void* call_site) {
         fflush(gLogFile);
         gFunctionsCalled->insert(this_fn);
       }
-      gLockOwner = -1;
-      pthread_mutex_unlock(&gMutex);
     }
+    gDepth -= 1;
   }
+  pthread_mutex_unlock(&gMutex);
 }
 
 // Called internally by instrumentation inserted by the compiler upon exiting

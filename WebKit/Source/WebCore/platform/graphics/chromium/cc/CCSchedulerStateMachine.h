@@ -64,6 +64,7 @@ public:
         ACTION_BEGIN_UPDATE_MORE_RESOURCES,
         ACTION_COMMIT,
         ACTION_DRAW,
+        ACTION_PREALLOCATE_MORE_RESOURCES,
     };
     Action nextAction() const;
     void updateState(Action);
@@ -93,6 +94,10 @@ public:
     // thread to main.
     void setNeedsCommit();
 
+    // These flags indicate whether more preallocations and updates exist.
+    void setHasMorePreallocations(bool hasMore) { m_hasMorePreallocations = hasMore; }
+    void setHasMoreResourceUpdates(bool hasMore) { m_hasMoreResourceUpdates = hasMore; }
+
     // Call this only in response to receiving an ACTION_BEGIN_FRAME
     // from nextState. Indicates that all painting is complete and that
     // updating of compositor resources can begin.
@@ -107,6 +112,12 @@ public:
     // when such behavior would be undesirable.
     void setCanDraw(bool can) { m_canDraw = can; }
 
+    // FIXME: This let's resource updates be cancelled without cancelling
+    // the scheduled action itself. The action must occur because
+    // the CCScheduler manages the state machine during this action,
+    // rather than letting the state-machine do this itself.
+    bool havePreallocatedSinceVSync() { return m_havePreallocatedSinceVSync; }
+
 protected:
     CommitState m_commitState;
 
@@ -115,10 +126,13 @@ protected:
     bool m_needsRedraw;
     bool m_needsForcedRedraw;
     bool m_needsCommit;
+    bool m_hasMorePreallocations;
+    bool m_hasMoreResourceUpdates;
     bool m_updateMoreResourcesPending;
     bool m_insideVSync;
     bool m_visible;
     bool m_canDraw;
+    bool m_havePreallocatedSinceVSync;
 };
 
 }

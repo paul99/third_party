@@ -159,6 +159,10 @@ public:
 
     const IntSize& scrollPrediction() const { return m_scrollPrediction; }
     void setScrollPrediction(const IntSize& scrollPrediction) { m_scrollPrediction = scrollPrediction; }
+    float pageScalePrediction() const { return m_pageScalePrediction; }
+    void setPageScalePrediction(float pageScalePrediction) { m_pageScalePrediction = pageScalePrediction; }
+    void setIsRootScrollingLayer(bool isRootScrollingLayer) { m_isRootScrollingLayer = isRootScrollingLayer; }
+    bool isRootScrollingLayer() { return m_isRootScrollingLayer; }
 #endif
 
     float pageScaleDelta() const { return 1; }
@@ -330,6 +334,8 @@ private:
     bool m_isContainerLayer;
     bool m_fixedToContainerLayerVisibleRect;
     IntSize m_scrollPrediction;
+    float m_pageScalePrediction;
+    bool m_isRootScrollingLayer;
 #endif
     bool m_isDrawable;
     bool m_masksToBounds;

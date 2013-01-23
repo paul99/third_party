@@ -16,7 +16,7 @@
  */
 
 
-#if	!defined(__ARM_HAVE_NEON)
+#if SK_ARM_NEON_IS_NONE
 #error	this file can be used only when the NEON unit is enabled
 #endif
 
@@ -86,7 +86,7 @@ static void SCALE_NOFILTER_NAME(const SkBitmapProcState& s,
     // test if we don't need to apply the tile proc
     if ((unsigned)(fx >> 16) <= maxX &&
         (unsigned)((fx + dx * (count - 1)) >> 16) <= maxX) {
-        decal_nofilter_scale(xy, fx, dx, count);
+        decal_nofilter_scale_neon(xy, fx, dx, count);
         return;
     }
 #endif
@@ -511,7 +511,7 @@ static void SCALE_FILTER_NAME(const SkBitmapProcState& s,
     if (dx > 0 &&
             (unsigned)(fx >> 16) <= maxX &&
             (unsigned)((fx + dx * (count - 1)) >> 16) < maxX) {
-        decal_filter_scale(xy, fx, dx, count);
+        decal_filter_scale_neon(xy, fx, dx, count);
     } else
 #endif
 
@@ -886,7 +886,7 @@ static void PERSP_FILTER_NAME(const SkBitmapProcState& s,
     }
 }
 
-static SkBitmapProcState::MatrixProc MAKENAME(_Procs)[] = {
+const SkBitmapProcState::MatrixProc MAKENAME(_Procs_neon)[] = {
     SCALE_NOFILTER_NAME,
     SCALE_FILTER_NAME,
     AFFINE_NOFILTER_NAME,

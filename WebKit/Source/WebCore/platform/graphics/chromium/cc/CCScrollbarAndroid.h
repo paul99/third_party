@@ -42,11 +42,13 @@ class LayerRendererChromium;
 
 class CCScrollbarAndroid {
 public:
-    CCScrollbarAndroid(const CCLayerImpl* scrollLayer, const CCLayerImpl* drawLayer);
+    CCScrollbarAndroid(PassRefPtr<GraphicsContext3D> context, const CCLayerImpl* scrollLayer, const CCLayerImpl* drawLayer);
+    virtual ~CCScrollbarAndroid();
 
     void draw(LayerRendererChromium*, const TransformationMatrix&, const IntSize& bounds, double timestamp);
 
     static bool drawScrollbarOverlay(LayerRendererChromium*, double timestamp);
+    static void resetScrollbarOverlay(LayerRendererChromium*);
 
 private:
     bool needsAnimation(double timestamp) const { return opacityAtTime(timestamp); }
@@ -55,9 +57,11 @@ private:
     void updateScrollbarRect(const CCLayerImpl* scrollLayer, const CCLayerImpl* drawLayer, double timestamp);
     FloatRect computeScrollbarRect(const CCLayerImpl* scrollLayer, const CCLayerImpl* drawLayer) const;
 
+    RefPtr<GraphicsContext3D> m_context;
     double m_lastAwakenTime;
     FloatRect m_lastScrollbarRect;
     FloatPoint m_lastScrollPosition;
+    Platform3DObject m_vertexBuffer;
 };
 
 } // namespace WebCore

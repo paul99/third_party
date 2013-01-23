@@ -778,7 +778,7 @@ PassRefPtr<Scrollbar> RenderTextControlSingleLine::createScrollbar(ScrollableAre
     RefPtr<Scrollbar> widget;
     bool hasCustomScrollbarStyle = style()->hasPseudoStyle(SCROLLBAR);
     if (hasCustomScrollbarStyle)
-        widget = RenderScrollbar::createCustomScrollbar(scrollableArea, orientation, this);
+        widget = RenderScrollbar::createCustomScrollbar(scrollableArea, orientation, this->node());
     else
         widget = Scrollbar::createNativeScrollbar(scrollableArea, orientation, controlSize);
     return widget.release();

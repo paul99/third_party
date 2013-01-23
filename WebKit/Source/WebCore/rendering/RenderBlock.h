@@ -110,13 +110,15 @@ public:
 
     typedef ListHashSet<RenderBox*, 4> PositionedObjectsListHashSet;
     PositionedObjectsListHashSet* positionedObjects() const { return m_positionedObjects.get(); }
+    bool hasPositionedObjects() const { return m_positionedObjects && !m_positionedObjects->isEmpty(); }
 
     void addPercentHeightDescendant(RenderBox*);
     static void removePercentHeightDescendant(RenderBox*);
     HashSet<RenderBox*>* percentHeightDescendants() const;
-#if !ASSERT_DISABLED
+    static bool hasPercentHeightContainerMap();
     static bool hasPercentHeightDescendant(RenderBox*);
-#endif
+    static void clearPercentHeightDescendantsFrom(RenderBox*);
+    static void removePercentHeightDescendantIfNeeded(RenderBox*);
 
     RootInlineBox* createAndAppendRootInlineBox();
 
@@ -217,12 +219,14 @@ public:
     using RenderBoxModelObject::continuation;
     using RenderBoxModelObject::setContinuation;
 
-    // This function is a convenience helper for creating an anonymous block that inherits its
-    // style from this RenderBlock.
-    RenderBlock* createAnonymousBlock(bool isFlexibleBox = false) const;
-    RenderBlock* createAnonymousColumnsBlock() const;
-    RenderBlock* createAnonymousColumnSpanBlock() const;
-    RenderBlock* createAnonymousBlockWithSameTypeAs(RenderBlock* otherAnonymousBlock) const;
+    static RenderBlock* createAnonymousWithParentRendererAndDisplay(const RenderObject*, EDisplay = BLOCK);
+    static RenderBlock* createAnonymousColumnsWithParentRenderer(const RenderObject*);
+    static RenderBlock* createAnonymousColumnSpanWithParentRenderer(const RenderObject*);
+    RenderBlock* createAnonymousBlock(EDisplay display = BLOCK) const { return createAnonymousWithParentRendererAndDisplay(this, display); }
+    RenderBlock* createAnonymousColumnsBlock() const { return createAnonymousColumnsWithParentRenderer(this); }
+    RenderBlock* createAnonymousColumnSpanBlock() const { return createAnonymousColumnSpanWithParentRenderer(this); }
+
+    virtual RenderBox* createAnonymousBoxWithSameTypeAs(const RenderObject* parent) const OVERRIDE;
     
     static void appendRunsForObject(BidiRunList<BidiRun>&, int start, int end, RenderObject*, InlineBidiResolver&);
 
@@ -356,6 +360,9 @@ public:
     LayoutUnit computeStartPositionDeltaForChildAvoidingFloats(const RenderBox* child, LayoutUnit childMarginStart,
         LayoutUnit childLogicalWidth, RenderRegion* = 0, LayoutUnit offsetFromLogicalTopOfFirstPage = 0);
 
+    void placeRunInIfNeeded(RenderObject* newChild, PlaceGeneratedRunInFlag);
+    bool runInIsPlacedIntoSiblingBlock(RenderObject* runIn);
+
 #ifndef NDEBUG
     void showLineTreeAndMark(const InlineBox* = 0, const char* = 0, const InlineBox* = 0, const char* = 0, const RenderObject* = 0) const;
 #endif
@@ -363,29 +370,7 @@ public:
 protected:
     virtual void willBeDestroyed();
 
-    // These functions are only used internally to manipulate the render tree structure via remove/insert/appendChildNode.
-    // Since they are typically called only to move objects around within anonymous blocks (which only have layers in
-    // the case of column spans), the default for fullRemoveInsert is false rather than true.
-    void moveChildTo(RenderBlock* to, RenderObject* child, bool fullRemoveInsert = false)
-    {
-        return moveChildTo(to, child, 0, fullRemoveInsert);
-    }
-    void moveChildTo(RenderBlock* toBlock, RenderObject* child, RenderObject* beforeChild, bool fullRemoveInsert = false);
-    void moveAllChildrenTo(RenderBlock* toBlock, bool fullRemoveInsert = false)
-    {
-        return moveAllChildrenTo(toBlock, 0, fullRemoveInsert);
-    }
-    void moveAllChildrenTo(RenderBlock* toBlock, RenderObject* beforeChild, bool fullRemoveInsert = false)
-    {
-        return moveChildrenTo(toBlock, firstChild(), 0, beforeChild, fullRemoveInsert);
-    }
-    // Move all of the kids from |startChild| up to but excluding |endChild|.  0 can be passed as the endChild to denote
-    // that all the kids from |startChild| onwards should be added.
-    void moveChildrenTo(RenderBlock* toBlock, RenderObject* startChild, RenderObject* endChild, bool fullRemoveInsert = false)
-    {
-        return moveChildrenTo(toBlock, startChild, endChild, 0, fullRemoveInsert);
-    }
-    void moveChildrenTo(RenderBlock* toBlock, RenderObject* startChild, RenderObject* endChild, RenderObject* beforeChild, bool fullRemoveInsert = false);
+    void updateScrollInfoAfterLayout();
 
     LayoutUnit maxPositiveMarginBefore() const { return m_rareData ? m_rareData->m_margins.positiveMarginBefore() : RenderBlockRareData::positiveMarginBeforeDefault(this); }
     LayoutUnit maxNegativeMarginBefore() const { return m_rareData ? m_rareData->m_margins.negativeMarginBefore() : RenderBlockRareData::negativeMarginBeforeDefault(this); }
@@ -815,10 +800,6 @@ private:
 
     bool expandsToEncloseOverhangingFloats() const;
 
-    void updateScrollInfoAfterLayout();
-
-    RenderObject* splitAnonymousBlocksAroundChild(RenderObject* beforeChild);
-    RenderObject* splitTablePartsAroundChild(RenderObject* beforeChild);
     void splitBlocks(RenderBlock* fromBlock, RenderBlock* toBlock, RenderBlock* middleBlock,
                      RenderObject* beforeChild, RenderBoxModelObject* oldCont);
     void splitFlow(RenderObject* beforeChild, RenderBlock* newBlockBox,
@@ -902,7 +883,11 @@ private:
     bool handleSpecialChild(RenderBox* child, const MarginInfo&);
     bool handleFloatingChild(RenderBox* child, const MarginInfo&);
     bool handlePositionedChild(RenderBox* child, const MarginInfo&);
-    bool handleRunInChild(RenderBox* child);
+
+    RenderBoxModelObject* createReplacementRunIn(RenderBoxModelObject* runIn);
+    void moveRunInUnderSiblingBlockIfNeeded(RenderObject* runIn);
+    void moveRunInToOriginalPosition(RenderObject* runIn);
+
     LayoutUnit collapseMargins(RenderBox* child, MarginInfo&);
     LayoutUnit clearFloatsIfNeeded(RenderBox* child, MarginInfo&, LayoutUnit oldTopPosMargin, LayoutUnit oldTopNegMargin, LayoutUnit yPos);
     LayoutUnit estimateLogicalTopPosition(RenderBox* child, const MarginInfo&, LayoutUnit& estimateWithoutPagination);

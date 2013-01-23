@@ -73,6 +73,8 @@ LayerChromium::LayerChromium()
 #if OS(ANDROID)
     , m_isContainerLayer(false)
     , m_fixedToContainerLayerVisibleRect(false)
+    , m_pageScalePrediction(1)
+    , m_isRootScrollingLayer(false)
 #endif
     , m_isDrawable(false)
     , m_masksToBounds(false)

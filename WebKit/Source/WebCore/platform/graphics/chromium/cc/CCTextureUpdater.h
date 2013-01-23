@@ -42,6 +42,7 @@ public:
     ~CCTextureUpdater();
 
     void append(LayerTextureUpdater::Texture*, const IntRect& sourceRect, const IntRect& destRect);
+    void appendPartial(LayerTextureUpdater::Texture*, const IntRect& sourceRect, const IntRect& destRect);
 
     bool hasMoreUpdates() const;
 
@@ -60,10 +61,13 @@ private:
         IntRect m_destRect;
     };
 
+    static void append(LayerTextureUpdater::Texture*, const IntRect& sourceRect, const IntRect& destRect, Vector<UpdateEntry>&);
+
     TextureAllocator* m_allocator;
     TextureCopier* m_copier;
     size_t m_entryIndex;
     Vector<UpdateEntry> m_entries;
+    Vector<UpdateEntry> m_partialEntries;
 };
 
 }

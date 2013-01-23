@@ -40,13 +40,13 @@
 #include "cc/CCTiledLayerImpl.h"
 #include <wtf/CurrentTime.h>
 
-// Start tiling when the width and height of a layer are larger than this size.
-static int maxUntiledSize = 512;
-
-// When tiling is enabled, use tiles of this dimension squared.
-static int defaultTileSize = 256;
-
 using namespace std;
+
+namespace {
+// Amount to downsample newly painted tiles during a fling. This is used to
+// reduce paint times and avoid checkerboarding during quick fling animations.
+const int kFlingDownsamplingFactor = 4;
+}
 
 namespace WebCore {
 
@@ -54,8 +54,11 @@ class UpdatableTile : public CCLayerTilingData::Tile {
     WTF_MAKE_NONCOPYABLE(UpdatableTile);
 public:
     explicit UpdatableTile(PassOwnPtr<LayerTextureUpdater::Texture> texture)
-        : m_updated(false)
-        , m_pageScaleChanged(false)
+        : m_partialUpdate(false)
+        , m_updated(false)
+        , isInUseOnImpl(false)
+        , m_hasValidContents(false)
+        , m_downsamplingFactor(1)
         , m_texture(texture) { }
 
     LayerTextureUpdater::Texture* texture() { return m_texture.get(); }
@@ -72,8 +75,13 @@ public:
     IntRect m_dirtyRect;
     IntRect m_updateRect;
     IntRect m_opaqueRect;
+    bool m_partialUpdate;
     bool m_updated;
-    bool m_pageScaleChanged;
+    bool isInUseOnImpl;
+    // If the tile has a valid managed texture, this flag indicates whether the
+    // contents of the texture are valid (but still possibly stale).
+    bool m_hasValidContents;
+    int m_downsamplingFactor;
 private:
     OwnPtr<LayerTextureUpdater::Texture> m_texture;
 };
@@ -86,6 +94,8 @@ TiledLayerChromium::TiledLayerChromium()
     , m_sampledTexelFormat(LayerTextureUpdater::SampledTexelFormatInvalid)
     , m_tilingOption(AutoTile)
 {
+    // When tiling is enabled, use tiles of this dimension squared.
+    int defaultTileSize = 256;
     m_tiler = CCLayerTilingData::create(IntSize(defaultTileSize, defaultTileSize), CCLayerTilingData::HasBorderTexels);
 }
 
@@ -109,6 +119,11 @@ void TiledLayerChromium::cleanupResources()
 
 void TiledLayerChromium::updateTileSizeAndTilingOption()
 {
+    // When tiling is enabled, use tiles of this dimension squared.
+    int defaultTileSize = TextureManager::defaultTileSize(layerTreeHost()->viewportSize());
+    // Start tiling when the width and height of a layer are larger than this size.
+    int maxUntiledSize = defaultTileSize * 2;
+
     const IntSize tileSize(min(defaultTileSize, contentBounds().width()), min(defaultTileSize, contentBounds().height()));
 
     // Tile if both dimensions large, or any one dimension large and the other
@@ -156,7 +171,7 @@ void TiledLayerChromium::setTileSize(const IntSize& size)
 
 void TiledLayerChromium::setBorderTexelOption(CCLayerTilingData::BorderTexelOption borderTexelOption)
 {
-    m_tiler->setBorderTexelOption(borderTexelOption);
+    m_tiler->setBorderTexelOption(borderTexelOption, std::max(1, kFlingDownsamplingFactor / 2));
 }
 
 bool TiledLayerChromium::drawsContent() const
@@ -248,7 +263,10 @@ void TiledLayerChromium::updateCompositorResources(GraphicsContext3D*, CCTexture
             if (paintOffset.y() + destRect.height() > m_paintRect.height())
                 CRASH();
 
-            updater.append(tile->texture(), sourceRect, destRect);
+            if (tile->m_partialUpdate)
+                updater.appendPartial(tile->texture(), sourceRect, destRect);
+            else
+                updater.append(tile->texture(), sourceRect, destRect);
         }
     }
 
@@ -284,6 +302,7 @@ void TiledLayerChromium::pushPropertiesTo(CCLayerImpl* layer)
         int i = iter->first.first;
         int j = iter->first.second;
         UpdatableTile* tile = static_cast<UpdatableTile*>(iter->second.get());
+        tile->isInUseOnImpl = false;
         if (!tile->managedTexture()->isValid(m_tiler->tileSize(), m_textureFormat)) {
             invalidTiles.append(tile);
             continue;
@@ -298,12 +317,10 @@ void TiledLayerChromium::pushPropertiesTo(CCLayerImpl* layer)
         // content (but only while scrolling) instead of seeing big flashes of background color.
         if (tile->isDirtyForCurrentFrame())
             continue;
-#else
-        if (tile->m_pageScaleChanged) {
-            continue;
-        }
 #endif
-        tiledLayer->pushTileProperties(i, j, tile->managedTexture()->textureId(), tile->m_opaqueRect);
+
+        tiledLayer->pushTileProperties(i, j, tile->managedTexture()->textureId(), tile->m_opaqueRect, tile->m_downsamplingFactor);
+        tile->isInUseOnImpl = true;
     }
     for (Vector<UpdatableTile*>::const_iterator iter = invalidTiles.begin(); iter != invalidTiles.end(); ++iter)
         m_tiler->takeTile((*iter)->i(), (*iter)->j());
@@ -315,7 +332,12 @@ void TiledLayerChromium::pageScaleChanged() {
     for (CCLayerTilingData::TileMap::const_iterator iter = m_tiler->tiles().begin(); iter != m_tiler->tiles().end(); ++iter) {
         UpdatableTile* tile = static_cast<UpdatableTile*>(iter->second.get());
         ASSERT(tile);
-        tile->m_pageScaleChanged = true;
+        // FIXME: All tiles should be invalidated elsewhere during a page scale,
+        // but this wasn't always happening on the first pinch-zoom after the layer's
+        // size change. This doesn't fix that issue, but since we have this
+        // extra type of invalidation, we can fix the bug here just as easily by
+        // dropping all textures as well.
+        tile->managedTexture()->releaseTexture();
     }
 }
 
@@ -378,8 +400,39 @@ void TiledLayerChromium::invalidateRect(const IntRect& layerRect)
     }
 }
 
-void TiledLayerChromium::prepareToUpdateTiles(bool idle, int left, int top, int right, int bottom)
+// Returns true if tile is dirty and only part of it needs to be updated.
+bool TiledLayerChromium::tileOnlyNeedsPartialUpdate(UpdatableTile* tile)
 {
+    return !tile->m_dirtyRect.contains(m_tiler->tileRect(tile));
+}
+
+// Dirty tiles with valid textures needs buffered update to guarantee that
+// we don't modify textures currently used for drawing by the impl thread.
+bool TiledLayerChromium::tileNeedsBufferedUpdate(UpdatableTile* tile)
+{
+    // No impl thread?.
+    if (!CCProxy::hasImplThread())
+        return false;
+
+    if (!tile->managedTexture()->isValid(m_tiler->tileSize(), m_textureFormat))
+        return false;
+
+    if (!tile->isDirty())
+        return false;
+
+    if (!tile->isInUseOnImpl)
+        return false;
+
+    return true;
+}
+
+void TiledLayerChromium::prepareToUpdateTiles(bool idle, int left, int top, int right, int bottom, int downsamplingFactor)
+{
+    // If we are about to paint some low resolution tiles, schedule a commit to
+    // ensure they are eventually repainted at full resolution.
+    if (downsamplingFactor > 1)
+        setNeedsCommit();
+
     // Clamp to visible tiles.
     left   = std::min(std::max(left, 0), m_tiler->numTilesX() - 1);
     top    = std::min(std::max(top, 0), m_tiler->numTilesY() - 1);
@@ -397,13 +450,35 @@ void TiledLayerChromium::prepareToUpdateTiles(bool idle, int left, int top, int 
             if (!tile)
                 tile = createTile(i, j);
 
-            // Do post commit deletion of current texture when partial texture
-            // updates are not used.
-            if (tile->isDirty() && layerTreeHost() && !layerTreeHost()->settings().partialTextureUpdates)
-                layerTreeHost()->deleteTextureAfterCommit(tile->managedTexture()->steal());
+            // If we are downsampling and the tile has previous contents that were painted at its
+            // current location, reuse the tile instead of repainting. This is done to prefer stale
+            // high resolution tiles over fuzzy but up-to-date ones during flings.
+            if (downsamplingFactor > 1
+                && tile->managedTexture()->isValid(m_tiler->tileSize(), m_textureFormat)
+                && tile->m_hasValidContents)
+                continue;
 
-            if (!tile->managedTexture()->isValid(m_tiler->tileSize(), m_textureFormat))
+            // If we no longer want to downsample, mark downsampled tiles as dirty.
+            if (tile->m_downsamplingFactor > downsamplingFactor)
                 tile->m_dirtyRect = m_tiler->tileRect(tile);
+
+            if (layerTreeHost() && layerTreeHost()->bufferedUpdates() && tileNeedsBufferedUpdate(tile)) {
+                // FIXME: Decide if partial update should be allowed based on cost
+                // of update. https://bugs.webkit.org/show_bug.cgi?id=77376
+                if (tileOnlyNeedsPartialUpdate(tile) && layerTreeHost()->requestPartialTextureUpdate())
+                    tile->m_partialUpdate = true;
+                else {
+                    // We no longer need to 'steal' the texture. If we just release the texture,
+                    // the manager will not delete it while it is in-use.
+                    // layerTreeHost()->deleteTextureAfterCommit(tile->managedTexture()->steal());
+                    tile->managedTexture()->releaseTexture();
+                }
+            }
+
+            if (!tile->managedTexture()->isValid(m_tiler->tileSize(), m_textureFormat)) {
+                tile->m_dirtyRect = m_tiler->tileRect(tile);
+                tile->m_hasValidContents = false;
+            }
 
             tile->m_updated = true;
 
@@ -430,7 +505,6 @@ void TiledLayerChromium::prepareToUpdateTiles(bool idle, int left, int top, int 
             UpdatableTile* tile = tileAt(i, j);
             if (tile->m_updated) {
                 tile->copyAndClearDirty();
-                tile->m_pageScaleChanged = false;
             }
         }
     }
@@ -451,7 +525,7 @@ void TiledLayerChromium::prepareToUpdateTiles(bool idle, int left, int top, int 
     // so we grab a local reference here to hold the updater alive until the paint completes.
     RefPtr<LayerTextureUpdater> protector(textureUpdater());
     IntRect paintedOpaqueRect;
-    textureUpdater()->prepareToUpdate(m_paintRect, m_tiler->tileSize(), m_tiler->hasBorderTexels(), contentsScale(), &paintedOpaqueRect);
+    textureUpdater()->prepareToUpdate(m_paintRect, m_tiler->tileSize(), m_tiler->hasBorderTexels(), contentsScale(), &paintedOpaqueRect, downsamplingFactor);
     for (int j = top; j <= bottom; ++j) {
         for (int i = left; i <= right; ++i) {
             UpdatableTile* tile = tileAt(i, j);
@@ -484,6 +558,8 @@ void TiledLayerChromium::prepareToUpdateTiles(bool idle, int left, int top, int 
             if (sourceRect.isEmpty())
                 continue;
 
+            tile->m_downsamplingFactor = downsamplingFactor;
+            tile->m_hasValidContents = true;
             tile->texture()->prepareRect(sourceRect);
         }
     }
@@ -517,8 +593,10 @@ bool TiledLayerChromium::reserveTiles(int left, int top, int right, int bottom)
             if (!tile)
                 tile = createTile(i, j);
 
-            if (!tile->managedTexture()->isValid(m_tiler->tileSize(), m_textureFormat))
+            if (!tile->managedTexture()->isValid(m_tiler->tileSize(), m_textureFormat)) {
                 tile->m_dirtyRect = m_tiler->tileRect(tile);
+                tile->m_hasValidContents = false;
+            }
 
             if (!tile->managedTexture()->reserve(m_tiler->tileSize(), m_textureFormat))
                 return false;
@@ -534,6 +612,7 @@ void TiledLayerChromium::resetUpdateState()
     for (CCLayerTilingData::TileMap::const_iterator iter = m_tiler->tiles().begin(); iter != end; ++iter) {
         UpdatableTile* tile = static_cast<UpdatableTile*>(iter->second.get());
         tile->m_updateRect = IntRect();
+        tile->m_partialUpdate = false;
 #if OS(ANDROID)
         tile->m_updated = false;
 #endif
@@ -629,6 +708,7 @@ IntRect TiledLayerChromium::unclippedVisibleRect() {
     IntRect targetSurfaceRect = targetRenderSurface() ? targetRenderSurface()->contentRect() : IntRect();
     TransformationMatrix transform = drawTransform();
     if (layerBoundRect == visibleLayerRect() ||
+            !isAnimating(this) ||
             targetSurfaceRect.isEmpty() ||
             contentBounds().isEmpty() ||
             !isScaleOrTranslation(transform)) {
@@ -684,7 +764,7 @@ void TiledLayerChromium::prepareToUpdate(const IntRect& layerRect)
     IntSize viewportSize = layerTreeHost() ? layerTreeHost()->viewportSize() : IntSize();
     IntSize contentSize = contentBounds();
     if (isAnimating(this) && contentSize.width() <= viewportSize.width() + 64
-                          && contentSize.height() <= contentSize.height() + 64) {
+                          && contentSize.height() <= viewportSize.height() + 64) {
         IntRect fullAnimatedLayerRect = IntRect(IntPoint::zero(), contentSize);
         m_tiler->layerRectToTileIndices(fullAnimatedLayerRect, left, top, right, bottom);
         if (reserveTiles(left, top, right, bottom))
@@ -699,7 +779,9 @@ void TiledLayerChromium::prepareToUpdate(const IntRect& layerRect)
     // prediction is too large, sacrifice paint responsiveness and paint an entire
     // viewport worth of tiles in the scroll direction.
     IntSize scroll = scrollPrediction();
+    float currentPageScalePrediction = pageScalePrediction();
     setScrollPrediction(IntSize());
+    setPageScalePrediction(1);
 
     // If the layer is animating in a predictable way (only scale/translate), we
     // didn't paint the entire layer above and we aren't scrolling, then use
@@ -766,10 +848,17 @@ void TiledLayerChromium::prepareToUpdate(const IntRect& layerRect)
         }
     }
 
+    // Downsample tiles while flinging on high dpi devices. Avoid doing this
+    // right after the page scale has changed, because all the tiles would need
+    // to be repainted at high resolution soon anyway.
+    bool shouldDownsampleWhileFlinging = m_tiler->tileSize().width() >= 512;
+    bool pageScaleChanged = fabs(currentPageScalePrediction - 1) > 1e-3;
+    int downsamplingFactor = shouldDownsampleWhileFlinging && !pageScaleChanged && textureUpdater()->canDownsample() ? kFlingDownsamplingFactor : 1;
+
     if (reserveTiles(left, top, right, bottom))
-        prepareToUpdateTiles(false, left, top, right, bottom);
+        prepareToUpdateTiles(false, left, top, right, bottom, downsamplingFactor);
     else
-        prepareToUpdateTiles(false, visibleLeft, visibleTop, visibleRight, visibleBottom);
+        prepareToUpdateTiles(false, visibleLeft, visibleTop, visibleRight, visibleBottom, downsamplingFactor);
 #endif
 }
 
@@ -852,7 +941,7 @@ IntRect TiledLayerChromium::idlePaintRect(const IntRect& visibleLayerRect)
     // - only reserve idle paint tiles up to a memory reclaim threshold and
     // - insure we play nicely with other layers
     prepaintRect.inflateX(m_tiler->tileSize().width());
-    prepaintRect.inflateY(m_tiler->tileSize().height() * 2);
+    prepaintRect.inflateY(m_tiler->tileSize().height() * (isRootScrollingLayer() ? 6 : 2));
     prepaintRect.intersect(IntRect(IntPoint::zero(), contentBounds()));
     return prepaintRect;
 }

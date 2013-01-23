@@ -108,7 +108,6 @@ WebMediaPlayer* WebMediaPlayerClientImpl::mediaPlayer() const
 WebMediaPlayerClientImpl::~WebMediaPlayerClientImpl()
 {
 #if USE(ACCELERATED_COMPOSITING)
-    MutexLocker locker(m_compositingMutex);
     if (m_videoFrameProviderClient)
         m_videoFrameProviderClient->stopUsingProvider();
 #endif
@@ -242,6 +241,7 @@ void WebMediaPlayerClientImpl::load(const String& url)
 {
     m_url = url;
 
+    MutexLocker locker(m_webMediaPlayerMutex);
     if (m_preload == MediaPlayer::None) {
 #if ENABLE(WEB_AUDIO)
         m_audioSourceProvider.wrap(0); // Clear weak reference to m_webMediaPlayer's WebAudioSourceProvider.
@@ -620,14 +620,15 @@ bool WebMediaPlayerClientImpl::acceleratedRenderingInUse()
 
 void WebMediaPlayerClientImpl::setVideoFrameProviderClient(VideoFrameProvider::Client* client)
 {
-    MutexLocker locker(m_compositingMutex);
+    MutexLocker locker(m_webMediaPlayerMutex);
     m_videoFrameProviderClient = client;
 }
 
 VideoFrameChromium* WebMediaPlayerClientImpl::getCurrentFrame()
 {
-    MutexLocker locker(m_compositingMutex);
+    MutexLocker locker(m_webMediaPlayerMutex);
     ASSERT(!m_currentVideoFrame);
+    ASSERT(m_videoFrameProviderClient);
     if (m_webMediaPlayer) {
         WebVideoFrame* webkitVideoFrame = m_webMediaPlayer->getCurrentFrame();
         if (webkitVideoFrame)
@@ -638,8 +639,9 @@ VideoFrameChromium* WebMediaPlayerClientImpl::getCurrentFrame()
 
 void WebMediaPlayerClientImpl::putCurrentFrame(VideoFrameChromium* videoFrame)
 {
-    MutexLocker locker(m_compositingMutex);
+    MutexLocker locker(m_webMediaPlayerMutex);
     ASSERT(videoFrame == m_currentVideoFrame);
+    ASSERT(m_videoFrameProviderClient);
     if (!videoFrame)
         return;
     if (m_webMediaPlayer) {

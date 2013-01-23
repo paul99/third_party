@@ -50,12 +50,9 @@ WebDOMTextContentWalker::~WebDOMTextContentWalker()
 WebDOMTextContentWalker::WebDOMTextContentWalker(const WebHitTestInfo& hitTestInfo, size_t maxLength)
 {
     Node* node = hitTestInfo.node().unwrap<Node>();
-    if (!node)
+    if (!node || !node->isTextNode())
         return;
 
-    Element* element = node->parentElement();
-    if (!node->inDocument() && element && element->inDocument())
-        node = element;
     m_private.reset(new DOMTextContentWalker(node->renderer()->positionForPoint(hitTestInfo.point()), maxLength));
 }
 

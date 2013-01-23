@@ -71,6 +71,7 @@ enum MediaControlElementType {
     MediaVolumeSliderMuteButton,
     MediaTextTrackDisplayContainer,
     MediaTextTrackDisplay,
+    MediaOverlayPlayButton,
 };
 
 HTMLMediaElement* toParentMediaElement(Node*);
@@ -254,6 +255,22 @@ public:
 
 private:
     MediaControlPlayButtonElement(Document*);
+
+    virtual const AtomicString& shadowPseudoId() const;
+};
+
+// ----------------------------
+
+
+class MediaControlOverlayPlayButtonElement : public MediaControlInputElement {
+public:
+    static PassRefPtr<MediaControlOverlayPlayButtonElement> create(Document*);
+
+    virtual void defaultEventHandler(Event*);
+    virtual void updateDisplayType();
+
+private:
+    explicit MediaControlOverlayPlayButtonElement(Document*);
 
     virtual const AtomicString& shadowPseudoId() const;
 };

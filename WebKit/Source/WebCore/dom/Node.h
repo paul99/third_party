@@ -66,6 +66,7 @@ class NSResolver;
 class NamedNodeMap;
 class NameNodeList;
 class NodeList;
+class NodeListsNodeData;
 class NodeRareData;
 class NodeRenderingContext;
 class PlatformKeyboardEvent;
@@ -540,18 +541,9 @@ public:
     void showTreeForThisAcrossFrame() const;
 #endif
 
-    void registerDynamicSubtreeNodeList(DynamicSubtreeNodeList*);
-    void unregisterDynamicSubtreeNodeList(DynamicSubtreeNodeList*);
     void invalidateNodeListsCacheAfterAttributeChanged(const QualifiedName&);
     void invalidateNodeListsCacheAfterChildrenChanged();
-    void notifyLocalNodeListsLabelChanged();
-    void removeCachedClassNodeList(ClassNodeList*, const String&);
-
-    void removeCachedNameNodeList(NameNodeList*, const String&);
-    void removeCachedTagNodeList(TagNodeList*, const AtomicString&);
-    void removeCachedTagNodeList(TagNodeList*, const QualifiedName&);
-    void removeCachedLabelsNodeList(DynamicSubtreeNodeList*);
-
+    NodeListsNodeData* nodeLists();
     void removeCachedChildNodeList();
 
     PassRefPtr<NodeList> getElementsByTagName(const AtomicString&);
@@ -614,8 +606,6 @@ public:
     virtual EventTargetData* ensureEventTargetData();
 
 #if ENABLE(MICRODATA)
-    void itemTypeAttributeChanged();
-
     DOMSettableTokenList* itemProp();
     DOMSettableTokenList* itemRef();
     DOMSettableTokenList* itemType();

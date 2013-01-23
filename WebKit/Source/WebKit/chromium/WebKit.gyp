@@ -29,11 +29,6 @@
 #
 
 {
-    'target_defaults': {
-      'cflags!': [
-        '-Werror',
-      ],
-    },
     'includes': [
         'WinPrecompile.gypi',
         '../../WebCore/WebCore.gypi',

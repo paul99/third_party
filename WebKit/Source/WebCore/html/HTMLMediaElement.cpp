@@ -3252,14 +3252,6 @@ void HTMLMediaElement::defaultEventHandler(Event* event)
     if (widget)
         widget->handleEvent(event);
 #else
-#if OS(ANDROID)
-    // It is really hard to hit the play/pause button on mobile devices.
-    // This allows user to click the video area to toggle play/pause state.
-    if (event->type() == eventNames().clickEvent && !hasEventListeners(eventNames().clickEvent) && ScriptController::processingUserGesture()) {
-        m_userGestureInitiated = true;
-        togglePlayState();
-    }
-#endif
     HTMLElement::defaultEventHandler(event);
 #endif
 }

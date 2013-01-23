@@ -15,7 +15,6 @@
         'U_USING_ICU_NAMESPACE=0',
       ],
     },
-    'cflags': ['-fno-builtin-sin', '-fno-builtin-cos', '-ffreestanding'],
   },
   'conditions': [
     ['use_system_icu==0', {
@@ -297,11 +296,6 @@
                 },
               }
             }],
-            ['OS == "android"', {
-              'dependencies': [
-                'gabi++',
-              ],
-            }],
             ['clang==1', {
               'xcode_settings': {
                 'WARNING_CFLAGS': [
@@ -537,11 +531,6 @@
                 },
               }
             }],
-            ['OS == "android"', {
-              'dependencies': [
-                'gabi++',
-              ],
-            }],
             ['clang==1', {
               'xcode_settings': {
                 'WARNING_CFLAGS': [
@@ -568,56 +557,6 @@
             }],
           ],
         },
-      ],
-      'conditions': [
-        # TODO(wangxianzhu): Remove this part when our Android source is rolled to
-        # a version that has ndk-r7 (Should happen before March 2012).
-        ['OS=="android" and android_src!=""', {
-          'targets': [
-            {
-              'target_name': 'gabi++',
-              'type': 'none',
-            },
-          ],
-        }],
-        # TODO(wangxianzhu): Upstream this. Remove the android_src part when
-        # we have ndk-r7.
-        ['OS=="android" and android_src==""', {
-          'targets': [
-            {
-              'target_name': 'gabi++',
-              'type': 'none',
-              'direct_dependent_settings': {
-                'include_dirs': [
-                  '<(android_ndk_root)/sources/cxx-stl/gabi++/include',
-                ],
-              },
-              'conditions': [
-                ['target_arch=="arm" and armv7==1', {
-                  'link_settings': {
-                    'libraries': [
-                      '<(android_ndk_root)/sources/cxx-stl/gabi++/libs/armeabi-v7a/libgabi++_static.a',
-                    ]
-                  },
-                }],
-                ['target_arch=="arm" and armv7==0', {
-                  'link_settings': {
-                    'libraries': [
-                      '<(android_ndk_root)/sources/cxx-stl/gabi++/libs/armeabi/libgabi++_static.a',
-                    ]
-                  },
-                }],
-                ['target_arch=="ia32"', {
-                  'link_settings': {
-                    'libraries': [
-                      '<(android_ndk_root)/sources/cxx-stl/gabi++/libs/x86/libgabi++_static.a',
-                    ]
-                  },
-                }],
-              ],
-            },
-          ],
-        }],
       ],
     }, { # use_system_icu != 0
       'targets': [

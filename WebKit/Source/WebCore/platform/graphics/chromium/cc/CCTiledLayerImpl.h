@@ -51,7 +51,7 @@ public:
 
     void setSkipsDraw(bool skipsDraw) { m_skipsDraw = skipsDraw; }
     void setTilingData(const CCLayerTilingData& tiler);
-    void pushTileProperties(int, int, Platform3DObject textureId, const IntRect& opaqueRect);
+    void pushTileProperties(int, int, Platform3DObject textureId, const IntRect& opaqueRect, int downsamplingFactor = 1);
 
     void setContentsSwizzled(bool contentsSwizzled) { m_contentsSwizzled = contentsSwizzled; }
     bool contentsSwizzled() const { return m_contentsSwizzled; }

@@ -89,11 +89,14 @@ void ManagedTexture::unreserve()
     m_textureManager->unprotectTexture(m_token);
 }
 
-void ManagedTexture::allocate(TextureAllocator* allocator)
+bool ManagedTexture::allocate(TextureAllocator* allocator)
 {
     ASSERT(m_textureManager->hasTexture(m_token));
-    if (!m_textureId)
+    if (!m_textureId) {
         m_textureId = m_textureManager->allocateTexture(allocator, m_token);
+        return true;
+    }
+    return false;
 }
 
 void ManagedTexture::bindTexture(GraphicsContext3D* context, TextureAllocator* allocator)
@@ -108,16 +111,15 @@ void ManagedTexture::framebufferTexture2D(GraphicsContext3D* context, TextureAll
     context->framebufferTexture2D(GraphicsContext3D::FRAMEBUFFER, GraphicsContext3D::COLOR_ATTACHMENT0, GraphicsContext3D::TEXTURE_2D, m_textureId, 0);
 }
 
-PassOwnPtr<ManagedTexture> ManagedTexture::steal()
+void ManagedTexture::releaseTexture()
 {
-    OwnPtr<ManagedTexture> texture = adoptPtr(new ManagedTexture(m_textureManager, m_token, m_size, m_format, m_textureId));
+    if (m_token)
+        m_textureManager->releaseToken(m_token);
     m_token = 0;
     m_size = IntSize();
     m_format = 0;
     m_textureId = 0;
-    return texture.release();
 }
-
 
 }
 

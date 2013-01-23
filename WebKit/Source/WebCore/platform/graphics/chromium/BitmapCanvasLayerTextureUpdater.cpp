@@ -59,6 +59,7 @@ PassRefPtr<BitmapCanvasLayerTextureUpdater> BitmapCanvasLayerTextureUpdater::cre
 BitmapCanvasLayerTextureUpdater::BitmapCanvasLayerTextureUpdater(PassOwnPtr<LayerPainterChromium> painter, bool useMapTexSubImage)
     : CanvasLayerTextureUpdater(painter)
     , m_texSubImage(useMapTexSubImage)
+    , m_downsamplingFactor(1)
 {
 }
 
@@ -78,31 +79,50 @@ LayerTextureUpdater::SampledTexelFormat BitmapCanvasLayerTextureUpdater::sampled
             LayerTextureUpdater::SampledTexelFormatRGBA : LayerTextureUpdater::SampledTexelFormatBGRA;
 }
 
-void BitmapCanvasLayerTextureUpdater::prepareToUpdate(const IntRect& contentRect, const IntSize& tileSize, int borderTexels, float contentsScale, IntRect* resultingOpaqueRect)
+void BitmapCanvasLayerTextureUpdater::prepareToUpdate(const IntRect& contentRect, const IntSize& tileSize, int borderTexels, float contentsScale, IntRect* resultingOpaqueRect, int downsamplingFactor)
 {
     m_texSubImage.setSubImageSize(tileSize);
 
     bool layerIsOpaque = m_canvas.opaque();
 
-    m_canvas.resize(contentRect.size());
+    IntSize downScaledSize(
+        ceilf(static_cast<float>(contentRect.width()) / downsamplingFactor),
+        ceilf(static_cast<float>(contentRect.height()) / downsamplingFactor));
+    m_downsamplingFactor = downsamplingFactor;
+    m_canvas.resize(downScaledSize);
+
     // Assumption: if a tiler is using border texels, then it is because the
     // layer is likely to be filtered or transformed. Because of it might be
     // transformed, draw the text in grayscale instead of subpixel antialiasing.
     PlatformCanvas::Painter::TextOption textOption =
         borderTexels ? PlatformCanvas::Painter::GrayscaleText : PlatformCanvas::Painter::SubpixelText;
     PlatformCanvas::Painter canvasPainter(&m_canvas, textOption);
+    canvasPainter.context()->scale(FloatSize(1.0 / downsamplingFactor, 1.0 / downsamplingFactor));
     paintContents(*canvasPainter.context(), contentRect, contentsScale);
 
-    if (!layerIsOpaque)
+    if (!layerIsOpaque) {
         *resultingOpaqueRect = canvasPainter.skiaContext()->opaqueRegion().asRect();
+        resultingOpaqueRect->scale(downsamplingFactor);
+    }
 }
 
 void BitmapCanvasLayerTextureUpdater::updateTextureRect(GraphicsContext3D* context, TextureAllocator* allocator, ManagedTexture* texture, const IntRect& sourceRect, const IntRect& destRect)
 {
     PlatformCanvas::AutoLocker locker(&m_canvas);
 
+    ASSERT((sourceRect.width() % m_downsamplingFactor) == 0);
+    ASSERT((sourceRect.height() % m_downsamplingFactor) == 0);
+    ASSERT((destRect.width() % m_downsamplingFactor) == 0);
+    ASSERT((destRect.height() % m_downsamplingFactor) == 0);
+
+    IntRect scaledContentRect(IntPoint(contentRect().x() / m_downsamplingFactor, contentRect().y() / m_downsamplingFactor), m_canvas.size());
+    IntRect scaledSourceRect(sourceRect);
+    IntRect scaledDestRect(destRect);
+    scaledSourceRect.scale(1.0 / m_downsamplingFactor);
+    scaledDestRect.scale(1.0 / m_downsamplingFactor);
+
     texture->bindTexture(context, allocator);
-    m_texSubImage.upload(locker.pixels(), contentRect(), sourceRect, destRect, texture->format(), context);
+    m_texSubImage.upload(locker.pixels(), scaledContentRect, scaledSourceRect, scaledDestRect, texture->format(), context);
 }
 
 void BitmapCanvasLayerTextureUpdater::setOpaque(bool opaque)

@@ -51,11 +51,11 @@ static int computeNumTiles(int maxTextureSize, int totalSize, int borderTexels)
     return totalSize > 0 ? numTiles : 0;
 }
 
-TilingData::TilingData(int maxTextureSize, int totalSizeX, int totalSizeY, bool hasBorderTexels)
+TilingData::TilingData(int maxTextureSize, int totalSizeX, int totalSizeY, int borderTexels)
     : m_maxTextureSize(maxTextureSize)
     , m_totalSizeX(totalSizeX)
     , m_totalSizeY(totalSizeY)
-    , m_borderTexels(hasBorderTexels ? 1 : 0)
+    , m_borderTexels(borderTexels)
 {
     recomputeNumTiles();
 }
@@ -73,9 +73,9 @@ void TilingData::setMaxTextureSize(int maxTextureSize)
     recomputeNumTiles();
 }
 
-void TilingData::setHasBorderTexels(bool hasBorderTexels)
+void TilingData::setBorderTexels(int borderTexels)
 {
-    m_borderTexels = hasBorderTexels ? 1 : 0;
+    m_borderTexels = borderTexels;
     recomputeNumTiles();
 }
 
@@ -144,13 +144,13 @@ IntRect TilingData::tileBoundsWithBorder(int tile) const
         int y2 = bounds.maxY();
 
         if (tileXIndex(tile) > 0)
-            x1--;
+            x1 -= m_borderTexels;
         if (tileXIndex(tile) < (numTilesX() - 1))
-            x2++;
+            x2 += m_borderTexels;
         if (tileYIndex(tile) > 0)
-            y1--;
+            y1 -= m_borderTexels;
         if (tileYIndex(tile) < (numTilesY() - 1))
-            y2++;
+            y2 += m_borderTexels;
 
         bounds = IntRect(x1, y1, x2 - x1, y2 - y1);
     }

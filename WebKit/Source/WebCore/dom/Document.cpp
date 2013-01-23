@@ -110,6 +110,7 @@
 #include "NewXMLDocumentParser.h"
 #include "NodeFilter.h"
 #include "NodeIterator.h"
+#include "NodeRareData.h"
 #include "NodeWithIndex.h"
 #include "Page.h"
 #include "PageGroup.h"
@@ -635,14 +636,14 @@ void Document::removedLastRef()
         m_fullScreenElement = 0;
 #endif
 
+        detachParser();
+
         // removeAllChildren() doesn't always unregister IDs,
         // so tear down scope information upfront to avoid having stale references in the map.
         destroyTreeScopeData();
         removeAllChildren();
 
         m_markers->detach();
-
-        detachParser();
 
         m_cssCanvasElements.clear();
 
@@ -977,6 +978,13 @@ PassRefPtr<Node> Document::adoptNode(PassRefPtr<Node> source, ExceptionCode& ec)
         break;
     }       
     default:
+        if (source->isShadowRoot()) {
+            // ShadowRoot cannot disconnect itself from the host node.
+            ec = HIERARCHY_REQUEST_ERR;
+            return 0;
+        }
+
+        // FIXME: What about <frame> and <object>?
         if (source->hasTagName(iframeTag)) {
             HTMLIFrameElement* iframe = static_cast<HTMLIFrameElement*>(source.get());
             if (frame() && frame()->tree()->isDescendantOf(iframe->contentFrame())) {
@@ -3658,6 +3666,23 @@ void Document::setCSSTarget(Element* n)
         n->setNeedsStyleRecalc();
 }
 
+void Document::registerDynamicSubtreeNodeList(DynamicSubtreeNodeList* list)
+{
+    m_listsInvalidatedAtDocument.add(list);
+}
+
+void Document::unregisterDynamicSubtreeNodeList(DynamicSubtreeNodeList* list)
+{
+    m_listsInvalidatedAtDocument.remove(list);
+}
+
+void Document::clearNodeListCaches()
+{
+    HashSet<DynamicSubtreeNodeList*>::iterator end = m_listsInvalidatedAtDocument.end();
+    for (HashSet<DynamicSubtreeNodeList*>::iterator it = m_listsInvalidatedAtDocument.begin(); it != end; ++it)
+        (*it)->invalidateCache();
+}
+
 void Document::attachNodeIterator(NodeIterator* ni)
 {
     m_nodeIterators.add(ni);
@@ -5933,32 +5958,11 @@ DocumentLoader* Document::loader() const
 #if ENABLE(MICRODATA)
 PassRefPtr<NodeList> Document::getItems(const String& typeNames)
 {
-    NodeListsNodeData* nodeLists = ensureRareData()->ensureNodeLists(this);
-
     // Since documet.getItem() is allowed for microdata, typeNames will be null string.
     // In this case we need to create an unique string identifier to map such request in the cache.
     String localTypeNames = typeNames.isNull() ? String("http://webkit.org/microdata/undefinedItemType") : typeNames;
 
-    pair<NodeListsNodeData::MicroDataItemListCache::iterator, bool> result = nodeLists->m_microDataItemListCache.add(localTypeNames, 0);
-    if (!result.second)
-        return PassRefPtr<NodeList>(result.first->second);
-
-    RefPtr<MicroDataItemList> list = MicroDataItemList::create(this, typeNames);
-    result.first->second = list.get();
-    return list.release();
-}
-
-void Document::removeCachedMicroDataItemList(MicroDataItemList* list, const String& typeNames)
-{
-    ASSERT(rareData());
-    ASSERT(rareData()->nodeLists());
-    ASSERT_UNUSED(list, list->hasOwnCaches());
-
-    NodeListsNodeData* data = rareData()->nodeLists();
-
-    String localTypeNames = typeNames.isNull() ? String("http://webkit.org/microdata/undefinedItemType") : typeNames;
-    ASSERT_UNUSED(list, list == data->m_microDataItemListCache.get(localTypeNames));
-    data->m_microDataItemListCache.remove(localTypeNames);
+    return ensureRareData()->ensureNodeLists(this)->addCacheWithName<MicroDataItemList>(this, DynamicNodeList::MicroDataItemListType, localTypeNames);
 }
 #endif
 

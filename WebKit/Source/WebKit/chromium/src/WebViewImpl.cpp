@@ -3570,6 +3570,16 @@ void WebViewImpl::setIsAcceleratedCompositingActive(bool active)
         ccSettings.screenPixelDensity = (float) (client()->getDeviceDpi() / 160.0f);
         ccSettings.threadedAnimationEnabled = page()->settings()->threadedAnimationEnabled();
 
+        // FIXME: Is there a better value I can query for the viewport size this early?
+        // These are all incorrect or zero:
+        // - this->size()
+        // - client()->getDeviceRect()
+        // - page()->settings()->deviceWidth()
+        // - page()->chrome()->windowRect().width()
+        // - page()->chrome()->client()->windowRect().width()
+        // - page()->mainFrame()->view()->visibleContentRect().width()
+        ccSettings.viewportSize = PlatformSupport::screenAvailableRect(page()->mainFrame()->view()).size();
+
         m_nonCompositedContentHost = NonCompositedContentHost::create(WebViewImplContentPainter::create(this));
         m_nonCompositedContentHost->setShowDebugBorders(page()->settings()->showDebugBorders());
 
@@ -3618,8 +3628,10 @@ void WebViewImpl::applyScrollAndScale(const IntSize& scrollDelta, float pageScal
 
 #if OS(ANDROID)
     if (m_nonCompositedContentHost) {
-           LayerChromium* layer = m_nonCompositedContentHost->topLevelRootLayer()->platformLayer();
-           layer->setScrollPrediction(layer->scrollPrediction() + scrollDelta);
+        LayerChromium* layer = m_nonCompositedContentHost->topLevelRootLayer()->platformLayer();
+        layer->setIsRootScrollingLayer(true);
+        layer->setScrollPrediction(layer->scrollPrediction() + scrollDelta);
+        layer->setPageScalePrediction(layer->pageScalePrediction() * pageScaleDelta);
     }
 #endif
 

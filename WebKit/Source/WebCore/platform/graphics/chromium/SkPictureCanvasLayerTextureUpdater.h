@@ -51,7 +51,7 @@ public:
 protected:
     explicit SkPictureCanvasLayerTextureUpdater(PassOwnPtr<LayerPainterChromium>);
 
-    virtual void prepareToUpdate(const IntRect& contentRect, const IntSize& tileSize, int borderTexels, float contentsScale, IntRect* resultingOpaqueRect);
+    virtual void prepareToUpdate(const IntRect& contentRect, const IntSize& tileSize, int borderTexels, float contentsScale, IntRect* resultingOpaqueRect, int downsamplingFactor);
     void drawPicture(SkCanvas*);
 
     virtual void setOpaque(bool);

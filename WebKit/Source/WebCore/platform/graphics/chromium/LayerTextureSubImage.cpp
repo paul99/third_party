@@ -91,10 +91,20 @@ void LayerTextureSubImage::uploadWithTexSubImage(const uint8_t* image, const Int
 }
 
 void LayerTextureSubImage::uploadWithMapTexSubImage(const uint8_t* image, const IntRect& imageRect,
-                                                    const IntRect& sourceRect, const IntRect& destRect,
+                                                    const IntRect& source, const IntRect& dest,
                                                     GC3Denum format, GraphicsContext3D* context)
 {
     TRACE_EVENT("LayerTextureSubImage::uploadWithMapTexSubImage", this, 0);
+
+    // We should still always protect against out-of-bounds crashes.
+    // - sourceRect must be fully contained in imageRect, and
+    // - destRect dimensions must not exceed sourceRect dimensions.
+    IntRect sourceRect = source;
+    ASSERT(imageRect.contains(sourceRect));
+    sourceRect.intersect(imageRect);
+    IntRect destRect = dest;
+    destRect.setSize(sourceRect.size());
+
     // Offset from image-rect to source-rect.
     IntPoint offset(sourceRect.x() - imageRect.x(), sourceRect.y() - imageRect.y());
 

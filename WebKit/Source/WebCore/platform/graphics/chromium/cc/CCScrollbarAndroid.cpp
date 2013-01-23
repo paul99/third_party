@@ -38,10 +38,29 @@
 
 namespace WebCore {
 
-CCScrollbarAndroid::CCScrollbarAndroid(const CCLayerImpl* scrollLayer, const CCLayerImpl* drawLayer)
-    : m_lastAwakenTime(-1.0)
+struct ScrollbarVertex {
+    float x, y, z, w;
+};
+
+static const size_t kScrollbarVertexCount = 24;
+
+CCScrollbarAndroid::CCScrollbarAndroid(PassRefPtr<GraphicsContext3D> context,
+                                       const CCLayerImpl* scrollLayer,
+                                       const CCLayerImpl* drawLayer)
+    : m_context(context)
+    , m_lastAwakenTime(-1.0)
     , m_lastScrollbarRect(computeScrollbarRect(scrollLayer, drawLayer))
+    , m_vertexBuffer(m_context->createBuffer())
 {
+    GLC(m_context.get(), m_context->bindBuffer(GraphicsContext3D::ARRAY_BUFFER, m_vertexBuffer));
+    GLC(m_context.get(), m_context->bufferData(GraphicsContext3D::ARRAY_BUFFER,
+                                               sizeof(ScrollbarVertex) * kScrollbarVertexCount,
+                                               0, GraphicsContext3D::STREAM_DRAW));
+}
+
+CCScrollbarAndroid::~CCScrollbarAndroid()
+{
+    GLC(m_context.get(), m_context->deleteBuffer(m_vertexBuffer));
 }
 
 void CCScrollbarAndroid::draw(LayerRendererChromium* layerRenderer, const TransformationMatrix& transform, const IntSize& bounds, double timestamp)
@@ -50,17 +69,15 @@ void CCScrollbarAndroid::draw(LayerRendererChromium* layerRenderer, const Transf
     if (!opacity)
         return;
 
-    GraphicsContext3D* context = layerRenderer->context();
-
     const LayerChromium::BorderProgram* program = layerRenderer->borderProgram();
-    GLC(context, context->useProgram(program->program()));
+    GLC(m_context.get(), m_context->useProgram(program->program()));
 
     float matrix[16];
     layerRenderer->toGLMatrix(matrix, transform);
-    GLC(context, context->uniformMatrix4fv(program->vertexShader().matrixLocation(), false, matrix, 1));
+    GLC(m_context.get(), m_context->uniformMatrix4fv(program->vertexShader().matrixLocation(), false, matrix, 1));
 
-    GLC(context, context->enable(GraphicsContext3D::BLEND));
-    GLC(context, context->blendFunc(GraphicsContext3D::ONE, GraphicsContext3D::ONE_MINUS_SRC_ALPHA));
+    GLC(m_context.get(), m_context->enable(GraphicsContext3D::BLEND));
+    GLC(m_context.get(), m_context->blendFunc(GraphicsContext3D::ONE, GraphicsContext3D::ONE_MINUS_SRC_ALPHA));
 
     const int w = bounds.width();
     const int h = bounds.height();
@@ -86,7 +103,7 @@ void CCScrollbarAndroid::draw(LayerRendererChromium* layerRenderer, const Transf
     vScrollbar.setX(w - vScrollbarMarginR - vScrollbarThickness);
     vScrollbar.setWidth(vScrollbarThickness);
 
-    float vertices[24][4] = {                                          // draw 1 bar in 3 rects for smooth edge
+    ScrollbarVertex vertices[kScrollbarVertexCount] = {                 // draw 1 bar in 3 rects for smooth edge
          {hScrollbar.x()    + 1.0, hScrollbar.maxY()      , 0.0, 1.0},  //A
          {hScrollbar.maxX() - 1.0, hScrollbar.maxY()      , 0.0, 1.0},  //                           F|D||.
          {hScrollbar.maxX() - 1.0, hScrollbar.y()         , 0.0, 1.0},  //                           -####-
@@ -112,26 +129,24 @@ void CCScrollbarAndroid::draw(LayerRendererChromium* layerRenderer, const Transf
          {vScrollbar.maxX()      , vScrollbar.y()         , 0.0, 1.0},  //   .||||||||||||||||||||.  .||||.
          {vScrollbar.x()         , vScrollbar.y()         , 0.0, 1.0}}; //
 
-    Platform3DObject vertexBuffer = context->createBuffer();
-    GLC(context, context->bindBuffer(GraphicsContext3D::ARRAY_BUFFER, vertexBuffer));
-    GLC(context, context->bufferData(GraphicsContext3D::ARRAY_BUFFER, sizeof(float[24][4]), vertices, GraphicsContext3D::STREAM_DRAW));
-    GLC(context, context->vertexAttribPointer(0, 4, GraphicsContext3D::FLOAT, false, 0, 0));
-    GLC(context, context->enableVertexAttribArray(0));
+    GLC(m_context.get(), m_context->bindBuffer(GraphicsContext3D::ARRAY_BUFFER, m_vertexBuffer));
+    GLC(m_context.get(), m_context->bufferSubData(GraphicsContext3D::ARRAY_BUFFER, 0, sizeof(vertices), vertices));
+    GLC(m_context.get(), m_context->vertexAttribPointer(0, 4, GraphicsContext3D::FLOAT, false, 0, 0));
+    GLC(m_context.get(), m_context->enableVertexAttribArray(0));
 
-    GLC(context, context->uniform4f(program->fragmentShader().colorLocation(), 0.5, 0.5, 0.5, 0.3 * opacity));
-    GLC(context, context->drawArrays(GraphicsContext3D::TRIANGLE_FAN, 0, 4));
-    GLC(context, context->drawArrays(GraphicsContext3D::TRIANGLE_FAN, 4, 4));
-    GLC(context, context->drawArrays(GraphicsContext3D::TRIANGLE_FAN, 12, 4));
-    GLC(context, context->drawArrays(GraphicsContext3D::TRIANGLE_FAN, 16, 4));
+    GLC(m_context.get(), m_context->uniform4f(program->fragmentShader().colorLocation(), 0.5, 0.5, 0.5, 0.3 * opacity));
+    GLC(m_context.get(), m_context->drawArrays(GraphicsContext3D::TRIANGLE_FAN, 0, 4));
+    GLC(m_context.get(), m_context->drawArrays(GraphicsContext3D::TRIANGLE_FAN, 4, 4));
+    GLC(m_context.get(), m_context->drawArrays(GraphicsContext3D::TRIANGLE_FAN, 12, 4));
+    GLC(m_context.get(), m_context->drawArrays(GraphicsContext3D::TRIANGLE_FAN, 16, 4));
 
-    GLC(context, context->uniform4f(program->fragmentShader().colorLocation(), 0.5, 0.5, 0.5, 0.06 * opacity));
-    GLC(context, context->drawArrays(GraphicsContext3D::TRIANGLE_FAN, 8, 4));
-    GLC(context, context->drawArrays(GraphicsContext3D::TRIANGLE_FAN, 20, 4));
+    GLC(m_context.get(), m_context->uniform4f(program->fragmentShader().colorLocation(), 0.5, 0.5, 0.5, 0.06 * opacity));
+    GLC(m_context.get(), m_context->drawArrays(GraphicsContext3D::TRIANGLE_FAN, 8, 4));
+    GLC(m_context.get(), m_context->drawArrays(GraphicsContext3D::TRIANGLE_FAN, 20, 4));
 
-    GLC(context, context->bindBuffer(GraphicsContext3D::ARRAY_BUFFER, 0));
-    GLC(context, context->deleteBuffer(vertexBuffer));
+    GLC(m_context.get(), m_context->bindBuffer(GraphicsContext3D::ARRAY_BUFFER, 0));
 
-    GLC(context, context->disable(GraphicsContext3D::BLEND));
+    GLC(m_context.get(), m_context->disable(GraphicsContext3D::BLEND));
 }
 
 bool CCScrollbarAndroid::drawScrollbarOverlay(LayerRendererChromium* layerRenderer, double timestamp)
@@ -139,12 +154,12 @@ bool CCScrollbarAndroid::drawScrollbarOverlay(LayerRendererChromium* layerRender
     // FIXME: to support sublayers after scrollable layer for overflow has been landed.
     CCLayerImpl* scrollLayer = layerRenderer->scrollLayer();
     CCLayerImpl* drawLayer = scrollLayer ? scrollLayer->parent() : 0;
-    if (!scrollLayer || !drawLayer)
+    if (!scrollLayer || !drawLayer || !layerRenderer->context())
         return false;
 
     // the creating should eventually go to the TreeSynchronizer maybe?
     if (!drawLayer->scrollbarAndroid())
-        drawLayer->setScrollbarAndroid(adoptPtr(new CCScrollbarAndroid(scrollLayer, drawLayer)));
+        drawLayer->setScrollbarAndroid(adoptPtr(new CCScrollbarAndroid(layerRenderer->context(), scrollLayer, drawLayer)));
 
     // and the updating should go to CCLayerImpl maybe?
     CCScrollbarAndroid *scrollbar = drawLayer->scrollbarAndroid();
@@ -154,6 +169,16 @@ bool CCScrollbarAndroid::drawScrollbarOverlay(LayerRendererChromium* layerRender
     scrollbar->draw(layerRenderer, layerRenderer->projectionMatrix() * drawLayer->screenSpaceTransform(), drawLayer->bounds(), timestamp);
 
     return scrollbar->needsAnimation(timestamp);
+}
+
+void CCScrollbarAndroid::resetScrollbarOverlay(LayerRendererChromium* layerRenderer)
+{
+    CCLayerImpl* scrollLayer = layerRenderer->scrollLayer();
+    CCLayerImpl* drawLayer = scrollLayer ? scrollLayer->parent() : 0;
+    if (!scrollLayer || !drawLayer)
+        return;
+
+    drawLayer->setScrollbarAndroid(nullptr);
 }
 
 float CCScrollbarAndroid::opacityAtTime(double timestamp) const

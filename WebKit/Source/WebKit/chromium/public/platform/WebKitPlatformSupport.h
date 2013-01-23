@@ -189,6 +189,8 @@ public:
     // Delta of memory usage growth (vs. last actualMemoryUsageMB()) to force GC when memory usage is high.
     virtual size_t highUsageDeltaMB() { return 128; }
 
+    // Maximum memory for textures
+    virtual size_t maxTextureMemoryUsageMB() { return 128; }
 
     // Threads -------------------------------------------------------
 

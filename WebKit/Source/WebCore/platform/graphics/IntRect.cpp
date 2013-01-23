@@ -119,10 +119,16 @@ void IntRect::uniteIfNonZero(const IntRect& other)
 
 void IntRect::scale(float s)
 {
-    m_location.setX((int)(x() * s));
-    m_location.setY((int)(y() * s));
-    m_size.setWidth((int)(width() * s));
-    m_size.setHeight((int)(height() * s));
+    float maximumScale = s;
+    if (width())
+        maximumScale = min(maximumScale, INT_MAX / static_cast<float>(width()));
+    if (height())
+        maximumScale = min(maximumScale, INT_MAX / static_cast<float>(height()));
+
+    m_location.setX((int)(x() * maximumScale));
+    m_location.setY((int)(y() * maximumScale));
+    m_size.setWidth((int)(width() * maximumScale));
+    m_size.setHeight((int)(height() * maximumScale));
 }
 
 IntRect unionRect(const Vector<IntRect>& rects)

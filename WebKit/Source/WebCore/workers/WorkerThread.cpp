@@ -141,6 +141,8 @@ void* WorkerThread::workerThread()
         }
     }
 #if PLATFORM(CHROMIUM)
+    // The corresponding call to didStopWorkerRunLoop is in
+    // ~WorkerScriptController.
     PlatformSupport::didStartWorkerRunLoop(&m_runLoop);
 #endif
 
@@ -155,10 +157,6 @@ void* WorkerThread::workerThread()
     m_startupData.clear();
 
     runEventLoop();
-
-#if PLATFORM(CHROMIUM)
-    PlatformSupport::didStopWorkerRunLoop(&m_runLoop);
-#endif
 
     ThreadIdentifier threadID = m_threadID;
 

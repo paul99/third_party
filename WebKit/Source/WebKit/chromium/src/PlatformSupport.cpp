@@ -1052,6 +1052,11 @@ int PlatformSupport::highUsageDeltaMB()
     return static_cast<int>(webKitPlatformSupport()->highUsageDeltaMB());
 }
 
+int PlatformSupport::maxTextureMemoryUsageMB()
+{
+    return static_cast<int>(webKitPlatformSupport()->maxTextureMemoryUsageMB());
+}
+
 int PlatformSupport::screenHorizontalDPI(Widget* widget)
 {
     WebWidgetClient* client = toWebWidgetClient(widget);

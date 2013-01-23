@@ -29,9 +29,6 @@
 #
 
 {
-  'target_defaults': {
-    'cflags_cc!': ['-Werror'],
-  },
   'includes': [
     '../../WebKit/chromium/WinPrecompile.gypi',
     '../../WebKit/chromium/features.gypi',

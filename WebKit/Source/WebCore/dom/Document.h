@@ -797,6 +797,10 @@ public:
     bool isPendingStyleRecalc() const;
     void styleRecalcTimerFired(Timer<Document>*);
 
+    void registerDynamicSubtreeNodeList(DynamicSubtreeNodeList*);
+    void unregisterDynamicSubtreeNodeList(DynamicSubtreeNodeList*);
+    void clearNodeListCaches();
+
     void attachNodeIterator(NodeIterator*);
     void detachNodeIterator(NodeIterator*);
     void moveNodeIteratorsToNewDocument(Node*, Document*);
@@ -1194,7 +1198,6 @@ public:
 
 #if ENABLE(MICRODATA)
     PassRefPtr<NodeList> getItems(const String& typeNames);
-    void removeCachedMicroDataItemList(MicroDataItemList*, const String&);
 #endif
     
     bool isInDocumentWrite() { return m_writeRecursionDepth > 0; }
@@ -1453,6 +1456,7 @@ private:
 
     OwnPtr<HTMLCollection> m_collections[NumUnnamedDocumentCachedTypes];
     OwnPtr<HTMLAllCollection> m_allCollection;
+    HashSet<DynamicSubtreeNodeList*> m_listsInvalidatedAtDocument;
 
     typedef HashMap<AtomicStringImpl*, OwnPtr<HTMLNameCollection> > NamedCollectionMap;
     NamedCollectionMap m_documentNamedItemCollections;

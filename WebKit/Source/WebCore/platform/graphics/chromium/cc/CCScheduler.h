@@ -39,10 +39,12 @@ class CCSchedulerClient {
 public:
     virtual bool canDraw() = 0;
     virtual bool hasMoreResourceUpdates() const = 0;
+    virtual bool hasMorePreallocations() const = 0;
 
     virtual void scheduledActionBeginFrame() = 0;
     virtual void scheduledActionDrawAndSwap() = 0;
     virtual void scheduledActionUpdateMoreResources() = 0;
+    virtual void scheduledActionPreallocateMoreResources() = 0;
     virtual void scheduledActionCommit() = 0;
 
 protected:
@@ -73,6 +75,7 @@ public:
 
     bool commitPending() const { return m_stateMachine.commitPending(); }
     bool redrawPending() const { return m_stateMachine.redrawPending(); }
+    bool redrawPendingAfterDraw() const { return m_setNeedsRedrawAfterDraw; }
 
     // CCFrameRateControllerClient implementation
     virtual void beginFrame();
@@ -87,6 +90,10 @@ private:
     OwnPtr<CCFrameRateController> m_frameRateController;
     CCSchedulerStateMachine m_stateMachine;
     bool m_updateMoreResourcesPending;
+
+    bool m_isInDraw;
+    bool m_setNeedsCommitAfterDraw;
+    bool m_setNeedsRedrawAfterDraw;
 };
 
 }

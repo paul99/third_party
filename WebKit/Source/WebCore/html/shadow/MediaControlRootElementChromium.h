@@ -65,7 +65,7 @@ public:
     static PassRefPtr<MediaControlRootElementChromium> create(Document*);
 
     // MediaControls implementation.
-    void setMediaController(MediaControllerInterface*);
+    virtual void setMediaController(MediaControllerInterface*);
 
     void show();
     void hide();
@@ -74,9 +74,9 @@ public:
 
     void reset();
 
-    void playbackProgressed();
-    void playbackStarted();
-    void playbackStopped();
+    virtual void playbackProgressed();
+    virtual void playbackStarted();
+    virtual void playbackStopped();
 
     void changedMute();
     void changedVolume();
@@ -103,9 +103,13 @@ public:
 
     virtual bool shouldHideControls();
 
-private:
-    MediaControlRootElementChromium(Document*);
+protected:
+    explicit MediaControlRootElementChromium(Document*);
 
+    // Returns true if successful, otherwise return false.
+    bool initializeControls(Document*);
+
+private:
     virtual void defaultEventHandler(Event*);
 
     virtual const AtomicString& shadowPseudoId() const;
