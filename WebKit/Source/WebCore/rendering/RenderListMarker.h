@@ -45,6 +45,8 @@ public:
 
     bool isInside() const;
 
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
+
 private:
     virtual const char* renderName() const { return "RenderListMarker"; }
 
@@ -58,14 +60,14 @@ private:
 
     virtual InlineBox* createInlineBox();
 
-    virtual int lineHeight(bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const;
+    virtual LayoutUnit lineHeight(bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const;
     virtual int baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const;
 
     bool isImage() const;
     bool isText() const { return !isImage(); }
 
     virtual void setSelectionState(SelectionState);
-    virtual LayoutRect selectionRectForRepaint(RenderBoxModelObject* repaintContainer, bool clipToVisibleContent = true);
+    virtual LayoutRect selectionRectForRepaint(const RenderLayerModelObject* repaintContainer, bool clipToVisibleContent = true) OVERRIDE;
     virtual bool canBeSelectionLeaf() const { return true; }
 
     void updateMargins();
@@ -74,7 +76,7 @@ private:
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
 
     IntRect getRelativeMarkerRect();
-    IntRect localSelectionRect();
+    LayoutRect localSelectionRect();
 
     String m_text;
     RefPtr<StyleImage> m_image;

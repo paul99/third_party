@@ -24,11 +24,12 @@
 #include "config.h"
 #include "V8Document.h"
 
+#include "BindingState.h"
 #include "DOMWindow.h"
 #include "Frame.h"
+#include "Location.h"
 #include "V8Binding.h"
 #include "V8Location.h"
-#include "V8Proxy.h"
 
 namespace WebCore {
 
@@ -36,10 +37,10 @@ v8::Handle<v8::Value> V8Document::locationAccessorGetter(v8::Local<v8::String> n
 {
     Document* document = V8Document::toNative(info.Holder());
     if (!document->frame())
-        return v8::Null();
+        return v8Null(info.GetIsolate());
 
-    DOMWindow* window = document->frame()->domWindow();
-    return toV8(window->location());
+    DOMWindow* window = document->domWindow();
+    return toV8(window->location(), info.Holder(), info.GetIsolate());
 }
 
 void V8Document::locationAccessorSetter(v8::Local<v8::String> name, v8::Local<v8::Value> value, const v8::AccessorInfo& info)
@@ -48,9 +49,19 @@ void V8Document::locationAccessorSetter(v8::Local<v8::String> name, v8::Local<v8
     if (!document->frame())
         return;
 
-    DOMWindow* window = document->frame()->domWindow();
-    // setLocation does security checks. // XXXMB- verify!
-    V8DOMWindowShell::setLocation(window, toWebCoreString(value));
+    BindingState* state = BindingState::instance();
+
+    DOMWindow* active = activeDOMWindow(state);
+    if (!active)
+        return;
+
+    DOMWindow* first = firstDOMWindow(state);
+    if (!first)
+        return;
+
+    DOMWindow* window = document->domWindow();
+    if (Location* location = window->location())
+        location->setHref(toWebCoreString(value), active, first);
 }
 
 } // namespace WebCore

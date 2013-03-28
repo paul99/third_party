@@ -26,16 +26,14 @@
       'target_name': 'v8-i18n',
       'type': 'static_library',
       'sources': [
+	'../src/break-iterator.cc',
+	'../src/break-iterator.h',
         '../include/extension.h',
-        '../src/break-iterator.cc',
-        '../src/break-iterator.h',
         '../src/collator.cc',
         '../src/collator.h',
-        '../src/datetime-format.cc',
-        '../src/datetime-format.h',
+        '../src/date-format.cc',
+        '../src/date-format.h',
         '../src/extension.cc',
-        '../src/language-matcher.cc',
-        '../src/language-matcher.h',
         '../src/locale.cc',
         '../src/locale.h',
         '../src/natives.h',
@@ -48,11 +46,10 @@
       'include_dirs': [
         '..',
         '<(v8_path)',
-        '<(icu_path)/public/common',
       ],
       'dependencies': [
-        '<(v8_path)/v8/tools/gyp/v8.gyp:v8',
         '<(icu_path)/icu.gyp:*',
+        '<(v8_path)/v8/tools/gyp/v8.gyp:v8',
         'api2c#host',
       ],
       'direct_dependent_settings': {
@@ -67,7 +64,16 @@
       'toolsets': ['host'],
       'variables': {
         'js_files': [
-          '../src/api.js'
+	  '../src/header.js',
+	  '../src/globals.js',
+	  '../src/locale.js',
+	  '../src/collator.js',
+	  '../src/number-format.js',
+	  '../src/date-format.js',
+	  '../src/break-iterator.js',
+	  '../src/utils.js',
+          '../src/overrides.js',
+	  '../src/footer.js'
         ],
       },
       'actions': [
@@ -79,6 +85,10 @@
           ],
           'outputs': [
             '<(SHARED_INTERMEDIATE_DIR)/v8-i18n-js.cc',
+            # Helps debugging when v8 complains about exact line number.
+            # Don't want to put it in ../src because build bots may have src
+            # as read-only.
+            '<(SHARED_INTERMEDIATE_DIR)/combined.js'
           ],
           'action': [
             'python',

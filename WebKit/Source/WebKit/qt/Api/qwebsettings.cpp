@@ -20,47 +20,41 @@
 #include "config.h"
 #include "qwebsettings.h"
 
-#include "qwebpage.h"
-#include "qwebpage_p.h"
 #include "qwebplugindatabase_p.h"
 
-#include "AbstractDatabase.h"
-#include "MemoryCache.h"
+#include "ApplicationCacheStorage.h"
 #include "CrossOriginPreflightResultCache.h"
+#include "DatabaseManager.h"
+#include "FileSystem.h"
 #include "FontCache.h"
+#include "IconDatabase.h"
+#include "Image.h"
 #if ENABLE(ICONDATABASE)
 #include "IconDatabaseClientQt.h"
 #endif
 #include "InitWebCoreQt.h"
+#include "IntSize.h"
+#include "KURL.h"
+#include "MemoryCache.h"
+#include "NetworkStateNotifier.h"
 #include "Page.h"
 #include "PageCache.h"
-#include "Settings.h"
-#include "KURL.h"
-#include "PlatformString.h"
-#include "IconDatabase.h"
 #include "PluginDatabase.h"
-#include "Image.h"
-#include "IntSize.h"
-#include "ApplicationCacheStorage.h"
-#include "DatabaseTracker.h"
-#include "FileSystem.h"
-
-#include <QApplication>
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-#include <QStandardPaths>
-#else
-#include <QDesktopServices>
-#endif
+#include "RuntimeEnabledFeatures.h"
+#include "Settings.h"
 #include <QDir>
+#include <QFileInfo>
+#include <QFont>
+#include <QGuiApplication>
 #include <QHash>
 #include <QSharedData>
+#include <QStandardPaths>
 #include <QUrl>
-#include <QFileInfo>
-#include <QStyle>
+#include <wtf/text/WTFString.h>
 
-#include "NetworkStateNotifier.h"
 
-void QWEBKIT_EXPORT qt_networkAccessAllowed(bool isAllowed)
+
+QWEBKIT_EXPORT void qt_networkAccessAllowed(bool isAllowed)
 {
 #ifndef QT_NO_BEARERMANAGEMENT
     WebCore::networkStateNotifier().setNetworkAccessAllowed(isAllowed);
@@ -82,9 +76,7 @@ public:
     QString localStoragePath;
     QString offlineWebApplicationCachePath;
     qint64 offlineStorageDefaultQuota;
-#if QT_VERSION >= QT_VERSION_CHECK(4, 8, 0)
     QWebSettings::ThirdPartyCookiePolicy thirdPartyCookiePolicy;
-#endif
     void apply();
     WebCore::Settings* settings;
 };
@@ -156,20 +148,29 @@ void QWebSettingsPrivate::apply()
         settings->setAcceleratedCompositingEnabled(value);
         settings->setAcceleratedCompositingFor3DTransformsEnabled(value);
         settings->setAcceleratedCompositingForAnimationEnabled(value);
-#if USE(TEXTURE_MAPPER)
         settings->setAcceleratedCompositingForVideoEnabled(false);
         settings->setAcceleratedCompositingForPluginsEnabled(false);
-#endif
 #endif
 #if ENABLE(WEBGL)
         value = attributes.value(QWebSettings::WebGLEnabled,
                                  global->attributes.value(QWebSettings::WebGLEnabled));
 
         settings->setWebGLEnabled(value);
+#if ENABLE(CSS_SHADERS)
+        // For now, enable CSS shaders when WebGL is enabled.
+        settings->setCSSCustomFilterEnabled(value);
+#endif
 #if USE(ACCELERATED_COMPOSITING)
         settings->setAcceleratedCompositingForCanvasEnabled(value);
 #endif
 #endif
+
+        value = attributes.value(QWebSettings::CSSRegionsEnabled,
+                                 global->attributes.value(QWebSettings::CSSRegionsEnabled));
+        WebCore::RuntimeEnabledFeatures::setCSSRegionsEnabled(value);
+        value = attributes.value(QWebSettings::CSSGridLayoutEnabled,
+                                 global->attributes.value(QWebSettings::CSSGridLayoutEnabled));
+        settings->setCSSGridLayoutEnabled(value);
 
         value = attributes.value(QWebSettings::HyperlinkAuditingEnabled,
                                  global->attributes.value(QWebSettings::HyperlinkAuditingEnabled));
@@ -229,7 +230,7 @@ void QWebSettingsPrivate::apply()
 #if ENABLE(SQL_DATABASE)
         value = attributes.value(QWebSettings::OfflineStorageDatabaseEnabled,
                                       global->attributes.value(QWebSettings::OfflineStorageDatabaseEnabled));
-        WebCore::AbstractDatabase::setIsAvailable(value);
+        WebCore::DatabaseManager::manager().setIsAvailable(value);
 #endif
 
         value = attributes.value(QWebSettings::OfflineWebApplicationCacheEnabled,
@@ -257,6 +258,20 @@ void QWebSettingsPrivate::apply()
                                       global->attributes.value(QWebSettings::TiledBackingStoreEnabled));
         settings->setTiledBackingStoreEnabled(value);
 #endif
+
+#if ENABLE(SMOOTH_SCROLLING)
+        value = attributes.value(QWebSettings::ScrollAnimatorEnabled,
+                                      global->attributes.value(QWebSettings::ScrollAnimatorEnabled));
+        settings->setEnableScrollAnimator(value);
+#endif
+
+        value = attributes.value(QWebSettings::CaretBrowsingEnabled,
+                                      global->attributes.value(QWebSettings::CaretBrowsingEnabled));
+        settings->setCaretBrowsingEnabled(value);
+
+        value = attributes.value(QWebSettings::NotificationsEnabled,
+                                      global->attributes.value(QWebSettings::NotificationsEnabled));
+        settings->setNotificationsEnabled(value);
 
         value = attributes.value(QWebSettings::SiteSpecificQuirksEnabled,
                                       global->attributes.value(QWebSettings::SiteSpecificQuirksEnabled));
@@ -360,7 +375,6 @@ QWebSettings* QWebSettings::globalSettings()
     \value DefaultFixedFontSize The default font size for fixed-pitch text.
 */
 
-#if QT_VERSION >= QT_VERSION_CHECK(4, 8, 0)
 /*!
     \enum QWebSettings::ThirdPartyCookiePolicy
 
@@ -375,7 +389,6 @@ QWebSettings* QWebSettings::globalSettings()
 
     \since QtWebKit 2,3
 */
-#endif
 
 /*!
     \enum QWebSettings::WebGraphic
@@ -438,11 +451,13 @@ QWebSettings* QWebSettings::globalSettings()
         web application cache feature is enabled or not. This is disabled by default.
     \value LocalStorageEnabled Specifies whether support for the HTML 5
         local storage feature is enabled or not. This is disabled by default.
+        (This value was introduced in 4.6.)
     \value LocalStorageDatabaseEnabled \e{This enum value is deprecated.} Use
         QWebSettings::LocalStorageEnabled instead.
     \value LocalContentCanAccessRemoteUrls Specifies whether locally loaded documents are
         allowed to access remote urls. This is disabled by default. For more information
         about security origins and local vs. remote content see QWebSecurityOrigin.
+        (This value was introduced in 4.6.)
     \value LocalContentCanAccessFileUrls Specifies whether locally loaded documents are
         allowed to access other local urls. This is enabled by default. For more information
         about security origins and local vs. remote content see QWebSecurityOrigin.
@@ -470,6 +485,10 @@ QWebSettings* QWebSettings::globalSettings()
         This is disabled by default.
     \value SiteSpecificQuirksEnabled This setting enables WebKit's workaround for broken sites. It is
         enabled by default.
+    \value ScrollAnimatorEnabled This setting enables animated scrolling. It is disabled by default.
+    \value CaretBrowsingEnabled This setting enables caret browsing. It is disabled by default.
+    \value NotificationsEnabled Specifies whether support for the HTML 5 web notifications is enabled
+        or not. This is enabled by default.
 */
 
 /*!
@@ -514,16 +533,19 @@ QWebSettings::QWebSettings()
     d->attributes.insert(QWebSettings::LocalContentCanAccessRemoteUrls, false);
     d->attributes.insert(QWebSettings::LocalContentCanAccessFileUrls, true);
     d->attributes.insert(QWebSettings::AcceleratedCompositingEnabled, true);
-    d->attributes.insert(QWebSettings::WebGLEnabled, false);
+    d->attributes.insert(QWebSettings::WebGLEnabled, true);
+    d->attributes.insert(QWebSettings::CSSRegionsEnabled, true);
+    d->attributes.insert(QWebSettings::CSSGridLayoutEnabled, false);
     d->attributes.insert(QWebSettings::HyperlinkAuditingEnabled, false);
     d->attributes.insert(QWebSettings::TiledBackingStoreEnabled, false);
     d->attributes.insert(QWebSettings::FrameFlatteningEnabled, false);
     d->attributes.insert(QWebSettings::SiteSpecificQuirksEnabled, true);
+    d->attributes.insert(QWebSettings::ScrollAnimatorEnabled, false);
+    d->attributes.insert(QWebSettings::CaretBrowsingEnabled, false);
+    d->attributes.insert(QWebSettings::NotificationsEnabled, true);
     d->offlineStorageDefaultQuota = 5 * 1024 * 1024;
     d->defaultTextEncoding = QLatin1String("iso-8859-1");
-#if QT_VERSION >= QT_VERSION_CHECK(4, 8, 0)
     d->thirdPartyCookiePolicy = AlwaysAllowThirdPartyCookies;
-#endif
 }
 
 /*!
@@ -659,14 +681,18 @@ void QWebSettings::setIconDatabasePath(const QString& path)
 
     WebCore::IconDatabase::delayDatabaseCleanup();
 
+    WebCore::IconDatabaseBase& db = WebCore::iconDatabase();
+
     if (!path.isEmpty()) {
-        WebCore::iconDatabase().setEnabled(true);
+        db.setEnabled(true);
+        if (db.isOpen())
+            db.close();
         QFileInfo info(path);
         if (info.isDir() && info.isWritable())
-            WebCore::iconDatabase().open(path, WebCore::IconDatabase::defaultDatabaseFilename());
+            db.open(path, WebCore::IconDatabase::defaultDatabaseFilename());
     } else {
-        WebCore::iconDatabase().setEnabled(false);
-        WebCore::iconDatabase().close();
+        db.setEnabled(false);
+        db.close();
     }
 }
 
@@ -698,7 +724,7 @@ void QWebSettings::clearIconDatabase()
 /*!
     Returns the web site's icon for \a url.
 
-    If the web site does not specify an icon \bold OR if the icon is not in the
+    If the web site does not specify an icon \b OR if the icon is not in the
     database, a null QIcon is returned.
 
     \note The returned icon's size is arbitrary.
@@ -708,14 +734,10 @@ void QWebSettings::clearIconDatabase()
 QIcon QWebSettings::iconForUrl(const QUrl& url)
 {
     WebCore::initializeWebCoreQt();
-    WebCore::Image* image = WebCore::iconDatabase().synchronousIconForPageURL(WebCore::KURL(url).string(),
+    QPixmap* icon = WebCore::iconDatabase().synchronousNativeIconForPageURL(WebCore::KURL(url).string(),
                                 WebCore::IntSize(16, 16));
-    if (!image)
-        return QPixmap();
-
-    QPixmap* icon = image->nativeImageForCurrentFrame();
     if (!icon)
-        return QPixmap();
+        return QIcon();
 
     return* icon;
 }
@@ -845,10 +867,10 @@ int QWebSettings::maximumPagesInCache()
    dead objects should consume when the cache is under pressure.
 
    \a cacheMaxDead is the \e maximum number of bytes that dead objects should
-   consume when the cache is \bold not under pressure.
+   consume when the cache is \b not under pressure.
 
    \a totalCapacity specifies the \e maximum number of bytes that the cache
-   should consume \bold overall.
+   should consume \b overall.
 
    The cache is enabled by default. Calling setObjectCacheCapacities(0, 0, 0)
    will disable the cache. Calling it with one non-zero enables it again.
@@ -864,7 +886,6 @@ void QWebSettings::setObjectCacheCapacities(int cacheMinDeadCapacity, int cacheM
                                     qMax(0, totalCapacity));
 }
 
-#if QT_VERSION >= QT_VERSION_CHECK(4, 8, 0)
 /*!
     Sets the third-party cookie policy, the default is AlwaysAllowThirdPartyCookies.
 */
@@ -880,7 +901,6 @@ QWebSettings::ThirdPartyCookiePolicy QWebSettings::thirdPartyCookiePolicy() cons
 {
     return d->thirdPartyCookiePolicy;
 }
-#endif
 
 /*!
     Sets the actual font family to \a family for the specified generic family,
@@ -983,7 +1003,7 @@ void QWebSettings::setOfflineStoragePath(const QString& path)
 {
     WebCore::initializeWebCoreQt();
 #if ENABLE(SQL_DATABASE)
-    WebCore::DatabaseTracker::tracker().setDatabaseDirectoryPath(path);
+    WebCore::DatabaseManager::manager().setDatabaseDirectoryPath(path);
 #endif
 }
 
@@ -999,7 +1019,7 @@ QString QWebSettings::offlineStoragePath()
 {
     WebCore::initializeWebCoreQt();
 #if ENABLE(SQL_DATABASE)
-    return WebCore::DatabaseTracker::tracker().databaseDirectoryPath();
+    return WebCore::DatabaseManager::manager().databaseDirectoryPath();
 #else
     return QString();
 #endif
@@ -1144,11 +1164,7 @@ void QWebSettings::enablePersistentStorage(const QString& path)
 
     if (path.isEmpty()) {
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
         storagePath = QStandardPaths::writableLocation(QStandardPaths::DataLocation);
-#else
-        storagePath = QDesktopServices::storageLocation(QDesktopServices::DataLocation);
-#endif
         if (storagePath.isEmpty())
             storagePath = WebCore::pathByAppendingComponent(QDir::homePath(), QCoreApplication::applicationName());
     } else
@@ -1167,7 +1183,7 @@ void QWebSettings::enablePersistentStorage(const QString& path)
 #if ENABLE(NETSCAPE_PLUGIN_METADATA_CACHE)
     // All applications can share the common QtWebkit cache file(s).
     // Path is not configurable and uses QDesktopServices::CacheLocation by default.
-    QString cachePath = QDesktopServices::storageLocation(QDesktopServices::CacheLocation);
+    QString cachePath = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     WebCore::makeAllDirectories(cachePath);
 
     QFileInfo info(cachePath);

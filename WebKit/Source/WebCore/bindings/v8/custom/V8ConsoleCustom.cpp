@@ -34,53 +34,29 @@
 
 #include "Console.h"
 #include "ScriptArguments.h"
-#include "ScriptCallStack.h"
 #include "ScriptCallStackFactory.h"
-#include "ScriptProfile.h"
 #include "V8Binding.h"
-#include "V8BindingMacros.h"
 #include "V8MemoryInfo.h"
-#include "V8Proxy.h"
-#include "V8ScriptProfile.h"
 
 namespace WebCore {
-
-typedef Vector<RefPtr<ScriptProfile> > ProfilesArray;
-
-#if ENABLE(JAVASCRIPT_DEBUGGER)
-v8::Handle<v8::Value> V8Console::profilesAccessorGetter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
-{
-    INC_STATS("DOM.Console.profilesAccessorGetter");
-    Console* imp = V8Console::toNative(info.Holder());
-    const ProfilesArray& profiles = imp->profiles();
-    v8::Handle<v8::Array> result = v8::Array::New(profiles.size());
-    int index = 0;
-    ProfilesArray::const_iterator end = profiles.end();
-    for (ProfilesArray::const_iterator iter = profiles.begin(); iter != end; ++iter)
-        result->Set(v8::Integer::New(index++), toV8(iter->get()));
-    return result;
-}
-#endif
 
 v8::Handle<v8::Value> V8Console::traceCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.Console.traceCallback");
     Console* imp = V8Console::toNative(args.Holder());
-    RefPtr<ScriptCallStack> callStack(createScriptCallStack(ScriptCallStack::maxCallStackSizeToCapture));
     RefPtr<ScriptArguments> scriptArguments(createScriptArguments(args, 0));
-    imp->trace(scriptArguments.release(), callStack);
-    return v8::Handle<v8::Value>();
+    imp->trace(ScriptState::current(), scriptArguments.release());
+    return v8Undefined();
 }
 
 v8::Handle<v8::Value> V8Console::assertCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.Console.assertCallback");
     Console* imp = V8Console::toNative(args.Holder());
-    RefPtr<ScriptCallStack> callStack(createScriptCallStack(ScriptCallStack::maxCallStackSizeToCapture));
     bool condition = args[0]->BooleanValue();
     RefPtr<ScriptArguments> scriptArguments(createScriptArguments(args, 1));
-    imp->assertCondition(condition, scriptArguments.release(), callStack);
-    return v8::Handle<v8::Value>();
+    imp->assertCondition(ScriptState::current(), scriptArguments.release(), condition);
+    return v8Undefined();
 }
 
 #if ENABLE(JAVASCRIPT_DEBUGGER)
@@ -88,32 +64,19 @@ v8::Handle<v8::Value> V8Console::profileCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.Console.profile");
     Console* imp = V8Console::toNative(args.Holder());
-    RefPtr<ScriptCallStack> callStack(createScriptCallStack(1));
-    if (!callStack)
-        return v8::Undefined();
-    STRING_TO_V8PARAMETER_EXCEPTION_BLOCK(V8Parameter<WithUndefinedOrNullCheck>, title, args[0]);
-    imp->profile(title, ScriptState::current(), callStack);
-    return v8::Handle<v8::Value>();
+    V8TRYCATCH_FOR_V8STRINGRESOURCE(V8StringResource<WithUndefinedOrNullCheck>, title, args[0]);
+    imp->profile(title, ScriptState::current());
+    return v8Undefined();
 }
 
 v8::Handle<v8::Value> V8Console::profileEndCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.Console.profileEnd");
     Console* imp = V8Console::toNative(args.Holder());
-    RefPtr<ScriptCallStack> callStack(createScriptCallStack(1));
-    if (!callStack)
-        return v8::Undefined();
-    STRING_TO_V8PARAMETER_EXCEPTION_BLOCK(V8Parameter<WithUndefinedOrNullCheck>, title, args[0]);
-    imp->profileEnd(title, ScriptState::current(), callStack);
-    return v8::Handle<v8::Value>();
+    V8TRYCATCH_FOR_V8STRINGRESOURCE(V8StringResource<WithUndefinedOrNullCheck>, title, args[0]);
+    imp->profileEnd(title, ScriptState::current());
+    return v8Undefined();
 }
 #endif
-
-v8::Handle<v8::Value> V8Console::memoryAccessorGetter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
-{
-    INC_STATS("DOM.Console.memoryAccessorGetter");
-    Console* imp = V8Console::toNative(info.Holder());
-    return toV8(imp->memory());
-}
 
 } // namespace WebCore

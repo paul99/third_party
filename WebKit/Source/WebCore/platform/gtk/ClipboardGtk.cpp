@@ -74,6 +74,8 @@ ClipboardGtk::ClipboardGtk(ClipboardAccessPolicy policy, PassRefPtr<DataObjectGt
 
 ClipboardGtk::~ClipboardGtk()
 {
+    if (m_dragImage)
+        m_dragImage->removeClient(this);
 }
 
 static ClipboardDataType dataObjectTypeFromHTMLClipboardType(const String& rawType)
@@ -118,8 +120,10 @@ void ClipboardGtk::clearData(const String& typeString)
         break;
     case ClipboardDataTypeImage:
         m_dataObject->clearImage();
+        break;
     case ClipboardDataTypeUnknown:
         m_dataObject->clearAll();
+        break;
     }
 
     if (m_clipboard)
@@ -142,13 +146,8 @@ void ClipboardGtk::clearAllData()
         PasteboardHelper::defaultPasteboardHelper()->writeClipboardContents(m_clipboard);
 }
 
-String ClipboardGtk::getData(const String& typeString, bool& success) const
+String ClipboardGtk::getData(const String& typeString) const
 {
-    success = true; // According to http://www.whatwg.org/specs/web-apps/current-work/multipage/dnd.html
-    // "The getData(format) method must return the data that is associated with the type format converted
-    // to ASCII lowercase, if any, and must return the empty string otherwise." Since success == false 
-    // results in an 'undefined' return value, we always want to return success == true. This parameter
-    // should eventually be removed.
     if (policy() != ClipboardReadable || !m_dataObject)
         return String();
 
@@ -189,15 +188,15 @@ bool ClipboardGtk::setData(const String& typeString, const String& data)
     return success;
 }
 
-HashSet<String> ClipboardGtk::types() const
+ListHashSet<String> ClipboardGtk::types() const
 {
     if (policy() != ClipboardReadable && policy() != ClipboardTypesReadable)
-        return HashSet<String>();
+        return ListHashSet<String>();
 
     if (m_clipboard)
         PasteboardHelper::defaultPasteboardHelper()->getClipboardContents(m_clipboard);
 
-    HashSet<String> types;
+    ListHashSet<String> types;
     if (m_dataObject->hasText()) {
         types.add("text/plain");
         types.add("Text");
@@ -229,7 +228,7 @@ PassRefPtr<FileList> ClipboardGtk::files() const
     RefPtr<FileList> fileList = FileList::create();
     const Vector<String>& filenames = m_dataObject->filenames();
     for (size_t i = 0; i < filenames.size(); i++)
-        fileList->append(File::create(filenames[i]));
+        fileList->append(File::create(filenames[i], File::AllContentTypes));
     return fileList.release();
 }
 

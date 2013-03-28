@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,17 +26,15 @@
 #include "config.h"
 #include "WebGeolocationManager.h"
 
+#include "WebGeolocationManagerMessages.h"
 #include "WebGeolocationManagerProxyMessages.h"
 #include "WebPage.h"
 #include "WebProcess.h"
-
-#if ENABLE(CLIENT_BASED_GEOLOCATION)
 #include <WebCore/Geolocation.h>
 #include <WebCore/GeolocationController.h>
 #include <WebCore/GeolocationError.h>
 #include <WebCore/GeolocationPosition.h>
 #include <WebCore/Page.h>
-#endif
 
 using namespace WebCore;
 
@@ -45,68 +43,69 @@ namespace WebKit {
 WebGeolocationManager::WebGeolocationManager(WebProcess* process)
     : m_process(process)
 {
+    m_process->addMessageReceiver(Messages::WebGeolocationManager::messageReceiverName(), this);
 }
 
 WebGeolocationManager::~WebGeolocationManager()
 {
 }
 
-void WebGeolocationManager::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::ArgumentDecoder* arguments)
+void WebGeolocationManager::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
 {
-    didReceiveWebGeolocationManagerMessage(connection, messageID, arguments);
+    didReceiveWebGeolocationManagerMessage(connection, messageID, decoder);
 }
 
 void WebGeolocationManager::registerWebPage(WebPage* page)
 {
-#if ENABLE(CLIENT_BASED_GEOLOCATION)
     bool wasEmpty = m_pageSet.isEmpty();
 
     m_pageSet.add(page);
     
     if (wasEmpty)
         m_process->connection()->send(Messages::WebGeolocationManagerProxy::StartUpdating(), 0);
-#endif
 }
 
 void WebGeolocationManager::unregisterWebPage(WebPage* page)
 {
-#if ENABLE(CLIENT_BASED_GEOLOCATION)
     m_pageSet.remove(page);
 
     if (m_pageSet.isEmpty())
         m_process->connection()->send(Messages::WebGeolocationManagerProxy::StopUpdating(), 0);
-#endif
 }
 
 void WebGeolocationManager::didChangePosition(const WebGeolocationPosition::Data& data)
 {
-#if ENABLE(CLIENT_BASED_GEOLOCATION)
-    RefPtr<GeolocationPosition> position = GeolocationPosition::create(data.timestamp, data.latitude, data.longitude, data.accuracy);
+#if ENABLE(GEOLOCATION)
+    RefPtr<GeolocationPosition> position = GeolocationPosition::create(data.timestamp, data.latitude, data.longitude, data.accuracy, data.canProvideAltitude, data.altitude, data.canProvideAltitudeAccuracy, data.altitudeAccuracy, data.canProvideHeading, data.heading, data.canProvideSpeed, data.speed);
 
-    HashSet<WebPage*>::const_iterator it = m_pageSet.begin();
-    HashSet<WebPage*>::const_iterator end = m_pageSet.end();
-    for (; it != end; ++it) {
-        WebPage* page = *it;
+    Vector<RefPtr<WebPage> > webPageCopy;
+    copyToVector(m_pageSet, webPageCopy);
+    for (size_t i = 0; i < webPageCopy.size(); ++i) {
+        WebPage* page = webPageCopy[i].get();
         if (page->corePage())
-            page->corePage()->geolocationController()->positionChanged(position.get());
+            GeolocationController::from(page->corePage())->positionChanged(position.get());
     }
-#endif
+#else
+    UNUSED_PARAM(data);
+#endif // ENABLE(GEOLOCATION)
 }
 
-void WebGeolocationManager::didFailToDeterminePosition()
+void WebGeolocationManager::didFailToDeterminePosition(const String& errorMessage)
 {
-#if ENABLE(CLIENT_BASED_GEOLOCATION)
+#if ENABLE(GEOLOCATION)
     // FIXME: Add localized error string.
-    RefPtr<GeolocationError> error = GeolocationError::create(GeolocationError::PositionUnavailable, /* Localized error string */ String(""));
+    RefPtr<GeolocationError> error = GeolocationError::create(GeolocationError::PositionUnavailable, errorMessage);
 
-    HashSet<WebPage*>::const_iterator it = m_pageSet.begin();
-    HashSet<WebPage*>::const_iterator end = m_pageSet.end();
-    for (; it != end; ++it) {
-        WebPage* page = *it;
+    Vector<RefPtr<WebPage> > webPageCopy;
+    copyToVector(m_pageSet, webPageCopy);
+    for (size_t i = 0; i < webPageCopy.size(); ++i) {
+        WebPage* page = webPageCopy[i].get();
         if (page->corePage())
-            page->corePage()->geolocationController()->errorOccurred(error.get());
+            GeolocationController::from(page->corePage())->errorOccurred(error.get());
     }
-#endif
+#else
+    UNUSED_PARAM(errorMessage);
+#endif // ENABLE(GEOLOCATION)
 }
 
 } // namespace WebKit

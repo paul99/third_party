@@ -1,5 +1,6 @@
 /*
  * Copyright © 2007,2008,2009,2010  Red Hat, Inc.
+ * Copyright © 2012  Google, Inc.
  *
  *  This is part of HarfBuzz, a text shaping library.
  *
@@ -22,6 +23,7 @@
  * PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
  *
  * Red Hat Author(s): Behdad Esfahbod
+ * Google Author(s): Behdad Esfahbod
  */
 
 #ifndef HB_OPEN_TYPE_PRIVATE_HH
@@ -31,6 +33,8 @@
 
 #include "hb-blob.h"
 
+
+namespace OT {
 
 
 /*
@@ -78,17 +82,25 @@ inline Type& StructAfter(TObject &X)
  */
 
 /* Check _assertion in a method environment */
-#define _DEFINE_SIZE_ASSERTION(_assertion) \
-  inline void _size_assertion (void) const \
-  { ASSERT_STATIC (_assertion); }
+#define _DEFINE_INSTANCE_ASSERTION1(_line, _assertion) \
+  inline void _instance_assertion_on_line_##_line (void) const \
+  { \
+    ASSERT_STATIC (_assertion); \
+    ASSERT_INSTANCE_POD (*this); /* Make sure it's POD. */ \
+  }
+# define _DEFINE_INSTANCE_ASSERTION0(_line, _assertion) _DEFINE_INSTANCE_ASSERTION1 (_line, _assertion)
+# define DEFINE_INSTANCE_ASSERTION(_assertion) _DEFINE_INSTANCE_ASSERTION0 (__LINE__, _assertion)
+
 /* Check that _code compiles in a method environment */
-#define _DEFINE_COMPILES_ASSERTION(_code) \
-  inline void _compiles_assertion (void) const \
+#define _DEFINE_COMPILES_ASSERTION1(_line, _code) \
+  inline void _compiles_assertion_on_line_##_line (void) const \
   { _code; }
+# define _DEFINE_COMPILES_ASSERTION0(_line, _code) _DEFINE_COMPILES_ASSERTION1 (_line, _code)
+# define DEFINE_COMPILES_ASSERTION(_code) _DEFINE_COMPILES_ASSERTION0 (__LINE__, _code)
 
 
 #define DEFINE_SIZE_STATIC(size) \
-  _DEFINE_SIZE_ASSERTION (sizeof (*this) == (size)); \
+  DEFINE_INSTANCE_ASSERTION (sizeof (*this) == (size)); \
   static const unsigned int static_size = (size); \
   static const unsigned int min_size = (size)
 
@@ -96,21 +108,21 @@ inline Type& StructAfter(TObject &X)
 #define VAR 1
 
 #define DEFINE_SIZE_UNION(size, _member) \
-  _DEFINE_SIZE_ASSERTION (this->u._member.static_size == (size)); \
+  DEFINE_INSTANCE_ASSERTION (this->u._member.static_size == (size)); \
   static const unsigned int min_size = (size)
 
 #define DEFINE_SIZE_MIN(size) \
-  _DEFINE_SIZE_ASSERTION (sizeof (*this) >= (size)); \
+  DEFINE_INSTANCE_ASSERTION (sizeof (*this) >= (size)); \
   static const unsigned int min_size = (size)
 
 #define DEFINE_SIZE_ARRAY(size, array) \
-  _DEFINE_SIZE_ASSERTION (sizeof (*this) == (size) + sizeof (array[0])); \
-  _DEFINE_COMPILES_ASSERTION ((void) array[0].static_size) \
+  DEFINE_INSTANCE_ASSERTION (sizeof (*this) == (size) + sizeof (array[0])); \
+  DEFINE_COMPILES_ASSERTION ((void) array[0].static_size) \
   static const unsigned int min_size = (size)
 
 #define DEFINE_SIZE_ARRAY2(size, array1, array2) \
-  _DEFINE_SIZE_ASSERTION (sizeof (*this) == (size) + sizeof (this->array1[0]) + sizeof (this->array2[0])); \
-  _DEFINE_COMPILES_ASSERTION ((void) array1[0].static_size; (void) array2[0].static_size) \
+  DEFINE_INSTANCE_ASSERTION (sizeof (*this) == (size) + sizeof (this->array1[0]) + sizeof (this->array2[0])); \
+  DEFINE_COMPILES_ASSERTION ((void) array1[0].static_size; (void) array2[0].static_size) \
   static const unsigned int min_size = (size)
 
 
@@ -120,6 +132,7 @@ inline Type& StructAfter(TObject &X)
  */
 
 /* Global nul-content Null pool.  Enlarge as necessary. */
+/* TODO This really should be a extern HB_INTERNAL and defined somewhere... */
 static const void *_NullPool[64 / sizeof (void *)];
 
 /* Generic nul-content Null objects. */
@@ -153,7 +166,7 @@ ASSERT_STATIC (Type::min_size + 1 <= sizeof (_Null##Type))
 
 
 #define TRACE_SANITIZE() \
-	hb_auto_trace_t<HB_DEBUG_SANITIZE> trace (&c->debug_depth, "SANITIZE", this, NULL, HB_FUNC);
+	hb_auto_trace_t<HB_DEBUG_SANITIZE> trace (&c->debug_depth, "SANITIZE", this, HB_FUNC, "");
 
 
 struct hb_sanitize_context_t
@@ -164,24 +177,24 @@ struct hb_sanitize_context_t
     this->writable = false;
   }
 
-  inline void setup (void)
+  inline void start_processing (void)
   {
     this->start = hb_blob_get_data (this->blob, NULL);
     this->end = this->start + hb_blob_get_length (this->blob);
     this->edit_count = 0;
     this->debug_depth = 0;
 
-    DEBUG_MSG (SANITIZE, this->blob,
-	       "init [%p..%p] (%lu bytes)",
-	       this->start, this->end,
-	       (unsigned long) (this->end - this->start));
+    DEBUG_MSG_LEVEL (SANITIZE, this->blob, 0, +1,
+		     "start [%p..%p] (%lu bytes)",
+		     this->start, this->end,
+		     (unsigned long) (this->end - this->start));
   }
 
-  inline void finish (void)
+  inline void end_processing (void)
   {
-    DEBUG_MSG (SANITIZE, this->blob,
-	       "fini [%p..%p] %u edit requests",
-	       this->start, this->end, this->edit_count);
+    DEBUG_MSG_LEVEL (SANITIZE, this->blob, 0, -1,
+		     "end [%p..%p] %u edit requests",
+		     this->start, this->end, this->edit_count);
 
     hb_blob_destroy (this->blob);
     this->blob = NULL;
@@ -191,18 +204,13 @@ struct hb_sanitize_context_t
   inline bool check_range (const void *base, unsigned int len) const
   {
     const char *p = (const char *) base;
-    bool ret = this->start <= p &&
-	       p <= this->end &&
-	       (unsigned int) (this->end - p) >= len;
 
-    DEBUG_MSG_LEVEL (SANITIZE, this->blob, this->debug_depth,
-		     "%-*d-> range [%p..%p] (%d bytes) in [%p..%p] -> %s",
-		     this->debug_depth, this->debug_depth,
-		     p, p + len, len,
-		     this->start, this->end,
-		     ret ? "pass" : "FAIL");
+    hb_auto_trace_t<HB_DEBUG_SANITIZE> trace (&this->debug_depth, "SANITIZE", this->blob, NULL,
+					      "check_range [%p..%p] (%d bytes) in [%p..%p]",
+					      p, p + len, len,
+					      this->start, this->end);
 
-    return likely (ret);
+    return TRACE_RETURN (likely (this->start <= p && p <= this->end && (unsigned int) (this->end - p) >= len));
   }
 
   inline bool check_array (const void *base, unsigned int record_size, unsigned int len) const
@@ -210,14 +218,12 @@ struct hb_sanitize_context_t
     const char *p = (const char *) base;
     bool overflows = _hb_unsigned_int_mul_overflows (len, record_size);
 
-    DEBUG_MSG_LEVEL (SANITIZE, this->blob, this->debug_depth,
-		     "%-*d-> array [%p..%p] (%d*%d=%ld bytes) in [%p..%p] -> %s",
-		     this->debug_depth, this->debug_depth,
-		     p, p + (record_size * len), record_size, len, (unsigned long) record_size * len,
-		     this->start, this->end,
-		     !overflows ? "does not overflow" : "OVERFLOWS FAIL");
+    hb_auto_trace_t<HB_DEBUG_SANITIZE> trace (&this->debug_depth, "SANITIZE", this->blob, NULL,
+					      "check_array [%p..%p] (%d*%d=%ld bytes) in [%p..%p]",
+					      p, p + (record_size * len), record_size, len, (unsigned long) record_size * len,
+					      this->start, this->end);
 
-    return likely (!overflows && this->check_range (base, record_size * len));
+    return TRACE_RETURN (likely (!overflows && this->check_range (base, record_size * len)));
   }
 
   template <typename Type>
@@ -226,23 +232,21 @@ struct hb_sanitize_context_t
     return likely (this->check_range (obj, obj->min_size));
   }
 
-  inline bool can_edit (const void *base HB_UNUSED, unsigned int len HB_UNUSED)
+  inline bool may_edit (const void *base HB_UNUSED, unsigned int len HB_UNUSED)
   {
     const char *p = (const char *) base;
     this->edit_count++;
 
-    DEBUG_MSG_LEVEL (SANITIZE, this->blob, this->debug_depth,
-		     "%-*d-> edit(%u) [%p..%p] (%d bytes) in [%p..%p] -> %s",
-		     this->debug_depth, this->debug_depth,
-		     this->edit_count,
-		     p, p + len, len,
-		     this->start, this->end,
-		     this->writable ? "granted" : "REJECTED");
+    hb_auto_trace_t<HB_DEBUG_SANITIZE> trace (&this->debug_depth, "SANITIZE", this->blob, NULL,
+					      "may_edit(%u) [%p..%p] (%d bytes) in [%p..%p] -> %s",
+					      this->edit_count,
+					      p, p + len, len,
+					      this->start, this->end);
 
-    return this->writable;
+    return TRACE_RETURN (this->writable);
   }
 
-  unsigned int debug_depth;
+  mutable unsigned int debug_depth;
   const char *start, *end;
   bool writable;
   unsigned int edit_count;
@@ -266,10 +270,10 @@ struct Sanitizer
   retry:
     DEBUG_MSG_FUNC (SANITIZE, blob, "start");
 
-    c->setup ();
+    c->start_processing ();
 
     if (unlikely (!c->start)) {
-      c->finish ();
+      c->end_processing ();
       return blob;
     }
 
@@ -303,7 +307,7 @@ struct Sanitizer
       }
     }
 
-    c->finish ();
+    c->end_processing ();
 
     DEBUG_MSG_FUNC (SANITIZE, blob, sane ? "PASSED" : "FAILED");
     if (sane)
@@ -319,6 +323,160 @@ struct Sanitizer
     const char *base = hb_blob_get_data (blob, NULL);
     return unlikely (!base) ? &Null(Type) : CastP<Type> (base);
   }
+};
+
+
+
+/*
+ * Serialize
+ */
+
+#ifndef HB_DEBUG_SERIALIZE
+#define HB_DEBUG_SERIALIZE (HB_DEBUG+0)
+#endif
+
+
+#define TRACE_SERIALIZE() \
+	hb_auto_trace_t<HB_DEBUG_SERIALIZE> trace (&c->debug_depth, "SERIALIZE", c, HB_FUNC, "");
+
+
+struct hb_serialize_context_t
+{
+  inline hb_serialize_context_t (void *start, unsigned int size)
+  {
+    this->start = (char *) start;
+    this->end = this->start + size;
+
+    this->ran_out_of_room = false;
+    this->head = this->start;
+    this->debug_depth = 0;
+  }
+
+  template <typename Type>
+  inline Type *start_serialize (void)
+  {
+    DEBUG_MSG_LEVEL (SERIALIZE, this->start, 0, +1,
+		     "start [%p..%p] (%lu bytes)",
+		     this->start, this->end,
+		     (unsigned long) (this->end - this->start));
+
+    return start_embed<Type> ();
+  }
+
+  inline void end_serialize (void)
+  {
+    DEBUG_MSG_LEVEL (SERIALIZE, this->start, 0, -1,
+		     "end [%p..%p] serialized %d bytes; %s",
+		     this->start, this->end,
+		     (int) (this->head - this->start),
+		     this->ran_out_of_room ? "RAN OUT OF ROOM" : "did not ran out of room");
+
+  }
+
+  template <typename Type>
+  inline Type *copy (void)
+  {
+    assert (!this->ran_out_of_room);
+    unsigned int len = this->head - this->start;
+    void *p = malloc (len);
+    if (p)
+      memcpy (p, this->start, len);
+    return reinterpret_cast<Type *> (p);
+  }
+
+  template <typename Type>
+  inline Type *allocate_size (unsigned int size)
+  {
+    if (unlikely (this->ran_out_of_room || this->end - this->head < size)) {
+      this->ran_out_of_room = true;
+      return NULL;
+    }
+    memset (this->head, 0, size);
+    char *ret = this->head;
+    this->head += size;
+    return reinterpret_cast<Type *> (ret);
+  }
+
+  template <typename Type>
+  inline Type *allocate_min (void)
+  {
+    return this->allocate_size<Type> (Type::min_size);
+  }
+
+  template <typename Type>
+  inline Type *start_embed (void)
+  {
+    Type *ret = reinterpret_cast<Type *> (this->head);
+    return ret;
+  }
+
+  template <typename Type>
+  inline Type *embed (const Type &obj)
+  {
+    unsigned int size = obj.get_size ();
+    Type *ret = this->allocate_size<Type> (size);
+    if (unlikely (!ret)) return NULL;
+    memcpy (ret, obj, size);
+    return ret;
+  }
+
+  template <typename Type>
+  inline Type *extend_min (Type &obj)
+  {
+    unsigned int size = obj.min_size;
+    assert (this->start <= (char *) &obj && (char *) &obj <= this->head && (char *) &obj + size >= this->head);
+    if (unlikely (!this->allocate_size<Type> (((char *) &obj) + size - this->head))) return NULL;
+    return reinterpret_cast<Type *> (&obj);
+  }
+
+  template <typename Type>
+  inline Type *extend (Type &obj)
+  {
+    unsigned int size = obj.get_size ();
+    assert (this->start < (char *) &obj && (char *) &obj <= this->head && (char *) &obj + size >= this->head);
+    if (unlikely (!this->allocate_size<Type> (((char *) &obj) + size - this->head))) return NULL;
+    return reinterpret_cast<Type *> (&obj);
+  }
+
+  inline void truncate (void *head)
+  {
+    assert (this->start < head && head <= this->head);
+    this->head = (char *) head;
+  }
+
+  unsigned int debug_depth;
+  char *start, *end, *head;
+  bool ran_out_of_room;
+};
+
+template <typename Type>
+struct Supplier
+{
+  inline Supplier (const Type *array, unsigned int len_)
+  {
+    head = array;
+    len = len_;
+  }
+  inline const Type operator [] (unsigned int i) const
+  {
+    if (unlikely (i >= len)) return Type ();
+    return head[i];
+  }
+
+  inline void advance (unsigned int count)
+  {
+    if (unlikely (count > len))
+      count = len;
+    len -= count;
+    head += count;
+  }
+
+  private:
+  inline Supplier (const Supplier<Type> &); /* Disallow copy */
+  inline Supplier<Type>& operator= (const Supplier<Type> &); /* Disallow copy */
+
+  unsigned int len;
+  const Type *head;
 };
 
 
@@ -340,8 +498,6 @@ struct Sanitizer
 
 template <typename Type, int Bytes> struct BEInt;
 
-/* LONGTERMTODO: On machines allowing unaligned access, we can make the
- * following tighter by using byteswap instructions on ints directly. */
 template <typename Type>
 struct BEInt<Type, 2>
 {
@@ -371,10 +527,12 @@ struct IntType
   inline operator Type(void) const { return v; }
   inline bool operator == (const IntType<Type> &o) const { return v == o.v; }
   inline bool operator != (const IntType<Type> &o) const { return v != o.v; }
+  static inline int cmp (const IntType<Type> *a, const IntType<Type> *b) { return b->cmp (*a); }
+  inline int cmp (IntType<Type> va) const { Type a = va; Type b = v; return a < b ? -1 : a == b ? 0 : +1; }
   inline int cmp (Type a) const { Type b = v; return a < b ? -1 : a == b ? 0 : +1; }
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    return likely (c->check_struct (this));
+    return TRACE_RETURN (likely (c->check_struct (this)));
   }
   protected:
   BEInt<Type, sizeof (Type)> v;
@@ -382,11 +540,6 @@ struct IntType
   DEFINE_SIZE_STATIC (sizeof (Type));
 };
 
-/* Typedef these to avoid clash with windows.h */
-#define USHORT	HB_USHORT
-#define SHORT	HB_SHORT
-#define ULONG	HB_ULONG
-#define LONG	HB_LONG
 typedef IntType<uint16_t> USHORT;	/* 16-bit unsigned integer. */
 typedef IntType<int16_t>  SHORT;	/* 16-bit signed integer. */
 typedef IntType<uint32_t> ULONG;	/* 32-bit unsigned integer. */
@@ -404,7 +557,7 @@ struct LONGDATETIME
 {
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    return likely (c->check_struct (this));
+    return TRACE_RETURN (likely (c->check_struct (this)));
   }
   private:
   LONG major;
@@ -468,7 +621,7 @@ struct FixedVersion
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    return c->check_struct (this);
+    return TRACE_RETURN (c->check_struct (this));
   }
 
   USHORT major;
@@ -493,29 +646,41 @@ struct GenericOffsetTo : OffsetType
     if (unlikely (!offset)) return Null(Type);
     return StructAtOffset<Type> (base, offset);
   }
+  inline Type& operator () (void *base)
+  {
+    unsigned int offset = *this;
+    return StructAtOffset<Type> (base, offset);
+  }
+
+  inline Type& serialize (hb_serialize_context_t *c, void *base)
+  {
+    Type *t = c->start_embed<Type> ();
+    this->set ((char *) t - (char *) base); /* TODO(serialize) Overflow? */
+    return *t;
+  }
 
   inline bool sanitize (hb_sanitize_context_t *c, void *base) {
     TRACE_SANITIZE ();
-    if (unlikely (!c->check_struct (this))) return false;
+    if (unlikely (!c->check_struct (this))) return TRACE_RETURN (false);
     unsigned int offset = *this;
-    if (unlikely (!offset)) return true;
+    if (unlikely (!offset)) return TRACE_RETURN (true);
     Type &obj = StructAtOffset<Type> (base, offset);
-    return likely (obj.sanitize (c)) || neuter (c);
+    return TRACE_RETURN (likely (obj.sanitize (c)) || neuter (c));
   }
   template <typename T>
   inline bool sanitize (hb_sanitize_context_t *c, void *base, T user_data) {
     TRACE_SANITIZE ();
-    if (unlikely (!c->check_struct (this))) return false;
+    if (unlikely (!c->check_struct (this))) return TRACE_RETURN (false);
     unsigned int offset = *this;
-    if (unlikely (!offset)) return true;
+    if (unlikely (!offset)) return TRACE_RETURN (true);
     Type &obj = StructAtOffset<Type> (base, offset);
-    return likely (obj.sanitize (c, user_data)) || neuter (c);
+    return TRACE_RETURN (likely (obj.sanitize (c, user_data)) || neuter (c));
   }
 
   private:
   /* Set the offset to Null */
   inline bool neuter (hb_sanitize_context_t *c) {
-    if (c->can_edit (this, this->static_size)) {
+    if (c->may_edit (this, this->static_size)) {
       this->set (0); /* 0 is Null offset */
       return true;
     }
@@ -523,7 +688,9 @@ struct GenericOffsetTo : OffsetType
   }
 };
 template <typename Base, typename OffsetType, typename Type>
-inline const Type& operator + (const Base &base, GenericOffsetTo<OffsetType, Type> offset) { return offset (base); }
+inline const Type& operator + (const Base &base, const GenericOffsetTo<OffsetType, Type> &offset) { return offset (base); }
+template <typename Base, typename OffsetType, typename Type>
+inline Type& operator + (Base &base, GenericOffsetTo<OffsetType, Type> &offset) { return offset (base); }
 
 template <typename Type>
 struct OffsetTo : GenericOffsetTo<Offset, Type> {};
@@ -556,12 +723,38 @@ struct GenericArrayOf
     if (unlikely (i >= len)) return Null(Type);
     return array[i];
   }
+  inline Type& operator [] (unsigned int i)
+  {
+    return array[i];
+  }
   inline unsigned int get_size (void) const
   { return len.static_size + len * Type::static_size; }
 
+  inline bool serialize (hb_serialize_context_t *c,
+			 unsigned int items_len)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!c->extend_min (*this))) return TRACE_RETURN (false);
+    len.set (items_len); /* TODO(serialize) Overflow? */
+    if (unlikely (!c->extend (*this))) return TRACE_RETURN (false);
+    return TRACE_RETURN (true);
+  }
+
+  inline bool serialize (hb_serialize_context_t *c,
+			 Supplier<Type> &items,
+			 unsigned int items_len)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!serialize (c, items_len))) return TRACE_RETURN (false);
+    for (unsigned int i = 0; i < items_len; i++)
+      array[i] = items[i];
+    items.advance (items_len);
+    return TRACE_RETURN (true);
+  }
+
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    if (unlikely (!sanitize_shallow (c))) return false;
+    if (unlikely (!sanitize_shallow (c))) return TRACE_RETURN (false);
 
     /* Note: for structs that do not reference other structs,
      * we do not need to call their sanitize() as we already did
@@ -572,33 +765,32 @@ struct GenericArrayOf
      */
     (void) (false && array[0].sanitize (c));
 
-    return true;
+    return TRACE_RETURN (true);
   }
   inline bool sanitize (hb_sanitize_context_t *c, void *base) {
     TRACE_SANITIZE ();
-    if (unlikely (!sanitize_shallow (c))) return false;
+    if (unlikely (!sanitize_shallow (c))) return TRACE_RETURN (false);
     unsigned int count = len;
     for (unsigned int i = 0; i < count; i++)
       if (unlikely (!array[i].sanitize (c, base)))
-        return false;
-    return true;
+        return TRACE_RETURN (false);
+    return TRACE_RETURN (true);
   }
   template <typename T>
   inline bool sanitize (hb_sanitize_context_t *c, void *base, T user_data) {
     TRACE_SANITIZE ();
-    if (unlikely (!sanitize_shallow (c))) return false;
+    if (unlikely (!sanitize_shallow (c))) return TRACE_RETURN (false);
     unsigned int count = len;
     for (unsigned int i = 0; i < count; i++)
       if (unlikely (!array[i].sanitize (c, base, user_data)))
-        return false;
-    return true;
+        return TRACE_RETURN (false);
+    return TRACE_RETURN (true);
   }
 
   private:
   inline bool sanitize_shallow (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    return c->check_struct (this)
-	&& c->check_array (this, Type::static_size, len);
+    return TRACE_RETURN (c->check_struct (this) && c->check_array (this, Type::static_size, len));
   }
 
   public:
@@ -640,12 +832,12 @@ struct OffsetListOf : OffsetArrayOf<Type>
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    return OffsetArrayOf<Type>::sanitize (c, this);
+    return TRACE_RETURN (OffsetArrayOf<Type>::sanitize (c, this));
   }
   template <typename T>
   inline bool sanitize (hb_sanitize_context_t *c, T user_data) {
     TRACE_SANITIZE ();
-    return OffsetArrayOf<Type>::sanitize (c, this, user_data);
+    return TRACE_RETURN (OffsetArrayOf<Type>::sanitize (c, this, user_data));
   }
 };
 
@@ -663,6 +855,21 @@ struct HeadlessArrayOf
   inline unsigned int get_size (void) const
   { return len.static_size + (len ? len - 1 : 0) * Type::static_size; }
 
+  inline bool serialize (hb_serialize_context_t *c,
+			 Supplier<Type> &items,
+			 unsigned int items_len)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!c->extend_min (*this))) return TRACE_RETURN (false);
+    len.set (items_len); /* TODO(serialize) Overflow? */
+    if (unlikely (!items_len)) return TRACE_RETURN (true);
+    if (unlikely (!c->extend (*this))) return TRACE_RETURN (false);
+    for (unsigned int i = 0; i < items_len - 1; i++)
+      array[i] = items[i];
+    items.advance (items_len - 1);
+    return TRACE_RETURN (true);
+  }
+
   inline bool sanitize_shallow (hb_sanitize_context_t *c) {
     return c->check_struct (this)
 	&& c->check_array (this, Type::static_size, len);
@@ -670,7 +877,7 @@ struct HeadlessArrayOf
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    if (unlikely (!sanitize_shallow (c))) return false;
+    if (unlikely (!sanitize_shallow (c))) return TRACE_RETURN (false);
 
     /* Note: for structs that do not reference other structs,
      * we do not need to call their sanitize() as we already did
@@ -681,7 +888,7 @@ struct HeadlessArrayOf
      */
     (void) (false && array[0].sanitize (c));
 
-    return true;
+    return TRACE_RETURN (true);
   }
 
   USHORT len;
@@ -697,14 +904,25 @@ struct SortedArrayOf : ArrayOf<Type> {
 
   template <typename SearchType>
   inline int search (const SearchType &x) const {
-    struct Cmp {
-      static int cmp (const SearchType *a, const Type *b) { return b->cmp (*a); }
-    };
-    const Type *p = (const Type *) bsearch (&x, this->array, this->len, sizeof (this->array[0]), (hb_compare_func_t) Cmp::cmp);
-    return p ? p - this->array : -1;
+    unsigned int count = this->len;
+    /* Linear search is *much* faster for small counts. */
+    if (likely (count < 32)) {
+      for (unsigned int i = 0; i < count; i++)
+	if (this->array[i].cmp (x) == 0)
+	  return i;
+      return -1;
+    } else {
+      struct Cmp {
+	static int cmp (const SearchType *a, const Type *b) { return b->cmp (*a); }
+      };
+      const Type *p = (const Type *) bsearch (&x, this->array, this->len, sizeof (this->array[0]), (hb_compare_func_t) Cmp::cmp);
+      return p ? p - this->array : -1;
+    }
   }
 };
 
+
+} // namespace OT
 
 
 #endif /* HB_OPEN_TYPE_PRIVATE_HH */

@@ -35,8 +35,10 @@
 #include "DFGCorrectableJumpPoint.h"
 #include "DFGExitProfile.h"
 #include "DFGGPRInfo.h"
-#include "DFGOperands.h"
+#include "DFGValueRecoveryOverride.h"
 #include "MacroAssembler.h"
+#include "MethodOfGettingAValueProfile.h"
+#include "Operands.h"
 #include "ValueProfile.h"
 #include "ValueRecovery.h"
 #include <wtf/Vector.h>
@@ -82,53 +84,23 @@ private:
 // This structure describes how to exit the speculative path by
 // going into baseline code.
 struct OSRExit {
-    OSRExit(ExitKind, JSValueSource, ValueProfile*, MacroAssembler::Jump, SpeculativeJIT*, unsigned recoveryIndex = 0);
+    OSRExit(ExitKind, JSValueSource, MethodOfGettingAValueProfile, MacroAssembler::Jump, SpeculativeJIT*, unsigned streamIndex, unsigned recoveryIndex = 0);
     
     MacroAssemblerCodeRef m_code;
     
     JSValueSource m_jsValueSource;
-    ValueProfile* m_valueProfile;
+    MethodOfGettingAValueProfile m_valueProfile;
     
     CorrectableJumpPoint m_check;
     NodeIndex m_nodeIndex;
     CodeOrigin m_codeOrigin;
+    CodeOrigin m_codeOriginForExitProfile;
     
     unsigned m_recoveryIndex;
+    unsigned m_watchpointIndex;
     
     ExitKind m_kind;
     uint32_t m_count;
-    
-    // Convenient way of iterating over ValueRecoveries while being
-    // generic over argument versus variable.
-    int numberOfRecoveries() const { return m_arguments.size() + m_variables.size(); }
-    const ValueRecovery& valueRecovery(int index) const
-    {
-        if (index < (int)m_arguments.size())
-            return m_arguments[index];
-        return m_variables[index - m_arguments.size()];
-    }
-    ValueRecovery& valueRecoveryForOperand(int operand)
-    {
-        if (operandIsArgument(operand))
-            return m_arguments[operandToArgument(operand)];
-        return m_variables[operand];
-    }
-    bool isArgument(int index) const { return index < (int)m_arguments.size(); }
-    bool isVariable(int index) const { return !isArgument(index); }
-    int argumentForIndex(int index) const
-    {
-        return index;
-    }
-    int variableForIndex(int index) const
-    {
-        return index - m_arguments.size();
-    }
-    int operandForIndex(int index) const
-    {
-        if (index < (int)m_arguments.size())
-            return operandToArgument(index);
-        return index - m_arguments.size();
-    }
     
     bool considerAddingAsFrequentExitSite(CodeBlock* dfgCodeBlock, CodeBlock* profiledCodeBlock)
     {
@@ -137,13 +109,10 @@ struct OSRExit {
         return considerAddingAsFrequentExitSiteSlow(dfgCodeBlock, profiledCodeBlock);
     }
     
-#ifndef NDEBUG
-    void dump(FILE* out) const;
-#endif
-    
-    Vector<ValueRecovery, 0> m_arguments;
-    Vector<ValueRecovery, 0> m_variables;
+    unsigned m_streamIndex;
     int m_lastSetOperand;
+    
+    RefPtr<ValueRecoveryOverride> m_valueRecoveryOverride;
 
 private:
     bool considerAddingAsFrequentExitSiteSlow(CodeBlock* dfgCodeBlock, CodeBlock* profiledCodeBlock);

@@ -29,10 +29,14 @@
 #include "config.h"
 #include "ImageSource.h"
 
-#if PLATFORM(QT)
-#include "ImageDecoderQt.h"
-#else
 #include "ImageDecoder.h"
+
+#include "ImageOrientation.h"
+#include "NotImplemented.h"
+#include "PlatformMemoryInstrumentation.h"
+
+#if PLATFORM(CHROMIUM)
+#include "DeferredImageDecoder.h"
 #endif
 
 namespace WebCore {
@@ -79,7 +83,7 @@ void ImageSource::setData(SharedBuffer* data, bool allDataReceived)
     // If insufficient bytes are available to determine the image type, no decoder plugin will be
     // made.
     if (!m_decoder) {
-        m_decoder = static_cast<NativeImageSourcePtr>(ImageDecoder::create(*data, m_alphaOption, m_gammaAndColorProfileOption));
+        m_decoder = static_cast<NativeImageDecoderPtr>(NativeImageDecoder::create(*data, m_alphaOption, m_gammaAndColorProfileOption));
 #if ENABLE(IMAGE_DECODER_DOWN_SAMPLING)
         if (m_decoder && s_maxPixelsPerDecodedImage)
             m_decoder->setMaxNumPixels(s_maxPixelsPerDecodedImage);
@@ -100,19 +104,26 @@ bool ImageSource::isSizeAvailable()
     return m_decoder && m_decoder->isSizeAvailable();
 }
 
-IntSize ImageSource::size() const
+IntSize ImageSource::size(RespectImageOrientationEnum shouldRespectOrientation) const
 {
-    return m_decoder ? m_decoder->size() : IntSize();
+    return frameSizeAtIndex(0, shouldRespectOrientation);
 }
 
-IntSize ImageSource::frameSizeAtIndex(size_t index) const
+IntSize ImageSource::frameSizeAtIndex(size_t index, RespectImageOrientationEnum shouldRespectOrientation) const
 {
-    return m_decoder ? m_decoder->frameSizeAtIndex(index) : IntSize();
+    if (!m_decoder)
+        return IntSize();
+
+    IntSize size = m_decoder->frameSizeAtIndex(index);
+    if ((shouldRespectOrientation == RespectImageOrientation) && m_decoder->orientation().usesWidthAsHeight())
+        return IntSize(size.height(), size.width());
+
+    return size;
 }
 
-bool ImageSource::getHotSpot(IntPoint&) const
+bool ImageSource::getHotSpot(IntPoint& hotSpot) const
 {
-    return false;
+    return m_decoder ? m_decoder->hotSpot(hotSpot) : false;
 }
 
 size_t ImageSource::bytesDecodedToDetermineProperties() const
@@ -168,16 +179,16 @@ float ImageSource::frameDurationAtIndex(size_t index)
     return duration;
 }
 
+ImageOrientation ImageSource::orientationAtIndex(size_t) const
+{
+    return m_decoder ? m_decoder->orientation() : DefaultImageOrientation;
+}
+
 bool ImageSource::frameHasAlphaAtIndex(size_t index)
 {
-    // When a frame has not finished decoding, always mark it as having alpha.
-    // Ports that check the result of this function to determine their
-    // compositing op need this in order to not draw the undecoded portion as
-    // black.
-    // TODO: Perhaps we should ensure that each individual decoder returns true
-    // in this case.
-    return !frameIsCompleteAtIndex(index)
-        || m_decoder->frameBufferAtIndex(index)->hasAlpha();
+    if (!m_decoder)
+        return true;
+    return m_decoder->frameHasAlphaAtIndex(index);
 }
 
 bool ImageSource::frameIsCompleteAtIndex(size_t index)
@@ -187,6 +198,19 @@ bool ImageSource::frameIsCompleteAtIndex(size_t index)
 
     ImageFrame* buffer = m_decoder->frameBufferAtIndex(index);
     return buffer && buffer->status() == ImageFrame::FrameComplete;
+}
+
+unsigned ImageSource::frameBytesAtIndex(size_t index) const
+{
+    if (!m_decoder)
+        return 0;
+    return m_decoder->frameBytesAtIndex(index);
+}
+
+void ImageSource::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, PlatformMemoryTypes::Image);
+    info.addMember(m_decoder);
 }
 
 }

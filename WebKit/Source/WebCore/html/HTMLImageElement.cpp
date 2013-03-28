@@ -26,20 +26,46 @@
 #include "Attribute.h"
 #include "CSSPropertyNames.h"
 #include "CSSValueKeywords.h"
+#include "ElementShadow.h"
 #include "EventNames.h"
 #include "FrameView.h"
 #include "HTMLDocument.h"
 #include "HTMLFormElement.h"
 #include "HTMLNames.h"
 #include "HTMLParserIdioms.h"
+#include "ImageInnerElement.h"
 #include "RenderImage.h"
 #include "ScriptEventListener.h"
+#include "ShadowRoot.h"
 
 using namespace std;
 
 namespace WebCore {
 
 using namespace HTMLNames;
+
+void ImageElement::setImageIfNecessary(RenderObject* renderObject, ImageLoader* imageLoader)
+{
+    if (renderObject && renderObject->isImage() && !imageLoader->hasPendingBeforeLoadEvent()) {
+        RenderImage* renderImage = toRenderImage(renderObject);
+        RenderImageResource* renderImageResource = renderImage->imageResource();
+        if (renderImageResource->hasImage())
+            return;
+        renderImageResource->setCachedImage(imageLoader->image());
+
+        // If we have no image at all because we have no src attribute, set
+        // image height and width for the alt text instead.
+        if (!imageLoader->image() && !renderImageResource->cachedImage())
+            renderImage->setImageSizeForAltText();
+    }
+}
+
+RenderObject* ImageElement::createRendererForImage(HTMLElement* element, RenderArena* arena)
+{
+    RenderImage* image = new (arena) RenderImage(element);
+    image->setImageResource(RenderImageResource::create());
+    return image;
+}
 
 HTMLImageElement::HTMLImageElement(const QualifiedName& tagName, Document* document, HTMLFormElement* form)
     : HTMLElement(tagName, document)
@@ -68,73 +94,94 @@ HTMLImageElement::~HTMLImageElement()
         m_form->removeImgElement(this);
 }
 
+void HTMLImageElement::willAddAuthorShadowRoot()
+{
+    if (userAgentShadowRoot())
+        return;
+
+    createShadowSubtree();
+}
+
+void HTMLImageElement::createShadowSubtree()
+{
+    RefPtr<ImageInnerElement> innerElement = ImageInnerElement::create(document());
+    
+    RefPtr<ShadowRoot> root = ShadowRoot::create(this, ShadowRoot::UserAgentShadowRoot);
+    root->appendChild(innerElement);
+}
+
+Element* HTMLImageElement::imageElement()
+{
+    if (ShadowRoot* root = userAgentShadowRoot()) {
+        ASSERT(root->firstChild()->hasTagName(webkitInnerImageTag));
+        return toElement(root->firstChild());
+    }
+
+    return this;
+}
+
 PassRefPtr<HTMLImageElement> HTMLImageElement::createForJSConstructor(Document* document, const int* optionalWidth, const int* optionalHeight)
 {
     RefPtr<HTMLImageElement> image = adoptRef(new HTMLImageElement(imgTag, document));
     if (optionalWidth)
         image->setWidth(*optionalWidth);
-    if (optionalHeight > 0)
+    if (optionalHeight)
         image->setHeight(*optionalHeight);
     return image.release();
 }
 
-bool HTMLImageElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+bool HTMLImageElement::isPresentationAttribute(const QualifiedName& name) const
 {
-    if (attrName == widthAttr ||
-        attrName == heightAttr ||
-        attrName == vspaceAttr ||
-        attrName == hspaceAttr ||
-        attrName == valignAttr) {
-        result = eUniversal;
-        return false;
-    }
-
-    if (attrName == borderAttr || attrName == alignAttr) {
-        result = eReplaced; // Shared with embed and iframe elements.
-        return false;
-    }
-
-    return HTMLElement::mapToEntry(attrName, result);
+    if (name == widthAttr || name == heightAttr || name == borderAttr || name == vspaceAttr || name == hspaceAttr || name == alignAttr || name == valignAttr)
+        return true;
+    return HTMLElement::isPresentationAttribute(name);
 }
 
-void HTMLImageElement::parseMappedAttribute(Attribute* attr)
+void HTMLImageElement::collectStyleForPresentationAttribute(const Attribute& attribute, StylePropertySet* style)
 {
-    const QualifiedName& attrName = attr->name();
-    if (attrName == altAttr) {
-        if (renderer() && renderer()->isImage())
-            toRenderImage(renderer())->updateAltText();
-    } else if (attrName == srcAttr)
+    if (attribute.name() == widthAttr)
+        addHTMLLengthToStyle(style, CSSPropertyWidth, attribute.value());
+    else if (attribute.name() == heightAttr)
+        addHTMLLengthToStyle(style, CSSPropertyHeight, attribute.value());
+    else if (attribute.name() == borderAttr)
+        applyBorderAttributeToStyle(attribute, style);
+    else if (attribute.name() == vspaceAttr) {
+        addHTMLLengthToStyle(style, CSSPropertyMarginTop, attribute.value());
+        addHTMLLengthToStyle(style, CSSPropertyMarginBottom, attribute.value());
+    } else if (attribute.name() == hspaceAttr) {
+        addHTMLLengthToStyle(style, CSSPropertyMarginLeft, attribute.value());
+        addHTMLLengthToStyle(style, CSSPropertyMarginRight, attribute.value());
+    } else if (attribute.name() == alignAttr)
+        applyAlignmentAttributeToStyle(attribute, style);
+    else if (attribute.name() == valignAttr)
+        addPropertyToPresentationAttributeStyle(style, CSSPropertyVerticalAlign, attribute.value());
+    else
+        HTMLElement::collectStyleForPresentationAttribute(attribute, style);
+}
+
+void HTMLImageElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+{
+    if (name == altAttr) {
+        RenderObject* renderObject = shadow() ? innerElement()->renderer() : renderer();
+        if (renderObject && renderObject->isImage())
+            toRenderImage(renderObject)->updateAltText();
+    } else if (name == srcAttr) {
         m_imageLoader.updateFromElementIgnoringPreviousError();
-    else if (attrName == widthAttr)
-        addCSSLength(attr, CSSPropertyWidth, attr->value());
-    else if (attrName == heightAttr)
-        addCSSLength(attr, CSSPropertyHeight, attr->value());
-    else if (attrName == borderAttr) {
-        // border="noborder" -> border="0"
-        applyBorderAttribute(attr);
-    } else if (attrName == vspaceAttr) {
-        addCSSLength(attr, CSSPropertyMarginTop, attr->value());
-        addCSSLength(attr, CSSPropertyMarginBottom, attr->value());
-    } else if (attrName == hspaceAttr) {
-        addCSSLength(attr, CSSPropertyMarginLeft, attr->value());
-        addCSSLength(attr, CSSPropertyMarginRight, attr->value());
-    } else if (attrName == alignAttr)
-        addHTMLAlignment(attr);
-    else if (attrName == valignAttr)
-        addCSSProperty(attr, CSSPropertyVerticalAlign, attr->value());
-    else if (attrName == usemapAttr)
-        setIsLink(!attr->isNull());
-    else if (attrName == onabortAttr)
-        setAttributeEventListener(eventNames().abortEvent, createAttributeEventListener(this, attr));
-    else if (attrName == onloadAttr)
-        setAttributeEventListener(eventNames().loadEvent, createAttributeEventListener(this, attr));
-    else if (attrName == onbeforeloadAttr)
-        setAttributeEventListener(eventNames().beforeloadEvent, createAttributeEventListener(this, attr));
-    else if (attrName == compositeAttr) {
-        if (!parseCompositeOperator(attr->value(), m_compositeOperator))
+        if (ElementShadow* elementShadow = shadow())
+            elementShadow->invalidateDistribution();
+    } else if (name == usemapAttr)
+        setIsLink(!value.isNull());
+    else if (name == onloadAttr)
+        setAttributeEventListener(eventNames().loadEvent, createAttributeEventListener(this, name, value));
+    else if (name == onbeforeloadAttr)
+        setAttributeEventListener(eventNames().beforeloadEvent, createAttributeEventListener(this, name, value));
+    else if (name == compositeAttr) {
+        // FIXME: images don't support blend modes in their compositing attribute.
+        BlendMode blendOp = BlendModeNormal;
+        if (!parseCompositeAndBlendOperator(value, m_compositeOperator, blendOp))
             m_compositeOperator = CompositeSourceOver;
     } else
-        HTMLElement::parseMappedAttribute(attr);
+        HTMLElement::parseAttribute(name, value);
 }
 
 String HTMLImageElement::altText() const
@@ -151,43 +198,27 @@ String HTMLImageElement::altText() const
 
 RenderObject* HTMLImageElement::createRenderer(RenderArena* arena, RenderStyle* style)
 {
-    if (style->hasContent())
+    if (style->hasContent() || shadow())
         return RenderObject::createObject(this, style);
 
-    RenderImage* image = new (arena) RenderImage(this);
-    image->setImageResource(RenderImageResource::create());
-    return image;
+    return createRendererForImage(this, arena);
+}
+
+bool HTMLImageElement::canStartSelection() const
+{
+    if (shadow())
+        return HTMLElement::canStartSelection();
+
+    return false;
 }
 
 void HTMLImageElement::attach()
 {
     HTMLElement::attach();
-
-    if (renderer() && renderer()->isImage() && m_imageLoader.haveFiredBeforeLoadEvent()) {
-        RenderImage* renderImage = toRenderImage(renderer());
-        RenderImageResource* renderImageResource = renderImage->imageResource();
-        if (renderImageResource->hasImage())
-            return;
-        renderImageResource->setCachedImage(m_imageLoader.image());
-
-        // If we have no image at all because we have no src attribute, set
-        // image height and width for the alt text instead.
-        if (!m_imageLoader.image() && !renderImageResource->cachedImage())
-            renderImage->setImageSizeForAltText();
-    }
+    setImageIfNecessary(renderer(), imageLoader());
 }
 
-void HTMLImageElement::insertedIntoDocument()
-{
-    // If we have been inserted from a renderer-less document,
-    // our loader may have not fetched the image, so do it now.
-    if (!m_imageLoader.image())
-        m_imageLoader.updateFromElement();
-
-    HTMLElement::insertedIntoDocument();
-}
-
-void HTMLImageElement::insertedIntoTree(bool deep)
+Node::InsertionNotificationRequest HTMLImageElement::insertedInto(ContainerNode* insertionPoint)
 {
     if (!m_form) {
         // m_form can be non-null if it was set in constructor.
@@ -200,15 +231,20 @@ void HTMLImageElement::insertedIntoTree(bool deep)
         }
     }
 
-    HTMLElement::insertedIntoTree(deep);
+    // If we have been inserted from a renderer-less document,
+    // our loader may have not fetched the image, so do it now.
+    if (insertionPoint->inDocument() && !m_imageLoader.image())
+        m_imageLoader.updateFromElement();
+
+    return HTMLElement::insertedInto(insertionPoint);
 }
 
-void HTMLImageElement::removedFromTree(bool deep)
+void HTMLImageElement::removedFrom(ContainerNode* insertionPoint)
 {
     if (m_form)
         m_form->removeImgElement(this);
     m_form = 0;
-    HTMLElement::removedFromTree(deep);
+    HTMLElement::removedFrom(insertionPoint);
 }
 
 int HTMLImageElement::width(bool ignorePendingStylesheets)
@@ -231,7 +267,7 @@ int HTMLImageElement::width(bool ignorePendingStylesheets)
         document()->updateLayout();
 
     RenderBox* box = renderBox();
-    return box ? adjustForAbsoluteZoom(box->contentWidth(), box) : 0;
+    return box ? adjustForAbsoluteZoom(box->contentBoxRect().pixelSnappedWidth(), box) : 0;
 }
 
 int HTMLImageElement::height(bool ignorePendingStylesheets)
@@ -254,7 +290,7 @@ int HTMLImageElement::height(bool ignorePendingStylesheets)
         document()->updateLayout();
 
     RenderBox* box = renderBox();
-    return box ? adjustForAbsoluteZoom(box->contentHeight(), box) : 0;
+    return box ? adjustForAbsoluteZoom(box->contentBoxRect().pixelSnappedHeight(), box) : 0;
 }
 
 int HTMLImageElement::naturalWidth() const
@@ -273,13 +309,13 @@ int HTMLImageElement::naturalHeight() const
     return m_imageLoader.image()->imageSizeForRenderer(renderer(), 1.0f).height();
 }
 
-bool HTMLImageElement::isURLAttribute(Attribute* attr) const
+bool HTMLImageElement::isURLAttribute(const Attribute& attribute) const
 {
-    return attr->name() == srcAttr
-        || attr->name() == lowsrcAttr
-        || attr->name() == longdescAttr
-        || (attr->name() == usemapAttr && attr->value().string()[0] != '#')
-        || HTMLElement::isURLAttribute(attr);
+    return attribute.name() == srcAttr
+        || attribute.name() == lowsrcAttr
+        || attribute.name() == longdescAttr
+        || (attribute.name() == usemapAttr && attribute.value().string()[0] != '#')
+        || HTMLElement::isURLAttribute(attribute);
 }
 
 const AtomicString& HTMLImageElement::alt() const
@@ -380,5 +416,19 @@ void HTMLImageElement::setItemValueText(const String& value, ExceptionCode&)
     setAttribute(srcAttr, value);
 }
 #endif
+
+inline ImageInnerElement* HTMLImageElement::innerElement() const
+{
+    ASSERT(userAgentShadowRoot());
+    return toImageInnerElement(userAgentShadowRoot()->firstChild());
+}
+
+void HTMLImageElement::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::DOM);
+    HTMLElement::reportMemoryUsage(memoryObjectInfo);
+    info.addMember(m_imageLoader);
+    info.addMember(m_form);
+}
 
 }

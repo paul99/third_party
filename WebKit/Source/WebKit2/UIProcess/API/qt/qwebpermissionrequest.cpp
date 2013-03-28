@@ -25,23 +25,33 @@
 #include <WebKit2/WKBase.h>
 #include <WebKit2/WKRetainPtr.h>
 
-
 class QWebPermissionRequestPrivate : public QSharedData {
 public:
-    QWebPermissionRequestPrivate(WKSecurityOriginRef securityOrigin, WKGeolocationPermissionRequestRef permissionRequest)
+    QWebPermissionRequestPrivate(WKSecurityOriginRef securityOrigin, WKGeolocationPermissionRequestRef geo = 0, WKNotificationPermissionRequestRef notify = 0, QWebPermissionRequest::RequestType reqType = QWebPermissionRequest::Geolocation)
         : origin(securityOrigin)
-        , type(QWebPermissionRequest::Geolocation)
-        , request(permissionRequest)
+        , geolocationRequest(geo)
+        , notificationRequest(notify)
+        , type(reqType)
         , allow(false)
     {
+        WKRetainPtr<WKStringRef> url = adoptWK(WKSecurityOriginCopyProtocol(origin.get()));
+        securityInfo.setScheme(WKStringCopyQString(url.get()));
+
+        WKRetainPtr<WKStringRef> host = adoptWK(WKSecurityOriginCopyHost(origin.get()));
+        securityInfo.setHost(WKStringCopyQString(host.get()));
+
+        securityInfo.setPort(static_cast<int>(WKSecurityOriginGetPort(origin.get())));
     }
+
     ~QWebPermissionRequestPrivate()
     {
     }
 
     WKRetainPtr<WKSecurityOriginRef> origin;
+    WKRetainPtr<WKGeolocationPermissionRequestRef> geolocationRequest;
+    WKRetainPtr<WKNotificationPermissionRequestRef> notificationRequest;
     QWebPermissionRequest::RequestType type;
-    WKRetainPtr<WKGeolocationPermissionRequestRef> request;
+    QtWebSecurityOrigin securityInfo;
     bool allow;
 };
 
@@ -50,9 +60,18 @@ QWebPermissionRequest* QWebPermissionRequest::create(WKSecurityOriginRef origin,
     return new QWebPermissionRequest(origin, request);
 }
 
-QWebPermissionRequest::QWebPermissionRequest(WKSecurityOriginRef securityOrigin, WKGeolocationPermissionRequestRef permissionRequest, QObject* parent)
+QWebPermissionRequest* QWebPermissionRequest::create(WKSecurityOriginRef origin, WKNotificationPermissionRequestRef request)
+{
+    return new QWebPermissionRequest(origin, 0, request, QWebPermissionRequest::Notification);
+}
+
+QWebPermissionRequest::QWebPermissionRequest(WKSecurityOriginRef securityOrigin
+                                             , WKGeolocationPermissionRequestRef geo
+                                             , WKNotificationPermissionRequestRef notify
+                                             , QWebPermissionRequest::RequestType type
+                                             , QObject* parent)
     : QObject(parent)
-    , d(new QWebPermissionRequestPrivate(securityOrigin, permissionRequest))
+    , d(new QWebPermissionRequestPrivate(securityOrigin, geo, notify, type))
 {
 }
 
@@ -71,9 +90,16 @@ void QWebPermissionRequest::setAllow(bool accepted)
     switch (type()) {
     case Geolocation: {
         if (accepted)
-            WKGeolocationPermissionRequestAllow(d->request.get());
+            WKGeolocationPermissionRequestAllow(d->geolocationRequest.get());
         else
-            WKGeolocationPermissionRequestDeny(d->request.get());
+            WKGeolocationPermissionRequestDeny(d->geolocationRequest.get());
+        break;
+    }
+    case Notification: {
+        if (accepted)
+            WKNotificationPermissionRequestAllow(d->notificationRequest.get());
+        else
+            WKNotificationPermissionRequestDeny(d->notificationRequest.get());
         break;
     }
     default:
@@ -88,19 +114,8 @@ bool QWebPermissionRequest::allow() const
     return d->allow;
 }
 
-QString QWebPermissionRequest::scheme() const
+QtWebSecurityOrigin* QWebPermissionRequest::securityOrigin()
 {
-    WKRetainPtr<WKStringRef> url = adoptWK(WKSecurityOriginCopyProtocol(d->origin.get()));
-    return WKStringCopyQString(url.get());
+    return &(d->securityInfo);
 }
 
-QString QWebPermissionRequest::host() const
-{
-    WKRetainPtr<WKStringRef> origin = adoptWK(WKSecurityOriginCopyHost(d->origin.get()));
-    return WKStringCopyQString(origin.get());
-}
-
-int QWebPermissionRequest::port() const
-{
-    return static_cast<int>(WKSecurityOriginGetPort(d->origin.get()));
-}

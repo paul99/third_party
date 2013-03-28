@@ -21,54 +21,32 @@
 #include "config.h"
 #include "ewk_view.h"
 
-#include "ewk_logging.h"
 #include "ewk_private.h"
-
+#include "ewk_tiled_backing_store_private.h"
+#include "ewk_view_private.h"
 #include <Evas.h>
-#include <RefPtrCairo.h>
 #include <eina_safety_checks.h>
-#include <ewk_tiled_backing_store.h>
 
 static Ewk_View_Smart_Class _parent_sc = EWK_VIEW_SMART_CLASS_INIT_NULL;
 
-static Eina_Bool _ewk_view_tiled_render_cb(void* data, Ewk_Tile* tile, const Eina_Rectangle* area)
+static bool _ewk_view_tiled_render_cb(void* data, Ewk_Tile* tile, const Eina_Rectangle* area)
 {
     Ewk_View_Private_Data* priv = static_cast<Ewk_View_Private_Data*>(data);
-    Eina_Rectangle rect = {area->x + tile->x, area->y + tile->y, area->w, area->h};    
-    int stride;
-    cairo_format_t format;
+    Eina_Rectangle rect = {area->x + tile->x, area->y + tile->y, area->w, area->h};
 
-    if (tile->cspace == EVAS_COLORSPACE_ARGB8888) {
-        stride = tile->width * 4;
-        format = CAIRO_FORMAT_ARGB32;
-    } else if (tile->cspace == EVAS_COLORSPACE_RGB565_A5P) {
-        stride = tile->width * 2;
-        format = CAIRO_FORMAT_RGB16_565;
-    } else {
-        ERR("unknown color space: %d", tile->cspace);
-        return false;
-    }
+    uint8_t* pixels = static_cast<uint8_t*>(evas_object_image_data_get(tile->image, true));
+    Ewk_Paint_Context* context = ewk_paint_context_from_image_data_new(pixels, tile->width, tile->height, tile->cspace);
 
-    RefPtr<cairo_surface_t> surface = adoptRef(cairo_image_surface_create_for_data(tile->pixels, format, tile->width, tile->height, stride));
-    cairo_status_t status = cairo_surface_status(surface.get());
-    if (status != CAIRO_STATUS_SUCCESS) {
-        ERR("failed to create cairo surface: %s", cairo_status_to_string(status));
-        return false;
-    }
+    ewk_paint_context_translate(context, -tile->x, -tile->y);
+    bool result = ewk_view_paint_contents(priv, context, &rect);
+    ewk_paint_context_free(context);
 
-    RefPtr<cairo_t> cairo = adoptRef(cairo_create(surface.get()));
-    status = cairo_status(cairo.get());
-    if (status != CAIRO_STATUS_SUCCESS) {
-        ERR("failed to create cairo: %s", cairo_status_to_string(status));
-        return false;
-    }
+    evas_object_image_data_set(tile->image, pixels);
 
-    cairo_translate(cairo.get(), -tile->x, -tile->y);
-
-    return ewk_view_paint_contents(priv, cairo.get(), &rect);
+    return result;
 }
 
-static void* _ewk_view_tiled_updates_process_pre(void* data, Evas_Object* ewkView)
+static void* _ewk_view_tiled_updates_process_pre(void* data, Evas_Object*)
 {
     Ewk_View_Private_Data* priv = static_cast<Ewk_View_Private_Data*>(data);
     ewk_view_layout_if_needed_recursive(priv);
@@ -77,16 +55,15 @@ static void* _ewk_view_tiled_updates_process_pre(void* data, Evas_Object* ewkVie
 
 static Evas_Object* _ewk_view_tiled_smart_backing_store_add(Ewk_View_Smart_Data* smartData)
 {
-    Evas_Object* bs = ewk_tiled_backing_store_add(smartData->base.evas);
-    ewk_tiled_backing_store_render_cb_set
-        (bs, _ewk_view_tiled_render_cb, smartData->_priv);
+    Evas_Object* backingStore = ewk_tiled_backing_store_add(smartData->base.evas);
+    ewk_tiled_backing_store_render_cb_set(backingStore, _ewk_view_tiled_render_cb, smartData->_priv);
     ewk_tiled_backing_store_updates_process_pre_set
-        (bs, _ewk_view_tiled_updates_process_pre, smartData->_priv);
-    return bs;
+        (backingStore, _ewk_view_tiled_updates_process_pre, smartData->_priv);
+    return backingStore;
 }
 
 static void
-_ewk_view_tiled_contents_size_changed_cb(void* data, Evas_Object* ewkView, void* eventInfo)
+_ewk_view_tiled_contents_size_changed_cb(void* data, Evas_Object*, void* eventInfo)
 {
     Evas_Coord* size = static_cast<Evas_Coord*>(eventInfo);
     Ewk_View_Smart_Data* smartData = static_cast<Ewk_View_Smart_Data*>(data);
@@ -97,17 +74,17 @@ _ewk_view_tiled_contents_size_changed_cb(void* data, Evas_Object* ewkView, void*
 
 static void _ewk_view_tiled_smart_add(Evas_Object* ewkView)
 {
-    Ewk_View_Smart_Data* sd;
+    Ewk_View_Smart_Data* smartData;
 
     _parent_sc.sc.add(ewkView);
 
-    sd = static_cast<Ewk_View_Smart_Data*>(evas_object_smart_data_get(ewkView));
-    if (!sd)
+    smartData = static_cast<Ewk_View_Smart_Data*>(evas_object_smart_data_get(ewkView));
+    if (!smartData)
         return;
 
     evas_object_smart_callback_add(
-        sd->main_frame, "contents,size,changed",
-        _ewk_view_tiled_contents_size_changed_cb, sd);
+        smartData->main_frame, "contents,size,changed",
+        _ewk_view_tiled_contents_size_changed_cb, smartData);
 }
 
 static Eina_Bool _ewk_view_tiled_smart_scrolls_process(Ewk_View_Smart_Data* smartData)
@@ -186,7 +163,7 @@ static void _ewk_view_tiled_smart_zoom_weak_smooth_scale_set(Ewk_View_Smart_Data
     ewk_tiled_backing_store_zoom_weak_smooth_scale_set(smartData->backing_store, smoothScale);
 }
 
-static void _ewk_view_tiled_smart_bg_color_set(Ewk_View_Smart_Data* smartData, unsigned char red, unsigned char green, unsigned char blue, unsigned char alpha)
+static void _ewk_view_tiled_smart_bg_color_set(Ewk_View_Smart_Data* smartData, unsigned char /*red*/, unsigned char /*green*/, unsigned char /*blue*/, unsigned char alpha)
 {
     ewk_tiled_backing_store_alpha_set(smartData->backing_store, alpha < 255);
 }
@@ -347,7 +324,7 @@ Eina_Bool ewk_view_tiled_smart_set(Ewk_View_Smart_Class* api)
         return false;
 
     if (EINA_UNLIKELY(!_parent_sc.sc.add)) {
-        _parent_sc.sc.name =  "Ewk_View_Tiled";
+        _parent_sc.sc.name = ewkViewTiledName;
         ewk_view_base_smart_set(&_parent_sc);
         api->sc.parent = reinterpret_cast<Evas_Smart_Class*>(&_parent_sc);
     }
@@ -374,7 +351,7 @@ Eina_Bool ewk_view_tiled_smart_set(Ewk_View_Smart_Class* api)
 
 static inline Evas_Smart* _ewk_view_tiled_smart_class_new(void)
 {
-    static Ewk_View_Smart_Class api = EWK_VIEW_SMART_CLASS_INIT_NAME_VERSION("EWK_View_Tiled");
+    static Ewk_View_Smart_Class api = EWK_VIEW_SMART_CLASS_INIT_NAME_VERSION(ewkViewTiledName);
     static Evas_Smart* smart = 0;
 
     if (EINA_UNLIKELY(!smart)) {
@@ -392,14 +369,16 @@ Evas_Object* ewk_view_tiled_add(Evas* canvas)
 
 Ewk_Tile_Unused_Cache* ewk_view_tiled_unused_cache_get(const Evas_Object* ewkView)
 {
-    Ewk_View_Smart_Data* sd = ewk_view_smart_data_get(ewkView);
-    EINA_SAFETY_ON_NULL_RETURN_VAL(sd, 0);
-    return ewk_tiled_backing_store_tile_unused_cache_get(sd->backing_store);
+    EWK_VIEW_TYPE_CHECK_OR_RETURN(ewkView, ewkViewTiledName, 0);
+    Ewk_View_Smart_Data* smartData = ewk_view_smart_data_get(ewkView);
+    EINA_SAFETY_ON_NULL_RETURN_VAL(smartData, 0);
+    return ewk_tiled_backing_store_tile_unused_cache_get(smartData->backing_store);
 }
 
 void ewk_view_tiled_unused_cache_set(Evas_Object* ewkView, Ewk_Tile_Unused_Cache* cache)
 {
-    Ewk_View_Smart_Data* sd = ewk_view_smart_data_get(ewkView);
-    EINA_SAFETY_ON_NULL_RETURN(sd);
-    ewk_tiled_backing_store_tile_unused_cache_set(sd->backing_store, cache);
+    EWK_VIEW_TYPE_CHECK_OR_RETURN(ewkView, ewkViewTiledName);
+    Ewk_View_Smart_Data* smartData = ewk_view_smart_data_get(ewkView);
+    EINA_SAFETY_ON_NULL_RETURN(smartData);
+    ewk_tiled_backing_store_tile_unused_cache_set(smartData->backing_store, cache);
 }

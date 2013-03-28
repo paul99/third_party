@@ -33,10 +33,10 @@
 
 #if ENABLE(SQL_DATABASE) && ENABLE(INSPECTOR)
 #include "InspectorFrontend.h"
-#include "PlatformString.h"
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 class Database;
@@ -49,13 +49,13 @@ public:
     void bind(InspectorFrontend::Database*);
     Database* database() { return m_database.get(); }
     void setDatabase(PassRefPtr<Database> database) { m_database = database; }
-    int id() const { return m_id; }
+    String id() const { return m_id; }
 
 private:
     InspectorDatabaseResource(PassRefPtr<Database>, const String& domain, const String& name, const String& version);
 
     RefPtr<Database> m_database;
-    int m_id;
+    String m_id;
     String m_domain;
     String m_name;
     String m_version;

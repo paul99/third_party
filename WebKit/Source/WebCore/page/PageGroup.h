@@ -29,12 +29,17 @@
 #include <wtf/HashSet.h>
 #include <wtf/Noncopyable.h>
 #include "LinkHash.h"
+#include "Supplementable.h"
 #include "UserScript.h"
 #include "UserStyleSheet.h"
 #include <wtf/text/StringHash.h>
 
 namespace WebCore {
 
+#if ENABLE(VIDEO_TRACK)
+    class CaptionPreferencesChangedListener;
+    class CaptionUserPreferences;
+#endif
     class KURL;
     class GroupSettings;
     class IDBFactoryBackendInterface;
@@ -42,10 +47,10 @@ namespace WebCore {
     class SecurityOrigin;
     class StorageNamespace;
 
-    class PageGroup {
+    class PageGroup : public Supplementable<PageGroup> {
         WTF_MAKE_NONCOPYABLE(PageGroup); WTF_MAKE_FAST_ALLOCATED;
     public:
-        PageGroup(const String& name);
+        explicit PageGroup(const String& name);
         ~PageGroup();
 
         static PassOwnPtr<PageGroup> create(Page*);
@@ -55,6 +60,7 @@ namespace WebCore {
 
         static void clearLocalStorageForAllOrigins();
         static void clearLocalStorageForOrigin(SecurityOrigin*);
+        static void closeIdleLocalStorageDatabases();
         // DumpRenderTree helper that triggers a StorageArea sync.
         static void syncLocalStorage();
 
@@ -81,16 +87,11 @@ namespace WebCore {
         StorageNamespace* localStorage();
         bool hasLocalStorage() { return m_localStorage; }
 
-#if ENABLE(INDEXED_DATABASE)
-        IDBFactoryBackendInterface* idbFactory();
-        bool hasIDBFactory() { return m_factoryBackend; }
-#endif
-
         void addUserScriptToWorld(DOMWrapperWorld*, const String& source, const KURL&,
-                                  PassOwnPtr<Vector<String> > whitelist, PassOwnPtr<Vector<String> > blacklist,
+                                  const Vector<String>& whitelist, const Vector<String>& blacklist,
                                   UserScriptInjectionTime, UserContentInjectedFrames);
         void addUserStyleSheetToWorld(DOMWrapperWorld*, const String& source, const KURL&,
-                                      PassOwnPtr<Vector<String> > whitelist, PassOwnPtr<Vector<String> > blacklist,
+                                      const Vector<String>& whitelist, const Vector<String>& blacklist,
                                       UserContentInjectedFrames,
                                       UserStyleLevel level = UserStyleUserLevel,
                                       UserStyleInjectionTime injectionTime = InjectInExistingDocuments);
@@ -107,12 +108,23 @@ namespace WebCore {
 
         GroupSettings* groupSettings() const { return m_groupSettings.get(); }
 
+#if ENABLE(VIDEO_TRACK)
+        bool userPrefersCaptions();
+        bool userHasCaptionPreferences();
+        float captionFontSizeScale();
+        void registerForCaptionPreferencesChangedCallbacks(CaptionPreferencesChangedListener*);
+        void unregisterForCaptionPreferencesChangedCallbacks(CaptionPreferencesChangedListener*);
+#endif
+
     private:
         PageGroup(Page*);
 
         void addVisitedLink(LinkHash stringHash);
-        void resetUserStyleCacheInAllFrames();
+        void invalidatedInjectedStyleSheetCacheInAllFrames();
   
+#if ENABLE(VIDEO_TRACK)
+        CaptionUserPreferences* captionPreferences();
+#endif
         String m_name;
 
         HashSet<Page*> m_pages;
@@ -122,14 +134,15 @@ namespace WebCore {
 
         unsigned m_identifier;
         RefPtr<StorageNamespace> m_localStorage;
-#if ENABLE(INDEXED_DATABASE)
-        RefPtr<IDBFactoryBackendInterface> m_factoryBackend;
-#endif
 
         OwnPtr<UserScriptMap> m_userScripts;
         OwnPtr<UserStyleSheetMap> m_userStyleSheets;
 
         OwnPtr<GroupSettings> m_groupSettings;
+
+#if ENABLE(VIDEO_TRACK)
+        OwnPtr<CaptionUserPreferences> m_captionPreferences;
+#endif
     };
 
 } // namespace WebCore

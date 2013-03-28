@@ -28,17 +28,24 @@
 
 #if ENABLE(INDEXED_DATABASE)
 
+#include "ScriptValue.h"
 #include <v8.h>
 #include <wtf/Forward.h>
 
 namespace WebCore {
 
+class DOMRequestState;
 class IDBKey;
+class IDBKeyPath;
 class SerializedScriptValue;
 
 PassRefPtr<IDBKey> createIDBKeyFromValue(v8::Handle<v8::Value>);
-PassRefPtr<IDBKey> createIDBKeyFromSerializedValueAndKeyPath(PassRefPtr<SerializedScriptValue>,  const Vector<String, 0>&);
-PassRefPtr<SerializedScriptValue> injectIDBKeyIntoSerializedValue(PassRefPtr<IDBKey>, PassRefPtr<SerializedScriptValue>, const Vector<String, 0>&);
+
+bool injectIDBKeyIntoScriptValue(DOMRequestState*, PassRefPtr<IDBKey>, ScriptValue&, const IDBKeyPath&);
+PassRefPtr<IDBKey> createIDBKeyFromScriptValueAndKeyPath(DOMRequestState*, const ScriptValue&, const IDBKeyPath&);
+bool canInjectIDBKeyIntoScriptValue(DOMRequestState*, const ScriptValue&, const IDBKeyPath&);
+ScriptValue deserializeIDBValue(DOMRequestState*, PassRefPtr<SerializedScriptValue>);
+ScriptValue idbKeyToScriptValue(DOMRequestState*, PassRefPtr<IDBKey>);
 
 }
 

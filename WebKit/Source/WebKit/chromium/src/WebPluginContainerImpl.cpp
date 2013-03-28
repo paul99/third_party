@@ -33,23 +33,14 @@
 
 #include "Chrome.h"
 #include "ChromeClientImpl.h"
-#include "PluginLayerChromium.h"
+#include "ClipboardChromium.h"
 #include "ScrollbarGroup.h"
-#include "platform/WebClipboard.h"
 #include "WebCursorInfo.h"
 #include "WebDataSourceImpl.h"
 #include "WebElement.h"
 #include "WebInputEvent.h"
 #include "WebInputEventConversion.h"
-#include "WebKit.h"
-#include "platform/WebKitPlatformSupport.h"
 #include "WebPlugin.h"
-#include "platform/WebRect.h"
-#include "platform/WebString.h"
-#include "platform/WebURL.h"
-#include "platform/WebURLError.h"
-#include "platform/WebURLRequest.h"
-#include "platform/WebVector.h"
 #include "WebViewImpl.h"
 #include "WrappedResourceResponse.h"
 
@@ -59,7 +50,10 @@
 #include "Frame.h"
 #include "FrameLoadRequest.h"
 #include "FrameView.h"
+#include "GestureEvent.h"
 #include "GraphicsContext.h"
+#include "GraphicsLayerChromium.h"
+#include "HitTestResult.h"
 #include "HostWindow.h"
 #include "HTMLFormElement.h"
 #include "HTMLNames.h"
@@ -72,20 +66,29 @@
 #include "RenderBox.h"
 #include "ScrollAnimator.h"
 #include "ScrollView.h"
-#if ENABLE(TOUCH_EVENTS)
-#include "TouchEvent.h"
-#endif // ENABLE(TOUCH_EVENTS)
 #include "ScrollbarTheme.h"
+#include "ScrollingCoordinator.h"
+#include "TouchEvent.h"
 #include "UserGestureIndicator.h"
+#include "WebPrintParams.h"
 #include "WheelEvent.h"
+#include <public/Platform.h>
+#include <public/WebClipboard.h>
+#include <public/WebCompositorSupport.h>
+#include <public/WebDragData.h>
+#include <public/WebExternalTextureLayer.h>
+#include <public/WebRect.h>
+#include <public/WebString.h>
+#include <public/WebURL.h>
+#include <public/WebURLError.h>
+#include <public/WebURLRequest.h>
+#include <public/WebVector.h>
 
 #if ENABLE(GESTURE_EVENTS)
 #include "PlatformGestureEvent.h"
 #endif
 
-#if WEBKIT_USING_SKIA
 #include "PlatformContextSkia.h"
-#endif
 
 using namespace WebCore;
 
@@ -115,37 +118,14 @@ void WebPluginContainerImpl::paint(GraphicsContext* gc, const IntRect& damageRec
     if (!parent())
         return;
 
-    // Don't paint anything if the plugin doesn't intersect the damage rect.
-#if OS(ANDROID)
-    // TODO (qinmin): This is a temporary hack to offset the shift caused by
-    // RenderWidget due to page scalefactor. We should come up with some better
-    // ways to handle this.
-    // Here is an example why we need to do this: Suppose the pagescalefactor
-    // is 4 and the plugin's location in DOM is (100, 100). After scaling, its
-    // location will be (400, 400). RenderWidget will add the the difference
-    // between the two, which is (300, 300) to the damageRect. If the unscaled
-    // damageRect is (0, 100, 1200, 800) in the DOM coordinate, it will become
-    // (300, 400, 1200, 800) after the transformation. However, frameRect() is
-    // in the scaled content coordinate. So its position is (400, 400).
-    // In order to intersect correctly with the frameRect(), we have to remove
-    // the offset introduced by RenderWidget from damageRect, and then scale it.
-    // The offset on x can be calculated by frameRect().x() - frameRect().x() /
-    // pageScaleFactor. So the full transformation will be (damageRect.x() -
-    // frameRect().x() - frameRect().x() / pageScaleFactor) * pageScaleFactor
-    float pageScaleFactor = m_element->document()->page()->pageScaleFactor();
-    float offsetScale = pageScaleFactor - 1.0f;
+    FloatRect scaledDamageRect = damageRect;
+    float frameScaleFactor = m_element->document()->frame()->frameScaleFactor();
+    scaledDamageRect.scale(frameScaleFactor);
+    scaledDamageRect.move(-frameRect().x() * (frameScaleFactor - 1), -frameRect().y() * (frameScaleFactor - 1));
 
-    IntRect contentDamageRect = IntRect(
-        ceil(static_cast<float>(damageRect.x() * pageScaleFactor - frameRect().x() * offsetScale)),
-        ceil(static_cast<float>(damageRect.y() * pageScaleFactor - frameRect().y() * offsetScale)),
-        ceil(static_cast<float>(damageRect.width() * pageScaleFactor)),
-        ceil(static_cast<float>(damageRect.height() * pageScaleFactor)));
-    if (!frameRect().intersects(contentDamageRect))
-      return;
-#else
-    if (!frameRect().intersects(damageRect))
+    // Don't paint anything if the plugin doesn't intersect the damage rect.
+    if (!frameRect().intersects(enclosingIntRect(scaledDamageRect)))
         return;
-#endif
 
     gc->save();
 
@@ -154,30 +134,12 @@ void WebPluginContainerImpl::paint(GraphicsContext* gc, const IntRect& damageRec
 
     // The plugin is positioned in window coordinates, so it needs to be painted
     // in window coordinates.
-#if OS(ANDROID)
-    // Because scale factor is applied to the outer frame, calling
-    // windowToContents will retrieve an non-scaled offset.
     IntPoint origin = view->contentsToWindow(IntPoint(0, 0));
     gc->translate(static_cast<float>(-origin.x()), static_cast<float>(-origin.y()));
-#else
-    IntPoint origin = view->windowToContents(IntPoint(0, 0));
-    gc->translate(static_cast<float>(origin.x()), static_cast<float>(origin.y()));
-#endif
 
-#if WEBKIT_USING_SKIA
     WebCanvas* canvas = gc->platformContext()->canvas();
-#elif WEBKIT_USING_CG
-    WebCanvas* canvas = gc->platformContext();
-#endif
 
-#if OS(ANDROID)
-    IntRect windowRect =
-        IntRect(view->contentsToWindow(contentDamageRect));
-#else
-    IntRect windowRect =
-        IntRect(view->contentsToWindow(damageRect.location()), damageRect.size());
-#endif
-
+    IntRect windowRect = view->contentsToWindow(enclosingIntRect(scaledDamageRect));
     m_webPlugin->paint(canvas, windowRect);
 
     gc->restore();
@@ -223,12 +185,8 @@ void WebPluginContainerImpl::handleEvent(Event* event)
     if (!m_webPlugin->acceptsInputEvents())
         return;
 
-#if OS(ANDROID)
-    if (!m_element->focused()) {
-        if (event->isKeyboardEvent() || event->hasInterface(eventNames().interfaceForTouchEvent))
-            return;
-    }
-#endif
+    const WebInputEvent* currentInputEvent = WebViewImpl::currentInputEvent();
+    UserGestureIndicator gestureIndicator(currentInputEvent && WebInputEvent::isUserGestureEventType(currentInputEvent->type) ? DefinitelyProcessingUserGesture : PossiblyProcessingUserGesture);
 
     RefPtr<WebPluginContainerImpl> protector(this);
     // The events we pass are defined at:
@@ -241,10 +199,10 @@ void WebPluginContainerImpl::handleEvent(Event* event)
         handleWheelEvent(static_cast<WheelEvent*>(event));
     else if (event->isKeyboardEvent())
         handleKeyboardEvent(static_cast<KeyboardEvent*>(event));
-#if ENABLE(TOUCH_EVENTS)
-    else if (event->hasInterface(eventNames().interfaceForTouchEvent))
+    else if (eventNames().isTouchEventType(event->type()))
         handleTouchEvent(static_cast<TouchEvent*>(event));
-#endif // ENABLE(TOUCH_EVENTS)
+    else if (eventNames().isGestureEventType(event->type()))
+        handleGestureEvent(static_cast<GestureEvent*>(event));
 
     // FIXME: it would be cleaner if Widget::handleEvent returned true/false and
     // HTMLPluginElement called setDefaultHandled or defaultEventHandler.
@@ -294,6 +252,55 @@ void WebPluginContainerImpl::setParent(ScrollView* view)
         reportGeometry();
 }
 
+void WebPluginContainerImpl::setPlugin(WebPlugin* plugin)
+{
+    if (plugin != m_webPlugin) {
+        m_element->resetInstance();
+        m_webPlugin = plugin;
+    }
+}
+
+float WebPluginContainerImpl::deviceScaleFactor()
+{
+    Page* page = m_element->document()->page();
+    if (!page)
+        return 1.0;
+    return page->deviceScaleFactor();
+}
+
+float WebPluginContainerImpl::pageScaleFactor()
+{
+    Page* page = m_element->document()->page();
+    if (!page)
+        return 1.0;
+    return page->pageScaleFactor();
+}
+
+float WebPluginContainerImpl::pageZoomFactor()
+{
+    Frame* frame = m_element->document()->frame();
+    if (!frame)
+        return 1.0;
+    return frame->pageZoomFactor();
+}
+
+void WebPluginContainerImpl::setWebLayer(WebLayer* layer)
+{
+    if (m_webLayer == layer)
+        return;
+
+    // If anyone of the layers is null we need to switch between hardware
+    // and software compositing. This is done by triggering a style recalc
+    // on the container element.
+    if (!m_webLayer || !layer)
+        m_element->setNeedsStyleRecalc(WebCore::SyntheticStyleChange);
+    if (m_webLayer)
+        GraphicsLayerChromium::unregisterContentsLayer(m_webLayer);
+    if (layer)
+        GraphicsLayerChromium::registerContentsLayer(layer);
+    m_webLayer = layer;
+}
+
 bool WebPluginContainerImpl::supportsPaginatedPrint() const
 {
     return m_webPlugin->supportsPaginatedPrint();
@@ -304,21 +311,16 @@ bool WebPluginContainerImpl::isPrintScalingDisabled() const
     return m_webPlugin->isPrintScalingDisabled();
 }
 
-int WebPluginContainerImpl::printBegin(const IntRect& printableArea,
-                                       int printerDPI) const
+int WebPluginContainerImpl::printBegin(const WebPrintParams& printParams) const
 {
-    return m_webPlugin->printBegin(printableArea, printerDPI);
+    return m_webPlugin->printBegin(printParams);
 }
 
 bool WebPluginContainerImpl::printPage(int pageNumber,
                                        WebCore::GraphicsContext* gc)
 {
     gc->save();
-#if WEBKIT_USING_SKIA
     WebCanvas* canvas = gc->platformContext()->canvas();
-#elif WEBKIT_USING_CG
-    WebCanvas* canvas = gc->platformContext();
-#endif
     bool ret = m_webPlugin->printPage(pageNumber, canvas);
     gc->restore();
     return ret;
@@ -334,7 +336,7 @@ void WebPluginContainerImpl::copy()
     if (!m_webPlugin->hasSelection())
         return;
 
-    webKitPlatformSupport()->clipboard()->writeHTML(m_webPlugin->selectionAsMarkup(), WebURL(), m_webPlugin->selectionAsText(), false);
+    WebKit::Platform::current()->clipboard()->writeHTML(m_webPlugin->selectionAsMarkup(), WebURL(), m_webPlugin->selectionAsText(), false);
 }
 
 WebElement WebPluginContainerImpl::element()
@@ -382,22 +384,26 @@ void WebPluginContainerImpl::reportGeometry()
 
     m_webPlugin->updateGeometry(windowRect, clipRect, cutOutRects, isVisible());
 
-    if (m_scrollbarGroup)
+    if (m_scrollbarGroup) {
         m_scrollbarGroup->scrollAnimator()->contentsResized();
+        m_scrollbarGroup->setFrameRect(frameRect());
+    }
 }
 
-void WebPluginContainerImpl::setBackingTextureId(unsigned id)
+void WebPluginContainerImpl::setBackingTextureId(unsigned textureId)
 {
 #if USE(ACCELERATED_COMPOSITING)
-    unsigned currId = m_platformLayer->textureId();
-    if (currId == id)
+    if (m_textureId == textureId)
         return;
-    m_platformLayer->setTextureId(id);
-    // If anyone of the IDs is zero we need to switch between hardware
-    // and software compositing. This is done by triggering a style recalc
-    // on the container element.
-    if (!(currId * id))
-        m_element->setNeedsStyleRecalc(WebCore::SyntheticStyleChange);
+
+    ASSERT(!m_ioSurfaceLayer);
+
+    if (!m_textureLayer)
+        m_textureLayer = adoptPtr(Platform::current()->compositorSupport()->createExternalTextureLayer());
+    m_textureLayer->setTextureId(textureId);
+    m_textureId = textureId;
+
+    setWebLayer(m_textureId ? m_textureLayer->layer() : 0);
 #endif
 }
 
@@ -405,42 +411,26 @@ void WebPluginContainerImpl::setBackingIOSurfaceId(int width,
                                                    int height,
                                                    uint32_t ioSurfaceId)
 {
-#if OS(DARWIN) && USE(ACCELERATED_COMPOSITING)
-    uint32_t currentId = m_platformLayer->getIOSurfaceId();
-    if (ioSurfaceId == currentId)
+#if USE(ACCELERATED_COMPOSITING)
+    if (ioSurfaceId == m_ioSurfaceId)
         return;
 
-    m_platformLayer->setIOSurfaceProperties(width, height, ioSurfaceId);
+    ASSERT(!m_textureLayer);
 
-    // If anyone of the IDs is zero we need to switch between hardware
-    // and software compositing. This is done by triggering a style recalc
-    // on the container element.
-    if (!(ioSurfaceId * currentId))
-        m_element->setNeedsStyleRecalc(WebCore::SyntheticStyleChange);
+    if (!m_ioSurfaceLayer)
+        m_ioSurfaceLayer = adoptPtr(Platform::current()->compositorSupport()->createIOSurfaceLayer());
+    m_ioSurfaceLayer->setIOSurfaceProperties(ioSurfaceId, WebSize(width, height));
+
+    m_ioSurfaceId = ioSurfaceId;
+    setWebLayer(m_ioSurfaceId ? m_ioSurfaceLayer->layer() : 0);
 #endif
 }
-
-#if OS(ANDROID)
-void WebPluginContainerImpl::setBackingVideoTextureId(unsigned id)
-{
-#if USE(ACCELERATED_COMPOSITING)
-    m_platformLayer->setVideoTextureId(id);
-#endif
-}
-
-void WebPluginContainerImpl::setBackingVideoRect(float x, float y, float width, float height)
-{
-#if USE(ACCELERATED_COMPOSITING)
-    m_platformLayer->setVideoRect(FloatRect(x, y, width, height));
-#endif
-}
-#endif
 
 void WebPluginContainerImpl::commitBackingTexture()
 {
 #if USE(ACCELERATED_COMPOSITING)
-    if (m_platformLayer.get())
-        m_platformLayer->invalidateRect(FloatRect(FloatPoint(), m_platformLayer->bounds()));
+    if (m_webLayer)
+        m_webLayer->invalidate();
 #endif
 }
 
@@ -504,6 +494,67 @@ void WebPluginContainerImpl::zoomLevelChanged(double zoomLevel)
     view->fullFramePluginZoomLevelChanged(zoomLevel);
 }
 
+void WebPluginContainerImpl::setOpaque(bool opaque)
+{
+#if USE(ACCELERATED_COMPOSITING)
+    if (m_webLayer)
+        m_webLayer->setOpaque(opaque);
+#endif
+}
+
+bool WebPluginContainerImpl::isRectTopmost(const WebRect& rect)
+{
+    Frame* frame = m_element->document()->frame();
+    if (!frame)
+        return false;
+
+    // hitTestResultAtPoint() takes a padding rectangle.
+    // FIXME: We'll be off by 1 when the width or height is even.
+    IntRect documentRect(x() + rect.x, y() + rect.y, rect.width, rect.height);
+    LayoutPoint center = documentRect.center();
+    // Make the rect we're checking (the point surrounded by padding rects) contained inside the requested rect. (Note that -1/2 is 0.)
+    LayoutSize padding((documentRect.width() - 1) / 2, (documentRect.height() - 1) / 2);
+    HitTestResult result = frame->eventHandler()->hitTestResultAtPoint(center, false, false, DontHitTestScrollbars, HitTestRequest::ReadOnly | HitTestRequest::Active, padding);
+    const HitTestResult::NodeSet& nodes = result.rectBasedTestResult();
+    if (nodes.size() != 1)
+        return false;
+    return (nodes.first().get() == m_element);
+}
+
+void WebPluginContainerImpl::requestTouchEventType(TouchEventRequestType requestType)
+{
+    if (m_touchEventRequestType == requestType)
+        return;
+    
+    if (requestType != TouchEventRequestTypeNone && m_touchEventRequestType == TouchEventRequestTypeNone)
+        m_element->document()->didAddTouchEventHandler(m_element);
+    else if (requestType == TouchEventRequestTypeNone && m_touchEventRequestType != TouchEventRequestTypeNone)
+        m_element->document()->didRemoveTouchEventHandler(m_element);
+    m_touchEventRequestType = requestType;
+}
+
+void WebPluginContainerImpl::setWantsWheelEvents(bool wantsWheelEvents)
+{
+    if (m_wantsWheelEvents == wantsWheelEvents)
+        return;
+    m_wantsWheelEvents = wantsWheelEvents;
+    if (Page* page = m_element->document()->page()) {
+        if (ScrollingCoordinator* scrollingCoordinator = page->scrollingCoordinator()) {
+            if (parent() && parent()->isFrameView())
+                scrollingCoordinator->frameViewLayoutUpdated(static_cast<FrameView*>(parent()));
+        }
+    }
+}
+
+WebPoint WebPluginContainerImpl::windowToLocalPoint(const WebPoint& point)
+{
+    ScrollView* view = parent();
+    if (!view)
+        return point;
+    WebPoint windowPoint = view->windowToContents(point);
+    return roundedIntPoint(m_element->renderer()->absoluteToLocal(LayoutPoint(windowPoint), UseTransforms));
+}
+
 void WebPluginContainerImpl::didReceiveResponse(const ResourceResponse& response)
 {
     // Make sure that the plugin receives window geometry before data, or else
@@ -544,6 +595,21 @@ bool WebPluginContainerImpl::getFormValue(String& value)
     return false;
 }
 
+bool WebPluginContainerImpl::supportsKeyboardFocus() const
+{
+    return m_webPlugin->supportsKeyboardFocus();
+}
+
+bool WebPluginContainerImpl::canProcessDrag() const
+{
+    return m_webPlugin->canProcessDrag();
+}
+
+bool WebPluginContainerImpl::wantsWheelEvents()
+{
+    return m_wantsWheelEvents;
+}
+
 void WebPluginContainerImpl::willDestroyPluginLoadObserver(WebPluginLoadObserver* observer)
 {
     size_t pos = m_pluginLoadObservers.find(observer);
@@ -553,17 +619,16 @@ void WebPluginContainerImpl::willDestroyPluginLoadObserver(WebPluginLoadObserver
 }
 
 #if USE(ACCELERATED_COMPOSITING)
-WebCore::LayerChromium* WebPluginContainerImpl::platformLayer() const
+WebLayer* WebPluginContainerImpl::platformLayer() const
 {
-    return (m_platformLayer->textureId() || m_platformLayer->getIOSurfaceId()) ? m_platformLayer.get() : 0;
+    return m_webLayer;
 }
 #endif
-
 
 ScrollbarGroup* WebPluginContainerImpl::scrollbarGroup()
 {
     if (!m_scrollbarGroup)
-        m_scrollbarGroup = adoptPtr(new ScrollbarGroup(m_element->document()->frame()->page()));
+        m_scrollbarGroup = adoptPtr(new ScrollbarGroup(m_element->document()->frame()->view(), frameRect()));
     return m_scrollbarGroup.get();
 }
 
@@ -589,17 +654,6 @@ bool WebPluginContainerImpl::paintCustomOverhangArea(GraphicsContext* context, c
     return true;
 }
 
-#if ENABLE(GESTURE_EVENTS)
-bool WebPluginContainerImpl::handleGestureEvent(const WebCore::PlatformGestureEvent& gestureEvent)
-{
-    if (m_scrollbarGroup) {
-        m_scrollbarGroup->handleGestureEvent(gestureEvent);
-        return true;
-    }
-    return false;
-}
-#endif
-
 // Private methods -------------------------------------------------------------
 
 WebPluginContainerImpl::WebPluginContainerImpl(WebCore::HTMLPlugInElement* element, WebPlugin* webPlugin)
@@ -607,34 +661,48 @@ WebPluginContainerImpl::WebPluginContainerImpl(WebCore::HTMLPlugInElement* eleme
     , m_element(element)
     , m_webPlugin(webPlugin)
 #if USE(ACCELERATED_COMPOSITING)
-    , m_platformLayer(PluginLayerChromium::create())
+    , m_textureId(0)
+    , m_ioSurfaceId(0)
 #endif
+    , m_webLayer(0)
+    , m_touchEventRequestType(TouchEventRequestTypeNone)
+    , m_wantsWheelEvents(false)
 {
-#if ENABLE(PLUGIN_SET_FOCUSABLE)
-    m_element->setSupportsFocus(true);
-#endif
 }
 
 WebPluginContainerImpl::~WebPluginContainerImpl()
 {
+    if (m_touchEventRequestType != TouchEventRequestTypeNone)
+        m_element->document()->didRemoveTouchEventHandler(m_element);
+
     for (size_t i = 0; i < m_pluginLoadObservers.size(); ++i)
         m_pluginLoadObservers[i]->clearPluginContainer();
     m_webPlugin->destroy();
+#if USE(ACCELERATED_COMPOSITING)
+    if (m_webLayer)
+        GraphicsLayerChromium::unregisterContentsLayer(m_webLayer);
+#endif
 }
 
 void WebPluginContainerImpl::handleMouseEvent(MouseEvent* event)
 {
     ASSERT(parent()->isFrameView());
 
+    if (event->isDragEvent()) {
+        if (m_webPlugin->canProcessDrag())
+            handleDragEvent(event);
+        return;
+    }
+
     // We cache the parent FrameView here as the plugin widget could be deleted
     // in the call to HandleEvent. See http://b/issue?id=1362948
     FrameView* parentView = static_cast<FrameView*>(parent());
 
-    WebMouseEventBuilder webEvent(this, *event);
+    WebMouseEventBuilder webEvent(this, m_element->renderer(), *event);
     if (webEvent.type == WebInputEvent::Undefined)
         return;
 
-    if (!m_element->focused() && event->type() == eventNames().mousedownEvent) {
+    if (event->type() == eventNames().mousedownEvent) {
         Frame* containingFrame = parentView->frame();
         if (Page* currentPage = containingFrame->page())
             currentPage->focusController()->setFocusedNode(m_element, containingFrame);
@@ -669,9 +737,35 @@ void WebPluginContainerImpl::handleMouseEvent(MouseEvent* event)
     chromeClient->setCursorForPlugin(cursorInfo);
 }
 
+void WebPluginContainerImpl::handleDragEvent(MouseEvent* event)
+{
+    ASSERT(event->isDragEvent());
+
+    WebDragStatus dragStatus = WebDragStatusUnknown;
+    if (event->type() == eventNames().dragenterEvent)
+        dragStatus = WebDragStatusEnter;
+    else if (event->type() == eventNames().dragleaveEvent)
+        dragStatus = WebDragStatusLeave;
+    else if (event->type() == eventNames().dragoverEvent)
+        dragStatus = WebDragStatusOver;
+    else if (event->type() == eventNames().dropEvent)
+        dragStatus = WebDragStatusDrop;
+
+    if (dragStatus == WebDragStatusUnknown)
+        return;
+
+    ClipboardChromium* clipboard = static_cast<ClipboardChromium*>(event->dataTransfer());
+    WebDragData dragData = clipboard->dataObject();
+    WebDragOperationsMask dragOperationMask = static_cast<WebDragOperationsMask>(clipboard->sourceOperation());
+    WebPoint dragScreenLocation(event->screenX(), event->screenY());
+    WebPoint dragLocation(event->absoluteLocation().x() - location().x(), event->absoluteLocation().y() - location().y());
+
+    m_webPlugin->handleDragStatusUpdate(dragStatus, dragData, dragOperationMask, dragLocation, dragScreenLocation);
+}
+
 void WebPluginContainerImpl::handleWheelEvent(WheelEvent* event)
 {
-    WebMouseWheelEventBuilder webEvent(this, *event);
+    WebMouseWheelEventBuilder webEvent(this, m_element->renderer(), *event);
     if (webEvent.type == WebInputEvent::Undefined)
         return;
 
@@ -718,59 +812,64 @@ void WebPluginContainerImpl::handleKeyboardEvent(KeyboardEvent* event)
         event->setDefaultHandled();
 }
 
-#if ENABLE(TOUCH_EVENTS)
-void WebPluginContainerImpl::startAcceptingTouchEvents()
+void WebPluginContainerImpl::handleTouchEvent(TouchEvent* event)
 {
-    // TODO(borenet) Now that plugins have to request event types, this should
-    // be done only if touch events are requested.
-    m_element->document()->addListenerTypeIfNeeded(eventNames().touchstartEvent);
+    switch (m_touchEventRequestType) {
+    case TouchEventRequestTypeNone:
+        return;
+    case TouchEventRequestTypeRaw: {
+        WebTouchEventBuilder webEvent(this, m_element->renderer(), *event);
+        if (webEvent.type == WebInputEvent::Undefined)
+            return;
+        WebCursorInfo cursorInfo;
+        if (m_webPlugin->handleInputEvent(webEvent, cursorInfo))
+            event->setDefaultHandled();
+        // FIXME: Can a plugin change the cursor from a touch-event callback?
+        return;
+    }
+    case TouchEventRequestTypeSynthesizedMouse:
+        synthesizeMouseEventIfPossible(event);
+        return;
+    }
 }
 
-void WebPluginContainerImpl::handleTouchEvent(WebCore::TouchEvent* event)
+void WebPluginContainerImpl::handleGestureEvent(GestureEvent* event)
 {
-    WebTouchEventBuilder webEvent(this, *event);
+    WebGestureEventBuilder webEvent(this, m_element->renderer(), *event);
+    if (webEvent.type == WebInputEvent::Undefined)
+        return;
+    WebCursorInfo cursorInfo;
+    if (m_webPlugin->handleInputEvent(webEvent, cursorInfo))
+        event->setDefaultHandled();
+    // FIXME: Can a plugin change the cursor from a touch-event callback?
+}
+
+void WebPluginContainerImpl::synthesizeMouseEventIfPossible(TouchEvent* event)
+{
+    WebMouseEventBuilder webEvent(this, m_element->renderer(), *event);
     if (webEvent.type == WebInputEvent::Undefined)
         return;
 
     WebCursorInfo cursorInfo;
-    if (m_webPlugin->handleInputEvent(webEvent, cursorInfo)) {
+    if (m_webPlugin->handleInputEvent(webEvent, cursorInfo))
         event->setDefaultHandled();
-        // I don't feel that setDefaultPrevented should be needed here, but
-        // the code in RenderWidgetHost uses defaultPrevented() rather than
-        // defaultHandled() to decide whether to pass the event to the next
-        // recipient.  Setting this here prevents pinches inside the plugin
-        // from causing awkward and unintentional zooms.
-
-        // NOTE: I have disabled this because touch filtering is not working. 
-        // So even if the touch events are not handled there is no pinch-zoom. 
-        // This can be enabled again once touch filtering is working.
-        event->setDefaultPrevented(true);
-    }
-
 }
-#endif // ENABLE(TOUCH_EVENTS)
 
 void WebPluginContainerImpl::calculateGeometry(const IntRect& frameRect,
                                                IntRect& windowRect,
                                                IntRect& clipRect,
                                                Vector<IntRect>& cutOutRects)
 {
-#if OS(ANDROID)
-    windowRect = IntRect(
-        parent()->contentsToWindow(frameRect));
-#else
-    windowRect = IntRect(
-        parent()->contentsToWindow(frameRect.location()), frameRect.size());
-#endif
+    windowRect = parent()->contentsToWindow(frameRect);
+
     // Calculate a clip-rect so that we don't overlap the scrollbars, etc.
     clipRect = windowClipRect();
     clipRect.move(-windowRect.x(), -windowRect.y());
 
     getPluginOcclusions(m_element, this->parent(), frameRect, cutOutRects);
     // Convert to the plugin position.
-    for (size_t i = 0; i < cutOutRects.size(); i++) {
+    for (size_t i = 0; i < cutOutRects.size(); i++)
         cutOutRects[i].move(-frameRect.x(), -frameRect.y());
-    }
 }
 
 WebCore::IntRect WebPluginContainerImpl::windowClipRect() const
@@ -784,9 +883,8 @@ WebCore::IntRect WebPluginContainerImpl::windowClipRect() const
     if (m_element->renderer()->document()->renderer()) {
         // Take our element and get the clip rect from the enclosing layer and
         // frame view.
-        RenderLayer* layer = m_element->renderer()->enclosingLayer();
         clipRect.intersect(
-            m_element->document()->view()->windowClipRectForLayer(layer, true));
+            m_element->document()->view()->windowClipRectForFrameOwner(m_element, true));
     }
 
     return clipRect;

@@ -14,6 +14,7 @@
 #include "GrIndexBuffer.h"
 #include "GrPathUtils.h"
 #include "SkGeometry.h"
+#include "SkStroke.h"
 #include "SkTemplates.h"
 
 namespace {
@@ -35,7 +36,7 @@ bool push_quad_index_data(GrIndexBuffer* qIdxBuffer) {
     uint16_t* data = (uint16_t*) qIdxBuffer->lock();
     bool tempData = NULL == data;
     if (tempData) {
-        data = new uint16_t[kNumQuadsInIdxBuffer * kIdxsPerQuad];
+        data = SkNEW_ARRAY(uint16_t, kNumQuadsInIdxBuffer * kIdxsPerQuad);
     }
     for (int i = 0; i < kNumQuadsInIdxBuffer; ++i) {
 
@@ -50,7 +51,7 @@ bool push_quad_index_data(GrIndexBuffer* qIdxBuffer) {
         //     a0              c0
         //      a            c
         //       a1       c1
-        // Each is drawn as three triagnles specified by these 9 indices:
+        // Each is drawn as three triangles specified by these 9 indices:
         int baseIdx = i * kIdxsPerQuad;
         uint16_t baseVert = (uint16_t)(i * kVertsPerQuad);
         data[0 + baseIdx] = baseVert + 0; // a0
@@ -86,9 +87,8 @@ GrPathRenderer* GrAAHairLinePathRenderer::Create(GrContext* context) {
         !push_quad_index_data(qIdxBuf)) {
         return NULL;
     }
-    return new GrAAHairLinePathRenderer(context,
-                                        lIdxBuffer,
-                                        qIdxBuf);
+    return SkNEW_ARGS(GrAAHairLinePathRenderer,
+                      (context, lIdxBuffer, qIdxBuf));
 }
 
 GrAAHairLinePathRenderer::GrAAHairLinePathRenderer(
@@ -99,39 +99,11 @@ GrAAHairLinePathRenderer::GrAAHairLinePathRenderer(
     linesIndexBuffer->ref();
     fQuadsIndexBuffer = quadsIndexBuffer;
     quadsIndexBuffer->ref();
-    this->resetGeom();
 }
 
 GrAAHairLinePathRenderer::~GrAAHairLinePathRenderer() {
     fLinesIndexBuffer->unref();
     fQuadsIndexBuffer->unref();
-}
-
-bool GrAAHairLinePathRenderer::canDrawPath(const GrDrawTarget::Caps& targetCaps,
-                                           const SkPath& path,
-                                           GrPathFill fill,
-                                           bool antiAlias) const {
-    static const uint32_t gReqDerivMask = SkPath::kCubic_SegmentMask |
-                                          SkPath::kQuad_SegmentMask;
-    return (kHairLine_PathFill == fill &&
-            antiAlias &&
-            (targetCaps.fShaderDerivativeSupport ||
-             !(gReqDerivMask & path.getSegmentMasks())));
-}
-
-void GrAAHairLinePathRenderer::pathWillClear() {
-    this->resetGeom();
-}
-
-void GrAAHairLinePathRenderer::resetGeom() {
-    fPreviousStages = ~0;
-    fPreviousRTHeight = ~0;
-    fPreviousViewMatrix = GrMatrix::InvalidMatrix();
-    fLineSegmentCnt = 0;
-    fQuadCnt = 0; 
-    if ((fQuadCnt || fLineSegmentCnt) && NULL != fTarget) {
-        fTarget->resetVertexSource();
-    }
 }
 
 namespace {
@@ -168,7 +140,7 @@ int get_float_exp(float x) {
 // if it returns -1 then should be drawn as lines
 int num_quad_subdivs(const SkPoint p[3]) {
     static const SkScalar gDegenerateToLineTol = SK_Scalar1;
-    static const SkScalar gDegenerateToLineTolSqd = 
+    static const SkScalar gDegenerateToLineTolSqd =
         SkScalarMul(gDegenerateToLineTol, gDegenerateToLineTol);
 
     if (p[0].distanceToSqd(p[1]) < gDegenerateToLineTolSqd ||
@@ -176,7 +148,7 @@ int num_quad_subdivs(const SkPoint p[3]) {
         return -1;
     }
 
-    GrScalar dsqd = p[1].distanceToLineBetweenSqd(p[0], p[2]);
+    SkScalar dsqd = p[1].distanceToLineBetweenSqd(p[0], p[2]);
     if (dsqd < gDegenerateToLineTolSqd) {
         return -1;
     }
@@ -192,7 +164,7 @@ int num_quad_subdivs(const SkPoint p[3]) {
     // maybe different when do this using gpu (geo or tess shaders)
     static const SkScalar gSubdivTol = 175 * SK_Scalar1;
 
-    if (dsqd <= gSubdivTol*gSubdivTol) {
+    if (dsqd <= SkScalarMul(gSubdivTol, gSubdivTol)) {
         return 0;
     } else {
         // subdividing the quad reduces d by 4. so we want x = log4(d/tol)
@@ -205,7 +177,9 @@ int num_quad_subdivs(const SkPoint p[3]) {
         log = GrMin(GrMax(0, log), kMaxSub);
         return log;
 #else
-        SkScalar log = SkScalarLog(SkScalarDiv(dsqd,gSubdivTol*gSubdivTol));
+        SkScalar log = SkScalarLog(
+                          SkScalarDiv(dsqd,
+                                      SkScalarMul(gSubdivTol, gSubdivTol)));
         static const SkScalar conv = SkScalarInvert(SkScalarLog(2));
         log = SkScalarMul(log, conv);
         return  GrMin(GrMax(0, SkScalarCeilToInt(log)),kMaxSub);
@@ -224,8 +198,7 @@ int num_quad_subdivs(const SkPoint p[3]) {
  */
 int generate_lines_and_quads(const SkPath& path,
                              const SkMatrix& m,
-                             const SkVector& translate,
-                             GrIRect clip,
+                             const GrIRect& devClipBounds,
                              PtArray* lines,
                              PtArray* quads,
                              IntArray* quadSubdivCnts) {
@@ -245,24 +218,22 @@ int generate_lines_and_quads(const SkPath& path,
             case kMove_PathCmd:
                 break;
             case kLine_PathCmd:
-                SkPoint::Offset(pts, 2, translate);
                 m.mapPoints(devPts, pts, 2);
                 bounds.setBounds(devPts, 2);
                 bounds.outset(SK_Scalar1, SK_Scalar1);
                 bounds.roundOut(&ibounds);
-                if (SkIRect::Intersects(clip, ibounds)) {
+                if (SkIRect::Intersects(devClipBounds, ibounds)) {
                     SkPoint* pts = lines->push_back_n(2);
                     pts[0] = devPts[0];
                     pts[1] = devPts[1];
                 }
                 break;
             case kQuadratic_PathCmd:
-                SkPoint::Offset(pts, 3, translate);
                 m.mapPoints(devPts, pts, 3);
                 bounds.setBounds(devPts, 3);
                 bounds.outset(SK_Scalar1, SK_Scalar1);
                 bounds.roundOut(&ibounds);
-                if (SkIRect::Intersects(clip, ibounds)) {
+                if (SkIRect::Intersects(devClipBounds, ibounds)) {
                     int subdiv = num_quad_subdivs(devPts);
                     GrAssert(subdiv >= -1);
                     if (-1 == subdiv) {
@@ -282,24 +253,25 @@ int generate_lines_and_quads(const SkPath& path,
                         totalQuadCount += 1 << subdiv;
                     }
                 }
-            break;
+                break;
             case kCubic_PathCmd:
-                SkPoint::Offset(pts, 4, translate);
                 m.mapPoints(devPts, pts, 4);
                 bounds.setBounds(devPts, 4);
                 bounds.outset(SK_Scalar1, SK_Scalar1);
                 bounds.roundOut(&ibounds);
-                if (SkIRect::Intersects(clip, ibounds)) {
+                if (SkIRect::Intersects(devClipBounds, ibounds)) {
                     PREALLOC_PTARRAY(32) q;
+                    // we don't need a direction if we aren't constraining the subdivision
+                    static const SkPath::Direction kDummyDir = SkPath::kCCW_Direction;
                     // We convert cubics to quadratics (for now).
                     // In perspective have to do conversion in src space.
                     if (persp) {
-                        SkScalar tolScale = 
+                        SkScalar tolScale =
                             GrPathUtils::scaleToleranceToSrc(SK_Scalar1, m,
                                                              path.getBounds());
-                        GrPathUtils::convertCubicToQuads(pts, tolScale, &q);
+                        GrPathUtils::convertCubicToQuads(pts, tolScale, false, kDummyDir, &q);
                     } else {
-                        GrPathUtils::convertCubicToQuads(devPts, SK_Scalar1, &q);
+                        GrPathUtils::convertCubicToQuads(devPts, SK_Scalar1, false, kDummyDir, &q);
                     }
                     for (int i = 0; i < q.count(); i += 3) {
                         SkPoint* qInDevSpace;
@@ -315,7 +287,7 @@ int generate_lines_and_quads(const SkPath& path,
                         }
                         bounds.outset(SK_Scalar1, SK_Scalar1);
                         bounds.roundOut(&ibounds);
-                        if (SkIRect::Intersects(clip, ibounds)) {
+                        if (SkIRect::Intersects(devClipBounds, ibounds)) {
                             int subdiv = num_quad_subdivs(qInDevSpace);
                             GrAssert(subdiv >= -1);
                             if (-1 == subdiv) {
@@ -338,7 +310,7 @@ int generate_lines_and_quads(const SkPath& path,
                         }
                     }
                 }
-            break;
+                break;
             case kClose_PathCmd:
                 break;
             case kEnd_PathCmd:
@@ -351,13 +323,13 @@ struct Vertex {
     GrPoint fPos;
     union {
         struct {
-            GrScalar fA;
-            GrScalar fB;
-            GrScalar fC;
+            SkScalar fA;
+            SkScalar fB;
+            SkScalar fC;
         } fLine;
         GrVec   fQuadCoord;
         struct {
-            GrScalar fBogus[4];
+            SkScalar fBogus[4];
         };
     };
 };
@@ -376,13 +348,13 @@ void intersect_lines(const SkPoint& ptA, const SkVector& normA,
 
     result->fX = SkScalarMul(normA.fY, lineBW) - SkScalarMul(lineAW, normB.fY);
     result->fX = SkScalarMul(result->fX, wInv);
-    
+
     result->fY = SkScalarMul(lineAW, normB.fX) - SkScalarMul(normA.fX, lineBW);
     result->fY = SkScalarMul(result->fY, wInv);
 }
 
-void bloat_quad(const SkPoint qpts[3], const GrMatrix* toDevice,
-                const GrMatrix* toSrc, Vertex verts[kVertsPerQuad]) {
+void bloat_quad(const SkPoint qpts[3], const SkMatrix* toDevice,
+                const SkMatrix* toSrc, Vertex verts[kVertsPerQuad]) {
     GrAssert(!toDevice == !toSrc);
     // original quad is specified by tri a,b,c
     SkPoint a = qpts[0];
@@ -390,8 +362,7 @@ void bloat_quad(const SkPoint qpts[3], const GrMatrix* toDevice,
     SkPoint c = qpts[2];
 
     // this should be in the src space, not dev coords, when we have perspective
-    SkMatrix DevToUV;
-    GrPathUtils::quadDesignSpaceToUVCoordsMatrix(qpts, &DevToUV);
+    GrPathUtils::QuadUVMatrix DevToUV(qpts);
 
     if (toDevice) {
         toDevice->mapPoints(&a, 1);
@@ -455,14 +426,13 @@ void bloat_quad(const SkPoint qpts[3], const GrMatrix* toDevice,
     if (toSrc) {
         toSrc->mapPointsWithStride(&verts[0].fPos, sizeof(Vertex), kVertsPerQuad);
     }
-    DevToUV.mapPointsWithStride(&verts[0].fQuadCoord,
-                                &verts[0].fPos, sizeof(Vertex), kVertsPerQuad);
+    DevToUV.apply<kVertsPerQuad, sizeof(Vertex), sizeof(GrPoint)>(verts);
 }
 
 void add_quads(const SkPoint p[3],
                int subdiv,
-               const GrMatrix* toDevice,
-               const GrMatrix* toSrc,
+               const SkMatrix* toDevice,
+               const SkMatrix* toSrc,
                Vertex** vert) {
     GrAssert(subdiv >= 0);
     if (subdiv) {
@@ -489,16 +459,7 @@ void add_line(const SkPoint p[2],
     if (orthVec.setLength(SK_Scalar1)) {
         orthVec.setOrthog(orthVec);
 
-        // the values we pass down to the frag shader
-        // have to be in y-points-up space;
-        SkVector normal;
-        normal.fX = orthVec.fX;
-        normal.fY = -orthVec.fY;
-        SkPoint aYDown;
-        aYDown.fX = a.fX;
-        aYDown.fY = rtHeight - a.fY;
-
-        SkScalar lineC = -(aYDown.dot(normal));
+        SkScalar lineC = -(a.dot(orthVec));
         for (int i = 0; i < kVertsPerLineSeg; ++i) {
             (*vert)[i].fPos = (i < 2) ? a : b;
             if (0 == i || 3 == i) {
@@ -506,8 +467,8 @@ void add_line(const SkPoint p[2],
             } else {
                 (*vert)[i].fPos += orthVec;
             }
-            (*vert)[i].fLine.fA = normal.fX;
-            (*vert)[i].fLine.fB = normal.fY;
+            (*vert)[i].fLine.fA = orthVec.fX;
+            (*vert)[i].fLine.fB = orthVec.fY;
             (*vert)[i].fLine.fC = lineC;
         }
         if (NULL != toSrc) {
@@ -528,58 +489,42 @@ void add_line(const SkPoint p[2],
 
 }
 
-bool GrAAHairLinePathRenderer::createGeom(GrDrawState::StageMask stageMask) {
-    const GrDrawState& drawState = fTarget->getDrawState();
+bool GrAAHairLinePathRenderer::createGeom(
+            const SkPath& path,
+            GrDrawTarget* target,
+            int* lineCnt,
+            int* quadCnt,
+            GrDrawTarget::AutoReleaseGeometry* arg) {
+    const GrDrawState& drawState = target->getDrawState();
     int rtHeight = drawState.getRenderTarget()->height();
 
-    GrIRect clip;
-    if (fTarget->getClip().hasConservativeBounds()) {
-        GrRect clipRect =  fTarget->getClip().getConservativeBounds();
-        clipRect.roundOut(&clip);
-    } else {
-        clip.setLargest();
-    }
+    GrIRect devClipBounds;
+    target->getClip()->getConservativeBounds(drawState.getRenderTarget(),
+                                             &devClipBounds);
 
-    // If none of the inputs that affect generation of path geometry have
-    // have changed since last previous path draw then we can reuse the
-    // previous geoemtry.
-    if (stageMask == fPreviousStages &&
-        fPreviousViewMatrix == drawState.getViewMatrix() &&
-        fPreviousTranslate == fTranslate &&
-        rtHeight == fPreviousRTHeight &&
-        fClipRect == clip) {
-        return true;
-    }
-
-    GrVertexLayout layout = GrDrawTarget::kEdge_VertexLayoutBit;
-    for (int s = 0; s < GrDrawState::kNumStages; ++s) {
-        if ((1 << s) & stageMask) {
-            layout |= GrDrawTarget::StagePosAsTexCoordVertexLayoutBit(s);
-        }
-    }
-
-    GrMatrix viewM = drawState.getViewMatrix();
+    GrVertexLayout layout = GrDrawState::kEdge_VertexLayoutBit;
+    SkMatrix viewM = drawState.getViewMatrix();
 
     PREALLOC_PTARRAY(128) lines;
     PREALLOC_PTARRAY(128) quads;
     IntArray qSubdivs;
-    fQuadCnt = generate_lines_and_quads(*fPath, viewM, fTranslate, clip,
+    *quadCnt = generate_lines_and_quads(path, viewM, devClipBounds,
                                         &lines, &quads, &qSubdivs);
 
-    fLineSegmentCnt = lines.count() / 2;
-    int vertCnt = kVertsPerLineSeg * fLineSegmentCnt + kVertsPerQuad * fQuadCnt;
+    *lineCnt = lines.count() / 2;
+    int vertCnt = kVertsPerLineSeg * *lineCnt + kVertsPerQuad * *quadCnt;
 
-    GrAssert(sizeof(Vertex) == GrDrawTarget::VertexSize(layout));
+    GrAssert(sizeof(Vertex) == GrDrawState::VertexSize(layout));
 
-    Vertex* verts;
-    if (!fTarget->reserveVertexSpace(layout, vertCnt, (void**)&verts)) {
+    if (!arg->set(target, layout, vertCnt, 0)) {
         return false;
     }
-    Vertex* base = verts;
 
-    const GrMatrix* toDevice = NULL;
-    const GrMatrix* toSrc = NULL;
-    GrMatrix ivm;
+    Vertex* verts = reinterpret_cast<Vertex*>(arg->vertices());
+
+    const SkMatrix* toDevice = NULL;
+    const SkMatrix* toSrc = NULL;
+    SkMatrix ivm;
 
     if (viewM.hasPerspective()) {
         if (viewM.invert(&ivm)) {
@@ -588,7 +533,7 @@ bool GrAAHairLinePathRenderer::createGeom(GrDrawState::StageMask stageMask) {
         }
     }
 
-    for (int i = 0; i < fLineSegmentCnt; ++i) {
+    for (int i = 0; i < *lineCnt; ++i) {
         add_line(&lines[2*i], rtHeight, toSrc, &verts);
     }
 
@@ -598,60 +543,84 @@ bool GrAAHairLinePathRenderer::createGeom(GrDrawState::StageMask stageMask) {
         add_quads(&quads[3*i], qSubdivs[i], toDevice, toSrc, &verts);
     }
 
-    fPreviousStages = stageMask;
-    fPreviousViewMatrix = drawState.getViewMatrix();
-    fPreviousRTHeight = rtHeight;
-    fClipRect = clip;
-    fPreviousTranslate = fTranslate;
     return true;
 }
 
-void GrAAHairLinePathRenderer::drawPath(GrDrawState::StageMask stageMask) {
-
-    if (!this->createGeom(stageMask)) {
-        return;
+bool GrAAHairLinePathRenderer::canDrawPath(const SkPath& path,
+                                           const SkStrokeRec& stroke,
+                                           const GrDrawTarget* target,
+                                           bool antiAlias) const {
+    if (!stroke.isHairlineStyle() || !antiAlias) {
+        return false;
     }
 
-    GrDrawState* drawState = fTarget->drawState();
+    static const uint32_t gReqDerivMask = SkPath::kCubic_SegmentMask |
+                                          SkPath::kQuad_SegmentMask;
+    if (!target->getCaps().shaderDerivativeSupport() &&
+        (gReqDerivMask & path.getSegmentMasks())) {
+        return false;
+    }
+    return true;
+}
 
-    GrDrawTarget::AutoStateRestore asr;
+bool GrAAHairLinePathRenderer::onDrawPath(const SkPath& path,
+                                          const SkStrokeRec&,
+                                          GrDrawTarget* target,
+                                          bool antiAlias) {
+
+    int lineCnt;
+    int quadCnt;
+    GrDrawTarget::AutoReleaseGeometry arg;
+    if (!this->createGeom(path,
+                          target,
+                          &lineCnt,
+                          &quadCnt,
+                          &arg)) {
+        return false;
+    }
+
+    GrDrawState::AutoDeviceCoordDraw adcd;
+    GrDrawState* drawState = target->drawState();
+    // createGeom transforms the geometry to device space when the matrix does not have
+    // perspective.
     if (!drawState->getViewMatrix().hasPerspective()) {
-        asr.set(fTarget);
-        GrMatrix ivm;
-        if (drawState->getViewInverse(&ivm)) {
-            drawState->preConcatSamplerMatrices(stageMask, ivm);
+        adcd.set(drawState);
+        if (!adcd.succeeded()) {
+            return false;
         }
-        drawState->setViewMatrix(GrMatrix::I());
     }
 
     // TODO: See whether rendering lines as degenerate quads improves perf
     // when we have a mix
-    fTarget->setIndexSourceToBuffer(fLinesIndexBuffer);
+
+    GrDrawState::VertexEdgeType oldEdgeType = drawState->getVertexEdgeType();
+
+    target->setIndexSourceToBuffer(fLinesIndexBuffer);
     int lines = 0;
     int nBufLines = fLinesIndexBuffer->maxQuads();
-    while (lines < fLineSegmentCnt) {
-        int n = GrMin(fLineSegmentCnt-lines, nBufLines);
-        drawState->setVertexEdgeType(GrDrawState::kHairLine_EdgeType);
-        fTarget->drawIndexed(kTriangles_PrimitiveType,
-                             kVertsPerLineSeg*lines,    // startV
-                             0,                         // startI
-                             kVertsPerLineSeg*n,        // vCount
-                             kIdxsPerLineSeg*n);        // iCount
+    drawState->setVertexEdgeType(GrDrawState::kHairLine_EdgeType);
+    while (lines < lineCnt) {
+        int n = GrMin(lineCnt - lines, nBufLines);
+        target->drawIndexed(kTriangles_GrPrimitiveType,
+                            kVertsPerLineSeg*lines,    // startV
+                            0,                         // startI
+                            kVertsPerLineSeg*n,        // vCount
+                            kIdxsPerLineSeg*n);        // iCount
         lines += n;
     }
 
-    fTarget->setIndexSourceToBuffer(fQuadsIndexBuffer);
+    target->setIndexSourceToBuffer(fQuadsIndexBuffer);
     int quads = 0;
-    while (quads < fQuadCnt) {
-        int n = GrMin(fQuadCnt-quads, kNumQuadsInIdxBuffer);
-        drawState->setVertexEdgeType(GrDrawState::kHairQuad_EdgeType);
-        fTarget->drawIndexed(kTriangles_PrimitiveType,
-                             4*fLineSegmentCnt + kVertsPerQuad*quads, // startV
-                             0,                                       // startI
-                             kVertsPerQuad*n,                         // vCount
-                             kIdxsPerQuad*n);                         // iCount
+    drawState->setVertexEdgeType(GrDrawState::kHairQuad_EdgeType);
+    while (quads < quadCnt) {
+        int n = GrMin(quadCnt - quads, kNumQuadsInIdxBuffer);
+        target->drawIndexed(kTriangles_GrPrimitiveType,
+                            4 * lineCnt + kVertsPerQuad*quads, // startV
+                            0,                                 // startI
+                            kVertsPerQuad*n,                   // vCount
+                            kIdxsPerQuad*n);                   // iCount
         quads += n;
     }
-
+    drawState->setVertexEdgeType(oldEdgeType);
+    return true;
 }
-

@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 Adobe Systems Incorporated. All Rights Reserved.
+ * Copyright (C) 2012 Adobe Systems Incorporated. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,16 +32,16 @@
 #if ENABLE(CSS_SHADERS)
 #include "CustomFilterProgram.h"
 
+#include "CustomFilterCompiledProgram.h"
 #include "CustomFilterProgramClient.h"
-#include "CustomFilterShader.h"
-
-#if ENABLE(WEBGL)
-#include "GraphicsContext3D.h"
-#endif
+#include "CustomFilterProgramInfo.h"
 
 namespace WebCore {
 
-CustomFilterProgram::CustomFilterProgram()
+CustomFilterProgram::CustomFilterProgram(CustomFilterProgramType programType, const CustomFilterProgramMixSettings& mixSettings, CustomFilterMeshType meshType)
+    : m_programType(programType)
+    , m_mixSettings(mixSettings)
+    , m_meshType(meshType)
 {
     // Keep the constructor protected to prevent creating this object directly.
 }
@@ -77,16 +77,21 @@ void CustomFilterProgram::removeClient(CustomFilterProgramClient* client)
 void CustomFilterProgram::notifyClients()
 {
     for (CustomFilterProgramClientList::iterator iter = m_clients.begin(), end = m_clients.end(); iter != end; ++iter)
-        iter->first->notifyCustomFilterProgramLoaded(this);
+        iter->key->notifyCustomFilterProgramLoaded(this);
 }
 
-#if ENABLE(WEBGL)
-PassRefPtr<CustomFilterShader> CustomFilterProgram::createShaderWithContext(GraphicsContext3D* context)
+CustomFilterProgramInfo CustomFilterProgram::programInfo() const
 {
     ASSERT(isLoaded());
-    return CustomFilterShader::create(context, vertexShaderString(), fragmentShaderString());
+    return CustomFilterProgramInfo(vertexShaderString(), fragmentShaderString(), m_programType, m_mixSettings, m_meshType);
 }
-#endif
+
+bool CustomFilterProgram::operator==(const CustomFilterProgram& o) const
+{
+    return m_programType == o.m_programType
+        && (m_programType != PROGRAM_TYPE_BLENDS_ELEMENT_TEXTURE || m_mixSettings == o.m_mixSettings)
+        && m_meshType == o.m_meshType;
+}
 
 } // namespace WebCore
 #endif // ENABLE(CSS_SHADERS)

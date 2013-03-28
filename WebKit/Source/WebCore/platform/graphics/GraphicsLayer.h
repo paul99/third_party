@@ -38,69 +38,37 @@
 #include "FloatSize.h"
 #include "GraphicsLayerClient.h"
 #include "IntRect.h"
+#include "PlatformLayer.h"
 #include "TransformationMatrix.h"
 #include "TransformOperations.h"
 #include <wtf/OwnPtr.h>
 #include <wtf/PassOwnPtr.h>
 
-#if PLATFORM(MAC)
-OBJC_CLASS CALayer;
-typedef CALayer PlatformLayer;
-#elif PLATFORM(WIN)
-typedef struct _CACFLayer PlatformLayer;
-#elif PLATFORM(QT)
-#if USE(TEXTURE_MAPPER)
-namespace WebCore {
-class TextureMapperPlatformLayer;
-typedef TextureMapperPlatformLayer PlatformLayer;
-};
-#else
-QT_BEGIN_NAMESPACE
-class QGraphicsObject;
-QT_END_NAMESPACE
-namespace WebCore {
-typedef QGraphicsObject PlatformLayer;
-}
-#endif
-#elif PLATFORM(CHROMIUM)
-namespace WebCore {
-class LayerChromium;
-typedef LayerChromium PlatformLayer;
-}
-#elif PLATFORM(GTK)
-#if USE(TEXTURE_MAPPER_CAIRO) || USE(TEXTURE_MAPPER_GL)
-namespace WebCore {
-class TextureMapperPlatformLayer;
-typedef TextureMapperPlatformLayer PlatformLayer;
-};
-#elif USE(CLUTTER)
-typedef struct _ClutterActor ClutterActor;
-namespace WebCore {
-typedef ClutterActor PlatformLayer;
-};
-#endif
-#else
-typedef void* PlatformLayer;
-#endif
-
 enum LayerTreeAsTextBehaviorFlags {
     LayerTreeAsTextBehaviorNormal = 0,
     LayerTreeAsTextDebug = 1 << 0, // Dump extra debugging info like layer addresses.
+    LayerTreeAsTextIncludeVisibleRects = 1 << 1,
+    LayerTreeAsTextIncludeTileCaches = 1 << 2,
+    LayerTreeAsTextIncludeRepaintRects = 1 << 3
 };
 typedef unsigned LayerTreeAsTextBehavior;
 
 namespace WebCore {
 
 class FloatPoint3D;
+class FloatRect;
 class GraphicsContext;
+class GraphicsLayerFactory;
 class Image;
 class TextStream;
+class TiledBacking;
 class TimingFunction;
 
 // Base class for animation values (also used for transitions). Here to
 // represent values for properties being animated via the GraphicsLayer,
 // without pulling in style-related data from outside of the platform directory.
 class AnimationValue {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     AnimationValue(float keyTime, PassRefPtr<TimingFunction> timingFunction = 0)
         : m_keyTime(keyTime)
@@ -152,6 +120,25 @@ public:
 private:
     TransformOperations m_value;
 };
+
+#if ENABLE(CSS_FILTERS)
+// Used to store one filter value in a keyframe list.
+class FilterAnimationValue : public AnimationValue {
+public:
+    FilterAnimationValue(float keyTime, const FilterOperations* value = 0, PassRefPtr<TimingFunction> timingFunction = 0)
+        : AnimationValue(keyTime, timingFunction)
+    {
+        if (value)
+            m_value = *value;
+    }
+    virtual AnimationValue* clone() const { return new FilterAnimationValue(*this); }
+
+    const FilterOperations* value() const { return &m_value; }
+
+private:
+    FilterOperations m_value;
+};
+#endif
 
 // Used to store a series of values in a keyframe list. Values will all be of the same type,
 // which can be inferred from the property.
@@ -209,6 +196,9 @@ protected:
 class GraphicsLayer {
     WTF_MAKE_NONCOPYABLE(GraphicsLayer); WTF_MAKE_FAST_ALLOCATED;
 public:
+    static PassOwnPtr<GraphicsLayer> create(GraphicsLayerFactory*, GraphicsLayerClient*);
+
+    // FIXME: Replace all uses of this create function with the one that takes a GraphicsLayerFactory.
     static PassOwnPtr<GraphicsLayer> create(GraphicsLayerClient*);
     
     virtual ~GraphicsLayer();
@@ -252,13 +242,21 @@ public:
     const FloatPoint& replicatedLayerPosition() const { return m_replicatedLayerPosition; }
     void setReplicatedLayerPosition(const FloatPoint& p) { m_replicatedLayerPosition = p; }
 
+    enum ShouldSetNeedsDisplay {
+        DontSetNeedsDisplay,
+        SetNeedsDisplay
+    };
+
     // Offset is origin of the renderer minus origin of the graphics layer (so either zero or negative).
     IntSize offsetFromRenderer() const { return m_offsetFromRenderer; }
-    void setOffsetFromRenderer(const IntSize&);
+    void setOffsetFromRenderer(const IntSize&, ShouldSetNeedsDisplay = SetNeedsDisplay);
 
     // The position of the layer (the location of its top-left corner in its parent)
     const FloatPoint& position() const { return m_position; }
     virtual void setPosition(const FloatPoint& p) { m_position = p; }
+
+    // For platforms that move underlying platform layers on a different thread for scrolling; just update the GraphicsLayer state.
+    virtual void syncPosition(const FloatPoint& p) { m_position = p; }
     
     // Anchor point: (0, 0) is top left, (1, 1) is bottom right. The anchor point
     // affects the origin of the transforms.
@@ -294,11 +292,11 @@ public:
     bool acceleratesDrawing() const { return m_acceleratesDrawing; }
     virtual void setAcceleratesDrawing(bool b) { m_acceleratesDrawing = b; }
 
-    // The color used to paint the layer backgrounds
+    // The color used to paint the layer background. Pass an invalid color to remove it.
+    // Note that this covers the entire layer. Use setContentsToSolidColor() if the color should
+    // only cover the contentsRect.
     const Color& backgroundColor() const { return m_backgroundColor; }
     virtual void setBackgroundColor(const Color&);
-    virtual void clearBackgroundColor();
-    bool backgroundColorSet() const { return m_backgroundColorSet; }
 
     // opaque means that we know the layer contents have no alpha
     bool contentsOpaque() const { return m_contentsOpaque; }
@@ -324,13 +322,13 @@ public:
     virtual void setNeedsDisplay() = 0;
     // mark the given rect (in layer coords) as needing dispay. Never goes deep.
     virtual void setNeedsDisplayInRect(const FloatRect&) = 0;
-    
+
     virtual void setContentsNeedsDisplay() { };
 
     // Set that the position/size of the contents (image or video).
     IntRect contentsRect() const { return m_contentsRect; }
     virtual void setContentsRect(const IntRect& r) { m_contentsRect = r; }
-
+    
     // Transitions are identified by a special animation name that cannot clash with a keyframe identifier.
     static String animationNameForTransition(AnimatedPropertyID);
     
@@ -346,8 +344,10 @@ public:
     
     // Layer contents
     virtual void setContentsToImage(Image*) { }
+    virtual bool shouldDirectlyCompositeImage(Image*) const { return true; }
     virtual void setContentsToMedia(PlatformLayer*) { } // video or plug-in
-    virtual void setContentsToBackgroundColor(const Color&) { }
+    // Pass an invalid color to remove the contents layer.
+    virtual void setContentsToSolidColor(const Color&) { }
     virtual void setContentsToCanvas(PlatformLayer*) { }
     virtual bool hasContentsLayer() const { return false; }
 
@@ -359,24 +359,27 @@ public:
     // For hosting this GraphicsLayer in a native layer hierarchy.
     virtual PlatformLayer* platformLayer() const { return 0; }
     
-    void dumpLayer(TextStream&, int indent = 0, LayerTreeAsTextBehavior = LayerTreeAsTextBehaviorNormal) const;
-
-    int repaintCount() const { return m_repaintCount; }
-    int incrementRepaintCount() { return ++m_repaintCount; }
-
     enum CompositingCoordinatesOrientation { CompositingCoordinatesTopDown, CompositingCoordinatesBottomUp };
 
     // Flippedness of the contents of this layer. Does not affect sublayer geometry.
     virtual void setContentsOrientation(CompositingCoordinatesOrientation orientation) { m_contentsOrientation = orientation; }
     CompositingCoordinatesOrientation contentsOrientation() const { return m_contentsOrientation; }
 
-    bool showDebugBorders() const { return m_client ? m_client->showDebugBorders(this) : false; }
-    bool showRepaintCounter() const { return m_client ? m_client->showRepaintCounter(this) : false; }
-    
-    void updateDebugIndicators();
-    
+    void dumpLayer(TextStream&, int indent = 0, LayerTreeAsTextBehavior = LayerTreeAsTextBehaviorNormal) const;
+
+    virtual void setShowDebugBorder(bool show) { m_showDebugBorder = show; }
+    bool isShowingDebugBorder() const { return m_showDebugBorder; }
+
+    virtual void setShowRepaintCounter(bool show) { m_showRepaintCounter = show; }
+    bool isShowingRepaintCounter() const { return m_showRepaintCounter; }
+
+    // FIXME: this is really a paint count.
+    int repaintCount() const { return m_repaintCount; }
+    int incrementRepaintCount() { return ++m_repaintCount; }
+
     virtual void setDebugBackgroundColor(const Color&) { }
     virtual void setDebugBorder(const Color&, float /*borderWidth*/) { }
+
     // z-position is the z-equivalent of position(). It's only used for debugging purposes.
     virtual float zPosition() const { return m_zPosition; }
     virtual void setZPosition(float);
@@ -387,19 +390,8 @@ public:
     virtual void setMaintainsPixelAlignment(bool maintainsAlignment) { m_maintainsPixelAlignment = maintainsAlignment; }
     virtual bool maintainsPixelAlignment() const { return m_maintainsPixelAlignment; }
     
-    void setAppliesPageScale(bool appliesScale = true) { m_appliesPageScale = appliesScale; }
-    bool appliesPageScale() const { return m_appliesPageScale; }
-
-#if OS(ANDROID)
-    bool isContainerLayer() const { return m_isContainerLayer; }
-    void setIsContainerLayer(bool isContainerLayer = true) { m_isContainerLayer = isContainerLayer; }
-
-    bool fixedToContainerLayerVisibleRect() const { return m_fixedToContainerLayerVisibleRect; }
-    virtual void setFixedToContainerLayerVisibleRect(bool b) { m_fixedToContainerLayerVisibleRect = b; }
-
-    bool acceleratesScrolling() const { return m_acceleratesScrolling; }
-    void setAcceleratesScrolling(bool b) { m_acceleratesScrolling = b; }
-#endif
+    virtual void setAppliesPageScale(bool appliesScale = true) { m_appliesPageScale = appliesScale; }
+    virtual bool appliesPageScale() const { return m_appliesPageScale; }
 
     float pageScaleFactor() const { return m_client ? m_client->pageScaleFactor() : 1; }
     float deviceScaleFactor() const { return m_client ? m_client->deviceScaleFactor() : 1; }
@@ -410,28 +402,55 @@ public:
     // Some compositing systems may do internal batching to synchronize compositing updates
     // with updates drawn into the window. These methods flush internal batched state on this layer
     // and descendant layers, and this layer only.
-    virtual void syncCompositingState(const FloatRect& /* clipRect */) { }
-    virtual void syncCompositingStateForThisLayerOnly() { }
+    virtual void flushCompositingState(const FloatRect& /* clipRect */) { }
+    virtual void flushCompositingStateForThisLayerOnly() { }
     
     // Return a string with a human readable form of the layer tree, If debug is true 
     // pointers for the layers and timing data will be included in the returned string.
     String layerTreeAsText(LayerTreeAsTextBehavior = LayerTreeAsTextBehaviorNormal) const;
 
+    // Return an estimate of the backing store memory cost (in bytes). May be incorrect for tiled layers.
+    virtual double backingStoreMemoryEstimate() const;
+
     bool usingTiledLayer() const { return m_usingTiledLayer; }
 
-#if PLATFORM(QT) || PLATFORM(GTK)
+    virtual TiledBacking* tiledBacking() const { return 0; }
+
+    void resetTrackedRepaints();
+    void addRepaintRect(const FloatRect&);
+
+#if PLATFORM(QT) || PLATFORM(GTK) || PLATFORM(EFL)
     // This allows several alternative GraphicsLayer implementations in the same port,
     // e.g. if a different GraphicsLayer implementation is needed in WebKit1 vs. WebKit2.
-    typedef PassOwnPtr<GraphicsLayer> GraphicsLayerFactory(GraphicsLayerClient*);
-    static void setGraphicsLayerFactory(GraphicsLayerFactory);
+    typedef PassOwnPtr<GraphicsLayer> GraphicsLayerFactoryCallback(GraphicsLayerClient*);
+    static void setGraphicsLayerFactory(GraphicsLayerFactoryCallback);
 #endif
 
+    static bool supportsBackgroundColorContent()
+    {
+#if USE(CA) || USE(TEXTURE_MAPPER)
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    void updateDebugIndicators();
+
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const;
+
 protected:
+    // Should be called from derived class destructors. Should call willBeDestroyed() on super.
+    virtual void willBeDestroyed();
+
 #if ENABLE(CSS_FILTERS)
     // This method is used by platform GraphicsLayer classes to clear the filters
     // when compositing is not done in hardware. It is not virtual, so the caller
     // needs to notifiy the change to the platform layer as needed.
     void clearFilters() { m_filters.clear(); }
+
+    // Given a KeyframeValueList containing filterOperations, return true if the operations are valid.
+    static int validateFilterOperations(const KeyframeValueList&);
 #endif
 
     // Given a list of TransformAnimationValues, see if all the operations for each keyframe match. If so
@@ -449,7 +468,12 @@ protected:
 
     GraphicsLayer(GraphicsLayerClient*);
 
+    static void writeIndent(TextStream&, int indent);
+
     void dumpProperties(TextStream&, int indent, LayerTreeAsTextBehavior) const;
+    virtual void dumpAdditionalProperties(TextStream&, int /*indent*/, LayerTreeAsTextBehavior) const { }
+
+    virtual void getDebugBorderInfo(Color&, float& width) const;
 
     GraphicsLayerClient* m_client;
     String m_name;
@@ -474,7 +498,6 @@ protected:
     FilterOperations m_filters;
 #endif
 
-    bool m_backgroundColorSet : 1;
     bool m_contentsOpaque : 1;
     bool m_preserves3D: 1;
     bool m_backfaceVisibility : 1;
@@ -485,12 +508,9 @@ protected:
     bool m_acceleratesDrawing : 1;
     bool m_maintainsPixelAlignment : 1;
     bool m_appliesPageScale : 1; // Set for the layer which has the page scale applied to it.
-#if OS(ANDROID)
-    bool m_isContainerLayer : 1; // Set for the layer that other layers are fixed to.
-    bool m_fixedToContainerLayerVisibleRect : 1; // Set for the layer that has position fixed to the container layer's visible rect.
-    bool m_acceleratesScrolling : 1; // Layer can be scrolled by the compositor without having to be repainted.
-#endif
-
+    bool m_showDebugBorder : 1;
+    bool m_showRepaintCounter : 1;
+    
     GraphicsLayerPaintingPhase m_paintingPhase;
     CompositingCoordinatesOrientation m_contentsOrientation; // affects orientation of layer contents
 
@@ -508,8 +528,8 @@ protected:
 
     int m_repaintCount;
 
-#if PLATFORM(QT) || PLATFORM(GTK)
-    static GraphicsLayer::GraphicsLayerFactory* s_graphicsLayerFactory;
+#if PLATFORM(QT) || PLATFORM(GTK) || PLATFORM(EFL)
+    static GraphicsLayer::GraphicsLayerFactoryCallback* s_graphicsLayerFactory;
 #endif
 };
 

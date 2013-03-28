@@ -31,6 +31,8 @@
 #ifndef WebPluginContainer_h
 #define WebPluginContainer_h
 
+#include "platform/WebCommon.h"
+
 struct NPObject;
 
 namespace WebKit {
@@ -40,14 +42,18 @@ class WebPlugin;
 class WebString;
 class WebURL;
 class WebURLRequest;
-struct WebRect;
-
-#if defined(ANDROID)
+class WebLayer;
 struct WebPoint;
-#endif
+struct WebRect;
 
 class WebPluginContainer {
 public:
+    enum TouchEventRequestType {
+        TouchEventRequestTypeNone,
+        TouchEventRequestTypeRaw,
+        TouchEventRequestTypeSynthesizedMouse,
+    };
+
     // Returns the element containing this plugin.
     virtual WebElement element() = 0;
 
@@ -63,10 +69,6 @@ public:
     // The default value for id is zero which indicates software rendering.
     // A non-zero value will trigger hw-accelerated compositing.
     virtual void setBackingTextureId(unsigned) = 0;
-#if defined(ANDROID)
-    virtual void setBackingVideoTextureId(unsigned) = 0;
-    virtual void setBackingVideoRect(float x, float y, float width, float height) = 0;
-#endif
     // Notifies the container that the plugin allocated a new IOSurface for
     // its rendering, and that the compositor should bind to this texture
     // and use it for subsequent rendering. A non-zero ioSurfaceId triggers
@@ -106,12 +108,38 @@ public:
         const WebURLRequest&, const WebString& target, bool notifyNeeded, void* notifyData) = 0;
 
     // Notifies that the zoom level has changed.
+    // Note, this does NOT affect pageScaleFactor or pageZoomFactor
     virtual void zoomLevelChanged(double zoomLevel) = 0;
+
+    // Notifies whether the contents of the plugin are entirely opaque.
+    virtual void setOpaque(bool) = 0;
+
+    // Determines whether the given rectangle in this plugin is above all other
+    // content. The rectangle is in the plugin's coordinate system.
+    virtual bool isRectTopmost(const WebRect&) = 0;
+
+    // Notifies when the plugin changes the kind of touch-events it accepts.
+    virtual void requestTouchEventType(TouchEventRequestType) = 0;
+
+    // Notifies when the plugin starts/stops accepting wheel events. Without
+    // calling the function with true, the container might not always able to
+    // receive wheel events in some cases (such as when threaded compositing
+    // is in use but a scroll bar is not in use).
+    virtual void setWantsWheelEvents(bool) = 0;
+
+    // Converts view's window coordinates to plugin's local coordinates.
+    virtual WebPoint windowToLocalPoint(const WebPoint&) = 0;
 
     virtual WebPlugin* plugin() = 0;
     virtual void setPlugin(WebPlugin*) = 0;
 
-    virtual void startAcceptingTouchEvents() = 0;
+    virtual float deviceScaleFactor() = 0;
+    virtual float pageScaleFactor() = 0;
+    virtual float pageZoomFactor() = 0;
+
+    // Sets the layer representing the plugin for compositing. The
+    // WebPluginContainer does *not* take ownership.
+    virtual void setWebLayer(WebLayer*) = 0;
 
 protected:
     ~WebPluginContainer() { }

@@ -60,8 +60,11 @@ public:
       
         unsigned initialSize = sizeof(T) * n;
 
-        // 16-byte alignment for 128bit SIMD.
+#if USE(WEBAUDIO_FFMPEG)
+        const size_t alignment = 32;
+#else
         const size_t alignment = 16;
+#endif
 
         if (m_allocation)
             fastFree(m_allocation);
@@ -137,6 +140,13 @@ public:
         // This expression cannot overflow because end - start cannot be
         // greater than m_size, which is safe due to the check in allocate().
         memcpy(this->data() + start, sourceData, sizeof(T) * (end - start));
+    }
+
+    template<typename MemoryObjectInfo>
+    void reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+    {
+        typename MemoryObjectInfo::ClassInfo info(memoryObjectInfo, this);
+        info.addRawBuffer(m_allocation, m_size * sizeof(T));
     }
 
 private:

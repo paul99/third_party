@@ -43,7 +43,12 @@
 #include <WebCore/GraphicsContext.h>
 #include <WebCore/IdentifierRep.h>
 #include <WebCore/NotImplemented.h>
+#include <wtf/TemporaryChange.h>
 #include <wtf/text/WTFString.h>
+
+#if PLATFORM(MAC)
+#include "LayerHostingContext.h"
+#endif
 
 using namespace WebCore;
 
@@ -62,10 +67,10 @@ PluginControllerProxy::PluginControllerProxy(WebProcessConnection* connection, c
 #if USE(ACCELERATED_COMPOSITING)
     , m_isAcceleratedCompositingEnabled(creationParameters.isAcceleratedCompositingEnabled)
 #endif
+    , m_isInitializing(false)
     , m_paintTimer(RunLoop::main(), this, &PluginControllerProxy::paint)
     , m_pluginDestructionProtectCount(0)
     , m_pluginDestroyTimer(RunLoop::main(), this, &PluginControllerProxy::destroy)
-    , m_pluginCreationParameters(0)
     , m_waitingForDidUpdate(false)
     , m_pluginCanceledManualStreamLoad(false)
 #if PLATFORM(MAC)
@@ -88,9 +93,22 @@ PluginControllerProxy::~PluginControllerProxy()
         releaseNPObject(m_pluginElementNPObject);
 }
 
+void PluginControllerProxy::setInitializationReply(PassRefPtr<Messages::WebProcessConnection::CreatePlugin::DelayedReply> reply)
+{
+    ASSERT(!m_initializationReply);
+    m_initializationReply = reply;
+}
+
+PassRefPtr<Messages::WebProcessConnection::CreatePlugin::DelayedReply> PluginControllerProxy::takeInitializationReply()
+{
+    return m_initializationReply.release();
+}
+
 bool PluginControllerProxy::initialize(const PluginCreationParameters& creationParameters)
 {
     ASSERT(!m_plugin);
+    
+    TemporaryChange<bool> initializing(m_isInitializing, true);
 
     m_plugin = NetscapePlugin::create(PluginProcess::shared().netscapePluginModule());
     if (!m_plugin) {
@@ -99,12 +117,10 @@ bool PluginControllerProxy::initialize(const PluginCreationParameters& creationP
         return false;
     }
 
-    m_windowNPObject = m_connection->npRemoteObjectMap()->createNPObjectProxy(creationParameters.windowNPObjectID, m_plugin.get());
-    ASSERT(m_windowNPObject);
+    if (creationParameters.windowNPObjectID)
+        m_windowNPObject = m_connection->npRemoteObjectMap()->createNPObjectProxy(creationParameters.windowNPObjectID, m_plugin.get());
 
-    m_pluginCreationParameters = &creationParameters;
     bool returnValue = m_plugin->initialize(this, creationParameters.parameters);
-    m_pluginCreationParameters = 0;
 
     if (!returnValue) {
         // Get the plug-in so we can pass it to removePluginControllerProxy. The pointer is only
@@ -118,7 +134,7 @@ bool PluginControllerProxy::initialize(const PluginCreationParameters& creationP
         return false;
     }
 
-    platformInitialize();
+    platformInitialize(creationParameters);
 
     return true;
 }
@@ -145,6 +161,11 @@ void PluginControllerProxy::destroy()
 
     // This will delete the plug-in controller proxy object.
     m_connection->removePluginControllerProxy(this, plugin);
+}
+
+bool PluginControllerProxy::wantsWheelEvents() const
+{
+    return m_plugin->wantsWheelEvents();
 }
 
 void PluginControllerProxy::paint()
@@ -240,6 +261,9 @@ void PluginControllerProxy::cancelManualStreamLoad()
 
 NPObject* PluginControllerProxy::windowScriptNPObject()
 {
+    if (!m_windowNPObject)
+        return 0;
+
     retainNPObject(m_windowNPObject);
     return m_windowNPObject;
 }
@@ -265,9 +289,6 @@ NPObject* PluginControllerProxy::pluginElementNPObject()
 
 bool PluginControllerProxy::evaluate(NPObject* npObject, const String& scriptString, NPVariant* result, bool allowPopups)
 {
-    if (tryToShortCircuitEvaluate(npObject, scriptString, result))
-        return true;
-
     PluginDestructionProtector protector(this);
 
     NPVariant npObjectAsNPVariant;
@@ -289,58 +310,6 @@ bool PluginControllerProxy::evaluate(NPObject* npObject, const String& scriptStr
     return true;
 }
 
-bool PluginControllerProxy::tryToShortCircuitInvoke(NPObject* npObject, NPIdentifier methodName, const NPVariant* arguments, uint32_t argumentCount, bool& returnValue, NPVariant& result)
-{
-    // Only try to short circuit evaluate for plug-ins that have the quirk specified.
-#if PLUGIN_ARCHITECTURE(MAC)
-    if (!PluginProcess::shared().netscapePluginModule()->pluginQuirks().contains(PluginQuirks::CanShortCircuitSomeNPRuntimeCallsDuringInitialization))
-        return false;
-#else
-    return false;
-#endif
-
-    // And only when we're in initialize.
-    if (!inInitialize())
-        return false;
-    
-    // And only when the NPObject is the window NPObject.
-    if (npObject != m_windowNPObject)
-        return false;
-
-    // And only when we don't have any arguments.
-    if (argumentCount)
-        return false;
-
-    IdentifierRep* methodNameRep = static_cast<IdentifierRep*>(methodName);
-    if (!methodNameRep->isString())
-        return false;
-
-    if (!strcmp(methodNameRep->string(), "__flash_getWindowLocation")) {
-        result.type = NPVariantType_String;
-        result.value.stringValue = createNPString(m_pluginCreationParameters->parameters.documentURL.utf8()); 
-        returnValue = true;
-        return true;
-    }
-    
-    if (!strcmp(methodNameRep->string(), "__flash_getTopLocation")) {
-        if (m_pluginCreationParameters->parameters.toplevelDocumentURL.isNull()) {
-            // If the toplevel document is URL it means that the frame that the plug-in is in doesn't have access to the toplevel document.
-            // In this case, just pass the string "[object]" to Flash.
-            result.type = NPVariantType_String;
-            result.value.stringValue = createNPString("[object]");
-            returnValue = true;
-            return true;
-        }
-
-        result.type = NPVariantType_String;
-        result.value.stringValue = createNPString(m_pluginCreationParameters->parameters.toplevelDocumentURL.utf8()); 
-        returnValue = true;
-        return true;
-    }
-
-    return false;
-}
-
 void PluginControllerProxy::setStatusbarText(const String& statusbarText)
 {
     m_connection->connection()->send(Messages::PluginProxy::SetStatusbarText(statusbarText), m_pluginInstanceID);
@@ -360,6 +329,18 @@ void PluginControllerProxy::pluginProcessCrashed()
 void PluginControllerProxy::willSendEventToPlugin()
 {
     // This is only used when running plugins in the web process.
+    ASSERT_NOT_REACHED();
+}
+
+void PluginControllerProxy::didInitializePlugin()
+{
+    // This should only be called on the plugin in the web process.
+    ASSERT_NOT_REACHED();
+}
+
+void PluginControllerProxy::didFailToInitializePlugin()
+{
+    // This should only be called on the plugin in the web process.
     ASSERT_NOT_REACHED();
 }
 
@@ -540,6 +521,21 @@ void PluginControllerProxy::handleKeyboardEvent(const WebKeyboardEvent& keyboard
     handled = m_plugin->handleKeyboardEvent(keyboardEvent);
 }
 
+void PluginControllerProxy::handleEditingCommand(const String& commandName, const String& argument, bool& handled)
+{
+    handled = m_plugin->handleEditingCommand(commandName, argument);
+}
+    
+void PluginControllerProxy::isEditingCommandEnabled(const String& commandName, bool& enabled)
+{
+    enabled = m_plugin->isEditingCommandEnabled(commandName);
+}
+    
+void PluginControllerProxy::handlesPageScaleFactor(bool& isHandled)
+{
+    isHandled = m_plugin->handlesPageScaleFactor();
+}
+
 void PluginControllerProxy::paintEntirePlugin()
 {
     if (m_pluginSize.isEmpty())
@@ -582,6 +578,14 @@ void PluginControllerProxy::getPluginScriptableNPObject(uint64_t& pluginScriptab
     releaseNPObject(pluginScriptableNPObject);
 }
 
+void PluginControllerProxy::storageBlockingStateChanged(bool isStorageBlockingEnabled)
+{
+    if (m_storageBlockingEnabled != isStorageBlockingEnabled) {
+        m_storageBlockingEnabled = isStorageBlockingEnabled;
+        m_plugin->storageBlockingStateChanged(m_storageBlockingEnabled);
+    }
+}
+
 void PluginControllerProxy::privateBrowsingStateChanged(bool isPrivateBrowsingEnabled)
 {
     m_isPrivateBrowsingEnabled = isPrivateBrowsingEnabled;
@@ -594,32 +598,19 @@ void PluginControllerProxy::getFormValue(bool& returnValue, String& formValue)
     returnValue = m_plugin->getFormValue(formValue);
 }
 
-bool PluginControllerProxy::tryToShortCircuitEvaluate(NPObject* npObject, const String& scriptString, NPVariant* result)
+#if PLUGIN_ARCHITECTURE(X11)
+uint64_t PluginControllerProxy::createPluginContainer()
 {
-    // Only try to short circuit evaluate for plug-ins that have the quirk specified.
-#if PLUGIN_ARCHITECTURE(MAC)
-    if (!PluginProcess::shared().netscapePluginModule()->pluginQuirks().contains(PluginQuirks::CanShortCircuitSomeNPRuntimeCallsDuringInitialization))
-        return false;
-#else
-    return false;
-#endif
-
-    // And only when we're in initialize.
-    if (!inInitialize())
-        return false;
-
-    // And only when the NPObject is the window NPObject.
-    if (npObject != m_windowNPObject)
-        return false;
-
-    // Now, check for the right strings.
-    if (scriptString != "function __flash_getWindowLocation() { return window.location; }"
-        && scriptString != "function __flash_getTopLocation() { return top.location; }")
-        return false;
-
-    VOID_TO_NPVARIANT(*result);
-    return true;
+    uint64_t windowID = 0;
+    m_connection->connection()->sendSync(Messages::PluginProxy::CreatePluginContainer(), Messages::PluginProxy::CreatePluginContainer::Reply(windowID), m_pluginInstanceID);
+    return windowID;
 }
+
+void PluginControllerProxy::windowedPluginGeometryDidChange(const IntRect& frameRect, const IntRect& clipRect, uint64_t windowID)
+{
+    m_connection->connection()->send(Messages::PluginProxy::WindowedPluginGeometryDidChange(frameRect, clipRect, windowID), m_pluginInstanceID);
+}
+#endif
 
 } // namespace WebKit
 

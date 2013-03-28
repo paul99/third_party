@@ -23,16 +23,25 @@
 #define FilterEffect_h
 
 #if ENABLE(FILTERS)
+#include "ColorSpace.h"
 #include "FloatRect.h"
 #include "IntRect.h"
 
-#include <wtf/ByteArray.h>
 #include <wtf/PassOwnPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+#include <wtf/Uint8ClampedArray.h>
 #include <wtf/Vector.h>
 
+#if ENABLE(OPENCL)
+#include "FilterContextOpenCL.h"
+#endif
+
 static const float kMaxFilterSize = 5000.0f;
+
+#if USE(SKIA)
+class SkImageFilter;
+#endif
 
 namespace WebCore {
 
@@ -40,6 +49,10 @@ class Filter;
 class FilterEffect;
 class ImageBuffer;
 class TextStream;
+
+#if USE(SKIA)
+class SkiaImageFilterBuilder;
+#endif
 
 typedef Vector<RefPtr<FilterEffect> > FilterEffectVector;
 
@@ -56,10 +69,16 @@ public:
 
     void clearResult();
     ImageBuffer* asImageBuffer();
-    PassRefPtr<ByteArray> asUnmultipliedImage(const IntRect&);
-    PassRefPtr<ByteArray> asPremultipliedImage(const IntRect&);
-    void copyUnmultipliedImage(ByteArray* destination, const IntRect&);
-    void copyPremultipliedImage(ByteArray* destination, const IntRect&);
+    PassRefPtr<Uint8ClampedArray> asUnmultipliedImage(const IntRect&);
+    PassRefPtr<Uint8ClampedArray> asPremultipliedImage(const IntRect&);
+    void copyUnmultipliedImage(Uint8ClampedArray* destination, const IntRect&);
+    void copyPremultipliedImage(Uint8ClampedArray* destination, const IntRect&);
+
+#if ENABLE(OPENCL)
+    OpenCLHandle openCLImage() { return m_openCLImageResult; }
+    void setOpenCLImage(OpenCLHandle openCLImage) { m_openCLImageResult = openCLImage; }
+    ImageBuffer* openCLImageToImageBuffer();
+#endif
 
     FilterEffectVector& inputEffects() { return m_inputEffects; }
     FilterEffect* inputEffect(unsigned) const;
@@ -68,7 +87,12 @@ public:
     inline bool hasResult() const
     {
         // This function needs platform specific checks, if the memory managment is not done by FilterEffect.
-        return m_imageBufferResult || m_unmultipliedImageResult || m_premultipliedImageResult;
+        return m_imageBufferResult
+#if ENABLE(OPENCL)
+            || m_openCLImageResult
+#endif
+            || m_unmultipliedImageResult
+            || m_premultipliedImageResult;
     }
 
     IntRect drawingRegionOfInputImage(const IntRect&) const;
@@ -86,7 +110,19 @@ public:
 
     void apply();
     
+    // Correct any invalid pixels, if necessary, in the result of a filter operation.
+    // This method is used to ensure valid pixel values on filter inputs and the final result.
+    // Only the arithmetic composite filter ever needs to perform correction.
+    virtual void correctFilterResultIfNeeded() { }
+
     virtual void platformApplySoftware() = 0;
+#if ENABLE(OPENCL)
+    virtual bool platformApplyOpenCL();
+#endif
+#if USE(SKIA)
+    virtual bool platformApplySkia() { return false; }
+    virtual SkImageFilter* createImageFilter(SkiaImageFilterBuilder*) { return 0; }
+#endif
     virtual void dump() = 0;
 
     virtual void determineAbsolutePaintRect();
@@ -121,18 +157,35 @@ public:
     bool clipsToBounds() const { return m_clipsToBounds; }
     void setClipsToBounds(bool value) { m_clipsToBounds = value; }
 
+    ColorSpace colorSpace() const { return m_colorSpace; }
+    void setColorSpace(ColorSpace colorSpace) { m_colorSpace = colorSpace; }
+    void transformResultColorSpace(ColorSpace);
+
 protected:
     FilterEffect(Filter*);
 
     ImageBuffer* createImageBufferResult();
-    ByteArray* createUnmultipliedImageResult();
-    ByteArray* createPremultipliedImageResult();
+    Uint8ClampedArray* createUnmultipliedImageResult();
+    Uint8ClampedArray* createPremultipliedImageResult();
+#if ENABLE(OPENCL)
+    OpenCLHandle createOpenCLImageResult(uint8_t* = 0);
+#endif
+
+    // Return true if the filter will only operate correctly on valid RGBA values, with
+    // alpha in [0,255] and each color component in [0, alpha].
+    virtual bool requiresValidPreMultipliedPixels() { return true; }
+
+    // If a pre-multiplied image, check every pixel for validity and correct if necessary.
+    void forceValidPreMultipliedPixels();
 
 private:
     OwnPtr<ImageBuffer> m_imageBufferResult;
-    RefPtr<ByteArray> m_unmultipliedImageResult;
-    RefPtr<ByteArray> m_premultipliedImageResult;
+    RefPtr<Uint8ClampedArray> m_unmultipliedImageResult;
+    RefPtr<Uint8ClampedArray> m_premultipliedImageResult;
     FilterEffectVector m_inputEffects;
+#if ENABLE(OPENCL)
+    OpenCLHandle m_openCLImageResult;
+#endif
 
     bool m_alphaImage;
 
@@ -144,7 +197,7 @@ private:
     Filter* m_filter;
     
 private:
-    inline void copyImageBytes(ByteArray* source, ByteArray* destination, const IntRect&);
+    inline void copyImageBytes(Uint8ClampedArray* source, Uint8ClampedArray* destination, const IntRect&);
 
     // The following member variables are SVG specific and will move to RenderSVGResourceFilterPrimitive.
     // See bug https://bugs.webkit.org/show_bug.cgi?id=45614.
@@ -163,6 +216,9 @@ private:
 
     // Should the effect clip to its primitive region, or expand to use the combined region of its inputs.
     bool m_clipsToBounds;
+
+    ColorSpace m_colorSpace;
+    ColorSpace m_resultColorSpace;
 };
 
 } // namespace WebCore

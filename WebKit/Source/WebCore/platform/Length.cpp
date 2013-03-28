@@ -25,11 +25,12 @@
 #include "config.h"
 #include "Length.h"
 
-#include "PlatformString.h"
+#include "CalculationValue.h"
 #include <wtf/ASCIICType.h>
 #include <wtf/Assertions.h>
 #include <wtf/OwnArrayPtr.h>
 #include <wtf/text/StringBuffer.h>
+#include <wtf/text/WTFString.h>
 
 using namespace WTF;
 
@@ -148,5 +149,111 @@ PassOwnArrayPtr<Length> newLengthArray(const String& string, int& len)
 
     return r.release();
 }
+        
+class CalculationValueHandleMap {
+    WTF_MAKE_FAST_ALLOCATED;
+public:
+    CalculationValueHandleMap() 
+        : m_index(1) 
+    {
+    }
+    
+    int insert(PassRefPtr<CalculationValue> calcValue)
+    {
+        ASSERT(m_index);
+        // FIXME calc(): https://bugs.webkit.org/show_bug.cgi?id=80489
+        // This monotonically increasing handle generation scheme is potentially wasteful
+        // of the handle space. Consider reusing empty handles.
+        while (m_map.contains(m_index))
+            m_index++;
+        
+        m_map.set(m_index, calcValue);       
+        
+        return m_index;
+    }
+
+    void remove(int index)
+    {
+        ASSERT(m_map.contains(index));
+        m_map.remove(index);
+    }
+    
+    PassRefPtr<CalculationValue> get(int index)
+    {
+        ASSERT(m_map.contains(index));
+        return m_map.get(index);
+    }
+    
+private:        
+    int m_index;
+    HashMap<int, RefPtr<CalculationValue> > m_map;
+};
+    
+static CalculationValueHandleMap& calcHandles()
+{
+    DEFINE_STATIC_LOCAL(CalculationValueHandleMap, handleMap, ());
+    return handleMap;
+}
+
+Length::Length(PassRefPtr<CalculationValue> calc)
+    : m_quirk(false)
+    , m_type(Calculated)
+    , m_isFloat(false)
+{
+    m_intValue = calcHandles().insert(calc);
+}
+        
+Length Length::blendMixedTypes(const Length& from, double progress) const
+{
+    if (progress <= 0.0)
+        return from;
+        
+    if (progress >= 1.0)
+        return *this;
+        
+    OwnPtr<CalcExpressionNode> blend = adoptPtr(new CalcExpressionBlendLength(from, *this, progress));
+    return Length(CalculationValue::create(blend.release(), CalculationRangeAll));
+}
+          
+PassRefPtr<CalculationValue> Length::calculationValue() const
+{
+    ASSERT(isCalculated());
+    return calcHandles().get(calculationHandle());
+}
+    
+void Length::incrementCalculatedRef() const
+{
+    ASSERT(isCalculated());
+    calculationValue()->ref();
+}
+
+void Length::decrementCalculatedRef() const
+{
+    ASSERT(isCalculated());
+    RefPtr<CalculationValue> calcLength = calculationValue();
+    if (calcLength->hasOneRef())
+        calcHandles().remove(calculationHandle());
+    calcLength->deref();
+}    
+
+float Length::nonNanCalculatedValue(int maxValue) const
+{
+    ASSERT(isCalculated());
+    float result = calculationValue()->evaluate(maxValue);
+    if (isnan(result))
+        return 0;
+    return result;
+}
+
+bool Length::isCalculatedEqual(const Length& o) const
+{
+    return isCalculated() && (calculationValue() == o.calculationValue() || *calculationValue() == *o.calculationValue());
+}
+
+struct SameSizeAsLength {
+    int32_t value;
+    int32_t metaData;
+};
+COMPILE_ASSERT(sizeof(Length) == sizeof(SameSizeAsLength), length_should_stay_small);
 
 } // namespace WebCore

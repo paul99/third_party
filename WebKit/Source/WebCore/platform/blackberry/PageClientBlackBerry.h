@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009, 2010, 2011 Research In Motion Limited. All rights reserved.
+ * Copyright (C) 2009, 2010, 2011, 2012 Research In Motion Limited. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -32,14 +32,25 @@ namespace BlackBerry {
 }
 
 namespace WebCore {
+    class AuthenticationChallengeClient;
+    class Credential;
     class IntRect;
     class IntSize;
+    class KURL;
     class PluginView;
+    class ProtectionSpace;
 }
 
 class PageClientBlackBerry {
 public:
-    virtual void setCursor(WebCore::PlatformCursorHandle) = 0;
+    enum SaveCredentialType {
+        SaveCredentialNeverForThisSite = 0,
+        SaveCredentialNotNow,
+        SaveCredentialYes
+    };
+
+    virtual int playerID() const = 0;
+    virtual void setCursor(WebCore::PlatformCursor) = 0;
     virtual BlackBerry::Platform::NetworkStreamFactory* networkStreamFactory() = 0;
     virtual BlackBerry::Platform::Graphics::Window* platformWindow() const = 0;
     virtual void setPreventsScreenDimming(bool) = 0;
@@ -60,6 +71,10 @@ public:
     virtual WebCore::IntSize viewportSize() const = 0;
     virtual int showAlertDialog(BlackBerry::WebKit::WebPageClient::AlertType) = 0;
     virtual bool isActive() const = 0;
+    virtual bool isVisible() const = 0;
+    virtual void authenticationChallenge(const WebCore::KURL&, const WebCore::ProtectionSpace&, const WebCore::Credential&) = 0;
+    virtual SaveCredentialType notifyShouldSaveCredential(bool) = 0;
+    virtual void syncProxyCredential(const WebCore::Credential&) = 0;
 };
 
 #endif // PageClientBlackBerry_h

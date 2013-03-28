@@ -68,11 +68,33 @@ DOMWindow* domWindowFromScriptState(ScriptState* scriptState)
     JSC::JSGlobalObject* globalObject = scriptState->lexicalGlobalObject();
     if (!globalObject->inherits(&JSDOMWindowBase::s_info))
         return 0;
-    return static_cast<JSDOMWindowBase*>(globalObject)->impl();
+    return JSC::jsCast<JSDOMWindowBase*>(globalObject)->impl();
+}
+
+ScriptExecutionContext* scriptExecutionContextFromScriptState(ScriptState* scriptState)
+{
+    JSC::JSGlobalObject* globalObject = scriptState->lexicalGlobalObject();
+    if (!globalObject->inherits(&JSDOMGlobalObject::s_info))
+        return 0;
+    return JSC::jsCast<JSDOMGlobalObject*>(globalObject)->scriptExecutionContext();
+}
+
+bool evalEnabled(ScriptState* scriptState)
+{
+    JSC::JSGlobalObject* globalObject = scriptState->lexicalGlobalObject();
+    return globalObject->evalEnabled();
+}
+
+void setEvalEnabled(ScriptState* scriptState, bool enabled)
+{
+    JSC::JSGlobalObject* globalObject = scriptState->lexicalGlobalObject();
+    return globalObject->setEvalEnabled(enabled);
 }
 
 ScriptState* mainWorldScriptState(Frame* frame)
 {
+    if (!frame)
+        return 0;
     JSDOMWindowShell* shell = frame->script()->windowShell(mainThreadNormalWorld());
     return shell->window()->globalExec();
 }

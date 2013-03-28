@@ -26,8 +26,13 @@
 #include "config.h"
 #include "WebCookieManager.h"
 
+#include "WebKitSoupCookieJarSqlite.h"
+#include "WebProcess.h"
 #include <WebCore/CookieJarSoup.h>
+#include <WebCore/ResourceHandle.h>
 #include <libsoup/soup.h>
+#include <wtf/gobject/GRefPtr.h>
+#include <wtf/text/CString.h>
 
 using namespace WebCore;
 
@@ -35,7 +40,7 @@ namespace WebKit {
 
 void WebCookieManager::platformSetHTTPCookieAcceptPolicy(HTTPCookieAcceptPolicy policy)
 {
-    SoupCookieJar* cookieJar = WebCore::defaultCookieJar();
+    SoupCookieJar* cookieJar = WebCore::soupCookieJar();
     SoupCookieJarAcceptPolicy soupPolicy;
 
     soupPolicy = SOUP_COOKIE_JAR_ACCEPT_ALWAYS;
@@ -55,7 +60,7 @@ void WebCookieManager::platformSetHTTPCookieAcceptPolicy(HTTPCookieAcceptPolicy 
 
 HTTPCookieAcceptPolicy WebCookieManager::platformGetHTTPCookieAcceptPolicy()
 {
-    SoupCookieJar* cookieJar = WebCore::defaultCookieJar();
+    SoupCookieJar* cookieJar = WebCore::soupCookieJar();
     SoupCookieJarAcceptPolicy soupPolicy;
 
     HTTPCookieAcceptPolicy policy;
@@ -75,6 +80,31 @@ HTTPCookieAcceptPolicy WebCookieManager::platformGetHTTPCookieAcceptPolicy()
         policy = HTTPCookieAcceptPolicyAlways;
     }
     return policy;
+}
+
+void WebCookieManager::setCookiePersistentStorage(const String& storagePath, uint32_t storageType)
+{
+    WebProcess::LocalTerminationDisabler terminationDisabler(WebProcess::shared());
+
+    GRefPtr<SoupCookieJar> jar;
+    switch (storageType) {
+    case SoupCookiePersistentStorageText:
+        jar = adoptGRef(soup_cookie_jar_text_new(storagePath.utf8().data(), FALSE));
+        break;
+    case SoupCookiePersistentStorageSQLite:
+        jar = adoptGRef(webkitSoupCookieJarSqliteNew(storagePath));
+        break;
+    default:
+        ASSERT_NOT_REACHED();
+    }
+
+    SoupCookieJar* currentJar = WebCore::soupCookieJar();
+    soup_cookie_jar_set_accept_policy(jar.get(), soup_cookie_jar_get_accept_policy(currentJar));
+    SoupSession* session = ResourceHandle::defaultSession();
+    soup_session_remove_feature(session, SOUP_SESSION_FEATURE(currentJar));
+    soup_session_add_feature(session, SOUP_SESSION_FEATURE(jar.get()));
+
+    WebCore::setSoupCookieJar(jar.get());
 }
 
 } // namespace WebKit

@@ -32,8 +32,16 @@
 #include "JSBlob.h"
 
 #include "Blob.h"
+#include "ExceptionCode.h"
+#include "ExceptionCodePlaceholder.h"
+#include "JSArrayBuffer.h"
+#include "JSArrayBufferView.h"
 #include "JSDOMBinding.h"
+#include "JSDictionary.h"
 #include "JSFile.h"
+#include "WebKitBlobBuilder.h"
+#include <runtime/Error.h>
+#include <runtime/JSArray.h>
 #include <wtf/Assertions.h>
 
 using namespace JSC;
@@ -46,9 +54,89 @@ JSValue toJS(ExecState* exec, JSDOMGlobalObject* globalObject, Blob* blob)
         return jsNull();
 
     if (blob->isFile())
-        return CREATE_DOM_WRAPPER(exec, globalObject, File, blob);
+        return wrap<JSFile>(exec, globalObject, static_cast<File*>(blob));
 
-    return CREATE_DOM_WRAPPER(exec, globalObject, Blob, blob);
+    return wrap<JSBlob>(exec, globalObject, blob);    
+}
+
+EncodedJSValue JSC_HOST_CALL JSBlobConstructor::constructJSBlob(ExecState* exec)
+{
+    JSBlobConstructor* jsConstructor = jsCast<JSBlobConstructor*>(exec->callee());
+    ScriptExecutionContext* context = jsConstructor->scriptExecutionContext();
+    if (!context)
+        return throwVMError(exec, createReferenceError(exec, "Blob constructor associated document is unavailable"));
+
+    if (!exec->argumentCount()) {
+        RefPtr<Blob> blob = Blob::create();
+        return JSValue::encode(CREATE_DOM_WRAPPER(exec, jsConstructor->globalObject(), Blob, blob.get()));
+    }
+
+    JSValue firstArg = exec->argument(0);
+    if (!isJSArray(firstArg))
+        return throwVMError(exec, createTypeError(exec, "First argument of the constructor is not of type Array"));
+
+    String type;
+    String endings = ASCIILiteral("transparent");
+
+    if (exec->argumentCount() > 1) {
+        JSValue blobPropertyBagValue = exec->argument(1);
+
+        if (!blobPropertyBagValue.isObject())
+            return throwVMError(exec, createTypeError(exec, "Second argument of the constructor is not of type Object"));
+
+        // Given the above test, this will always yield an object.
+        JSObject* blobPropertyBagObject = blobPropertyBagValue.toObject(exec);
+
+        // Create the dictionary wrapper from the initializer object.
+        JSDictionary dictionary(exec, blobPropertyBagObject);
+
+        // Attempt to get the endings property and validate it.
+        bool containsEndings = dictionary.get("endings", endings);
+        if (exec->hadException())
+            return JSValue::encode(jsUndefined());
+
+        if (containsEndings) {
+            if (endings != "transparent" && endings != "native")
+                return throwVMError(exec, createTypeError(exec, "The endings property must be either \"transparent\" or \"native\""));
+        }
+
+        // Attempt to get the type property.
+        dictionary.get("type", type);
+        if (exec->hadException())
+            return JSValue::encode(jsUndefined());
+        if (!type.containsOnlyASCII())
+            return throwVMError(exec, createSyntaxError(exec, "type must consist of ASCII characters"));
+        type.makeLower();
+    }
+
+    ASSERT(endings == "transparent" || endings == "native");
+
+    BlobBuilder blobBuilder;
+
+    JSArray* array = asArray(firstArg);
+    unsigned length = array->length();
+
+    for (unsigned i = 0; i < length; ++i) {
+        JSValue item = array->getIndex(exec, i);
+#if ENABLE(BLOB)
+        if (item.inherits(&JSArrayBuffer::s_info))
+            blobBuilder.append(context, toArrayBuffer(item));
+        else if (item.inherits(&JSArrayBufferView::s_info))
+            blobBuilder.append(toArrayBufferView(item));
+        else
+#endif
+        if (item.inherits(&JSBlob::s_info))
+            blobBuilder.append(toBlob(item));
+        else {
+            String string = item.toString(exec)->value(exec);
+            if (exec->hadException())
+                return JSValue::encode(jsUndefined());
+            blobBuilder.append(string, endings);
+        }
+    }
+
+    RefPtr<Blob> blob = blobBuilder.getBlob(type);
+    return JSValue::encode(CREATE_DOM_WRAPPER(exec, jsConstructor->globalObject(), Blob, blob.get()));
 }
 
 } // namespace WebCore

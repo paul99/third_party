@@ -27,19 +27,30 @@
 #include "GraphicsTypes.h"
 #include "HTMLElement.h"
 #include "HTMLImageLoader.h"
+#include "ImageLoaderClient.h"
 
 namespace WebCore {
 
 class HTMLFormElement;
+class ImageInnerElement;
 
-class HTMLImageElement : public HTMLElement {
+class ImageElement {
+protected:
+    void setImageIfNecessary(RenderObject*, ImageLoader*);
+    RenderObject* createRendererForImage(HTMLElement*, RenderArena*);
+};
+
+class HTMLImageElement : public HTMLElement, public ImageElement, public ImageLoaderClient {
     friend class HTMLFormElement;
+    friend class ImageInnerElement;
 public:
     static PassRefPtr<HTMLImageElement> create(Document*);
     static PassRefPtr<HTMLImageElement> create(const QualifiedName&, Document*, HTMLFormElement*);
     static PassRefPtr<HTMLImageElement> createForJSConstructor(Document*, const int* optionalWidth, const int* optionalHeight);
 
     virtual ~HTMLImageElement();
+
+    virtual void willAddAuthorShadowRoot() OVERRIDE;
 
     int width(bool ignorePendingStylesheets = false);
     int height(bool ignorePendingStylesheets = false);
@@ -72,10 +83,11 @@ public:
 
     bool complete() const;
 
-    bool haveFiredLoadEvent() const { return m_imageLoader.haveFiredLoadEvent(); }
-    bool hasPendingActivity() const { return !m_imageLoader.haveFiredLoadEvent(); }
+    bool hasPendingActivity() const { return m_imageLoader.hasPendingActivity(); }
 
     virtual bool canContainRangeEndPoint() const { return false; }
+
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
 
 protected:
     HTMLImageElement(const QualifiedName&, Document*, HTMLFormElement* = 0);
@@ -83,24 +95,33 @@ protected:
     virtual void didMoveToNewDocument(Document* oldDocument) OVERRIDE;
 
 private:
-    virtual bool mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const;
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void createShadowSubtree();
+
+    virtual bool areAuthorShadowsAllowed() const OVERRIDE { return false; }
+
+    // Implementation of ImageLoaderClient
+    Element* sourceElement() { return this; }
+    Element* imageElement();
+    void refSourceElement() { ref(); }
+    void derefSourceElement() { deref(); }
+
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForPresentationAttribute(const Attribute&, StylePropertySet*) OVERRIDE;
 
     virtual void attach();
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
 
-    virtual bool canStartSelection() const { return false; }
+    virtual bool canStartSelection() const;
 
-    virtual bool isURLAttribute(Attribute*) const;
+    virtual bool isURLAttribute(const Attribute&) const OVERRIDE;
 
     virtual bool draggable() const;
 
     virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
 
-    virtual void insertedIntoDocument();
-    virtual void insertedIntoTree(bool deep);
-    virtual void removedFromTree(bool deep);
-
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
+    virtual void removedFrom(ContainerNode*) OVERRIDE;
     virtual bool shouldRegisterAsNamedItem() const OVERRIDE { return true; }
     virtual bool shouldRegisterAsExtraNamedItem() const OVERRIDE { return true; }
 
@@ -109,10 +130,25 @@ private:
     virtual void setItemValueText(const String&, ExceptionCode&) OVERRIDE;
 #endif
 
+    RenderObject* imageRenderer() const { return HTMLElement::renderer(); }
+    HTMLImageLoader* imageLoader() { return &m_imageLoader; }
+    ImageInnerElement* innerElement() const;
+
     HTMLImageLoader m_imageLoader;
     HTMLFormElement* m_form;
     CompositeOperator m_compositeOperator;
 };
+
+inline bool isHTMLImageElement(Node* node)
+{
+    return node->hasTagName(HTMLNames::imgTag);
+}
+
+inline HTMLImageElement* toHTMLImageElement(Node* node)
+{
+    ASSERT(!node || isHTMLImageElement(node));
+    return static_cast<HTMLImageElement*>(node);
+}
 
 } //namespace
 

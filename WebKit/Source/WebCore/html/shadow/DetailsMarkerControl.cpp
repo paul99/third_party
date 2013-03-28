@@ -31,8 +31,7 @@
 #include "config.h"
 #include "DetailsMarkerControl.h"
 
-#if ENABLE(DETAILS)
-
+#if ENABLE(DETAILS_ELEMENT)
 #include "HTMLNames.h"
 #include "HTMLSummaryElement.h"
 #include "RenderDetailsMarker.h"
@@ -58,15 +57,15 @@ bool DetailsMarkerControl::rendererIsNeeded(const NodeRenderingContext& context)
 
 const AtomicString& DetailsMarkerControl::shadowPseudoId() const
 {
-    DEFINE_STATIC_LOCAL(AtomicString, pseudId, ("-webkit-details-marker"));
+    DEFINE_STATIC_LOCAL(AtomicString, pseudId, ("-webkit-details-marker", AtomicString::ConstructFromLiteral));
     return pseudId;
 }
 
 HTMLSummaryElement* DetailsMarkerControl::summaryElement()
 {
-    Node* node = this->shadowAncestorNode();
-    ASSERT(!node || toElement(node)->hasTagName(summaryTag));
-    return static_cast<HTMLSummaryElement*>(node);
+    Element* element = shadowHost();
+    ASSERT(!element || element->hasTagName(summaryTag));
+    return static_cast<HTMLSummaryElement*>(element);
 }
 
 }

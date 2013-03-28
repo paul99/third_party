@@ -24,22 +24,23 @@
 #ifndef RenderThemeChromiumMac_h
 #define RenderThemeChromiumMac_h
 
-#import "RenderThemeMac.h"
+#import "RenderThemeChromiumCommon.h"
+#import "RenderThemeMacShared.h"
 
 namespace WebCore {
 
-class RenderThemeChromiumMac : public RenderThemeMac {
+class RenderThemeChromiumMac : public RenderThemeMacShared {
 public:
     static PassRefPtr<RenderTheme> create();
 
+    virtual bool supportsDataListUI(const AtomicString& type) const OVERRIDE;
+
 protected:
-    virtual bool paintTextField(RenderObject*, const PaintInfo&, const IntRect&);
 #if ENABLE(VIDEO)
     virtual void adjustMediaSliderThumbSize(RenderStyle*) const;
     virtual bool paintMediaPlayButton(RenderObject*, const PaintInfo&, const IntRect&);
     virtual bool paintMediaMuteButton(RenderObject*, const PaintInfo&, const IntRect&);
     virtual bool paintMediaSliderTrack(RenderObject*, const PaintInfo&, const IntRect&);
-    virtual bool paintMediaControlsBackground(RenderObject*, const PaintInfo&, const IntRect&);
     virtual String extraMediaControlsStyleSheet();
 #if ENABLE(FULLSCREEN_API)
     virtual String extraFullScreenStyleSheet();
@@ -49,9 +50,15 @@ protected:
     virtual bool paintMediaVolumeSliderContainer(RenderObject*, const PaintInfo&, const IntRect&);
     virtual bool paintMediaVolumeSliderTrack(RenderObject*, const PaintInfo&, const IntRect&);
     virtual bool paintMediaVolumeSliderThumb(RenderObject*, const PaintInfo&, const IntRect&);
-    virtual IntPoint volumeSliderOffsetFromMuteButton(RenderBox*, const IntSize&) const;
+    virtual IntPoint volumeSliderOffsetFromMuteButton(RenderBox*, const IntSize&) const OVERRIDE;
     virtual bool usesMediaControlStatusDisplay() { return false; }
     virtual bool hasOwnDisabledStateHandlingFor(ControlPart) const { return true; }
+    virtual bool usesVerticalVolumeSlider() const { return false; }
+    virtual String formatMediaControlsTime(float time) const;
+    virtual String formatMediaControlsCurrentTime(float currentTime, float duration) const;
+    virtual String formatMediaControlsRemainingTime(float currentTime, float duration) const;
+    virtual bool paintMediaFullscreenButton(RenderObject*, const PaintInfo&, const IntRect&);
+    virtual bool paintMediaToggleClosedCaptionsButton(RenderObject*, const PaintInfo&, const IntRect&);
 #endif
 
     virtual bool usesTestModeFocusRingColor() const;
@@ -64,6 +71,12 @@ private:
     virtual Color disabledTextColor(const Color& textColor, const Color&) const OVERRIDE { return textColor; }
     virtual void updateActiveState(NSCell*, const RenderObject*);
     virtual String extraDefaultStyleSheet();
+#if ENABLE(DATALIST_ELEMENT)
+    virtual LayoutUnit sliderTickSnappingThreshold() const OVERRIDE;
+#endif
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+    virtual bool supportsCalendarPicker(const AtomicString& type) const OVERRIDE;
+#endif
     virtual bool shouldShowPlaceholderWhenFocused() const OVERRIDE;
 };
 

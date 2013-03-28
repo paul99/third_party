@@ -30,23 +30,17 @@
 #include "talk/base/logging.h"
 #include "talk/base/helpers.h"
 #include "talk/base/scoped_ptr.h"
+#include "talk/base/sslstreamadapter.h"
 #include "talk/xmpp/constants.h"
 #include "talk/xmpp/jid.h"
+#include "talk/p2p/base/dtlstransport.h"
 #include "talk/p2p/base/p2ptransport.h"
-#include "talk/p2p/base/p2ptransportchannel.h"
 #include "talk/p2p/base/sessionclient.h"
 #include "talk/p2p/base/transport.h"
 #include "talk/p2p/base/transportchannelproxy.h"
+#include "talk/p2p/base/transportinfo.h"
 
 #include "talk/p2p/base/constants.h"
-
-namespace {
-
-const uint32 MSG_TIMEOUT = 1;
-const uint32 MSG_ERROR = 2;
-const uint32 MSG_STATE = 3;
-
-}  // namespace
 
 namespace cricket {
 
@@ -64,60 +58,64 @@ TransportProxy::~TransportProxy() {
     iter->second->SignalDestroyed(iter->second);
     delete iter->second;
   }
-  if (owner_)
-    delete transport_;
 }
 
 std::string TransportProxy::type() const {
-  return transport_->type();
+  return transport_->get()->type();
 }
 
-void TransportProxy::SetImplementation(Transport* impl, bool owner) {
-  if (owner_ && transport_)
-     delete transport_;
-  transport_ = impl;
-  owner_ = owner;
-}
-
-TransportChannel* TransportProxy::GetChannel(const std::string& name) {
-  return GetProxy(name);
+TransportChannel* TransportProxy::GetChannel(int component) {
+  return GetChannelProxy(component);
 }
 
 TransportChannel* TransportProxy::CreateChannel(
-    const std::string& name, const std::string& content_type) {
-  ASSERT(GetChannel(name) == NULL);
-  ASSERT(!transport_->HasChannel(name));
+    const std::string& name, int component) {
+  ASSERT(GetChannel(component) == NULL);
+  ASSERT(!transport_->get()->HasChannel(component));
 
   // We always create a proxy in case we need to change out the transport later.
   TransportChannelProxy* channel =
-      new TransportChannelProxy(name, content_type);
-  channels_[name] = channel;
+      new TransportChannelProxy(content_name(), name, component);
+  channels_[component] = channel;
 
   if (state_ == STATE_NEGOTIATED) {
-    SetProxyImpl(name, channel);
+    SetChannelProxyImpl(component, channel);
   } else if (state_ == STATE_CONNECTING) {
-    GetOrCreateImpl(name, content_type);
+    GetOrCreateChannelProxyImpl(component);
   }
   return channel;
 }
 
-void TransportProxy::DestroyChannel(const std::string& name) {
-  TransportChannel* channel = GetChannel(name);
+bool TransportProxy::HasChannel(int component) {
+  return transport_->get()->HasChannel(component);
+}
+
+void TransportProxy::DestroyChannel(int component) {
+  TransportChannel* channel = GetChannel(component);
   if (channel) {
-    channels_.erase(name);
+    // If the state of TransportProxy is not NEGOTIATED
+    // then TransportChannelProxy and its impl are not
+    // connected. Both must be connected before
+    // deletion.
+    if (state_ != STATE_NEGOTIATED) {
+      SetChannelProxyImpl(component, GetChannelProxy(component));
+    }
+
+    channels_.erase(component);
     channel->SignalDestroyed(channel);
     delete channel;
   }
 }
 
 void TransportProxy::SpeculativelyConnectChannels() {
-  ASSERT(state_ == STATE_INIT || state_ == STATE_CONNECTING);
-  state_ = STATE_CONNECTING;
-  for (ChannelMap::iterator iter = channels_.begin();
-       iter != channels_.end(); ++iter) {
-    GetOrCreateImpl(iter->first, iter->second->content_type());
+  if (state_ != STATE_NEGOTIATED) {
+    state_ = STATE_CONNECTING;
+    for (ChannelMap::iterator iter = channels_.begin();
+         iter != channels_.end(); ++iter) {
+      GetOrCreateChannelProxyImpl(iter->first);
+    }
+    transport_->get()->ConnectChannels();
   }
-  transport_->ConnectChannels();
 }
 
 void TransportProxy::CompleteNegotiation() {
@@ -125,9 +123,9 @@ void TransportProxy::CompleteNegotiation() {
     state_ = STATE_NEGOTIATED;
     for (ChannelMap::iterator iter = channels_.begin();
          iter != channels_.end(); ++iter) {
-      SetProxyImpl(iter->first, iter->second);
+      SetChannelProxyImpl(iter->first, iter->second);
     }
-    transport_->ConnectChannels();
+    transport_->get()->ConnectChannels();
   }
 }
 
@@ -145,54 +143,137 @@ void TransportProxy::AddUnsentCandidates(const Candidates& candidates) {
   }
 }
 
+bool TransportProxy::GetChannelNameFromComponent(
+    int component, std::string* channel_name) const {
+  const TransportChannelProxy* channel = GetChannelProxy(component);
+  if (channel == NULL) {
+    return false;
+  }
 
-TransportChannelProxy* TransportProxy::GetProxy(const std::string& name) {
-  ChannelMap::iterator iter = channels_.find(name);
+  *channel_name = channel->name();
+  return true;
+}
+
+bool TransportProxy::GetComponentFromChannelName(
+    const std::string& channel_name, int* component) const {
+  const TransportChannelProxy* channel = GetChannelProxyByName(channel_name);
+  if (channel == NULL) {
+    return false;
+  }
+
+  *component = channel->component();
+  return true;
+}
+
+TransportChannelProxy* TransportProxy::GetChannelProxy(int component) const {
+  ChannelMap::const_iterator iter = channels_.find(component);
   return (iter != channels_.end()) ? iter->second : NULL;
 }
 
-TransportChannelImpl* TransportProxy::GetOrCreateImpl(
-    const std::string& name, const std::string& content_type) {
-  TransportChannelImpl* impl = transport_->GetChannel(name);
+TransportChannelProxy* TransportProxy::GetChannelProxyByName(
+    const std::string& name) const {
+  for (ChannelMap::const_iterator iter = channels_.begin();
+       iter != channels_.end();
+       ++iter) {
+    if (iter->second->name() == name) {
+      return iter->second;
+    }
+  }
+  return NULL;
+}
+
+TransportChannelImpl* TransportProxy::GetOrCreateChannelProxyImpl(
+    int component) {
+  TransportChannelImpl* impl = transport_->get()->GetChannel(component);
   if (impl == NULL) {
-    impl = transport_->CreateChannel(name, content_type);
-    impl->set_session_id(sid_);
+    impl = transport_->get()->CreateChannel(component);
+    impl->SetSessionId(sid_);
   }
   return impl;
 }
 
-void TransportProxy::SetProxyImpl(
-    const std::string& name, TransportChannelProxy* proxy) {
-  TransportChannelImpl* impl = GetOrCreateImpl(name, proxy->content_type());
+void TransportProxy::SetChannelProxyImpl(
+    int component, TransportChannelProxy* proxy) {
+  TransportChannelImpl* impl = GetOrCreateChannelProxyImpl(component);
   ASSERT(impl != NULL);
-  proxy->SetImplementation(impl, true);
+  proxy->SetImplementation(impl);
 }
 
-// This method will use TransportChannelImpls of and deletes what it owns.
-void TransportProxy::CopyTransportProxyChannels(TransportProxy* proxy) {
+// This function muxes |this| onto proxy by making a copy
+// of |proxy|'s transport and setting our TransportChannelProxies
+// to point to |proxy|'s underlying implementations.
+void TransportProxy::SetupMux(TransportProxy* proxy) {
   size_t index = 0;
+  // Copy the channels from proxy 1:1 onto us.
   for (ChannelMap::const_iterator iter = proxy->channels().begin();
        iter != proxy->channels().end(); ++iter, ++index) {
-    ReplaceImpl(iter->second, index);
+    ReplaceChannelProxyImpl(iter->second, index);
   }
+  // Now replace our transport. Must happen afterwards because
+  // it deletes all impls as a side effect.
+  transport_ = proxy->transport_;
+  transport_->get()->SignalCandidatesReady.connect(
+      this, &TransportProxy::OnTransportCandidatesReady);
+  set_candidates_allocated(proxy->candidates_allocated());
 }
 
-void TransportProxy::ReplaceImpl(TransportChannelProxy* channel,
-                                 size_t index) {
+// Mux the channel at |this->channels_[index]| (also known as
+// |target_channel| onto |channel|. The new implementation (actually
+// a ref-count-increased version of what's in |channel->impl| is
+// obtained by calling CreateChannel on |channel|'s Transport object.
+void TransportProxy::ReplaceChannelProxyImpl(TransportChannelProxy* channel,
+                                             size_t index) {
   if (index < channels().size()) {
     ChannelMap::const_iterator iter = channels().begin();
-    // Get handle the index which needs to be replaced.
+    // map::iterator does not allow random access
     for (size_t i = 0; i < index; ++i, ++iter);
 
     TransportChannelProxy* target_channel = iter->second;
     if (target_channel) {
-      // Deleting TransportChannelImpl before replacing it.
-      transport_->DestroyChannel(iter->first);
-      target_channel->SetImplementation(channel->impl(), false);
+      // Reset the implementation on the target_channel
+      target_channel->SetImplementation(
+        // Increments ref count
+          channel->impl()->GetTransport()->CreateChannel(channel->component()));
     }
   } else {
     LOG(LS_WARNING) << "invalid TransportChannelProxy index to replace";
   }
+}
+
+std::string BaseSession::StateToString(State state) {
+  switch (state) {
+    case Session::STATE_INIT:
+      return "STATE_INIT";
+    case Session::STATE_SENTINITIATE:
+      return "STATE_SENTINITIATE";
+    case Session::STATE_RECEIVEDINITIATE:
+      return "STATE_RECEIVEDINITIATE";
+    case Session::STATE_SENTACCEPT:
+      return "STATE_SENTACCEPT";
+    case Session::STATE_RECEIVEDACCEPT:
+      return "STATE_RECEIVEDACCEPT";
+    case Session::STATE_SENTMODIFY:
+      return "STATE_SENTMODIFY";
+    case Session::STATE_RECEIVEDMODIFY:
+      return "STATE_RECEIVEDMODIFY";
+    case Session::STATE_SENTREJECT:
+      return "STATE_SENTREJECT";
+    case Session::STATE_RECEIVEDREJECT:
+      return "STATE_RECEIVEDREJECT";
+    case Session::STATE_SENTREDIRECT:
+      return "STATE_SENTREDIRECT";
+    case Session::STATE_SENTTERMINATE:
+      return "STATE_SENTTERMINATE";
+    case Session::STATE_RECEIVEDTERMINATE:
+      return "STATE_RECEIVEDTERMINATE";
+    case Session::STATE_INPROGRESS:
+      return "STATE_INPROGRESS";
+    case Session::STATE_DEINIT:
+      return "STATE_DEINIT";
+    default:
+      break;
+  }
+  return "STATE_" + talk_base::ToString(state);
 }
 
 BaseSession::BaseSession(talk_base::Thread* signaling_thread,
@@ -210,8 +291,12 @@ BaseSession::BaseSession(talk_base::Thread* signaling_thread,
       content_type_(content_type),
       transport_type_(NS_GINGLE_P2P),
       initiator_(initiator),
+      identity_(NULL),
       local_description_(NULL),
-      remote_description_(NULL) {
+      remote_description_(NULL),
+      transport_muxed_(false),
+      ice_tiebreaker_(talk_base::CreateRandomId64()),
+      role_switch_(false) {
   ASSERT(signaling_thread->IsCurrent());
 }
 
@@ -219,6 +304,7 @@ BaseSession::~BaseSession() {
   ASSERT(signaling_thread()->IsCurrent());
 
   ASSERT(state_ != STATE_DEINIT);
+  LogState(state_, STATE_DEINIT);
   state_ = STATE_DEINIT;
   SignalState(this, state_);
 
@@ -231,37 +317,79 @@ BaseSession::~BaseSession() {
   delete local_description_;
 }
 
-void BaseSession::set_allow_local_ips(bool allow) {
-  allow_local_ips_ = allow;
+bool BaseSession::PushdownTransportDescription(ContentSource source,
+                                               ContentAction action) {
+  bool ret = false;
+  if (source == CS_LOCAL) {
+    ret = PushdownLocalTransportDescription(action);
+  } else {
+    ret = PushdownRemoteTransportDescription(action);
+  }
+  return ret;
+}
+
+bool BaseSession::PushdownLocalTransportDescription(ContentAction action) {
+  // Update the Transports with the right information
   for (TransportMap::iterator iter = transports_.begin();
        iter != transports_.end(); ++iter) {
-    iter->second->impl()->set_allow_local_ips(allow);
+    TransportDescription tdesc;
+
+    // If no transport info was in this session description, ret == false
+    // and we just skip this one.
+    bool ret = GetLocalTransportDescription(
+        iter->second->content_name(), &tdesc);
+    if (ret) {
+      if (!iter->second->SetLocalTransportDescription(tdesc, action)) {
+        return false;
+      }
+    }
   }
+  return true;
+}
+
+bool BaseSession::PushdownRemoteTransportDescription(ContentAction action) {
+  // Update the Transports with the right information
+  for (TransportMap::iterator iter = transports_.begin();
+       iter != transports_.end(); ++iter) {
+    TransportDescription tdesc;
+
+    // If no transport info was in this session description, ret == false
+    // and we just skip this one.
+    bool ret = GetRemoteTransportDescription(
+        iter->second->content_name(), &tdesc);
+    if (ret) {
+      if (!iter->second->SetRemoteTransportDescription(tdesc, action)) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 TransportChannel* BaseSession::CreateChannel(const std::string& content_name,
-                                             const std::string& channel_name) {
+                                             const std::string& channel_name,
+                                             int component) {
   // We create the proxy "on demand" here because we need to support
   // creating channels at any time, even before we send or receive
   // initiate messages, which is before we create the transports.
   TransportProxy* transproxy = GetOrCreateTransportProxy(content_name);
-  return transproxy->CreateChannel(channel_name, content_type_);
+  return transproxy->CreateChannel(channel_name, component);
 }
 
 TransportChannel* BaseSession::GetChannel(const std::string& content_name,
-                                          const std::string& channel_name) {
+                                          int component) {
   TransportProxy* transproxy = GetTransportProxy(content_name);
   if (transproxy == NULL)
     return NULL;
   else
-    return transproxy->GetChannel(channel_name);
+    return transproxy->GetChannel(component);
 }
 
 void BaseSession::DestroyChannel(const std::string& content_name,
-                                 const std::string& channel_name) {
+                                 int component) {
   TransportProxy* transproxy = GetTransportProxy(content_name);
   ASSERT(transproxy != NULL);
-  transproxy->DestroyChannel(channel_name);
+  transproxy->DestroyChannel(component);
 }
 
 TransportProxy* BaseSession::GetOrCreateTransportProxy(
@@ -270,22 +398,30 @@ TransportProxy* BaseSession::GetOrCreateTransportProxy(
   if (transproxy)
     return transproxy;
 
-  Transport* transport = CreateTransport();
-  transport->set_allow_local_ips(allow_local_ips_);
+  Transport* transport = CreateTransport(content_name);
+  transport->SetRole(initiator_ ? ROLE_CONTROLLING : ROLE_CONTROLLED);
+  transport->SetTiebreaker(ice_tiebreaker_);
+  // TODO: Connect all the Transport signals to TransportProxy
+  // then to the BaseSession.
   transport->SignalConnecting.connect(
       this, &BaseSession::OnTransportConnecting);
   transport->SignalWritableState.connect(
       this, &BaseSession::OnTransportWritable);
   transport->SignalRequestSignaling.connect(
       this, &BaseSession::OnTransportRequestSignaling);
-  transport->SignalCandidatesReady.connect(
-      this, &BaseSession::OnTransportCandidatesReady);
   transport->SignalTransportError.connect(
       this, &BaseSession::OnTransportSendError);
-  transport->SignalChannelGone.connect(
-      this, &BaseSession::OnTransportChannelGone);
+  transport->SignalRouteChange.connect(
+      this, &BaseSession::OnTransportRouteChange);
+  transport->SignalCandidatesAllocationDone.connect(
+      this, &BaseSession::OnTransportCandidatesAllocationDone);
+  transport->SignalRoleConflict.connect(
+      this, &BaseSession::OnRoleConflict);
 
-  transproxy = new TransportProxy(sid_, content_name, transport);
+  transproxy = new TransportProxy(sid_, content_name,
+                                  new TransportWrapper(transport));
+  transproxy->SignalCandidatesReady.connect(
+      this, &BaseSession::OnTransportProxyCandidatesReady);
   transports_[content_name] = transproxy;
 
   return transproxy;
@@ -321,15 +457,44 @@ TransportProxy* BaseSession::GetFirstTransportProxy() {
   return transports_.begin()->second;
 }
 
-cricket::Transport* BaseSession::CreateTransport() {
+void BaseSession::DestroyTransportProxy(
+    const std::string& content_name) {
+  TransportMap::iterator iter = transports_.find(content_name);
+  if (iter != transports_.end()) {
+    delete iter->second;
+    transports_.erase(content_name);
+  }
+}
+
+cricket::Transport* BaseSession::CreateTransport(
+    const std::string& content_name) {
   ASSERT(transport_type_ == NS_GINGLE_P2P);
-  return new cricket::P2PTransport(
-      signaling_thread(), worker_thread(), port_allocator());
+  return new cricket::DtlsTransport<P2PTransport>(
+      signaling_thread(), worker_thread(), content_name,
+      port_allocator(), identity_);
+}
+
+void BaseSession::UpdateContentName(
+    const std::string& old_content_name, const std::string& new_content_name) {
+  ASSERT(signaling_thread_->IsCurrent());
+  if (state() != STATE_INIT) {
+    LOG(LS_WARNING) << "Wrong state to update content name.";
+    return;
+  }
+
+  TransportMap::iterator iter = transports_.find(old_content_name);
+  ASSERT(iter != transports_.end());
+  TransportProxy* proxy = iter->second;
+  ASSERT(proxy != NULL);
+  proxy->UpdateContentName(new_content_name);
+  transports_.erase(iter);
+  transports_[new_content_name] = proxy;
 }
 
 void BaseSession::SetState(State state) {
   ASSERT(signaling_thread_->IsCurrent());
   if (state != state_) {
+    LogState(state_, state);
     state_ = state;
     SignalState(this, state_);
     signaling_thread_->Post(this, MSG_STATE);
@@ -359,13 +524,41 @@ void BaseSession::SpeculativelyConnectAllTransportChannels() {
   }
 }
 
+bool BaseSession::OnRemoteCandidates(const std::string& content_name,
+                                     const Candidates& candidates,
+                                     std::string* error) {
+  TransportProxy* proxy = GetTransportProxy(content_name);
+  if (!proxy) {
+    *error = "Unknown content name " + content_name;
+    return false;
+  }
+
+  if (!proxy->negotiated()) {
+    proxy->CompleteNegotiation();
+  }
+
+  // Verify each candidate before passing down to transport layer.
+  for (Candidates::const_iterator cand = candidates.begin();
+       cand != candidates.end(); ++cand) {
+    if (!proxy->impl()->VerifyCandidate(*cand, error))
+      return false;
+    if (!proxy->HasChannel(cand->component())) {
+      *error = "Candidate has unknown component: " + cand->ToString() +
+                " for content: "+ content_name;
+      return false;
+    }
+  }
+  proxy->OnRemoteCandidates(candidates);
+  return true;
+}
+
 bool BaseSession::ContentsGrouped() {
   // TODO - present implementation checks for groups present
   // in SDP. It may be necessary to check content_names in groups of both
   // local and remote descriptions. Assumption here is that when this method
   // returns true, media contents can be muxed.
-  if (local_description()->HasGroup(GN_BUNDLE) &&
-      remote_description()->HasGroup(GN_BUNDLE)) {
+  if (local_description()->HasGroup(GROUP_TYPE_BUNDLE) &&
+      remote_description()->HasGroup(GROUP_TYPE_BUNDLE)) {
     return true;
   }
   return false;
@@ -373,13 +566,29 @@ bool BaseSession::ContentsGrouped() {
 
 bool BaseSession::MaybeEnableMuxingSupport() {
   bool ret = true;
+  if ((state_ == STATE_SENTINITIATE ||
+      state_ == STATE_RECEIVEDINITIATE) &&
+      ((local_description_ == NULL) ||
+      (remote_description_ == NULL))) {
+    return false;
+  }
+
   if (!ContentsGrouped()) {
-    LOG(LS_INFO) << "Contents are not grouped together cannot be muxed";
+    LOG(LS_INFO) << "BUNDLE group information is not negotiated through "
+                 << "signaling channel. Muxing cannot be done.";
   } else {
+    // Make sure proxies are in connect state, if not move it to connected
+    // state.
+    for (TransportMap::iterator iter = transports_.begin();
+           iter != transports_.end(); ++iter) {
+      if (!iter->second->negotiated())
+        iter->second->CompleteNegotiation();
+    }
+
     // Always use first content name from the group for muxing. Hence ordering
     // of content names in SDP should match to the order in group.
     const ContentGroup* muxed_content_group =
-        local_description()->GetGroupByName(GN_BUNDLE);
+        local_description()->GetGroupByName(GROUP_TYPE_BUNDLE);
     const std::string* content_name =
         muxed_content_group->FirstContentName();
     if (content_name) {
@@ -388,6 +597,9 @@ bool BaseSession::MaybeEnableMuxingSupport() {
       ASSERT(content != NULL);
       SetSelectedProxy(content->name, muxed_content_group);
     }
+    transport_muxed_ = true;
+    MaybeCandidatesAllocationDone();
+    LOG(LS_INFO) << "RTP BUNDLE is enabled.";
   }
   return ret;
 }
@@ -404,12 +616,70 @@ void BaseSession::SetSelectedProxy(const std::string& content_name,
       if (iter->first != content_name &&
           muxed_group->HasContentName(iter->first)) {
         TransportProxy* proxy = iter->second;
-        proxy->CopyTransportProxyChannels(selected_proxy);
-        // After replacing the TransportChannels, replace Transport
-        proxy->SetImplementation(selected_proxy->impl(), false);
+        proxy->SetupMux(selected_proxy);
       }
     }
   }
+}
+
+void BaseSession::OnTransportCandidatesAllocationDone(Transport* transport) {
+  for (TransportMap::iterator iter = transports_.begin();
+       iter != transports_.end(); ++iter) {
+    TransportProxy* transproxy = iter->second;
+    if (transproxy->impl() == transport) {
+      transproxy->set_candidates_allocated(true);
+    }
+  }
+
+  MaybeCandidatesAllocationDone();
+}
+
+void BaseSession::MaybeCandidatesAllocationDone() {
+  // Check all other TransportProxies got this signal.
+  for (TransportMap::iterator iter = transports_.begin();
+         iter != transports_.end(); ++iter) {
+    if (!iter->second->candidates_allocated())
+      return;
+  }
+  OnCandidatesAllocationDone();
+}
+
+void BaseSession::OnRoleConflict() {
+  if (role_switch_) {
+    LOG(LS_WARNING) << "Repeat of role conflict signal from Transport.";
+    return;
+  }
+
+  role_switch_ = true;
+  for (TransportMap::iterator iter = transports_.begin();
+         iter != transports_.end(); ++iter) {
+    // Role will be reverse of initial role setting.
+    TransportRole role = initiator_ ? ROLE_CONTROLLED : ROLE_CONTROLLING;
+    iter->second->impl()->SetRole(role);
+  }
+}
+
+void BaseSession::LogState(State old_state, State new_state) {
+  LOG(LS_INFO) << "Session:" << id()
+               << " Old state:" << StateToString(old_state)
+               << " New state:" << StateToString(new_state)
+               << " Type:" << content_type()
+               << " Transport:" << transport_type();
+}
+
+bool BaseSession::GetTransportDescription(const SessionDescription* description,
+                                          const std::string& content_name,
+                                          TransportDescription* tdesc) {
+  if (!description || !tdesc) {
+    return false;
+  }
+  const TransportInfo* transport_info =
+      description->GetTransportInfoByName(content_name);
+  if (!transport_info) {
+    return false;
+  }
+  *tdesc = transport_info->description;
+  return true;
 }
 
 void BaseSession::OnMessage(talk_base::Message *pmsg) {
@@ -481,9 +751,12 @@ bool Session::Initiate(const std::string &to,
     return false;
   }
 
-  SetState(Session::STATE_SENTINITIATE);
-
+  // We need to connect transport proxy and impl here so that we can process
+  // the TransportDescriptions.
   SpeculativelyConnectAllTransportChannels();
+
+  PushdownTransportDescription(CS_LOCAL, CA_OFFER);
+  SetState(Session::STATE_SENTINITIATE);
   return true;
 }
 
@@ -502,8 +775,9 @@ bool Session::Accept(const SessionDescription* sdesc) {
     LOG(LS_ERROR) << "Could not send accept message: " << error.text;
     return false;
   }
-
+  // TODO - Add BUNDLE support to transport-info messages.
   MaybeEnableMuxingSupport();  // Enable transport channel mux if supported.
+  PushdownTransportDescription(CS_LOCAL, CA_ANSWER);
   SetState(Session::STATE_SENTACCEPT);
   return true;
 }
@@ -564,13 +838,34 @@ bool Session::SendInfoMessage(const XmlElements& elems) {
   return true;
 }
 
+bool Session::SendDescriptionInfoMessage(const ContentInfos& contents) {
+  XmlElements elems;
+  WriteError write_error;
+  if (!WriteDescriptionInfo(current_protocol_,
+                            contents,
+                            GetContentParsers(),
+                            &elems, &write_error)) {
+    LOG(LS_ERROR) << "Could not write description info message: "
+                  << write_error.text;
+    return false;
+  }
+  SessionError error;
+  if (!SendMessage(ACTION_DESCRIPTION_INFO, elems, &error)) {
+    LOG(LS_ERROR) << "Could not send description info message: "
+                  << error.text;
+    return false;
+  }
+  return true;
+}
+
 TransportInfos Session::GetEmptyTransportInfos(
     const ContentInfos& contents) const {
   TransportInfos tinfos;
   for (ContentInfos::const_iterator content = contents.begin();
        content != contents.end(); ++content) {
     tinfos.push_back(
-        TransportInfo(content->name, transport_type(), Candidates()));
+        TransportInfo(content->name,
+            TransportDescription(transport_type(), Candidates())));
   }
   return tinfos;
 }
@@ -579,33 +874,12 @@ bool Session::OnRemoteCandidates(
     const TransportInfos& tinfos, ParseError* error) {
   for (TransportInfos::const_iterator tinfo = tinfos.begin();
        tinfo != tinfos.end(); ++tinfo) {
-    TransportProxy* transproxy = GetTransportProxy(tinfo->content_name);
-    if (transproxy == NULL) {
-      return BadParse("Unknown content name: " + tinfo->content_name, error);
+    std::string str_error;
+    if (!BaseSession::OnRemoteCandidates(
+        tinfo->content_name, tinfo->description.candidates, &str_error)) {
+      return BadParse(str_error, error);
     }
-
-    // Must complete negotiation before sending remote candidates, or
-    // there won't be any channel impls.
-    transproxy->CompleteNegotiation();
-    for (Candidates::const_iterator cand = tinfo->candidates.begin();
-         cand != tinfo->candidates.end(); ++cand) {
-      if (!transproxy->impl()->VerifyCandidate(*cand, error))
-        return false;
-
-      if (!transproxy->impl()->HasChannel(cand->name())) {
-        buzz::XmlElement* extra_info =
-            new buzz::XmlElement(QN_GINGLE_P2P_UNKNOWN_CHANNEL_NAME);
-        extra_info->AddAttr(buzz::QN_NAME, cand->name());
-        error->extra = extra_info;
-
-        return BadParse("channel named in candidate does not exist: " +
-                        cand->name() + " for content: "+ tinfo->content_name,
-                        error);
-      }
-    }
-    transproxy->impl()->OnRemoteCandidates(tinfo->candidates);
   }
-
   return true;
 }
 
@@ -613,7 +887,7 @@ bool Session::CreateTransportProxies(const TransportInfos& tinfos,
                                      SessionError* error) {
   for (TransportInfos::const_iterator tinfo = tinfos.begin();
        tinfo != tinfos.end(); ++tinfo) {
-    if (tinfo->transport_type != transport_type()) {
+    if (tinfo->description.transport_type != transport_type()) {
       error->SetText("No supported transport in offer.");
       return false;
     }
@@ -629,6 +903,20 @@ TransportParserMap Session::GetTransportParsers() {
   return parsers;
 }
 
+CandidateTranslatorMap Session::GetCandidateTranslators() {
+  CandidateTranslatorMap translators;
+  // NOTE: This technique makes it impossible to parse G-ICE
+  // candidates in session-initiate messages because the channels
+  // aren't yet created at that point.  Since we don't use candidates
+  // in session-initiate messages, we should be OK.  Once we switch to
+  // ICE, this translation shouldn't be necessary.
+  for (TransportMap::const_iterator iter = transport_proxies().begin();
+       iter != transport_proxies().end(); ++iter) {
+    translators[iter->first] = iter->second;
+  }
+  return translators;
+}
+
 ContentParserMap Session::GetContentParsers() {
   ContentParserMap parsers;
   parsers[content_type()] = client_;
@@ -637,6 +925,12 @@ ContentParserMap Session::GetContentParsers() {
 
 void Session::OnTransportRequestSignaling(Transport* transport) {
   ASSERT(signaling_thread()->IsCurrent());
+  TransportProxy* transport_proxy = GetTransportProxy(transport);
+  ASSERT(transport_proxy != NULL);
+  if (transport_proxy) {
+    // Reset candidate allocation status for the transport proxy.
+    transport_proxy->set_candidates_allocated(false);
+  }
   SignalRequestSignaling(this);
 }
 
@@ -661,23 +955,22 @@ void Session::OnTransportWritable(Transport* transport) {
   }
 }
 
-void Session::OnTransportCandidatesReady(Transport* transport,
-                                         const Candidates& candidates) {
+void Session::OnTransportProxyCandidatesReady(TransportProxy* proxy,
+                                              const Candidates& candidates) {
   ASSERT(signaling_thread()->IsCurrent());
-  TransportProxy* transproxy = GetTransportProxy(transport);
-  if (transproxy != NULL) {
+  if (proxy != NULL) {
     if (initiator() && !initiate_acked_) {
       // TODO: This is to work around server re-ordering
       // messages.  We send the candidates once the session-initiate
       // is acked.  Once we have fixed the server to guarantee message
       // order, we can remove this case.
-      transproxy->AddUnsentCandidates(candidates);
+      proxy->AddUnsentCandidates(candidates);
     } else {
-      if (!transproxy->negotiated()) {
-        transproxy->AddSentCandidates(candidates);
+      if (!proxy->negotiated()) {
+        proxy->AddSentCandidates(candidates);
       }
       SessionError error;
-      if (!SendTransportInfoMessage(transproxy, candidates, &error)) {
+      if (!SendTransportInfoMessage(proxy, candidates, &error)) {
         LOG(LS_ERROR) << "Could not send transport info message: "
                       << error.text;
         return;
@@ -694,12 +987,6 @@ void Session::OnTransportSendError(Transport* transport,
                                    const buzz::XmlElement* extra_info) {
   ASSERT(signaling_thread()->IsCurrent());
   SignalErrorMessage(this, stanza, name, type, text, extra_info);
-}
-
-void Session::OnTransportChannelGone(Transport* transport,
-                                     const std::string& name) {
-  ASSERT(signaling_thread()->IsCurrent());
-  SignalChannelGone(this, name);
 }
 
 void Session::OnIncomingMessage(const SessionMessage& msg) {
@@ -849,6 +1136,7 @@ bool Session::OnInitiateMessage(const SessionMessage& msg,
   SessionInitiate init;
   if (!ParseSessionInitiate(msg.protocol, msg.action_elem,
                             GetContentParsers(), GetTransportParsers(),
+                            GetCandidateTranslators(),
                             &init, error))
     return false;
 
@@ -859,7 +1147,12 @@ bool Session::OnInitiateMessage(const SessionMessage& msg,
   }
 
   set_remote_name(msg.from);
-  set_remote_description(new SessionDescription(init.ClearContents()));
+  set_initiator_name(msg.initiator);
+  set_remote_description(new SessionDescription(init.ClearContents(),
+                                                init.transports,
+                                                init.groups));
+  // Updating transport with TransportDescription.
+  PushdownTransportDescription(CS_REMOTE, CA_OFFER);
   SetState(STATE_RECEIVEDINITIATE);
 
   // Users of Session may listen to state change and call Reject().
@@ -877,6 +1170,7 @@ bool Session::OnAcceptMessage(const SessionMessage& msg, MessageError* error) {
   SessionAccept accept;
   if (!ParseSessionAccept(msg.protocol, msg.action_elem,
                           GetContentParsers(), GetTransportParsers(),
+                          GetCandidateTranslators(),
                           &accept, error)) {
     return false;
   }
@@ -885,8 +1179,12 @@ bool Session::OnAcceptMessage(const SessionMessage& msg, MessageError* error) {
   // received, even if we haven't gotten an IQ response.
   OnInitiateAcked();
 
-  set_remote_description(new SessionDescription(accept.ClearContents()));
+  set_remote_description(new SessionDescription(accept.ClearContents(),
+                                                accept.transports,
+                                                accept.groups));
   MaybeEnableMuxingSupport();  // Enable transport channel mux if supported.
+  // Updating transport with TransportDescription.
+  PushdownTransportDescription(CS_REMOTE, CA_ANSWER);
   SetState(STATE_RECEIVEDACCEPT);
 
   // Users of Session may listen to state change and call Reject().
@@ -931,7 +1229,8 @@ bool Session::OnTransportInfoMessage(const SessionMessage& msg,
   TransportInfos tinfos;
   if (!ParseTransportInfos(msg.protocol, msg.action_elem,
                            initiator_description()->contents(),
-                           GetTransportParsers(), &tinfos, error))
+                           GetTransportParsers(), GetCandidateTranslators(),
+                           &tinfos, error))
     return false;
 
   if (!OnRemoteCandidates(tinfos, error))
@@ -955,19 +1254,24 @@ bool Session::OnDescriptionInfoMessage(const SessionMessage& msg,
   DescriptionInfo description_info;
   if (!ParseDescriptionInfo(msg.protocol, msg.action_elem,
                             GetContentParsers(), GetTransportParsers(),
+                            GetCandidateTranslators(),
                             &description_info, error)) {
     return false;
   }
 
   ContentInfos updated_contents = description_info.ClearContents();
-  ContentInfos::iterator it;
 
+  // TODO: Currently, reflector sends back
+  // video stream updates even for an audio-only call, which causes
+  // this to fail.  Put this back once reflector is fixed.
+  //
+  // ContentInfos::iterator it;
   // First, ensure all updates are valid before modifying remote_description_.
-  for (it = updated_contents.begin(); it != updated_contents.end(); ++it) {
-    if (remote_description()->GetContentByName(it->name) == NULL) {
-      return false;
-    }
-  }
+  // for (it = updated_contents.begin(); it != updated_contents.end(); ++it) {
+  //   if (remote_description()->GetContentByName(it->name) == NULL) {
+  //     return false;
+  //   }
+  // }
 
   // TODO: We used to replace contents from an update, but
   // that no longer works with partial updates.  We need to figure out
@@ -1013,7 +1317,6 @@ bool Session::OnRedirectError(const SessionRedirect& redirect,
 }
 
 bool Session::CheckState(State expected, MessageError* error) {
-  ASSERT(state() == expected);
   if (state() != expected) {
     return BadMessage(buzz::QN_STANZA_NOT_ALLOWED,
                       "message not allowed in current state",
@@ -1028,7 +1331,7 @@ void Session::SetError(Error error) {
     signaling_thread()->Post(this, MSG_ERROR);
 }
 
-void Session::OnMessage(talk_base::Message *pmsg) {
+void Session::OnMessage(talk_base::Message* pmsg) {
   // preserve this because BaseSession::OnMessage may modify it
   State orig_state = state();
 
@@ -1065,17 +1368,16 @@ bool Session::SendInitiateMessage(const SessionDescription* sdesc,
   SessionInitiate init;
   init.contents = sdesc->contents();
   init.transports = GetEmptyTransportInfos(init.contents);
+  init.groups = sdesc->groups();
   return SendMessage(ACTION_SESSION_INITIATE, init, error);
 }
 
 bool Session::WriteSessionAction(
     SignalingProtocol protocol, const SessionInitiate& init,
     XmlElements* elems, WriteError* error) {
-  ContentParserMap content_parsers = GetContentParsers();
-  TransportParserMap trans_parsers = GetTransportParsers();
-
   return WriteSessionInitiate(protocol, init.contents, init.transports,
-                              content_parsers, trans_parsers,
+                              GetContentParsers(), GetTransportParsers(),
+                              GetCandidateTranslators(), init.groups,
                               elems, error);
 }
 
@@ -1086,6 +1388,7 @@ bool Session::SendAcceptMessage(const SessionDescription* sdesc,
                           sdesc->contents(),
                           GetEmptyTransportInfos(sdesc->contents()),
                           GetContentParsers(), GetTransportParsers(),
+                          GetCandidateTranslators(), sdesc->groups(),
                           &elems, error)) {
     return false;
   }
@@ -1120,9 +1423,7 @@ bool Session::SendTransportInfoMessage(const TransportProxy* transproxy,
                                        const Candidates& candidates,
                                        SessionError* error) {
   return SendTransportInfoMessage(TransportInfo(transproxy->content_name(),
-                                                transproxy->type(),
-                                                candidates),
-                                  error);
+      TransportDescription(transproxy->type(), candidates)), error);
 }
 
 bool Session::WriteSessionAction(SignalingProtocol protocol,
@@ -1130,9 +1431,8 @@ bool Session::WriteSessionAction(SignalingProtocol protocol,
                                  XmlElements* elems, WriteError* error) {
   TransportInfos tinfos;
   tinfos.push_back(tinfo);
-  TransportParserMap parsers = GetTransportParsers();
-
-  return WriteTransportInfos(protocol, tinfos, parsers,
+  return WriteTransportInfos(protocol, tinfos,
+                             GetTransportParsers(), GetCandidateTranslators(),
                              elems, error);
 }
 

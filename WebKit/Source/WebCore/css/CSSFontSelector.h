@@ -43,6 +43,7 @@ class CSSSegmentedFontFace;
 class CachedFont;
 class Document;
 class FontDescription;
+class StyleRuleFontFace;
 
 class CSSFontSelector : public FontSelector {
 public:
@@ -54,11 +55,11 @@ public:
     
     virtual unsigned version() const OVERRIDE { return m_version; }
 
-    virtual FontData* getFontData(const FontDescription& fontDescription, const AtomicString& familyName);
+    virtual PassRefPtr<FontData> getFontData(const FontDescription&, const AtomicString&);
 
     void clearDocument();
 
-    void addFontFaceRule(const CSSFontFaceRule*);
+    void addFontFaceRule(const StyleRuleFontFace*);
 
     void fontLoaded();
     virtual void fontCacheInvalidated();

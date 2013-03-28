@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003, 2004, 2005, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Eric Seidel <eric@webkit.org>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,11 +32,12 @@
 #include "FloatConversion.h"
 #include "GraphicsContextPlatformPrivateCG.h"
 #include "ImageBuffer.h"
+#include "ImageOrientation.h"
 #include "KURL.h"
 #include "Path.h"
 #include "Pattern.h"
 #include "ShadowBlur.h"
-
+#include "Timer.h"
 #include <CoreGraphics/CoreGraphics.h>
 #include <wtf/MathExtras.h>
 #include <wtf/OwnArrayPtr.h>
@@ -53,26 +54,141 @@
 
 #if PLATFORM(MAC) || (PLATFORM(CHROMIUM) && OS(DARWIN))
 
-#ifndef BUILDING_ON_LEOPARD
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MAX_ALLOWED >= 1060
 // Building on 10.6 or later: kCGInterpolationMedium is defined in the CGInterpolationQuality enum.
 #define HAVE_CG_INTERPOLATION_MEDIUM 1
 #endif
 
-#ifndef TARGETING_LEOPARD
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
 // Targeting 10.6 or later: use kCGInterpolationMedium.
 #define WTF_USE_CG_INTERPOLATION_MEDIUM 1
 #endif
 
 #endif
 
-// Undocumented CGContextSetCTM function, available at least since 10.4.
 extern "C" {
     CG_EXTERN void CGContextSetCTM(CGContextRef, CGAffineTransform);
+    CG_EXTERN CGAffineTransform CGContextGetBaseCTM(CGContextRef);
 };
 
 using namespace std;
 
+// FIXME: The following using declaration should be in <wtf/HashFunctions.h>.
+using WTF::pairIntHash;
+
+// FIXME: The following using declaration should be in <wtf/HashTraits.h>.
+using WTF::GenericHashTraits;
+
+#define CACHE_SUBIMAGES 1
+
 namespace WebCore {
+
+#if !CACHE_SUBIMAGES
+
+static inline RetainPtr<CGImageRef> subimage(CGImageRef image, const FloatRect& rect)
+{
+    return adoptCF(CGImageCreateWithImageInRect(image, rect));
+}
+
+#else // CACHE_SUBIMAGES
+
+static const double subimageCacheClearDelay = 1;
+static const int maxSubimageCacheSize = 300;
+
+struct SubimageCacheEntry {
+    RetainPtr<CGImageRef> image;
+    FloatRect rect;
+    RetainPtr<CGImageRef> subimage;
+};
+
+struct SubimageCacheEntryTraits : GenericHashTraits<SubimageCacheEntry> {
+    typedef HashTraits<RetainPtr<CGImageRef> > ImageTraits;
+
+    static const bool emptyValueIsZero = true;
+
+    static const bool hasIsEmptyValueFunction = true;
+    static bool isEmptyValue(const SubimageCacheEntry& value) { return !value.image; }
+
+    static void constructDeletedValue(SubimageCacheEntry& slot) { ImageTraits::constructDeletedValue(slot.image); }
+    static bool isDeletedValue(const SubimageCacheEntry& value) { return ImageTraits::isDeletedValue(value.image); }
+};
+
+struct SubimageCacheHash {
+    static unsigned hash(CGImageRef image, const FloatRect& rect)
+    {
+        return pairIntHash(PtrHash<CGImageRef>::hash(image),
+            (static_cast<unsigned>(rect.x()) << 16) | static_cast<unsigned>(rect.y()));
+    }
+    static unsigned hash(const SubimageCacheEntry& key)
+    {
+        return hash(key.image.get(), key.rect);
+    }
+    static bool equal(const SubimageCacheEntry& a, const SubimageCacheEntry& b)
+    {
+        return a.image == b.image && a.rect == b.rect;
+    }
+    static const bool safeToCompareToEmptyOrDeleted = true;
+};
+
+typedef HashSet<SubimageCacheEntry, SubimageCacheHash, SubimageCacheEntryTraits> SubimageCache;
+
+struct SubimageCacheWithTimer {
+    SubimageCache cache;
+    DeferrableOneShotTimer<SubimageCacheWithTimer> timer;
+
+    SubimageCacheWithTimer()
+        : timer(this, &SubimageCacheWithTimer::invalidateCacheTimerFired, subimageCacheClearDelay)
+    {
+    }
+
+    void invalidateCacheTimerFired(DeferrableOneShotTimer<SubimageCacheWithTimer>*);
+};
+
+static SubimageCacheWithTimer& subimageCache()
+{
+    static SubimageCacheWithTimer& cache = *new SubimageCacheWithTimer;
+    return cache;
+}
+
+void SubimageCacheWithTimer::invalidateCacheTimerFired(DeferrableOneShotTimer<SubimageCacheWithTimer>*)
+{
+    subimageCache().cache.clear();
+}
+
+struct SubimageRequest {
+    CGImageRef image;
+    const FloatRect& rect;
+    SubimageRequest(CGImageRef image, const FloatRect& rect) : image(image), rect(rect) { }
+};
+
+struct SubimageCacheAdder {
+    static unsigned hash(const SubimageRequest& value)
+    {
+        return SubimageCacheHash::hash(value.image, value.rect);
+    }
+    static bool equal(const SubimageCacheEntry& a, const SubimageRequest& b)
+    {
+        return a.image == b.image && a.rect == b.rect;
+    }
+    static void translate(SubimageCacheEntry& entry, const SubimageRequest& request, unsigned /*hashCode*/)
+    {
+        entry.image = request.image;
+        entry.rect = request.rect;
+        entry.subimage = adoptCF(CGImageCreateWithImageInRect(request.image, request.rect));
+    }
+};
+
+static RetainPtr<CGImageRef> subimage(CGImageRef image, const FloatRect& rect)
+{
+    SubimageCacheWithTimer& cache = subimageCache();
+    cache.timer.restart();
+    if (cache.cache.size() == maxSubimageCacheSize)
+        cache.cache.remove(cache.cache.begin());
+    ASSERT(cache.cache.size() < maxSubimageCacheSize);
+    return cache.cache.add<SubimageRequest, SubimageCacheAdder>(SubimageRequest(image, rect)).iterator->subimage;
+}
+
+#endif // CACHE_SUBIMAGES
 
 static void setCGFillColor(CGContextRef context, const Color& color, ColorSpace colorSpace)
 {
@@ -101,16 +217,13 @@ CGColorSpaceRef sRGBColorSpaceRef()
 #endif
 }
 
+#if PLATFORM(WIN)
 CGColorSpaceRef linearRGBColorSpaceRef()
 {
-    // FIXME: Windows should be able to use kCGColorSpaceGenericRGBLinear, this is tracked by http://webkit.org/b/31363.
-#if PLATFORM(WIN)
+    // FIXME: Windows should be able to use linear sRGB, this is tracked by http://webkit.org/b/80000.
     return deviceRGBColorSpaceRef();
-#else
-    static CGColorSpaceRef linearRGBSpace = CGColorSpaceCreateWithName(kCGColorSpaceGenericRGBLinear);
-    return linearRGBSpace;
-#endif
 }
+#endif
 
 void GraphicsContext::platformInit(CGContextRef cgContext)
 {
@@ -152,11 +265,12 @@ void GraphicsContext::restorePlatformState()
     m_data->m_userToDeviceTransformKnownToBeIdentity = false;
 }
 
-void GraphicsContext::drawNativeImage(NativeImagePtr imagePtr, const FloatSize& imageSize, ColorSpace styleColorSpace, const FloatRect& destRect, const FloatRect& srcRect, CompositeOperator op)
+void GraphicsContext::drawNativeImage(NativeImagePtr imagePtr, const FloatSize& imageSize, ColorSpace styleColorSpace, const FloatRect& destRect, const FloatRect& srcRect, CompositeOperator op, BlendMode blendMode, ImageOrientation orientation)
 {
     RetainPtr<CGImageRef> image(imagePtr);
 
-    float currHeight = CGImageGetHeight(image.get());
+    float currHeight = orientation.usesWidthAsHeight() ? CGImageGetWidth(image.get()) : CGImageGetHeight(image.get());
+
     if (currHeight <= srcRect.y())
         return;
 
@@ -192,7 +306,7 @@ void GraphicsContext::drawNativeImage(NativeImagePtr imagePtr, const FloatSize& 
             subimageRect.setHeight(ceilf(subimageRect.height() + topPadding));
             adjustedDestRect.setHeight(subimageRect.height() / yScale);
 
-            image.adoptCF(CGImageCreateWithImageInRect(image.get(), subimageRect));
+            image = subimage(image.get(), subimageRect);
             if (currHeight < srcRect.maxY()) {
                 ASSERT(CGImageGetHeight(image.get()) == currHeight - CGRectIntegral(srcRect).origin.y);
                 adjustedDestRect.setHeight(CGImageGetHeight(image.get()) / yScale);
@@ -210,12 +324,25 @@ void GraphicsContext::drawNativeImage(NativeImagePtr imagePtr, const FloatSize& 
     if (!shouldUseSubimage && currHeight < imageSize.height())
         adjustedDestRect.setHeight(adjustedDestRect.height() * currHeight / imageSize.height());
 
-    setPlatformCompositeOperation(op);
+    setPlatformCompositeOperation(op, blendMode);
 
-    // Flip the coords.
-    CGContextScaleCTM(context, 1, -1);
-    adjustedDestRect.setY(-adjustedDestRect.maxY());
+    // ImageOrientation expects the origin to be at (0, 0)
+    CGContextTranslateCTM(context, adjustedDestRect.x(), adjustedDestRect.y());
+    adjustedDestRect.setLocation(FloatPoint());
+
+    if (orientation != DefaultImageOrientation) {
+        CGContextConcatCTM(context, orientation.transformFromDefault(adjustedDestRect.size()));
+        if (orientation.usesWidthAsHeight()) {
+            // The destination rect will have it's width and height already reversed for the orientation of
+            // the image, as it was needed for page layout, so we need to reverse it back here.
+            adjustedDestRect = FloatRect(adjustedDestRect.x(), adjustedDestRect.y(), adjustedDestRect.height(), adjustedDestRect.width());
+        }
+    }
     
+    // Flip the coords.
+    CGContextTranslateCTM(context, 0, adjustedDestRect.height());
+    CGContextScaleCTM(context, 1, -1);
+
     // Adjust the color space.
     image = Image::imageWithColorSpace(image.get(), styleColorSpace);
 
@@ -232,6 +359,8 @@ void GraphicsContext::drawRect(const IntRect& rect)
     // like drawPath does, it probably should.
     if (paintingDisabled())
         return;
+
+    ASSERT(!rect.isEmpty());
 
     CGContextRef context = platformContext();
 
@@ -299,6 +428,10 @@ void GraphicsContext::drawLine(const IntPoint& point1, const IntPoint& point2)
     switch (strokeStyle()) {
     case NoStroke:
     case SolidStroke:
+#if ENABLE(CSS3_TEXT)
+    case DoubleStroke:
+    case WavyStroke: // FIXME: https://bugs.webkit.org/show_bug.cgi?id=94112 - Needs platform support.
+#endif // CSS3_TEXT
         break;
     case DottedStroke:
         patWidth = (int)width;
@@ -355,7 +488,7 @@ void GraphicsContext::drawLine(const IntPoint& point1, const IntPoint& point2)
             }
         }
 
-        const CGFloat dottedLine[2] = { patWidth, patWidth };
+        const CGFloat dottedLine[2] = { static_cast<CGFloat>(patWidth), static_cast<CGFloat>(patWidth) };
         CGContextSetLineDash(context, patternOffset, dottedLine, 2);
     }
 
@@ -463,7 +596,7 @@ void GraphicsContext::strokeArc(const IntRect& rect, int startAngle, int angleSp
             }
         }
 
-        const CGFloat dottedLine[2] = { patWidth, patWidth };
+        const CGFloat dottedLine[2] = { static_cast<CGFloat>(patWidth), static_cast<CGFloat>(patWidth) };
         CGContextSetLineDash(context, patternOffset, dottedLine, 2);
     }
 
@@ -585,7 +718,7 @@ static inline bool calculateDrawingMode(const GraphicsContextState& state, CGPat
 
 void GraphicsContext::drawPath(const Path& path)
 {
-    if (paintingDisabled())
+    if (paintingDisabled() || path.isEmpty())
         return;
 
     CGContextRef context = platformContext();
@@ -622,7 +755,7 @@ static inline void fillPathWithFillRule(CGContextRef context, WindRule fillRule)
 
 void GraphicsContext::fillPath(const Path& path)
 {
-    if (paintingDisabled())
+    if (paintingDisabled() || path.isEmpty())
         return;
 
     CGContextRef context = platformContext();
@@ -677,7 +810,7 @@ void GraphicsContext::fillPath(const Path& path)
 
 void GraphicsContext::strokePath(const Path& path)
 {
-    if (paintingDisabled())
+    if (paintingDisabled() || path.isEmpty())
         return;
 
     CGContextRef context = platformContext();
@@ -927,7 +1060,12 @@ void GraphicsContext::clipOut(const IntRect& rect)
     if (paintingDisabled())
         return;
 
-    CGRect rects[2] = { CGContextGetClipBoundingBox(platformContext()), rect };
+    // FIXME: Using CGRectInfinite is much faster than getting the clip bounding box. However, due
+    // to <rdar://problem/12584492>, CGRectInfinite can't be used with an accelerated context that
+    // has certain transforms that aren't just a translation or a scale.
+    const AffineTransform& ctm = getCTM();
+    bool canUseCGRectInfinite = !isAcceleratedContext() || (!ctm.b() && !ctm.c());
+    CGRect rects[2] = { canUseCGRectInfinite ? CGRectInfinite : CGContextGetClipBoundingBox(platformContext()), rect };
     CGContextBeginPath(platformContext());
     CGContextAddRects(platformContext(), rects, 2);
     CGContextEOClip(platformContext());
@@ -938,6 +1076,8 @@ void GraphicsContext::clipPath(const Path& path, WindRule clipRule)
     if (paintingDisabled())
         return;
 
+    // Why does clipping to an empty path do nothing?
+    // Why is this different from GraphicsContext::clip(const Path&).
     if (path.isEmpty())
         return;
 
@@ -1002,6 +1142,32 @@ bool GraphicsContext::supportsTransparencyLayers()
     return true;
 }
 
+static void applyShadowOffsetWorkaroundIfNeeded(const GraphicsContext& context, CGFloat& xOffset, CGFloat& yOffset)
+{
+#if !PLATFORM(IOS)
+    if (context.isAcceleratedContext())
+        return;
+
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
+    if (wkCGContextDrawsWithCorrectShadowOffsets(context.platformContext()))
+        return;
+#endif
+
+    // Work around <rdar://problem/5539388> by ensuring that the offsets will get truncated
+    // to the desired integer. Also see: <rdar://problem/10056277>
+    static const CGFloat extraShadowOffset = narrowPrecisionToCGFloat(1.0 / 128);
+    if (xOffset > 0)
+        xOffset += extraShadowOffset;
+    else if (xOffset < 0)
+        xOffset -= extraShadowOffset;
+
+    if (yOffset > 0)
+        yOffset += extraShadowOffset;
+    else if (yOffset < 0)
+        yOffset -= extraShadowOffset;
+#endif
+}
+
 void GraphicsContext::setPlatformShadow(const FloatSize& offset, float blur, const Color& color, ColorSpace colorSpace)
 {
     if (paintingDisabled())
@@ -1035,23 +1201,7 @@ void GraphicsContext::setPlatformShadow(const FloatSize& offset, float blur, con
     // Extreme "blur" values can make text drawing crash or take crazy long times, so clamp
     blurRadius = min(blurRadius, narrowPrecisionToCGFloat(1000.0));
 
-
-#if defined(BUILDING_ON_SNOW_LEOPARD) || defined(BUILDING_ON_LION)
-    if (!isAcceleratedContext()) {
-        // Work around <rdar://problem/5539388> by ensuring that the offsets will get truncated
-        // to the desired integer. Also see: <rdar://problem/10056277>
-        static const CGFloat extraShadowOffset = narrowPrecisionToCGFloat(1.0 / 128);
-        if (xOffset > 0)
-            xOffset += extraShadowOffset;
-        else if (xOffset < 0)
-            xOffset -= extraShadowOffset;
-
-        if (yOffset > 0)
-            yOffset += extraShadowOffset;
-        else if (yOffset < 0)
-            yOffset -= extraShadowOffset;
-    }
-#endif
+    applyShadowOffsetWorkaroundIfNeeded(*this, xOffset, yOffset);
 
     // Check for an invalid color, as this means that the color was not set for the shadow
     // and we should therefore just use the default shadow color.
@@ -1215,7 +1365,8 @@ void GraphicsContext::clipOut(const Path& path)
 
     CGContextBeginPath(platformContext());
     CGContextAddRect(platformContext(), CGContextGetClipBoundingBox(platformContext()));
-    CGContextAddPath(platformContext(), path.platformPath());
+    if (!path.isEmpty())
+        CGContextAddPath(platformContext(), path.platformPath());
     CGContextEOClip(platformContext());
 }
 
@@ -1264,12 +1415,18 @@ void GraphicsContext::setCTM(const AffineTransform& transform)
     m_data->m_userToDeviceTransformKnownToBeIdentity = false;
 }
 
-AffineTransform GraphicsContext::getCTM() const
+AffineTransform GraphicsContext::getCTM(IncludeDeviceScale includeScale) const
 {
     if (paintingDisabled())
         return AffineTransform();
 
-    return AffineTransform(CGContextGetCTM(platformContext()));
+    // The CTM usually includes the deviceScaleFactor except in WebKit 1 when the
+    // content is non-composited, since the scale factor is integrated at a lower
+    // level. To guarantee the deviceScale is included, we can use this CG API.
+    if (includeScale == DefinitelyIncludeDeviceScale)
+        return CGContextGetUserSpaceToDeviceSpaceTransform(platformContext());
+
+    return CGContextGetCTM(platformContext());
 }
 
 FloatRect GraphicsContext::roundToDevicePixels(const FloatRect& rect, RoundingMode roundingMode)
@@ -1283,12 +1440,12 @@ FloatRect GraphicsContext::roundToDevicePixels(const FloatRect& rect, RoundingMo
     // we get the affine transform matrix and extract the scale.
 
     if (m_data->m_userToDeviceTransformKnownToBeIdentity)
-        return rect;
+        return roundedIntRect(rect);
 
     CGAffineTransform deviceMatrix = CGContextGetUserSpaceToDeviceSpaceTransform(platformContext());
     if (CGAffineTransformIsIdentity(deviceMatrix)) {
         m_data->m_userToDeviceTransformKnownToBeIdentity = true;
-        return rect;
+        return roundedIntRect(rect);
     }
 
     float deviceScaleX = sqrtf(deviceMatrix.a * deviceMatrix.a + deviceMatrix.b * deviceMatrix.b);
@@ -1453,7 +1610,7 @@ InterpolationQuality GraphicsContext::imageInterpolationQuality() const
 void GraphicsContext::setAllowsFontSmoothing(bool allowsFontSmoothing)
 {
     UNUSED_PARAM(allowsFontSmoothing);
-#if !defined(BUILDING_ON_LEOPARD)
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
     CGContextRef context = platformContext();
     CGContextSetAllowsFontSmoothing(context, allowsFontSmoothing);
 #endif
@@ -1490,12 +1647,8 @@ void GraphicsContext::setPlatformTextDrawingMode(TextDrawingModeFlags mode)
     if (paintingDisabled())
         return;
 
-    // Wow, wish CG had used bits here.
     CGContextRef context = platformContext();
     switch (mode) {
-    case TextModeInvisible:
-        CGContextSetTextDrawingMode(context, kCGTextInvisible);
-        break;
     case TextModeFill:
         CGContextSetTextDrawingMode(context, kCGTextFill);
         break;
@@ -1504,18 +1657,6 @@ void GraphicsContext::setPlatformTextDrawingMode(TextDrawingModeFlags mode)
         break;
     case TextModeFill | TextModeStroke:
         CGContextSetTextDrawingMode(context, kCGTextFillStroke);
-        break;
-    case TextModeClip:
-        CGContextSetTextDrawingMode(context, kCGTextClip);
-        break;
-    case TextModeFill | TextModeClip:
-        CGContextSetTextDrawingMode(context, kCGTextFillClip);
-        break;
-    case TextModeStroke | TextModeClip:
-        CGContextSetTextDrawingMode(context, kCGTextStrokeClip);
-        break;
-    case TextModeFill | TextModeStroke | TextModeClip:
-        CGContextSetTextDrawingMode(context, kCGTextFillStrokeClip);
         break;
     default:
         break;
@@ -1557,7 +1698,7 @@ void GraphicsContext::setPlatformShouldSmoothFonts(bool enable)
     CGContextSetShouldSmoothFonts(platformContext(), enable);
 }
 
-void GraphicsContext::setPlatformCompositeOperation(CompositeOperator mode)
+void GraphicsContext::setPlatformCompositeOperation(CompositeOperator mode, BlendMode)
 {
     if (paintingDisabled())
         return;
@@ -1610,12 +1751,42 @@ void GraphicsContext::setPlatformCompositeOperation(CompositeOperator mode)
     CGContextSetBlendMode(platformContext(), target);
 }
 
-void GraphicsContext::platformApplyDeviceScaleFactor()
+void GraphicsContext::platformApplyDeviceScaleFactor(float deviceScaleFactor)
 {
     // CoreGraphics expects the base CTM of a HiDPI context to have the scale factor applied to it.
     // Failing to change the base level CTM will cause certain CG features, such as focus rings,
     // to draw with a scale factor of 1 rather than the actual scale factor.
-    wkSetBaseCTM(platformContext(), getCTM());
+    wkSetBaseCTM(platformContext(), CGAffineTransformScale(CGContextGetBaseCTM(platformContext()), deviceScaleFactor, deviceScaleFactor));
+}
+
+void GraphicsContext::platformFillEllipse(const FloatRect& ellipse)
+{
+    if (paintingDisabled())
+        return;
+
+    // CGContextFillEllipseInRect only supports solid colors.
+    if (m_state.fillGradient || m_state.fillPattern) {
+        fillEllipseAsPath(ellipse);
+        return;
+    }
+
+    CGContextRef context = platformContext();
+    CGContextFillEllipseInRect(context, ellipse);
+}
+
+void GraphicsContext::platformStrokeEllipse(const FloatRect& ellipse)
+{
+    if (paintingDisabled())
+        return;
+
+    // CGContextStrokeEllipseInRect only supports solid colors.
+    if (m_state.strokeGradient || m_state.strokePattern) {
+        strokeEllipseAsPath(ellipse);
+        return;
+    }
+
+    CGContextRef context = platformContext();
+    CGContextStrokeEllipseInRect(context, ellipse);
 }
 
 }

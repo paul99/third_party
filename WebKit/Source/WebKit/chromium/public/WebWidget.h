@@ -31,29 +31,26 @@
 #ifndef WebWidget_h
 #define WebWidget_h
 
-#if defined(ANDROID)
-#include "android/WebHitTestInfo.h"
-#endif
 #include "WebCompositionUnderline.h"
-#if defined(ANDROID)
-#include "WebTextInputInfo.h"
-#else
-#include "WebTextInputType.h"
-#endif
 #include "WebTextDirection.h"
+#include "WebTextInputInfo.h"
 #include "platform/WebCanvas.h"
 #include "platform/WebCommon.h"
 #include "platform/WebRect.h"
 #include "platform/WebSize.h"
 
 #define WEBKIT_HAS_NEW_FULLSCREEN_API 1
+#define WEBWIDGET_HAS_SETCOMPOSITORSURFACEREADY 1
+#define WEBWIDGET_HAS_PAINT_OPTIONS 1
 
 namespace WebKit {
 
 class WebInputEvent;
+class WebLayerTreeView;
 class WebMouseEvent;
 class WebString;
 struct WebPoint;
+struct WebRenderingStats;
 template <typename T> class WebVector;
 
 class WebWidget {
@@ -86,14 +83,31 @@ public:
     virtual void didExitFullScreen() { }
 
     // Called to update imperative animation state. This should be called before
-    // paint, although the client can rate-limit these calls. When
-    // frameBeginTime is 0.0, the WebWidget will determine the frame begin time
-    // itself.
-    virtual void animate(double frameBeginTime) { }
+    // paint, although the client can rate-limit these calls.
+    virtual void animate(double ignored) { }
 
     // Called to layout the WebWidget. This MUST be called before Paint,
     // and it may result in calls to WebWidgetClient::didInvalidateRect.
     virtual void layout() { }
+
+    // Called to toggle the WebWidget in or out of force compositing mode. This
+    // should be called before paint.
+    virtual void enterForceCompositingMode(bool enter) { }
+
+    enum PaintOptions {
+        // Attempt to fulfill the painting request by reading back from the
+        // compositor, assuming we're using a compositor to render.
+        ReadbackFromCompositorIfAvailable,
+
+        // Force the widget to rerender onto the canvas using software. This
+        // mode ignores 3d transforms and ignores GPU-resident content, such
+        // as video, canvas, and WebGL.
+        //
+        // Note: This option exists on OS(ANDROID) and will hopefully be
+        //       removed once the link disambiguation feature renders using
+        //       the compositor.
+        ForceSoftwareRenderingAndIgnoreGPUResidentContent,
+    };
 
     // Called to paint the rectangular region within the WebWidget
     // onto the specified canvas at (viewPort.x,viewPort.y). You MUST call
@@ -102,13 +116,7 @@ public:
     // changes are made to the WebWidget (e.g., once events are
     // processed, it should be assumed that another call to layout is
     // warranted before painting again).
-    virtual void paint(WebCanvas*, const WebRect& viewPort) { }
-#if defined(ANDROID)
-    // The purpose of this function is to bypass HW composition in WebViewImpl
-    // We want to redraw vector contents (text & SVG) in higher resolution for on-demand zoom,
-    // instead of read back from composite buffer that results in aliasing
-    virtual void paintOnDemandZoom(WebCanvas* canvas, const WebRect& viewPort) { paint(canvas, viewPort);}
-#endif
+    virtual void paint(WebCanvas*, const WebRect& viewPort, PaintOptions = ReadbackFromCompositorIfAvailable) { }
 
     // In non-threaded compositing mode, triggers compositing of the current
     // layers onto the screen. You MUST call Layout before calling this method,
@@ -120,11 +128,30 @@ public:
     // animate or layout in this case.
     virtual void composite(bool finish) = 0;
 
-#if defined(ANDROID)
-    // Called when this widget is hidden. Release any GPU textures we're using.
-    // TODO(husky): Remove this.
-    virtual void releaseGpuTextures() { }
-#endif
+    // Returns true if we've started tracking repaint rectangles.
+    virtual bool isTrackingRepaints() const { return false; }
+
+    // Indicates that the compositing surface associated with this WebWidget is
+    // ready to use.
+    virtual void setCompositorSurfaceReady() = 0;
+
+    // Returns this widget's WebLayerTreeView if compositing is active, nil
+    // otherwise.
+    virtual WebLayerTreeView* layerTreeView() { return 0; }
+
+    // Temporary method for the embedder to notify the WebWidget that the widget
+    // has taken damage, e.g. due to a window expose. This method will be
+    // removed when the WebWidget inversion patch lands --- http://crbug.com/112837
+    virtual void setNeedsRedraw() { }
+
+    // Temporary method for the embedder to check for throttled input. When this
+    // is true, the WebWidget is indicating that it would prefer to not receive
+    // additional input events until
+    // WebWidgetClient::didBecomeReadyForAdditionalInput is called.
+    //
+    // This method will be removed when the WebWidget inversion patch lands ---
+    // http://crbug.com/112837
+    virtual bool isInputThrottled() const { return false; }
 
     // Called to inform the WebWidget of a change in theme.
     // Implementors that cache rendered copies of widgets need to re-render
@@ -134,6 +161,9 @@ public:
     // Called to inform the WebWidget of an input event. Returns true if
     // the event has been processed, false otherwise.
     virtual bool handleInputEvent(const WebInputEvent&) { return false; }
+
+    // Check whether the given point hits any registered touch event handlers.
+    virtual bool hasTouchEventHandlersAt(const WebPoint&) { return true; }
 
     // Called to inform the WebWidget that mouse capture was lost.
     virtual void mouseCaptureLost() { }
@@ -170,25 +200,20 @@ public:
     // returns false on failure.
     virtual bool compositionRange(size_t* location, size_t* length) { return false; }
 
+    // Returns information about the current text input of this WebWidget.
+    virtual WebTextInputInfo textInputInfo() { return WebTextInputInfo(); }
+
     // Returns the current text input type of this WebWidget.
-#if defined(ANDROID)
-    virtual WebTextInputInfo textInputInfo() = 0;
-#endif
-    virtual WebTextInputType textInputType() = 0;
+    // FIXME: Remove this method. It's redundant with textInputInfo().
+    virtual WebTextInputType textInputType() { return WebTextInputTypeNone; }
 
-#if defined(ANDROID)
-    virtual WebHitTestInfo hitTestInfoForWindowPos(const WebPoint&) { return WebHitTestInfo(); }
-#endif
-
-    // Returns the start and end bounds of the current selection.
+    // Returns the anchor and focus bounds of the current selection.
     // If the selection range is empty, it returns the caret bounds.
-    virtual bool selectionBounds(WebRect& start, WebRect& end) const { return false; }
+    virtual bool selectionBounds(WebRect& anchor, WebRect& focus) const { return false; }
 
-#if defined(ANDROID)
     // Returns the text direction at the start and end bounds of the current selection.
     // If the selection range is empty, it returns false.
     virtual bool selectionTextDirection(WebTextDirection& start, WebTextDirection& end) const { return false; }
-#endif
 
     // Fetch the current selection range of this WebWidget. If there is no
     // selection, it will output a 0-length range with the location at the
@@ -219,13 +244,21 @@ public:
     // rect.)
     virtual void didChangeWindowResizerRect() { }
 
-#if defined(ANDROID)
+    // Instrumentation method that marks beginning of frame update that includes
+    // things like animate()/layout()/paint()/composite().
+    virtual void instrumentBeginFrame() { }
+    // Cancels the effect of instrumentBeginFrame() in case there were no events
+    // following the call to instrumentBeginFrame().
+    virtual void instrumentCancelFrame() { }
+
+    // Fills in a WebRenderingStats struct containing information about rendering, e.g. count of frames rendered, time spent painting.
+    // This call is relatively expensive in threaded compositing mode, as it blocks on the compositor thread.
+    // It is safe to call in software mode, but will only give stats for rendering done in compositing mode.
+    virtual void renderingStats(WebRenderingStats&) const { }
+
     // The page background color. Can be used for filling in areas without
     // content.
-    virtual WebColor backgroundColor() const {
-        return 0xFFFFFFFF; /* SK_ColorWHITE */
-    }
-#endif
+    virtual WebColor backgroundColor() const { return 0xFFFFFFFF; /* SK_ColorWHITE */ }
 
 protected:
     ~WebWidget() { }

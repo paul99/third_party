@@ -67,13 +67,13 @@ static void appendMailtoPostFormDataToURL(KURL& url, const FormData& data, const
 
     if (equalIgnoringCase(encodingType, "text/plain")) {
         // Convention seems to be to decode, and s/&/\r\n/. Also, spaces are encoded as %20.
-        body = decodeURLEscapeSequences(body.replace('&', "\r\n").replace('+', ' ') + "\r\n");
+        body = decodeURLEscapeSequences(body.replaceWithLiteral('&', "\r\n").replace('+', ' ') + "\r\n");
     }
 
     Vector<char> bodyData;
     bodyData.append("body=", 5);
     FormDataBuilder::encodeStringAsFormData(bodyData, body.utf8());
-    body = String(bodyData.data(), bodyData.size()).replace('+', "%20");
+    body = String(bodyData.data(), bodyData.size()).replaceWithLiteral('+', "%20");
 
     String query = url.query();
     if (!query.isEmpty())
@@ -143,9 +143,12 @@ PassRefPtr<FormSubmission> FormSubmission::create(HTMLFormElement* form, const A
 
     HTMLFormControlElement* submitButton = 0;
     if (event && event->target()) {
-        Node* node = event->target()->toNode();
-        if (node && node->isElementNode() && toElement(node)->isFormControlElement())
-            submitButton = static_cast<HTMLFormControlElement*>(node);
+        for (Node* node = event->target()->toNode(); node; node = node->parentNode()) {
+            if (node->isElementNode() && toElement(node)->isFormControlElement()) {
+                submitButton = static_cast<HTMLFormControlElement*>(node);
+                break;
+            }
+        }
     }
 
     FormSubmission::Attributes copiedAttributes;
@@ -180,6 +183,7 @@ PassRefPtr<FormSubmission> FormSubmission::create(HTMLFormElement* form, const A
     RefPtr<DOMFormData> domFormData = DOMFormData::create(dataEncoding.encodingForFormSubmission());
     Vector<pair<String, String> > formValues;
 
+    bool containsPasswordData = false;
     for (unsigned i = 0; i < form->associatedElements().size(); ++i) {
         FormAssociatedElement* control = form->associatedElements()[i];
         HTMLElement* element = toHTMLElement(control);
@@ -189,9 +193,10 @@ PassRefPtr<FormSubmission> FormSubmission::create(HTMLFormElement* form, const A
             HTMLInputElement* input = static_cast<HTMLInputElement*>(control);
             if (input->isTextField()) {
                 formValues.append(pair<String, String>(input->name().string(), input->value()));
-                if (input->isSearchField())
-                    input->addSearchResult();
+                input->addSearchResult();
             }
+            if (input->isPasswordField() && !input->value().isEmpty())
+                containsPasswordData = true;
         }
     }
 
@@ -211,6 +216,7 @@ PassRefPtr<FormSubmission> FormSubmission::create(HTMLFormElement* form, const A
     }
 
     formData->setIdentifier(generateFormDataIdentifier());
+    formData->setContainsPasswordData(containsPasswordData);
     String targetOrBaseTarget = copiedAttributes.target().isEmpty() ? document->baseTarget() : copiedAttributes.target();
     RefPtr<FormState> formState = FormState::create(form, formValues, document, trigger);
     return adoptRef(new FormSubmission(copiedAttributes.method(), actionURL, targetOrBaseTarget, encodingType, formState.release(), formData.release(), boundary, lockHistory, event));
@@ -239,9 +245,9 @@ void FormSubmission::populateFrameLoadRequest(FrameLoadRequest& frameRequest)
         frameRequest.resourceRequest().setHTTPBody(m_formData);
 
         // construct some user headers if necessary
-        if (m_contentType.isNull() || m_contentType == "application/x-www-form-urlencoded")
+        if (m_boundary.isEmpty())
             frameRequest.resourceRequest().setHTTPContentType(m_contentType);
-        else // contentType must be "multipart/form-data"
+        else
             frameRequest.resourceRequest().setHTTPContentType(m_contentType + "; boundary=" + m_boundary);
     }
 

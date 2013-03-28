@@ -29,7 +29,7 @@
 #include "config.h"
 
 // Public APIs not available on versions of Mac on which we build
-#if (defined(BUILDING_ON_LEOPARD) || defined(BUILDING_ON_SNOW_LEOPARD))
+#if __MAC_OS_X_VERSION_MAX_ALLOWED <= 1060
 enum {
     NSScrollerStyleLegacy       = 0,
     NSScrollerStyleOverlay      = 1
@@ -44,7 +44,7 @@ enum {
 typedef NSInteger NSScrollerKnobStyle;
 #endif
 
-#if (defined(BUILDING_ON_LEOPARD) || defined(BUILDING_ON_SNOW_LEOPARD))
+#if __MAC_OS_X_VERSION_MAX_ALLOWED <= 1060
 @interface NSScroller(NSObject)
 + (NSScrollerStyle)preferredScrollerStyle;
 @end
@@ -62,8 +62,10 @@ typedef NSInteger NSScrollerKnobStyle;
 - (void)setKnobProportion:(CGFloat)proportion;
 - (void)setKnobStyle:(NSScrollerKnobStyle)knobStyle;
 - (void)setExpanded:(BOOL)expanded;
+- (BOOL)isExpanded;
 - (void)setDelegate:(id)delegate;
 - (void)setUiStateTransitionProgress:(CGFloat)uiStateTransitionProgress;
+- (void)setExpansionTransitionProgress:(CGFloat)expansionTransitionProgress;
 - (BOOL)isHorizontal;
 - (CGFloat)trackWidth;
 - (CGFloat)trackBoxWidth;
@@ -73,6 +75,7 @@ typedef NSInteger NSScrollerKnobStyle;
 - (CGFloat)trackEndInset;
 - (CGFloat)knobEndInset;
 - (CGFloat)uiStateTransitionProgress;
+- (CGFloat)expansionTransitionProgress;
 - (NSRect)rectForPart:(NSScrollerPart)partCode;
 - (void)drawKnobSlotInRect:(NSRect)slotRect highlight:(BOOL)flag alpha:(CGFloat)alpha;
 - (void)drawKnob;

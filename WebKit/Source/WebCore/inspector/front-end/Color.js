@@ -44,6 +44,11 @@ WebInspector.Color.fromRGBA = function(r, g, b, a)
     return new WebInspector.Color("rgba(" + r + "," + g + "," + b + "," + (typeof a === "undefined" ? 1 : a) + ")");
 }
 
+WebInspector.Color.fromRGB = function(r, g, b)
+{
+    return new WebInspector.Color("rgb(" + r + "," + g + "," + b + ")");
+}
+
 WebInspector.Color.prototype = {
     /**
      * @return {string}
@@ -805,4 +810,15 @@ WebInspector.Color.PageHighlight = {
     BorderLight: WebInspector.Color.fromRGBA(255, 229, 153, .5),
     Margin: WebInspector.Color.fromRGBA(246, 178, 107, .66),
     MarginLight: WebInspector.Color.fromRGBA(246, 178, 107, .5)
+}
+
+WebInspector.Color.Format = {
+    Original: "original",
+    Nickname: "nickname",
+    HEX: "hex",
+    ShortHEX: "shorthex",
+    RGB: "rgb",
+    RGBA: "rgba",
+    HSL: "hsl",
+    HSLA: "hsla"
 }

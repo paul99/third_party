@@ -34,8 +34,9 @@
 
 #include "JSMutationCallback.h"
 
+#include "JSDOMWindowBase.h"
+#include "JSMutationObserver.h"
 #include "JSMutationRecord.h"
-#include "JSWebKitMutationObserver.h"
 #include "ScriptExecutionContext.h"
 #include <runtime/JSLock.h>
 
@@ -43,14 +44,14 @@ using namespace JSC;
 
 namespace WebCore {
 
-bool JSMutationCallback::handleEvent(MutationRecordArray* mutations, WebKitMutationObserver* observer)
+bool JSMutationCallback::handleEvent(MutationRecordArray* mutations, MutationObserver* observer)
 {
     if (!canInvokeCallback())
         return true;
 
     RefPtr<JSMutationCallback> protect(this);
 
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindowBase::commonJSGlobalData());
 
     ExecState* exec = m_data->globalObject()->globalExec();
 
@@ -58,12 +59,14 @@ bool JSMutationCallback::handleEvent(MutationRecordArray* mutations, WebKitMutat
     for (size_t i = 0; i < mutations->size(); ++i)
         mutationList.append(toJS(exec, m_data->globalObject(), mutations->at(i).get()));
 
+    JSValue jsObserver = toJS(exec, m_data->globalObject(), observer);
+
     MarkedArgumentBuffer args;
-    args.append(constructArray(exec, m_data->globalObject(), mutationList));
-    args.append(toJS(exec, m_data->globalObject(), observer));
+    args.append(constructArray(exec, 0, m_data->globalObject(), mutationList));
+    args.append(jsObserver);
 
     bool raisedException = false;
-    m_data->invokeCallback(args, &raisedException);
+    m_data->invokeCallback(jsObserver, args, &raisedException);
     return !raisedException;
 }
 

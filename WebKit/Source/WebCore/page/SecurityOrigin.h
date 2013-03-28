@@ -29,8 +29,8 @@
 #ifndef SecurityOrigin_h
 #define SecurityOrigin_h
 
-#include "PlatformString.h"
 #include <wtf/ThreadSafeRefCounted.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -39,6 +39,18 @@ class KURL;
 
 class SecurityOrigin : public ThreadSafeRefCounted<SecurityOrigin> {
 public:
+    enum Policy {
+        AlwaysDeny = 0,
+        AlwaysAllow,
+        Ask
+    };
+
+    enum StorageBlockingPolicy {
+        AllowAllStorage = 0,
+        BlockThirdPartyStorage,
+        BlockAllStorage
+    };
+
     static PassRefPtr<SecurityOrigin> create(const KURL&);
     static PassRefPtr<SecurityOrigin> createUnique();
 
@@ -46,9 +58,22 @@ public:
     static PassRefPtr<SecurityOrigin> createFromString(const String&);
     static PassRefPtr<SecurityOrigin> create(const String& protocol, const String& host, int port);
 
+    // Some URL schemes use nested URLs for their security context. For example,
+    // filesystem URLs look like the following:
+    //
+    //   filesystem:http://example.com/temporary/path/to/file.png
+    //
+    // We're supposed to use "http://example.com" as the origin.
+    //
+    // Generally, we add URL schemes to this list when WebKit support them. For
+    // example, we don't include the "jar" scheme, even though Firefox
+    // understands that "jar" uses an inner URL for it's security origin.
+    static bool shouldUseInnerURL(const KURL&);
+    static KURL extractInnerURL(const KURL&);
+
     // Create a deep copy of this SecurityOrigin. This method is useful
     // when marshalling a SecurityOrigin to another thread.
-    PassRefPtr<SecurityOrigin> isolatedCopy();
+    PassRefPtr<SecurityOrigin> isolatedCopy() const;
 
     // Set the domain property of this security origin to newDomain. This
     // function does not check whether newDomain is a suffix of the current
@@ -60,6 +85,11 @@ public:
     String host() const { return m_host; }
     String domain() const { return m_domain; }
     unsigned short port() const { return m_port; }
+
+    // Returns true if a given URL is secure, based either directly on its
+    // own protocol, or, when relevant, on the protocol of its "inner URL"
+    // Protocols like blob: and filesystem: fall into this latter category.
+    static bool isSecure(const KURL&);
 
     // Returns true if this SecurityOrigin can script objects in the given
     // SecurityOrigin. For example, call this function before allowing
@@ -110,11 +140,16 @@ public:
     // WARNING: This is an extremely powerful ability. Use with caution!
     void grantUniversalAccess();
 
-    bool canAccessDatabase() const { return !isUnique(); }
-    bool canAccessLocalStorage() const { return !isUnique(); }
+    void setStorageBlockingPolicy(StorageBlockingPolicy policy) { m_storageBlockingPolicy = policy; }
+
+    bool canAccessDatabase(const SecurityOrigin* topOrigin = 0) const { return canAccessStorage(topOrigin); };
+    bool canAccessLocalStorage(const SecurityOrigin* topOrigin) const { return canAccessStorage(topOrigin); };
+    bool canAccessSharedWorkers(const SecurityOrigin* topOrigin) const { return canAccessStorage(topOrigin); }
+    bool canAccessPluginStorage(const SecurityOrigin* topOrigin) const { return canAccessStorage(topOrigin); }
     bool canAccessCookies() const { return !isUnique(); }
     bool canAccessPasswordManager() const { return !isUnique(); }
     bool canAccessFileSystem() const { return !isUnique(); }
+    Policy canShowNotifications() const;
 
     // Technically, we should always allow access to sessionStorage, but we
     // currently don't handle creating a sessionStorage area for unique
@@ -135,6 +170,8 @@ public:
     bool isUnique() const { return m_isUnique; }
 
     // Marks a file:// origin as being in a domain defined by its path.
+    // FIXME 81578: The naming of this is confusing. Files with restricted access to other local files
+    // still can have other privileges that can be remembered, thereby not making them unique.
     void enforceFilePathSeparation();
 
     // Convert this SecurityOrigin into a string. The string
@@ -148,6 +185,10 @@ public:
     // SecurityOrigin might be empty, or we might have explicitly decided that
     // we shouldTreatURLSchemeAsNoAccess.
     String toString() const;
+
+    // Similar to toString(), but does not take into account any factors that
+    // could make the string return "null".
+    String toRawString() const;
 
     // Serialize the security origin to a string that could be used as part of
     // file names. This format should be used in storage APIs only.
@@ -171,6 +212,8 @@ private:
 
     // FIXME: Rename this function to something more semantic.
     bool passesFileCheck(const SecurityOrigin*) const;
+    bool isThirdParty(const SecurityOrigin*) const;
+    bool canAccessStorage(const SecurityOrigin*) const;
 
     String m_protocol;
     String m_host;
@@ -182,6 +225,7 @@ private:
     bool m_universalAccess;
     bool m_domainWasSetInDOM;
     bool m_canLoadLocalResources;
+    StorageBlockingPolicy m_storageBlockingPolicy;
     bool m_enforceFilePathSeparation;
     bool m_needsDatabaseIdentifierQuirkForFiles;
 };

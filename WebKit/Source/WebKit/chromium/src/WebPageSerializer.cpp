@@ -41,19 +41,17 @@
 #include "KURL.h"
 #include "MHTMLArchive.h"
 #include "PageSerializer.h"
-#include "Vector.h"
-
-#include "platform/WebCString.h"
 #include "WebFrame.h"
 #include "WebFrameImpl.h"
 #include "WebPageSerializerClient.h"
 #include "WebPageSerializerImpl.h"
-#include "platform/WebString.h"
-#include "platform/WebURL.h"
-#include "platform/WebVector.h"
 #include "WebView.h"
 #include "WebViewImpl.h"
-
+#include <public/WebCString.h>
+#include <public/WebString.h>
+#include <public/WebURL.h>
+#include <public/WebVector.h>
+#include <wtf/Vector.h>
 #include <wtf/text/StringConcatenate.h>
 
 using namespace WebCore;
@@ -127,7 +125,7 @@ void retrieveResourcesForElement(Element* element,
 
     // Ignore URLs that have a non-standard protocols. Since the FTP protocol
     // does no have a cache mechanism, we skip it as well.
-    if (!url.protocolInHTTPFamily() && !url.isLocalFile())
+    if (!url.protocolIsInHTTPFamily() && !url.isLocalFile())
         return;
 
     if (!resourceURLs->contains(url))
@@ -166,7 +164,7 @@ void retrieveResourcesForFrame(Frame* frame,
         frameURLs->append(frameURL);
   
     // Now get the resources associated with each node of the document.
-    RefPtr<HTMLAllCollection> allNodes = frame->document()->all();
+    RefPtr<HTMLCollection> allNodes = frame->document()->all();
     for (unsigned i = 0; i < allNodes->length(); ++i) {
         Node* node = allNodes->item(i);
         // We are only interested in HTML resources.

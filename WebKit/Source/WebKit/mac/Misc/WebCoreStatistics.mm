@@ -58,54 +58,54 @@ using namespace WebCore;
 
 + (size_t)javaScriptObjectsCount
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
     return JSDOMWindow::commonJSGlobalData()->heap.objectCount();
 }
 
 + (size_t)javaScriptGlobalObjectsCount
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
     return JSDOMWindow::commonJSGlobalData()->heap.globalObjectCount();
 }
 
 + (size_t)javaScriptProtectedObjectsCount
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
     return JSDOMWindow::commonJSGlobalData()->heap.protectedObjectCount();
 }
 
 + (size_t)javaScriptProtectedGlobalObjectsCount
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
     return JSDOMWindow::commonJSGlobalData()->heap.protectedGlobalObjectCount();
 }
 
 + (NSCountedSet *)javaScriptProtectedObjectTypeCounts
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
     
     NSCountedSet *result = [NSCountedSet set];
 
     OwnPtr<TypeCountSet> counts(JSDOMWindow::commonJSGlobalData()->heap.protectedObjectTypeCounts());
     HashCountedSet<const char*>::iterator end = counts->end();
     for (HashCountedSet<const char*>::iterator it = counts->begin(); it != end; ++it)
-        for (unsigned i = 0; i < it->second; ++i)
-            [result addObject:[NSString stringWithUTF8String:it->first]];
+        for (unsigned i = 0; i < it->value; ++i)
+            [result addObject:[NSString stringWithUTF8String:it->key]];
     
     return result;
 }
 
 + (NSCountedSet *)javaScriptObjectTypeCounts
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
     
     NSCountedSet *result = [NSCountedSet set];
 
     OwnPtr<TypeCountSet> counts(JSDOMWindow::commonJSGlobalData()->heap.objectTypeCounts());
     HashCountedSet<const char*>::iterator end = counts->end();
     for (HashCountedSet<const char*>::iterator it = counts->begin(); it != end; ++it)
-        for (unsigned i = 0; i < it->second; ++i)
-            [result addObject:[NSString stringWithUTF8String:it->first]];
+        for (unsigned i = 0; i < it->value; ++i)
+            [result addObject:[NSString stringWithUTF8String:it->key]];
     
     return result;
 }
@@ -118,6 +118,11 @@ using namespace WebCore;
 + (void)garbageCollectJavaScriptObjectsOnAlternateThreadForDebugging:(BOOL)waitUntilDone
 {
     gcController().garbageCollectOnAlternateThreadForDebugging(waitUntilDone);
+}
+
++ (void)setJavaScriptGarbageCollectorTimerEnabled:(BOOL)enable
+{
+    gcController().setJavaScriptGarbageCollectorTimerEnabled(enable);
 }
 
 + (size_t)iconPageURLMappingCount
@@ -162,13 +167,13 @@ using namespace WebCore;
 
 + (BOOL)shouldPrintExceptions
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
     return Console::shouldPrintExceptions();
 }
 
 + (void)setShouldPrintExceptions:(BOOL)print
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
     Console::setShouldPrintExceptions(print);
 }
 
@@ -196,7 +201,7 @@ using namespace WebCore;
 {
     WTF::FastMallocStatistics fastMallocStatistics = WTF::fastMallocStatistics();
     
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
     size_t heapSize = JSDOMWindow::commonJSGlobalData()->heap.size();
     size_t heapFree = JSDOMWindow::commonJSGlobalData()->heap.capacity() - heapSize;
     GlobalMemoryStatistics globalMemoryStats = globalMemoryStatistics();
@@ -240,7 +245,7 @@ using namespace WebCore;
 
 + (size_t)javaScriptReferencedObjectsCount
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
     return JSDOMWindow::commonJSGlobalData()->heap.protectedObjectCount();
 }
 
@@ -268,37 +273,12 @@ using namespace WebCore;
     return externalRepresentation(_private->coreFrame, forPrinting ? RenderAsTextPrintingMode : RenderAsTextBehaviorNormal);
 }
 
-- (NSString *)counterValueForElement:(DOMElement*)element
-{
-    return counterValueForElement(core(element));
-}
-
-- (int)pageNumberForElement:(DOMElement*)element:(float)pageWidthInPixels:(float)pageHeightInPixels
-{
-    return PrintContext::pageNumberForElement(core(element), FloatSize(pageWidthInPixels, pageHeightInPixels));
-}
-
-- (int)numberOfPages:(float)pageWidthInPixels:(float)pageHeightInPixels
+- (int)numberOfPagesWithPageWidth:(float)pageWidthInPixels pageHeight:(float)pageHeightInPixels
 {
     return PrintContext::numberOfPages(_private->coreFrame, FloatSize(pageWidthInPixels, pageHeightInPixels));
 }
 
-- (NSString *)pageProperty:(const char *)propertyName:(int)pageNumber
-{
-    return PrintContext::pageProperty(_private->coreFrame, propertyName, pageNumber);
-}
-
-- (bool)isPageBoxVisible:(int)pageNumber
-{
-    return PrintContext::isPageBoxVisible(_private->coreFrame, pageNumber);
-}
-
-- (NSString *)pageSizeAndMarginsInPixels:(int)pageNumber:(int)width:(int)height:(int)marginTop:(int)marginRight:(int)marginBottom:(int)marginLeft
-{
-    return PrintContext::pageSizeAndMarginsInPixels(_private->coreFrame, pageNumber, width, height, marginTop, marginRight, marginBottom, marginLeft);
-}
-
-- (void)printToCGContext:(CGContextRef)cgContext:(float)pageWidthInPixels:(float)pageHeightInPixels
+- (void)printToCGContext:(CGContextRef)cgContext pageWidth:(float)pageWidthInPixels pageHeight:(float)pageHeightInPixels
 {
     Frame* coreFrame = _private->coreFrame;
     if (!coreFrame)

@@ -20,12 +20,15 @@
  */
 
 #include "config.h"
+
+#if ENABLE(CONTEXT_MENUS)
+
 #include "WebContextMenu.h"
 
-#include "ContextMenuState.h"
 #include "InjectedBundleHitTestResult.h"
 #include "InjectedBundleUserMessageCoders.h"
 #include "WebCoreArgumentCoders.h"
+#include "WebHitTestResult.h"
 #include "WebPage.h"
 #include "WebPageProxyMessages.h"
 #include "WebProcess.h"
@@ -56,14 +59,37 @@ void WebContextMenu::show()
     ContextMenu* menu = controller->contextMenu();
     if (!menu)
         return;
-    Node* node = controller->hitTestResult().innerNonSharedNode();
-    if (!node)
-        return;
-    Frame* frame = node->document()->frame();
+    Frame* frame = controller->hitTestResult().innerNodeFrame();
     if (!frame)
         return;
     FrameView* view = frame->view();
     if (!view)
+        return;
+
+    Vector<WebContextMenuItemData> menuItems;
+    RefPtr<APIObject> userData;
+    menuItemsWithUserData(menuItems, userData);
+    WebHitTestResult::Data webHitTestResultData(controller->hitTestResult());
+
+    // Mark the WebPage has having a shown context menu then notify the UIProcess.
+    m_page->contextMenuShowing();
+    m_page->send(Messages::WebPageProxy::ShowContextMenu(view->contentsToWindow(controller->hitTestResult().roundedPointInInnerNodeFrame()), webHitTestResultData, menuItems, InjectedBundleUserMessageEncoder(userData.get())));
+}
+
+void WebContextMenu::itemSelected(const WebContextMenuItemData& item)
+{
+    ContextMenuItem coreItem(ActionType, static_cast<ContextMenuAction>(item.action()), item.title());
+    m_page->corePage()->contextMenuController()->contextMenuItemSelected(&coreItem);
+}
+
+void WebContextMenu::menuItemsWithUserData(Vector<WebContextMenuItemData> &menuItems, RefPtr<APIObject>& userData) const
+{
+    ContextMenuController* controller = m_page->corePage()->contextMenuController();
+    if (!controller)
+        return;
+
+    ContextMenu* menu = controller->contextMenu();
+    if (!menu)
         return;
 
     // Give the bundle client a chance to process the menu.
@@ -74,24 +100,20 @@ void WebContextMenu::show()
 #endif
     Vector<WebContextMenuItemData> proposedMenu = kitItems(coreItems, menu);
     Vector<WebContextMenuItemData> newMenu;
-    RefPtr<APIObject> userData;
     RefPtr<InjectedBundleHitTestResult> hitTestResult = InjectedBundleHitTestResult::create(controller->hitTestResult());
     if (m_page->injectedBundleContextMenuClient().getCustomMenuFromDefaultItems(m_page, hitTestResult.get(), proposedMenu, newMenu, userData))
         proposedMenu = newMenu;
-
-    ContextMenuState contextMenuState;
-    contextMenuState.absoluteImageURLString = controller->hitTestResult().absoluteImageURL().string();
-    contextMenuState.absoluteLinkURLString = controller->hitTestResult().absoluteLinkURL().string();
-
-    // Mark the WebPage has having a shown context menu then notify the UIProcess.
-    m_page->contextMenuShowing();
-    m_page->send(Messages::WebPageProxy::ShowContextMenu(view->contentsToWindow(controller->hitTestResult().point()), contextMenuState, proposedMenu, InjectedBundleUserMessageEncoder(userData.get())));
+    menuItems = proposedMenu;
 }
 
-void WebContextMenu::itemSelected(const WebContextMenuItemData& item)
+Vector<WebContextMenuItemData> WebContextMenu::items() const
 {
-    ContextMenuItem coreItem(ActionType, static_cast<ContextMenuAction>(item.action()), item.title());
-    m_page->corePage()->contextMenuController()->contextMenuItemSelected(&coreItem);
+    Vector<WebContextMenuItemData> menuItems;
+    RefPtr<APIObject> userData;
+    menuItemsWithUserData(menuItems, userData);
+    return menuItems;
 }
 
 } // namespace WebKit
+
+#endif // ENABLE(CONTEXT_MENUS)

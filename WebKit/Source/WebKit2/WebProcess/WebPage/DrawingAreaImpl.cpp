@@ -70,7 +70,11 @@ DrawingAreaImpl::DrawingAreaImpl(WebPage* webPage, const WebPageCreationParamete
 {
     if (webPage->corePage()->settings()->acceleratedDrawingEnabled() || webPage->corePage()->settings()->forceCompositingMode())
         m_alwaysUseCompositing = true;
-        
+
+#if USE(COORDINATED_GRAPHICS)
+    m_alwaysUseCompositing = true;
+#endif
+
     if (m_alwaysUseCompositing)
         enterAcceleratedCompositingMode(0);
 }
@@ -115,6 +119,9 @@ void DrawingAreaImpl::scroll(const IntRect& scrollRect, const IntSize& scrollOff
     }
 
     if (m_webPage->mainFrameHasCustomRepresentation())
+        return;
+
+    if (scrollRect.isEmpty())
         return;
 
     if (!m_scrollRect.isEmpty() && scrollRect != m_scrollRect) {
@@ -199,6 +206,11 @@ void DrawingAreaImpl::forceRepaint()
     display();
 }
 
+bool DrawingAreaImpl::forceRepaintAsync(uint64_t callbackID)
+{
+    return m_layerTreeHost && m_layerTreeHost->forceRepaintAsync(callbackID);
+}
+
 void DrawingAreaImpl::didInstallPageOverlay()
 {
     if (m_layerTreeHost)
@@ -223,6 +235,20 @@ void DrawingAreaImpl::setPageOverlayNeedsDisplay(const IntRect& rect)
     setNeedsDisplay(rect);
 }
 
+void DrawingAreaImpl::setPageOverlayOpacity(float value)
+{
+    if (m_layerTreeHost)
+        m_layerTreeHost->setPageOverlayOpacity(value);
+}
+
+bool DrawingAreaImpl::pageOverlayShouldApplyFadeWhenPainting() const
+{
+    if (m_layerTreeHost && !m_layerTreeHost->pageOverlayShouldApplyFadeWhenPainting())
+        return false;
+
+    return true;
+}
+
 void DrawingAreaImpl::pageCustomRepresentationChanged()
 {
     if (!m_alwaysUseCompositing)
@@ -238,6 +264,24 @@ void DrawingAreaImpl::pageCustomRepresentationChanged()
 void DrawingAreaImpl::setPaintingEnabled(bool paintingEnabled)
 {
     m_isPaintingEnabled = paintingEnabled;
+}
+
+void DrawingAreaImpl::updatePreferences(const WebPreferencesStore& store)
+{
+#if PLATFORM(MAC)
+    // Soon we want pages with fixed positioned elements to be able to be scrolled by the ScrollingCoordinator.
+    // As a part of that work, we have to composite fixed position elements, and we have to allow those
+    // elements to create a stacking context.
+    m_webPage->corePage()->settings()->setAcceleratedCompositingForFixedPositionEnabled(true);
+    m_webPage->corePage()->settings()->setFixedPositionCreatesStackingContext(true);
+
+    // <rdar://problem/10697417>: It is necessary to force compositing when accelerate drawing
+    // is enabled on Mac so that scrollbars are always in their own layers.
+    if (m_webPage->corePage()->settings()->acceleratedDrawingEnabled())
+        m_webPage->corePage()->settings()->setForceCompositingMode(LayerTreeHost::supportsAcceleratedCompositing());
+    else
+#endif
+        m_webPage->corePage()->settings()->setForceCompositingMode(store.getBoolValueForKey(WebPreferencesKey::forceCompositingModeKey()) && LayerTreeHost::supportsAcceleratedCompositing());
 }
 
 void DrawingAreaImpl::layerHostDidFlushLayers()
@@ -261,6 +305,15 @@ void DrawingAreaImpl::layerHostDidFlushLayers()
         m_compositingAccordingToProxyMessages = true;
     }
 #endif
+}
+
+#if USE(ACCELERATED_COMPOSITING)
+GraphicsLayerFactory* DrawingAreaImpl::graphicsLayerFactory()
+{
+    if (m_layerTreeHost)
+        return m_layerTreeHost->graphicsLayerFactory();
+
+    return 0;
 }
 
 void DrawingAreaImpl::setRootCompositingLayer(GraphicsLayer* graphicsLayer)
@@ -303,12 +356,13 @@ void DrawingAreaImpl::setRootCompositingLayer(GraphicsLayer* graphicsLayer)
     }
 }
 
-void DrawingAreaImpl::scheduleCompositingLayerSync()
+void DrawingAreaImpl::scheduleCompositingLayerFlush()
 {
     if (!m_layerTreeHost)
         return;
     m_layerTreeHost->scheduleLayerFlush();
 }
+#endif
 
 void DrawingAreaImpl::updateBackingStoreState(uint64_t stateID, bool respondImmediately, float deviceScaleFactor, const WebCore::IntSize& size, const WebCore::IntSize& scrollOffset)
 {
@@ -327,7 +381,9 @@ void DrawingAreaImpl::updateBackingStoreState(uint64_t stateID, bool respondImme
 
         if (m_layerTreeHost) {
             m_layerTreeHost->deviceScaleFactorDidChange();
-            m_layerTreeHost->sizeDidChange(size);
+            // Use the previously set page size instead of the argument.
+            // It gets adjusted properly when using the fixed layout mode.
+            m_layerTreeHost->sizeDidChange(m_webPage->size());
         } else
             m_dirtyRegion = m_webPage->bounds();
     } else {
@@ -434,7 +490,12 @@ void DrawingAreaImpl::resumePainting()
     // FIXME: We shouldn't always repaint everything here.
     setNeedsDisplay(m_webPage->bounds());
 
+#if PLATFORM(MAC)
+    if (m_webPage->windowIsVisible())
+        m_webPage->corePage()->resumeScriptedAnimations();
+#else
     m_webPage->corePage()->resumeScriptedAnimations();
+#endif
 }
 
 void DrawingAreaImpl::enterAcceleratedCompositingMode(GraphicsLayer* graphicsLayer)
@@ -667,13 +728,29 @@ void DrawingAreaImpl::display(UpdateInfo& updateInfo)
     m_displayTimer.stop();
 }
 
-#if USE(ACCELERATED_COMPOSITING) && USE(TEXTURE_MAPPER)
-void DrawingAreaImpl::didReceiveLayerTreeHostMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::ArgumentDecoder* arguments)
+#if USE(COORDINATED_GRAPHICS)
+void DrawingAreaImpl::didReceiveCoordinatedLayerTreeHostMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
 {
     if (m_layerTreeHost)
-        m_layerTreeHost->didReceiveLayerTreeHostMessage(connection, messageID, arguments);
+        m_layerTreeHost->didReceiveCoordinatedLayerTreeHostMessage(connection, messageID, decoder);
 }
 #endif
 
+#if PLATFORM(MAC)
+void DrawingAreaImpl::setLayerHostingMode(uint32_t opaqueLayerHostingMode)
+{
+    LayerHostingMode layerHostingMode = static_cast<LayerHostingMode>(opaqueLayerHostingMode);
+    m_webPage->setLayerHostingMode(layerHostingMode);
+
+    if (!m_layerTreeHost)
+        return;
+
+    LayerTreeContext oldLayerTreeContext = m_layerTreeHost->layerTreeContext();
+    m_layerTreeHost->setLayerHostingMode(layerHostingMode);
+
+    if (m_layerTreeHost->layerTreeContext() != oldLayerTreeContext)
+        m_webPage->send(Messages::DrawingAreaProxy::UpdateAcceleratedCompositingMode(m_backingStoreStateID, m_layerTreeHost->layerTreeContext()));
+}
+#endif
 
 } // namespace WebKit

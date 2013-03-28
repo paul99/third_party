@@ -31,24 +31,32 @@
 #include "config.h"
 #include "WebKit.h"
 
+#include "ImageDecodingStore.h"
+#include "LayoutTestSupport.h"
 #include "Logging.h"
+#include "MutationObserver.h"
 #include "Page.h"
 #include "RuntimeEnabledFeatures.h"
 #include "Settings.h"
 #include "TextEncoding.h"
 #include "V8Binding.h"
-#include "WebKitMutationObserver.h"
-#include "platform/WebKitPlatformSupport.h"
+#include "V8RecursionScope.h"
 #include "WebMediaPlayerClientImpl.h"
 #include "WebSocket.h"
-#include "platform/WebThread.h"
-#include "WorkerContextExecutionProxy.h"
+#include "platform/WebKitPlatformSupport.h"
 #include "v8.h"
-
+#include <public/Platform.h>
+#include <public/WebPrerenderingSupport.h>
+#include <public/WebThread.h>
 #include <wtf/Assertions.h>
 #include <wtf/MainThread.h>
 #include <wtf/Threading.h>
+#include <wtf/UnusedParam.h>
 #include <wtf/text/AtomicString.h>
+
+#if OS(DARWIN)
+#include "WebSystemInterface.h"
+#endif
 
 namespace WebKit {
 
@@ -57,9 +65,10 @@ namespace {
 
 class EndOfTaskRunner : public WebThread::TaskObserver {
 public:
+    virtual void willProcessTask() { }
     virtual void didProcessTask()
     {
-        WebCore::WebKitMutationObserver::deliverAllMutations();
+        WebCore::MutationObserver::deliverAllMutations();
     }
 };
 
@@ -73,7 +82,6 @@ static WebThread::TaskObserver* s_endOfTaskRunner = 0;
 static bool s_webKitInitialized = false;
 
 static WebKitPlatformSupport* s_webKitPlatformSupport = 0;
-static bool s_layoutTestMode = false;
 
 static bool generateEntropy(unsigned char* buffer, size_t length)
 {
@@ -84,17 +92,27 @@ static bool generateEntropy(unsigned char* buffer, size_t length)
     return false;
 }
 
+#ifndef NDEBUG
+static void assertV8RecursionScope()
+{
+    ASSERT(!isMainThread() || WebCore::V8RecursionScope::properlyUsed());
+}
+#endif
+
 void initialize(WebKitPlatformSupport* webKitPlatformSupport)
 {
     initializeWithoutV8(webKitPlatformSupport);
 
     v8::V8::SetEntropySource(&generateEntropy);
     v8::V8::Initialize();
-    WebCore::V8BindingPerIsolateData::ensureInitialized(v8::Isolate::GetCurrent());
+    WebCore::V8PerIsolateData::ensureInitialized(v8::Isolate::GetCurrent());
 
 #if ENABLE(MUTATION_OBSERVERS)
     // currentThread will always be non-null in production, but can be null in Chromium unit tests.
     if (WebThread* currentThread = webKitPlatformSupport->currentThread()) {
+#ifndef NDEBUG
+        v8::V8::AddCallCompletedCallback(&assertV8RecursionScope);
+#endif
         ASSERT(!s_endOfTaskRunner);
         s_endOfTaskRunner = new EndOfTaskRunner;
         currentThread->addTaskObserver(s_endOfTaskRunner);
@@ -107,9 +125,15 @@ void initializeWithoutV8(WebKitPlatformSupport* webKitPlatformSupport)
     ASSERT(!s_webKitInitialized);
     s_webKitInitialized = true;
 
+#if OS(DARWIN)
+    InitWebCoreSystemInterface();
+#endif
+
     ASSERT(webKitPlatformSupport);
     ASSERT(!s_webKitPlatformSupport);
     s_webKitPlatformSupport = webKitPlatformSupport;
+    Platform::initialize(s_webKitPlatformSupport);
+    WebCore::ImageDecodingStore::initializeOnce();
 
     WTF::initializeThreading();
     WTF::initializeMainThread();
@@ -128,8 +152,13 @@ void initializeWithoutV8(WebKitPlatformSupport* webKitPlatformSupport)
 
 void shutdown()
 {
+    // WebKit might have been initialized without V8, so be careful not to invoke
+    // V8 specific functions, if V8 was not properly initialized.
 #if ENABLE(MUTATION_OBSERVERS)
     if (s_endOfTaskRunner) {
+#ifndef NDEBUG
+        v8::V8::RemoveCallCompletedCallback(&assertV8RecursionScope);
+#endif
         ASSERT(s_webKitPlatformSupport->currentThread());
         s_webKitPlatformSupport->currentThread()->removeTaskObserver(s_endOfTaskRunner);
         delete s_endOfTaskRunner;
@@ -137,6 +166,9 @@ void shutdown()
     }
 #endif
     s_webKitPlatformSupport = 0;
+    WebCore::ImageDecodingStore::shutdown();
+    Platform::shutdown();
+    WebPrerenderingSupport::shutdown();
 }
 
 WebKitPlatformSupport* webKitPlatformSupport()
@@ -146,19 +178,23 @@ WebKitPlatformSupport* webKitPlatformSupport()
 
 void setLayoutTestMode(bool value)
 {
-    s_layoutTestMode = value;
+    WebCore::setIsRunningLayoutTest(value);
 }
 
 bool layoutTestMode()
 {
-    return s_layoutTestMode;
+    return WebCore::isRunningLayoutTest();
 }
 
 void enableLogChannel(const char* name)
 {
+#if !LOG_DISABLED
     WTFLogChannel* channel = WebCore::getChannelFromName(name);
     if (channel)
         channel->state = WTFLogChannelOn;
+#else
+    UNUSED_PARAM(name);
+#endif // !LOG_DISABLED
 }
 
 void resetPluginCache(bool reloadPages)

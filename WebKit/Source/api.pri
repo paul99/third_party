@@ -4,224 +4,106 @@
 # See 'Tools/qmake/README' for an overview of the build system
 # -------------------------------------------------------------------
 
+# Use Qt5's module system
+load(qt_build_config)
+
 TEMPLATE = lib
 TARGET = QtWebKit
 
-DESTDIR = $${ROOT_BUILD_DIR}/lib
+WEBKIT_DESTDIR = $${ROOT_BUILD_DIR}/lib
 
-runSyncQt() # Generate forwarding headers for the QtWebKit API
+WEBKIT += wtf javascriptcore webcore
 
-load(features)
+build?(webkit1): WEBKIT += webkit1
+build?(webkit2): WEBKIT += webkit2
 
-include(WebKit/WebKit.pri)
+# Ensure that changes to the WebKit1 and WebKit2 API will trigger a qmake of this
+# file, which in turn runs syncqt to update the forwarding headers.
+build?(webkit1): {
+    QMAKE_INTERNAL_INCLUDED_FILES *= WebKit/WebKit1.pro
+}
+build?(webkit2): QMAKE_INTERNAL_INCLUDED_FILES *= WebKit2/Target.pri
 
-WEBKIT += wtf
+use?(3D_GRAPHICS): WEBKIT += angle
 
-!v8:WEBKIT += javascriptcore
+MODULE = webkit
+CONFIG += creating_module
 
-WEBKIT += webcore
+# This is the canonical list of dependencies for the public API of
+# the QtWebKit library, and will end up in the library's prl file.
+QT_API_DEPENDS = core gui network
 
-!no_webkit2 {
-    WEBKIT += webkit2
-    QT += declarative
+# We want the QtWebKit API forwarding includes to live in the root build dir.
+MODULE_BASE_DIR = $$_PRO_FILE_PWD_
+MODULE_BASE_OUTDIR = $$ROOT_BUILD_DIR
 
-    # Ensure that changes to the WebKit2 API will trigger a qmake of this
-    # file, which in turn runs syncqt to update the forwarding headers.
-    QMAKE_INTERNAL_INCLUDED_FILES *= WebKit2/Target.pri
+QMAKE_DOCS = $$PWD/qtwebkit.qdocconf
+
+# We load the relevant modules here, so that the effects of each module
+# on the QT variable can be picked up when we later load(qt_module).
+load(webkit_modules)
+
+# Resources have to be included directly in the final binary.
+# MSVC's linker won't pick them from a static library since they aren't referenced.
+RESOURCES += $$PWD/WebCore/WebCore.qrc
+include_webinspector {
+    # WEBCORE_GENERATED_SOURCES_DIR is defined in WebCore.pri, included by
+    # load(webkit_modules) if WEBKIT contains webcore.
+    RESOURCES += \
+        $$PWD/WebCore/inspector/front-end/WebKit.qrc \
+        $${WEBCORE_GENERATED_SOURCES_DIR}/InspectorBackendCommands.qrc
 }
 
-QT += network
-haveQt(5): QT += widgets printsupport quick
+# ---------------- Custom developer-build handling -------------------
+#
+# The assumption for Qt developer builds is that the module file
+# will be put into qtbase/mkspecs/modules, and the libraries into
+# qtbase/lib, with rpath/install_name set to the Qt lib dir.
+#
+# For WebKit we don't want that behavior for the libraries, as we want
+# them to be self-contained in the WebKit build dir.
+#
+!production_build: CONFIG += force_independent
 
-win32*:!win32-msvc* {
-    # Make sure OpenGL libs are after the webcore lib so MinGW can resolve symbols
-    contains(DEFINES, ENABLE_WEBGL=1)|contains(CONFIG, texmap): LIBS += $$QMAKE_LIBS_OPENGL
-}
+BASE_TARGET = $$TARGET
 
-!static: DEFINES += QT_MAKEDLL
+load(qt_module)
 
-SOURCES += \
-    $$PWD/WebKit/qt/WebCoreSupport/QtFallbackWebPopup.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/QtWebComboBox.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/ChromeClientQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/ContextMenuClientQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/DragClientQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/DumpRenderTreeSupportQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/EditorClientQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/UndoStepQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/FrameLoaderClientQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/FrameNetworkingContextQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/GeolocationPermissionClientQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/InitWebCoreQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/InspectorClientQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/InspectorServerQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/NotificationPresenterClientQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/PageClientQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/PopupMenuQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/QtPlatformPlugin.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/SearchPopupMenuQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/TextCheckerClientQt.cpp \
-    $$PWD/WebKit/qt/WebCoreSupport/PlatformStrategiesQt.cpp
+# Make sure the install_name of the QtWebKit library point to webkit
+force_independent:macx {
+    # We do our own absolute path so that we can trick qmake into
+    # using the webkit build path instead of the Qt install path.
+    CONFIG -= absolute_library_soname
+    QMAKE_LFLAGS_SONAME = $$QMAKE_LFLAGS_SONAME$$WEBKIT_DESTDIR/
 
-HEADERS += \
-    $$PWD/WebKit/qt/WebCoreSupport/InitWebCoreQt.h \
-    $$PWD/WebKit/qt/WebCoreSupport/InspectorServerQt.h \
-    $$PWD/WebKit/qt/WebCoreSupport/QtFallbackWebPopup.h \
-    $$PWD/WebKit/qt/WebCoreSupport/QtWebComboBox.h \
-    $$PWD/WebKit/qt/WebCoreSupport/FrameLoaderClientQt.h \
-    $$PWD/WebKit/qt/WebCoreSupport/FrameNetworkingContextQt.h \
-    $$PWD/WebKit/qt/WebCoreSupport/GeolocationPermissionClientQt.h \
-    $$PWD/WebKit/qt/WebCoreSupport/NotificationPresenterClientQt.h \
-    $$PWD/WebKit/qt/WebCoreSupport/PageClientQt.h \
-    $$PWD/WebKit/qt/WebCoreSupport/QtPlatformPlugin.h \
-    $$PWD/WebKit/qt/WebCoreSupport/PopupMenuQt.h \
-    $$PWD/WebKit/qt/WebCoreSupport/SearchPopupMenuQt.h \
-    $$PWD/WebKit/qt/WebCoreSupport/TextCheckerClientQt.h \
-    $$PWD/WebKit/qt/WebCoreSupport/PlatformStrategiesQt.h
+    !debug_and_release|build_pass {
+        # We also have to make sure the install_name is correct when
+        # the library is installed.
+        change_install_name.depends = install_target
 
-INCLUDEPATH += \
-    $$PWD/WebKit/qt/Api \
-    $$PWD/WebKit/qt/WebCoreSupport
+        # The install rules generated by qmake for frameworks are busted in
+        # that both the debug and the release makefile copy QtWebKit.framework
+        # into the install dir, so whatever changes we did to the release library
+        # will get overwritten when the debug library is installed. We work around
+        # that by running install_name on both, for both configs.
+        change_install_name.commands = framework_dir=\$\$(dirname $(TARGETD)); \
+            for file in \$\$(ls $$[QT_INSTALL_LIBS]/\$\$framework_dir/$$BASE_TARGET*); do \
+                install_name_tool -id \$\$file \$\$file; \
+            done
+        default_install_target.target = install
+        default_install_target.depends += change_install_name
 
-contains(DEFINES, ENABLE_VIDEO=1) {
-    !contains(DEFINES, WTF_USE_QTKIT=1):!contains(DEFINES, WTF_USE_GSTREAMER=1):contains(DEFINES, WTF_USE_QT_MULTIMEDIA=1) {
-        HEADERS += $$PWD/WebKit/qt/WebCoreSupport/FullScreenVideoWidget.h
-        SOURCES += $$PWD/WebKit/qt/WebCoreSupport/FullScreenVideoWidget.cpp
-    }
-
-    contains(DEFINES, WTF_USE_QTKIT=1) | contains(DEFINES, WTF_USE_GSTREAMER=1) | contains(DEFINES, WTF_USE_QT_MULTIMEDIA=1) {
-        HEADERS += $$PWD/WebKit/qt/WebCoreSupport/FullScreenVideoQt.h
-        SOURCES += $$PWD/WebKit/qt/WebCoreSupport/FullScreenVideoQt.cpp
-    }
-
-    contains(DEFINES, WTF_USE_QTKIT=1) {
-        INCLUDEPATH += \
-            $$PWD/WebCore/platform/qt/ \
-            $$PWD/WebCore/platform/mac/ \
-            $$PWD/../WebKitLibraries/
-
-        DEFINES += NSGEOMETRY_TYPES_SAME_AS_CGGEOMETRY_TYPES
-
-        contains(CONFIG, "x86") {
-            DEFINES+=NS_BUILD_32_LIKE_64
-        }
-
-        HEADERS += \
-            $$PWD/WebKit/qt/WebCoreSupport/WebSystemInterface.h \
-            $$PWD/WebKit/qt/WebCoreSupport/QTKitFullScreenVideoHandler.h
-
-        OBJECTIVE_SOURCES += \
-            $$PWD/WebKit/qt/WebCoreSupport/WebSystemInterface.mm \
-            $$PWD/WebKit/qt/WebCoreSupport/QTKitFullScreenVideoHandler.mm
-
-        LIBS += -framework Security -framework IOKit
-
-        # We can know the Mac OS version by using the Darwin major version
-        DARWIN_VERSION = $$split(QMAKE_HOST.version, ".")
-        DARWIN_MAJOR_VERSION = $$first(DARWIN_VERSION)
-        equals(DARWIN_MAJOR_VERSION, "11") {
-            LIBS += $${ROOT_WEBKIT_DIR}/WebKitLibraries/libWebKitSystemInterfaceLion.a
-        } else:equals(DARWIN_MAJOR_VERSION, "10") {
-            LIBS += $${ROOT_WEBKIT_DIR}/WebKitLibraries/libWebKitSystemInterfaceSnowLeopard.a
-        } else:equals(DARWIN_MAJOR_VERSION, "9") {
-            LIBS += $${ROOT_WEBKIT_DIR}/WebKitLibraries/libWebKitSystemInterfaceLeopard.a
-        }
+        QMAKE_EXTRA_TARGETS += change_install_name default_install_target
     }
 }
 
-contains(DEFINES, ENABLE_ICONDATABASE=1) {
-    HEADERS += \
-        $$PWD/WebCore/loader/icon/IconDatabaseClient.h \
-        $$PWD/WebKit/qt/WebCoreSupport/IconDatabaseClientQt.h
-
-    SOURCES += \
-        $$PWD/WebKit/qt/WebCoreSupport/IconDatabaseClientQt.cpp
-}
-
-contains(DEFINES, ENABLE_DEVICE_ORIENTATION=1) || contains(DEFINES, ENABLE_ORIENTATION_EVENTS=1) {
-    haveQt(5): QT += sensors
-}
-
-contains(DEFINES, ENABLE_DEVICE_ORIENTATION=1) {
-    HEADERS += \
-        $$PWD/WebKit/qt/WebCoreSupport/DeviceMotionClientQt.h \
-        $$PWD/WebKit/qt/WebCoreSupport/DeviceMotionProviderQt.h \
-        $$PWD/WebKit/qt/WebCoreSupport/DeviceOrientationClientQt.h \
-        $$PWD/WebKit/qt/WebCoreSupport/DeviceOrientationProviderQt.h
-
-    SOURCES += \
-        $$PWD/WebKit/qt/WebCoreSupport/DeviceMotionClientQt.cpp \
-        $$PWD/WebKit/qt/WebCoreSupport/DeviceMotionProviderQt.cpp \
-        $$PWD/WebKit/qt/WebCoreSupport/DeviceOrientationClientQt.cpp \
-        $$PWD/WebKit/qt/WebCoreSupport/DeviceOrientationProviderQt.cpp
-}
-
-contains(DEFINES, ENABLE_GEOLOCATION=1) {
-     haveQt(5): QT += location
-
-     HEADERS += \
-        $$PWD/WebKit/qt/WebCoreSupport/GeolocationClientQt.h
-     SOURCES += \
-        $$PWD/WebKit/qt/WebCoreSupport/GeolocationClientQt.cpp
-}
-
-contains(CONFIG, texmap) {
-    DEFINES += WTF_USE_TEXTURE_MAPPER=1
-}
-
-
-# ------------- Install rules -------------
-
-modulefile.files = $$QT.webkit.modulefile
-mkspecs = $$[QMAKE_MKSPECS]
-mkspecs = $$split(mkspecs, :)
-modulefile.path = $$last(mkspecs)/modules
-INSTALLS += modulefile
-
-# Syncqt has already run at this point, so we can use headers.pri
-# as a basis for our install-rules
-HEADERS_PRI = $${ROOT_BUILD_DIR}/include/$$TARGET/headers.pri
-!include($$HEADERS_PRI): error(Failed to resolve install headers)
-
-headers.files = $$SYNCQT.HEADER_FILES $$SYNCQT.HEADER_CLASSES
-!isEmpty(INSTALL_HEADERS): headers.path = $$INSTALL_HEADERS/$${TARGET}
-else: headers.path = $$[QT_INSTALL_HEADERS]/$${TARGET}
-INSTALLS += headers
-
-!isEmpty(INSTALL_LIBS): target.path = $$INSTALL_LIBS
-else: target.path = $$[QT_INSTALL_LIBS]
-INSTALLS += target
-
-unix {
-    CONFIG += create_pc create_prl
-    QMAKE_PKGCONFIG_LIBDIR = $$target.path
-    QMAKE_PKGCONFIG_INCDIR = $$headers.path
-    QMAKE_PKGCONFIG_DESTDIR = pkgconfig
-    lib_replace.match = $$re_escape($$DESTDIR)
-    lib_replace.replace = $$[QT_INSTALL_LIBS]
-    QMAKE_PKGCONFIG_INSTALL_REPLACE += lib_replace
-}
-
-mac {
-    !static:contains(QT_CONFIG, qt_framework) {
-        # Build QtWebKit as a framework, to match how Qt was built
-        CONFIG += lib_bundle qt_no_framework_direct_includes qt_framework
-
-        # For debug_and_release configs, only copy headers in release
-        !debug_and_release|if(build_pass:CONFIG(release, debug|release)) {
-            FRAMEWORK_HEADERS.version = Versions
-            FRAMEWORK_HEADERS.files = $${headers.files}
-            FRAMEWORK_HEADERS.path = Headers
-            QMAKE_BUNDLE_DATA += FRAMEWORK_HEADERS
-        }
-    }
-
-    QMAKE_LFLAGS_SONAME = "$${QMAKE_LFLAGS_SONAME}$${DESTDIR}$${QMAKE_DIR_SEP}"
-}
-
-plugin_backend_xlib: PKGCONFIG += x11
-
-linux-g++*: {
-    PRE_TARGETDEPS += $$PWD/qtwebkit-export.map
-    QMAKE_LFLAGS += -Wl,--version-script=$$PWD/qtwebkit-export.map
+qnx {
+    # see: https://bugs.webkit.org/show_bug.cgi?id=93460
+    # the gcc 4.4.2 used in the qnx bbndk cannot cope with
+    # the linkage step of libQtWebKit, adding a dummy .cpp
+    # file fixes this though - so do this here
+    dummyfile.target = dummy.cpp
+    dummyfile.commands = touch $$dummyfile.target
+    QMAKE_EXTRA_TARGETS += dummyfile
+    GENERATED_SOURCES += $$dummyfile.target
 }

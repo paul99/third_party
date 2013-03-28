@@ -183,10 +183,6 @@ SkTypeface* SkFontHost::CreateTypefaceFromFile(char const*) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-bool SkFontHost::ValidFontID(uint32_t uniqueID) {
-    return true;
-}
-
 SkStream* SkFontHost::OpenStream(uint32_t uniqueID) {
     SkTypeface_Stream* tf = find_by_id(uniqueID);
     SkASSERT(tf);
@@ -257,7 +253,7 @@ SkAdvancedTypefaceMetrics* SkFontHost::GetAdvancedTypefaceMetrics(
     return NULL;
 }
 
-void SkFontHost::FilterRec(SkScalerContext::Rec* rec) {
+void SkFontHost::FilterRec(SkScalerContext::Rec* rec, SkTypeface*) {
 }
 
 SkScalerContext* SkFontHost::CreateScalerContext(const SkDescriptor* desc) {

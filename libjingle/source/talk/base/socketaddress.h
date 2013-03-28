@@ -48,7 +48,7 @@ class SocketAddress {
   SocketAddress();
 
   // Creates the address with the given host and port. Host may be a
-  // literal IP string or a hostname to be resolved later with ResolveIP().
+  // literal IP string or a hostname to be resolved later.
   SocketAddress(const std::string& hostname, int port);
 
   // Creates the address with the given IP and port.
@@ -105,6 +105,8 @@ class SocketAddress {
 
   const IPAddress& ipaddr() const;
 
+  int family() const {return ip_.family(); }
+
   // Returns the port part of this address.
   uint16 port() const;
 
@@ -116,8 +118,10 @@ class SocketAddress {
   int scope_id() const {return scope_id_; }
   void SetScopeID(int id) { scope_id_ = id; }
 
-  // Returns the IP address (or hostname) in printable form.
-  std::string IPAsString() const;
+  // Returns the 'host' portion of the address (hostname or IP) in a form
+  // suitable for use in a URI. If both IP and hostname are present, hostname
+  // is preferred. IPv6 addresses are enclosed in square brackets ('[' and ']').
+  std::string HostAsURIString() const;
 
   // Returns the port as a string.
   std::string PortAsString() const;
@@ -141,10 +145,6 @@ class SocketAddress {
   // For v6 addresses this means the address is ::1.
   bool IsLoopbackIP() const;
 
-  // Determines wither the IP address refers to any adapter on the local
-  // machine, including the loopback adapter.
-  bool IsLocalIP() const;
-
   // Determines whether the IP address is in one of the private ranges:
   // For v4: 127.0.0.0/8 10.0.0.0/8 192.168.0.0/16 172.16.0.0/12.
   // For v6: FE80::/16 and ::1.
@@ -153,12 +153,6 @@ class SocketAddress {
   // Determines whether the hostname has been resolved to an IP.
   bool IsUnresolvedIP() const;
   inline bool IsUnresolved() const { return IsUnresolvedIP(); }  // deprecated
-
-  // Attempt to resolve a hostname to IP address.
-  // Returns false if resolution is required but failed, and sets error.
-  // 'force' will cause re-resolution of hostname.
-  // TODO: Deprecate this function.
-  bool ResolveIP(bool force = false, int* error = NULL);
 
   // Determines whether this address is identical to the given one.
   bool operator ==(const SocketAddress& addr) const;
@@ -209,13 +203,7 @@ class SocketAddress {
   // Converts the IP address given in printable form into an IPAddress.
   static bool StringToIP(const std::string& str, IPAddress* ip);
 
-  // Get a list of the local machine's ip addresses.
-  // TODO: Move to nethelpers or similar (doesn't belong in socketaddress).
-  static bool GetLocalIPs(std::vector<IPAddress>* ips);
-
  private:
-  // Get local machine's hostname.
-  static std::string GetHostname();
   std::string hostname_;
   IPAddress ip_;
   uint16 port_;
@@ -225,6 +213,7 @@ class SocketAddress {
 
 bool SocketAddressFromSockAddrStorage(const sockaddr_storage& saddr,
                                       SocketAddress* out);
+SocketAddress EmptySocketAddressWithFamily(int family);
 
 }  // namespace talk_base
 

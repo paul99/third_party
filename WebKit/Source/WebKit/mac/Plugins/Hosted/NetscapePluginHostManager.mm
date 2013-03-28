@@ -69,15 +69,15 @@ NetscapePluginHostManager::~NetscapePluginHostManager()
 
 NetscapePluginHostProxy* NetscapePluginHostManager::hostForPlugin(const WTF::String& pluginPath, cpu_type_t pluginArchitecture, const String& bundleIdentifier)
 {
-    pair<PluginHostMap::iterator, bool> result = m_pluginHosts.add(pluginPath, 0);
+    PluginHostMap::AddResult result = m_pluginHosts.add(pluginPath, 0);
     
     // The package was already in the map, just return it.
-    if (!result.second)
-        return result.first->second;
+    if (!result.isNewEntry)
+        return result.iterator->value;
         
     mach_port_t clientPort;
     if (mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &clientPort) != KERN_SUCCESS) {
-        m_pluginHosts.remove(result.first);
+        m_pluginHosts.remove(result.iterator);
         return 0;
     }
     
@@ -85,7 +85,7 @@ NetscapePluginHostProxy* NetscapePluginHostManager::hostForPlugin(const WTF::Str
     ProcessSerialNumber pluginHostPSN;
     if (!spawnPluginHost(pluginPath, pluginArchitecture, clientPort, pluginHostPort, pluginHostPSN)) {
         mach_port_destroy(mach_task_self(), clientPort);
-        m_pluginHosts.remove(result.first);
+        m_pluginHosts.remove(result.iterator);
         return 0;
     }
     
@@ -95,7 +95,7 @@ NetscapePluginHostProxy* NetscapePluginHostManager::hostForPlugin(const WTF::Str
     
     NetscapePluginHostProxy* hostProxy = new NetscapePluginHostProxy(clientPort, pluginHostPort, pluginHostPSN, shouldCacheMissingPropertiesAndMethods);
     
-    result.first->second = hostProxy;
+    result.iterator->value = hostProxy;
     
     return hostProxy;
 }
@@ -161,9 +161,17 @@ bool NetscapePluginHostManager::spawnPluginHost(const String& pluginPath, cpu_ty
     [hostProperties release];
 
     ProcessSerialNumber psn;
-    GetCurrentProcess(&psn);
 
-    kr = _WKPHCheckInWithPluginHost(pluginHostPort, (uint8_t*)[data bytes], [data length], clientPort, psn.highLongOfPSN, psn.lowLongOfPSN, renderServerPort, 
+#if COMPILER(CLANG)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    GetCurrentProcess(&psn);
+#if COMPILER(CLANG)
+#pragma clang diagnostic pop
+#endif
+
+    kr = _WKPHCheckInWithPluginHost(pluginHostPort, (uint8_t*)[data bytes], [data length], clientPort, psn.highLongOfPSN, psn.lowLongOfPSN, renderServerPort,
                                     &pluginHostPSN.highLongOfPSN, &pluginHostPSN.lowLongOfPSN);
     
     if (kr != KERN_SUCCESS) {
@@ -204,7 +212,7 @@ void NetscapePluginHostManager::pluginHostDied(NetscapePluginHostProxy* pluginHo
 
     // This has O(n) complexity but the number of active plug-in hosts is very small so it shouldn't matter.
     for (PluginHostMap::iterator it = m_pluginHosts.begin(); it != end; ++it) {
-        if (it->second == pluginHost) {
+        if (it->value == pluginHost) {
             m_pluginHosts.remove(it);
             return;
         }
@@ -272,31 +280,13 @@ PassRefPtr<NetscapePluginInstanceProxy> NetscapePluginHostManager::instantiatePl
     return instance.release();
 }
 
-void NetscapePluginHostManager::createPropertyListFile(const String& pluginPath, cpu_type_t pluginArchitecture)
-{   
-    NSString *pluginHostAppPath = [[NSBundle bundleWithIdentifier:@"com.apple.WebKit"] pathForAuxiliaryExecutable:pluginHostAppName];
-    NSString *pluginHostAppExecutablePath = [[NSBundle bundleWithPath:pluginHostAppPath] executablePath];
-    NSString *bundlePath = pluginPath;
+void NetscapePluginHostManager::createPropertyListFile(const String& pluginPath, cpu_type_t pluginArchitecture, const String& bundleIdentifier)
+{
+    NetscapePluginHostProxy* hostProxy = hostForPlugin(pluginPath, pluginArchitecture, bundleIdentifier);
+    if (!hostProxy)
+        return;
 
-    pid_t pid;
-    posix_spawnattr_t attr;
-    posix_spawnattr_init(&attr);
-    
-    // Set the architecture.
-    size_t ocount = 0;
-    int cpuTypes[] = { pluginArchitecture };
-    posix_spawnattr_setbinpref_np(&attr, 1, cpuTypes, &ocount);
-    
-    // Spawn the plug-in host and tell it to call the registration function.
-    const char* args[] = { [pluginHostAppExecutablePath fileSystemRepresentation], "-createPluginMIMETypesPreferences", [bundlePath fileSystemRepresentation], 0 };
-    
-    int result = posix_spawn(&pid, args[0], 0, &attr, const_cast<char* const*>(args), 0);
-    posix_spawnattr_destroy(&attr);
-    
-    if (!result && pid > 0) {
-        // Wait for the process to finish.
-        while (waitpid(pid, 0,  0) == -1) { }
-    }
+    _WKPHCreatePluginMIMETypesPreferences(hostProxy->port());
 }
     
 void NetscapePluginHostManager::didCreateWindow()
@@ -304,13 +294,20 @@ void NetscapePluginHostManager::didCreateWindow()
     // See if any of our hosts are in full-screen mode.
     PluginHostMap::iterator end = m_pluginHosts.end();
     for (PluginHostMap::iterator it = m_pluginHosts.begin(); it != end; ++it) {
-        NetscapePluginHostProxy* hostProxy = it->second;
+        NetscapePluginHostProxy* hostProxy = it->value;
         
         if (!hostProxy->isMenuBarVisible()) {
             // Make ourselves the front process.
             ProcessSerialNumber psn;
+#if COMPILER(CLANG)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
             GetCurrentProcess(&psn);
             SetFrontProcess(&psn);
+#if COMPILER(CLANG)
+#pragma clang diagnostic pop
+#endif
             return;
         }
     }

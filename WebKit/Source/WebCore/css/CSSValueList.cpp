@@ -22,7 +22,8 @@
 #include "CSSValueList.h"
 
 #include "CSSParserValues.h"
-#include "PlatformString.h"
+#include "WebCoreMemoryInstrumentation.h"
+#include <wtf/MemoryInstrumentationVector.h>
 #include <wtf/PassOwnPtr.h>
 #include <wtf/text/StringBuilder.h>
 
@@ -40,25 +41,15 @@ CSSValueList::CSSValueList(ValueListSeparator listSeparator)
     m_valueListSeparator = listSeparator;
 }
 
-CSSValueList::CSSValueList(CSSParserValueList* list)
+CSSValueList::CSSValueList(CSSParserValueList* parserValues)
     : CSSValue(ValueListClass)
 {
     m_valueListSeparator = SpaceSeparator;
-    if (list) {
-        size_t size = list->size();
-        for (unsigned i = 0; i < size; ++i)
-            append(list->valueAt(i)->createCSSValue());
+    if (parserValues) {
+        m_values.reserveInitialCapacity(parserValues->size());
+        for (unsigned i = 0; i < parserValues->size(); ++i)
+            m_values.uncheckedAppend(parserValues->valueAt(i)->createCSSValue());
     }
-}
-
-void CSSValueList::append(PassRefPtr<CSSValue> val)
-{
-    m_values.append(val);
-}
-
-void CSSValueList::prepend(PassRefPtr<CSSValue> val)
-{
-    m_values.prepend(val);
 }
 
 bool CSSValueList::removeAll(CSSValue* val)
@@ -136,11 +127,70 @@ String CSSValueList::customCssText() const
     return result.toString();
 }
 
-void CSSValueList::addSubresourceStyleURLs(ListHashSet<KURL>& urls, const CSSStyleSheet* styleSheet)
+#if ENABLE(CSS_VARIABLES)
+String CSSValueList::customSerializeResolvingVariables(const HashMap<AtomicString, String>& variables) const
+{
+    StringBuilder result;
+    String separator;
+    switch (m_valueListSeparator) {
+    case SpaceSeparator:
+        separator = " ";
+        break;
+    case CommaSeparator:
+        separator = ", ";
+        break;
+    case SlashSeparator:
+        separator = " / ";
+        break;
+    default:
+        ASSERT_NOT_REACHED();
+    }
+
+    unsigned size = m_values.size();
+    for (unsigned i = 0; i < size; i++) {
+        if (!result.isEmpty())
+            result.append(separator);
+        result.append(m_values[i]->serializeResolvingVariables(variables));
+    }
+
+    return result.toString();
+}
+#endif
+
+void CSSValueList::addSubresourceStyleURLs(ListHashSet<KURL>& urls, const StyleSheetContents* styleSheet) const
 {
     size_t size = m_values.size();
     for (size_t i = 0; i < size; ++i)
         m_values[i]->addSubresourceStyleURLs(urls, styleSheet);
+}
+
+bool CSSValueList::hasFailedOrCanceledSubresources() const
+{
+    for (unsigned i = 0; i < m_values.size(); ++i) {
+        if (m_values[i]->hasFailedOrCanceledSubresources())
+            return true;
+    }
+    return false;
+}
+
+CSSValueList::CSSValueList(const CSSValueList& cloneFrom)
+    : CSSValue(cloneFrom.classType(), /* isCSSOMSafe */ true)
+{
+    m_valueListSeparator = cloneFrom.m_valueListSeparator;
+    m_values.resize(cloneFrom.m_values.size());
+    for (unsigned i = 0; i < m_values.size(); ++i)
+        m_values[i] = cloneFrom.m_values[i]->cloneForCSSOM();
+}
+
+PassRefPtr<CSSValueList> CSSValueList::cloneForCSSOM() const
+{
+    return adoptRef(new CSSValueList(*this));
+}
+
+void CSSValueList::reportDescendantMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CSS);
+    info.addMember(m_values);
 }
 
 } // namespace WebCore

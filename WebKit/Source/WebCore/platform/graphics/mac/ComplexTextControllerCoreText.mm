@@ -24,8 +24,6 @@
 
 #include "config.h"
 
-#if USE(CORE_TEXT)
-
 #include "ComplexTextController.h"
 
 #include "Font.h"
@@ -33,13 +31,9 @@
 #include "TextRun.h"
 #include "WebCoreSystemInterface.h"
 
-#if PLATFORM(WX)
 #include <ApplicationServices/ApplicationServices.h>
-#else
-#include <CoreText/CoreText.h>
-#endif
 
-#if defined(BUILDING_ON_LEOPARD)
+#if !PLATFORM(IOS) && __MAC_OS_X_VERSION_MIN_REQUIRED == 1050
 // The following symbols are SPI in 10.5.
 extern "C" {
 void CTRunGetAdvances(CTRunRef run, CFRange range, CGSize buffer[]);
@@ -107,7 +101,9 @@ ComplexTextController::ComplexTextRun::ComplexTextRun(CTRunRef ctRun, const Simp
     , m_characters(characters)
     , m_stringLocation(stringLocation)
     , m_stringLength(stringLength)
+    , m_indexBegin(runRange.location)
     , m_indexEnd(runRange.location + runRange.length)
+    , m_isLTR(!(CTRunGetStatus(ctRun) & kCTRunStatusRightToLeft))
     , m_isMonotonic(true)
 {
     m_glyphCount = CTRunGetGlyphCount(ctRun);
@@ -135,7 +131,15 @@ ComplexTextController::ComplexTextRun::ComplexTextRun(CTRunRef ctRun, const Simp
 
 // Missing glyphs run constructor. Core Text will not generate a run of missing glyphs, instead falling back on
 // glyphs from LastResort. We want to use the primary font's missing glyph in order to match the fast text code path.
-void ComplexTextController::ComplexTextRun::createTextRunFromFontDataCoreText(bool ltr)
+ComplexTextController::ComplexTextRun::ComplexTextRun(const SimpleFontData* fontData, const UChar* characters, unsigned stringLocation, size_t stringLength, bool ltr)
+    : m_fontData(fontData)
+    , m_characters(characters)
+    , m_stringLocation(stringLocation)
+    , m_stringLength(stringLength)
+    , m_indexBegin(0)
+    , m_indexEnd(stringLength)
+    , m_isLTR(ltr)
+    , m_isMonotonic(true)
 {
     m_coreTextIndicesVector.reserveInitialCapacity(m_stringLength);
     unsigned r = 0;
@@ -180,15 +184,19 @@ static const UniChar* provideStringAndAttributes(CFIndex stringIndex, CFIndex* c
     return info->cp + stringIndex;
 }
 
-void ComplexTextController::collectComplexTextRunsForCharactersCoreText(const UChar* cp, unsigned length, unsigned stringLocation, const SimpleFontData* fontData)
+void ComplexTextController::collectComplexTextRunsForCharacters(const UChar* cp, unsigned length, unsigned stringLocation, const SimpleFontData* fontData)
 {
-    ASSERT_ARG(fontData, fontData);
+    if (!fontData) {
+        // Create a run of missing glyphs from the primary font.
+        m_complexTextRuns.append(ComplexTextRun::create(m_font.primaryFont(), cp, stringLocation, length, m_run.ltr()));
+        return;
+    }
 
     bool isSystemFallback = false;
 
     UChar32 baseCharacter = 0;
     RetainPtr<CFDictionaryRef> stringAttributes;
-    if (fontData == systemFallbackFontData()) {
+    if (fontData == SimpleFontData::systemFallback()) {
         // FIXME: This code path does not support small caps.
         isSystemFallback = true;
 
@@ -218,7 +226,7 @@ void ComplexTextController::collectComplexTextRunsForCharactersCoreText(const UC
         static CFDictionaryRef ltrTypesetterOptions = CFDictionaryCreate(kCFAllocatorDefault, optionKeys, ltrOptionValues, WTF_ARRAY_LENGTH(optionKeys), &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
         static CFDictionaryRef rtlTypesetterOptions = CFDictionaryCreate(kCFAllocatorDefault, optionKeys, rtlOptionValues, WTF_ARRAY_LENGTH(optionKeys), &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
         ProviderInfo info = { cp, length, stringAttributes.get() };
         RetainPtr<CTTypesetterRef> typesetter(AdoptCF, wkCreateCTTypesetterWithUniCharProviderAndOptions(&provideStringAndAttributes, 0, &info, m_run.ltr() ? ltrTypesetterOptions : rtlTypesetterOptions));
 #else
@@ -270,9 +278,19 @@ void ComplexTextController::collectComplexTextRunsForCharactersCoreText(const UC
                         m_complexTextRuns.append(ComplexTextRun::create(m_font.primaryFont(), cp, stringLocation + runRange.location, runRange.length, m_run.ltr()));
                         continue;
                     }
-                    runFontData = fontCache()->getCachedFontData(m_font.fontDescription(), fontName.get(), false, FontCache::DoNotRetain);
+                    runFontData = fontCache()->getCachedFontData(m_font.fontDescription(), fontName.get(), false, FontCache::DoNotRetain).get();
+#if !PLATFORM(WX)
+                    // Core Text may have used a font that is not known to NSFontManager. In that case, fall back on
+                    // using the font as returned, even though it may not have the best NSFontRenderingMode.
+                    if (!runFontData) {
+                        FontPlatformData runFontPlatformData((NSFont *)runFont, CTFontGetSize(runFont), m_font.fontDescription().usePrinterFont());
+                        runFontData = fontCache()->getCachedFontData(&runFontPlatformData, FontCache::DoNotRetain).get();
+                    }
+#else
+                    // just assert for now, until we can devise a better fix that works with wx.
+                    ASSERT(runFontData);
+#endif
                 }
-                ASSERT(runFontData);
                 if (m_fallbackFonts && runFontData != m_font.primaryFont())
                     m_fallbackFonts->add(runFontData);
             }
@@ -285,5 +303,3 @@ void ComplexTextController::collectComplexTextRunsForCharactersCoreText(const UC
 }
 
 } // namespace WebCore
-
-#endif // USE(CORE_TEXT)

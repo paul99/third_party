@@ -1,7 +1,7 @@
 Name: mesa
 Version: 7.9
 URL: http://www.mesa3d.org/
-License File: MesaLib/docs/COPYING
+License: MIT and LGPL v2
 Security Critical: Yes
 
 Description:
@@ -13,9 +13,12 @@ Ext headers       include/GL/glext.h
                   include/GL/glxext.h
 SGI GLU library   src/glu/sgi/
 
-The license is in MesaLib/docs/license.html.
- 
+The license file in this directory is derived from MesaLib/docs/license.html
+and MesaLib/docs/COPYING.
+
 Modifications made with initial commit:
+- Converted to utf-8 with: vim +"argdo write ++enc=utf-8" *.c
+
 - Added the file README.chromium (this file)
 
 Later modifications (see chromium.patch):
@@ -75,7 +78,7 @@ Later modifications (see chromium.patch):
 
 - Guarded all usage of EGL_Y_INVERTED_NOK with EGL_NOK_texture_from_pixmap
   so that it can be compiled against standard EGL 1.4 headers.
-  
+
 - Initialized uninitialized mask variable in eglconfig.c line 245.
 
 - Fixed compiler warning about cast to pointer from integer of different size
@@ -93,3 +96,26 @@ Later modifications (see chromium.patch):
   from gl_apinop.c.
   http://code.google.com/p/chromium/issues/detail?id=92568
   https://bugs.freedesktop.org/show_bug.cgi?id=40028
+
+- Merged fix for https://bugs.freedesktop.org/show_bug.cgi?id=51574
+  (commit b1802a2115323233352da558430e109ff187b8af)
+
+- Merged the replacement of memcpy() with memmove() in SHIFT_ARRAY declared in
+  s_span.c (commit a44d715d2b19dc2f8f48b01144cc38e4e2c5015a)
+
+- Suppressed the OOB read reported by AddressSanitizer in swizzle_for_size from
+  ir_to_mesa.cpp
+  https://code.google.com/p/chromium/issues/detail?id=139772
+  https://bugs.freedesktop.org/show_bug.cgi?id=52996
+  https://codereview.chromium.org/11549005/
+
+- Suppressed the OOB read reported by AddressSanitizer in _mesa_add_parameter
+  from prog_parameter.c
+  http://code.google.com/p/chromium/issues/detail?id=142316
+  https://codereview.chromium.org/11549005/
+
+- Fix the compile errors on Android
+
+- Added constants for GL_NVX_gpu_memory_info to glext.h
+
+- Added constants for GL_EXT_discard_framebuffer to glext.h

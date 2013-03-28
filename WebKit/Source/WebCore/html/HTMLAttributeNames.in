@@ -93,6 +93,7 @@ dir
 direction
 dirname
 disabled
+disposition
 download
 draggable
 webkitdropzone
@@ -157,12 +158,15 @@ multiple
 muted
 name
 nohref
+nonce
 noresize
 noshade
 novalidate
 nowrap
 object
 onabort
+onautocomplete
+onautocompleteerror
 onbeforecopy
 onbeforecut
 onbeforeload
@@ -248,6 +252,13 @@ onwebkitbeginfullscreen
 onwebkitendfullscreen
 onwebkitfullscreenchange
 onwebkitfullscreenerror
+onwebkitkeyadded
+onwebkitkeyerror
+onwebkitkeymessage
+onwebkitneedkey
+onwebkitsourceclose
+onwebkitsourceended
+onwebkitsourceopen
 onwebkittransitionend
 open
 optimum
@@ -263,9 +274,11 @@ primary
 profile
 progress
 prompt
+pseudo
 readonly
 rel
 required
+reset-style-inheritance
 results
 rev
 reversed
@@ -280,6 +293,7 @@ scoped
 scrollamount
 scrolldelay
 scrolling
+seamless
 select
 selected
 shape
@@ -292,6 +306,7 @@ x-webkit-speech
 x-webkit-grammar
 spellcheck
 src
+srcdoc
 srclang
 standby
 start
@@ -305,6 +320,7 @@ text
 title
 top
 topmargin
+translate
 truespeed
 type
 usemap

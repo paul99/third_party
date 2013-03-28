@@ -35,10 +35,10 @@
 
 #include "InspectorBaseAgent.h"
 #include "InspectorDebuggerAgent.h"
-#include "PlatformString.h"
 #include <wtf/HashMap.h>
 #include <wtf/PassOwnPtr.h>
 #include <wtf/RefCounted.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -54,7 +54,7 @@ class Node;
 
 typedef String ErrorString;
 
-class InspectorDOMDebuggerAgent : public InspectorBaseAgent<InspectorDOMDebuggerAgent>, public InspectorDebuggerAgent::Listener {
+class InspectorDOMDebuggerAgent : public InspectorBaseAgent<InspectorDOMDebuggerAgent>, public InspectorDebuggerAgent::Listener, public InspectorBackendDispatcher::DOMDebuggerCommandHandler {
     WTF_MAKE_NONCOPYABLE(InspectorDOMDebuggerAgent);
 public:
     static PassOwnPtr<InspectorDOMDebuggerAgent> create(InstrumentingAgents*, InspectorState*, InspectorDOMAgent*, InspectorDebuggerAgent*, InspectorAgent*);
@@ -62,17 +62,17 @@ public:
     virtual ~InspectorDOMDebuggerAgent();
 
     // DOMDebugger API for InspectorFrontend
-    void setXHRBreakpoint(ErrorString*, const String& url);
-    void removeXHRBreakpoint(ErrorString*, const String& url);
-    void setEventListenerBreakpoint(ErrorString*, const String& eventName);
-    void removeEventListenerBreakpoint(ErrorString*, const String& eventName);
-    void setInstrumentationBreakpoint(ErrorString*, const String& eventName);
-    void removeInstrumentationBreakpoint(ErrorString*, const String& eventName);
-    void setDOMBreakpoint(ErrorString*, int nodeId, const String& type);
-    void removeDOMBreakpoint(ErrorString*, int nodeId, const String& type);
+    virtual void setXHRBreakpoint(ErrorString*, const String& url);
+    virtual void removeXHRBreakpoint(ErrorString*, const String& url);
+    virtual void setEventListenerBreakpoint(ErrorString*, const String& eventName);
+    virtual void removeEventListenerBreakpoint(ErrorString*, const String& eventName);
+    virtual void setInstrumentationBreakpoint(ErrorString*, const String& eventName);
+    virtual void removeInstrumentationBreakpoint(ErrorString*, const String& eventName);
+    virtual void setDOMBreakpoint(ErrorString*, int nodeId, const String& type);
+    virtual void removeDOMBreakpoint(ErrorString*, int nodeId, const String& type);
 
     // InspectorInstrumentation API
-    void willInsertDOMNode(Node*, Node* parent);
+    void willInsertDOMNode(Node* parent);
     void didInvalidateStyleAttr(Node*);
     void didInsertDOMNode(Node*);
     void willRemoveDOMNode(Node*);
@@ -103,7 +103,6 @@ private:
 
     InspectorDOMAgent* m_domAgent;
     InspectorDebuggerAgent* m_debuggerAgent;
-    InspectorAgent* m_inspectorAgent;
     HashMap<Node*, uint32_t> m_domBreakpoints;
 };
 

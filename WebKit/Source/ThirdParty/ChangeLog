@@ -1,3 +1,139 @@
+2012-10-28  Mark Rowe  <mrowe@apple.com>
+
+        Simplify Xcode configuration settings that used to vary between OS versions.
+
+        Reviewed by Dan Bernstein.
+
+        * gtest/xcode/Config/General.xcconfig:
+
+2012-10-28  Mark Rowe  <mrowe@apple.com>
+
+        Remove references to unsupported OS and Xcode versions.
+
+        Reviewed by Anders Carlsson.
+
+        * gtest/xcode/Config/CompilerVersion.xcconfig: Removed.
+        * gtest/xcode/Config/General.xcconfig:
+
+2012-10-27  Dan Bernstein  <mitz@apple.com>
+
+        REAL_PLATFORM_NAME build setting is no longer needed
+        https://bugs.webkit.org/show_bug.cgi?id=100587
+
+        Reviewed by Mark Rowe.
+
+        Removed the definition of REAL_PLATFORM_NAME and replaced references to it with references
+        to PLATFORM_NAME.
+
+        * gtest/xcode/Config/CompilerVersion.xcconfig:
+        * gtest/xcode/Config/General.xcconfig:
+
+2012-08-23  Mark Rowe  <mrowe@apple.com>
+
+        Make gtest build with the latest version of clang.
+
+        Reviewed by Dan Bernstein.
+
+        * gtest/src/gtest-internal-inl.h:
+        (GTestFlagSaver): Remove an unused member.
+
+2012-07-03  Tony Chang  <tony@chromium.org>
+
+        [chromium] Unreviewed, update .gitignore to handle VS2010 files.
+
+        * glu/.gitignore:
+
+2012-06-27  Ryosuke Niwa  <rniwa@webkit.org>
+
+        Fix gcc build after r121302
+        https://bugs.webkit.org/show_bug.cgi?id=90055
+
+        Reviewed by Mark Rowe.
+
+        Assume RTTI is disabled so that gtest builds under XCode 3.2.6.
+
+        * gtest/xcode/Config/General.xcconfig:
+
+2012-04-30  Carlos Garcia Campos  <cgarcia@igalia.com>
+
+        Unreviewed. Fix make distcheck.
+
+        * gtest/GNUmakefile.am: Add source code files included by
+        gtest_all.cc to EXTRA_DIST.
+
+2012-04-26  Carlos Garcia Campos  <cgarcia@igalia.com>
+
+        [GTK] Build and run TestWebKitAPI WebKit2 unit tests
+        https://bugs.webkit.org/show_bug.cgi?id=84446
+
+        Reviewed by Philippe Normand.
+
+        * gtest/GNUmakefile.am: Do not build libgtestmain anymmore since
+        all tests use now a custom main to make sure WTF threads are
+        initialized.
+
+2012-04-24  Carlos Garcia Campos  <cgarcia@igalia.com>
+
+        [GTK] Build and run TestWebKitAPI unit tests
+        https://bugs.webkit.org/show_bug.cgi?id=84325
+
+        Reviewed by Philippe Normand.
+
+        * gtest/GNUmakefile.am: Added.
+
+2012-03-30  David Barr  <davidbarr@chromium.org>
+
+        Split up top-level .gitignore and .gitattributes
+        https://bugs.webkit.org/show_bug.cgi?id=82687
+
+        Reviewed by Tor Arne Vestbø.
+
+        * glu/.gitignore: Added.
+
+2012-03-09  Ashod Nakashian  <ashodnakashian@yahoo.com>
+
+        Bash scripts should support LF endings only
+        https://bugs.webkit.org/show_bug.cgi?id=79509
+
+        Reviewed by David Kilzer.
+
+        * gtest/xcode/Samples/FrameworkSample/runtests.sh: Added property svn:executable.
+        * gtest/xcode/Scripts/runtests.sh: Added property svn:executable.
+
+2012-03-08  Jessie Berlin  <jberlin@apple.com>
+
+        More Windows build fixing.
+
+        * gtest/msvc/gtest-md.vcproj:
+
+2012-03-07  Jessie Berlin  <jberlin@apple.com>
+
+        Clean Windows build fails after r110033
+        https://bugs.webkit.org/show_bug.cgi?id=80553
+
+        Rubber-stamped by Jon Honeycutt and Eric Seidel.
+
+        * gtest/msvc/gtest-md.vcproj:
+        Add the new JavaScriptCore include directory to the include path.
+
+2012-02-21  Sam Weinig  <sam@webkit.org>
+
+        Attempt to fix the Snow Leopard build.
+
+        * gtest/xcode/Config/General.xcconfig:
+
+2012-02-21  Sam Weinig  <sam@webkit.org>
+
+        Use libc++ when building with Clang on Mac
+        https://bugs.webkit.org/show_bug.cgi?id=78981
+
+        Reviewed by Dan Bernstein.
+
+        * gtest/xcode/Config/General.xcconfig:
+        In addition to enabling libc++ when building with Clang,
+        disable gtest's use of tr1::tuple, which doesn't exist in
+        libc++.
+
 2012-01-25  Mark Rowe  <mrowe@apple.com>
 
         Build in to an alternate location when USE_STAGING_INSTALL_PATH is set.

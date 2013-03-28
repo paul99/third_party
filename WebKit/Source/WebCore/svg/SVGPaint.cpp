@@ -26,6 +26,7 @@
 
 #include "SVGException.h"
 #include "SVGURIReference.h"
+#include "WebCoreMemoryInstrumentation.h"
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
@@ -97,6 +98,24 @@ String SVGPaint::customCssText() const
 
     ASSERT_NOT_REACHED();
     return String();
+}
+
+SVGPaint::SVGPaint(const SVGPaint& cloneFrom)
+    : SVGColor(SVGPaintClass, cloneFrom)
+    , m_paintType(cloneFrom.m_paintType)
+    , m_uri(cloneFrom.m_uri)
+{
+}
+
+PassRefPtr<SVGPaint> SVGPaint::cloneForCSSOM() const
+{
+    return adoptRef(new SVGPaint(*this));
+}
+
+void SVGPaint::reportDescendantMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CSS);
+    info.addMember(m_uri);
 }
 
 }

@@ -9,11 +9,16 @@
 // are documented in the header file.
 //
 
+#if defined(_MSC_VER)
+#pragma warning(disable: 4718)
+#endif
+
 #include "compiler/SymbolTable.h"
 
 #include <stdio.h>
-
 #include <algorithm>
+
+#include "common/angleutils.h"
 
 //
 // TType helper function needs a place to live.
@@ -52,7 +57,7 @@ void TType::buildMangledName(TString& mangledName)
     mangledName += static_cast<char>('0' + getNominalSize());
     if (isArray()) {
         char buf[20];
-        sprintf(buf, "%d", arraySize);
+        snprintf(buf, sizeof(buf), "%d", arraySize);
         mangledName += '[';
         mangledName += buf;
         mangledName += ']';

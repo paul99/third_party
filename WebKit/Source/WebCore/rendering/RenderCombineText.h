@@ -21,6 +21,7 @@
 #ifndef RenderCombineText_h
 #define RenderCombineText_h
 
+#include "Font.h"
 #include "RenderText.h"
 
 namespace WebCore {
@@ -31,7 +32,7 @@ public:
 
     void combineText();
     void adjustTextOrigin(FloatPoint& textOrigin, const FloatRect& boxRect) const;
-    void charactersToRender(int start, const UChar*& characters, int& length) const;
+    void getStringToRender(int, String& string, int& length) const;
     bool isCombined() const { return m_isCombined; }
     float combinedTextWidth(const Font& font) const { return font.size(); }
     const Font& originalFont() const { return parent()->style()->font(); }
@@ -41,7 +42,7 @@ private:
     virtual float width(unsigned from, unsigned length, const Font&, float xPosition, HashSet<const SimpleFontData*>* fallbackFonts = 0, GlyphOverflow* = 0) const;
     virtual const char* renderName() const { return "RenderCombineText"; }
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
-    virtual void setTextInternal(PassRefPtr<StringImpl>, int delta = 0);
+    virtual void setTextInternal(PassRefPtr<StringImpl>);
 
     float m_combinedTextWidth;
     bool m_isCombined : 1;

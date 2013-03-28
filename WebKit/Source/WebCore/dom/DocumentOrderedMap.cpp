@@ -34,7 +34,11 @@
 #include "Element.h"
 #include "HTMLMapElement.h"
 #include "HTMLNames.h"
+#include "NodeTraversal.h"
 #include "TreeScope.h"
+#include "WebCoreMemoryInstrumentation.h"
+#include <wtf/MemoryInstrumentationHashCountedSet.h>
+#include <wtf/MemoryInstrumentationHashMap.h>
 
 namespace WebCore {
 
@@ -42,7 +46,7 @@ using namespace HTMLNames;
 
 inline bool keyMatchesId(AtomicStringImpl* key, Element* element)
 {
-    return element->hasID() && element->getIdAttribute().impl() == key;
+    return element->getIdAttribute().impl() == key;
 }
 
 inline bool keyMatchesMapName(AtomicStringImpl* key, Element* element)
@@ -53,6 +57,11 @@ inline bool keyMatchesMapName(AtomicStringImpl* key, Element* element)
 inline bool keyMatchesLowercasedMapName(AtomicStringImpl* key, Element* element)
 {
     return element->hasTagName(mapTag) && static_cast<HTMLMapElement*>(element)->getName().lower().impl() == key;
+}
+
+inline bool keyMatchesLabelForAttribute(AtomicStringImpl* key, Element* element)
+{
+    return element->hasTagName(labelTag) && element->getAttribute(forAttr).impl() == key;
 }
 
 void DocumentOrderedMap::clear()
@@ -69,14 +78,14 @@ void DocumentOrderedMap::add(AtomicStringImpl* key, Element* element)
     if (!m_duplicateCounts.contains(key)) {
         // Fast path. The key is not already in m_duplicateCounts, so we assume that it's
         // also not already in m_map and try to add it. If that add succeeds, we're done.
-        pair<Map::iterator, bool> addResult = m_map.add(key, element);
-        if (addResult.second)
+        Map::AddResult addResult = m_map.add(key, element);
+        if (addResult.isNewEntry)
             return;
 
         // The add failed, so this key was already cached in m_map.
         // There are multiple elements with this key. Remove the m_map
         // cache for this key so get searches for it next time it is called.
-        m_map.remove(addResult.first);
+        m_map.remove(addResult.iterator);
         m_duplicateCounts.add(key);
     } else {
         // There are multiple elements with this key. Remove the m_map
@@ -98,7 +107,7 @@ void DocumentOrderedMap::remove(AtomicStringImpl* key, Element* element)
 
     m_map.checkConsistency();
     Map::iterator cachedItem = m_map.find(key);
-    if (cachedItem != m_map.end() && cachedItem->second == element)
+    if (cachedItem != m_map.end() && cachedItem->value == element)
         m_map.remove(cachedItem);
     else
         m_duplicateCounts.remove(key);
@@ -108,6 +117,7 @@ template<bool keyMatches(AtomicStringImpl*, Element*)>
 inline Element* DocumentOrderedMap::get(AtomicStringImpl* key, const TreeScope* scope) const
 {
     ASSERT(key);
+    ASSERT(scope);
 
     m_map.checkConsistency();
 
@@ -117,10 +127,7 @@ inline Element* DocumentOrderedMap::get(AtomicStringImpl* key, const TreeScope* 
 
     if (m_duplicateCounts.contains(key)) {
         // We know there's at least one node that matches; iterate to find the first one.
-        for (Node* node = scope->firstChild(); node; node = node->traverseNextNode()) {
-            if (!node->isElementNode())
-                continue;
-            element = static_cast<Element*>(node);
+        for (element = ElementTraversal::firstWithin(scope->rootNode()); element; element = ElementTraversal::next(element)) {
             if (!keyMatches(key, element))
                 continue;
             m_duplicateCounts.remove(key);
@@ -148,5 +155,16 @@ Element* DocumentOrderedMap::getElementByLowercasedMapName(AtomicStringImpl* key
     return get<keyMatchesLowercasedMapName>(key, scope);
 }
 
-} // namespace WebCore
+Element* DocumentOrderedMap::getElementByLabelForAttribute(AtomicStringImpl* key, const TreeScope* scope) const
+{
+    return get<keyMatchesLabelForAttribute>(key, scope);
+}
 
+void DocumentOrderedMap::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::DOM);
+    info.addMember(m_map);
+    info.addMember(m_duplicateCounts);
+}
+
+} // namespace WebCore

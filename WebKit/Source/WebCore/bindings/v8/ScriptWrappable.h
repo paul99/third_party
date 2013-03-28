@@ -31,29 +31,54 @@
 #ifndef ScriptWrappable_h
 #define ScriptWrappable_h
 
+#include "WebCoreMemoryInstrumentation.h"
 #include <v8.h>
 
 namespace WebCore {
 
 class ScriptWrappable {
 public:
-    ScriptWrappable() : m_wrapper(0) { }
+    ScriptWrappable() { }
 
-    v8::Persistent<v8::Object>* wrapper() const
+    v8::Persistent<v8::Object> wrapper() const
     {
-        return m_wrapper;
+        return v8::Persistent<v8::Object>(maskOrUnmaskPointer(*m_maskedWrapper));
     }
 
-    void setWrapper(v8::Persistent<v8::Object>* wrapper)
+    void setWrapper(v8::Persistent<v8::Object> wrapper)
     {
-        ASSERT(wrapper);
-        m_wrapper = wrapper;
+        m_maskedWrapper = maskOrUnmaskPointer(*wrapper);
     }
 
-    void clearWrapper() { m_wrapper = 0; }
+    void clearWrapper()
+    {
+        ASSERT(!m_maskedWrapper.IsEmpty());
+        m_maskedWrapper.Clear();
+    }
+
+    void disposeWrapper()
+    {
+        ASSERT(!m_maskedWrapper.IsEmpty());
+        m_maskedWrapper = wrapper();
+        m_maskedWrapper.Dispose();
+        m_maskedWrapper.Clear();
+    }
+
+    void reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+    {
+        MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::DOM);
+        info.addWeakPointer(const_cast<v8::Persistent<v8::Object>*>(&m_maskedWrapper));
+    }
 
 private:
-    v8::Persistent<v8::Object>* m_wrapper;
+    v8::Persistent<v8::Object> m_maskedWrapper;
+
+    static inline v8::Object* maskOrUnmaskPointer(const v8::Object* object)
+    {
+        const uintptr_t objectPointer = reinterpret_cast<uintptr_t>(object);
+        const uintptr_t randomMask = ~(reinterpret_cast<uintptr_t>(&WebCoreMemoryTypes::DOM) >> 13); // Entropy via ASLR.
+        return reinterpret_cast<v8::Object*>((objectPointer ^ randomMask) & (!objectPointer - 1)); // Preserve null without branching.
+    }
 };
 
 } // namespace WebCore

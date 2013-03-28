@@ -8,10 +8,10 @@
 
 
 #include "SkFontHost.h"
+#include "SkScalerContext.h"
 
 SkTypeface* SkFontHost::CreateTypeface(const SkTypeface* familyFace,
                                      const char famillyName[],
-                                     const void* data, size_t bytelength,
                                      SkTypeface::Style style) {
     SkDEBUGFAIL("SkFontHost::FindTypeface unimplemented");
     return NULL;
@@ -30,20 +30,17 @@ SkTypeface* SkFontHost::CreateTypefaceFromFile(char const*) {
 // static
 SkAdvancedTypefaceMetrics* SkFontHost::GetAdvancedTypefaceMetrics(
         uint32_t fontID,
-        SkAdvancedTypefaceMetrics::PerGlyphInfo perGlyphInfo) {
+        SkAdvancedTypefaceMetrics::PerGlyphInfo perGlyphInfo,
+        const uint32_t* glyphIDs,
+        uint32_t glyphIDsCount) {
     SkDEBUGFAIL("SkFontHost::GetAdvancedTypefaceMetrics unimplemented");
     return NULL;
 }
 
-void SkFontHost::FilterRec(SkScalerContext::Rec* rec) {
+void SkFontHost::FilterRec(SkScalerContext::Rec* rec, SkTypeface*) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-
-bool SkFontHost::ValidFontID(uint32_t uniqueID) {
-    SkDEBUGFAIL("SkFontHost::ResolveTypeface unimplemented");
-    return false;
-}
 
 SkStream* SkFontHost::OpenStream(uint32_t uniqueID) {
     SkDEBUGFAIL("SkFontHost::OpenStream unimplemented");
@@ -77,5 +74,3 @@ SkScalerContext* SkFontHost::CreateScalerContext(const SkDescriptor* desc) {
 SkFontID SkFontHost::NextLogicalFont(SkFontID currFontID, SkFontID origFontID) {
     return 0;
 }
-
-

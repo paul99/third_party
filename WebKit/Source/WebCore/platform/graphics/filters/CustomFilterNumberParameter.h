@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 Adobe Systems Incorporated. All Rights Reserved.
+ * Copyright (C) 2012 Adobe Systems Incorporated. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@
 #define CustomFilterNumberParameter_h
 
 #if ENABLE(CSS_SHADERS)
+#include "AnimationUtilities.h"
 #include "CustomFilterParameter.h"
 #include <wtf/Vector.h>
 
@@ -47,6 +48,27 @@ public:
     double valueAt(unsigned index) const { return m_data.at(index); }
 
     void addValue(double value) { m_data.append(value); }
+    
+    virtual PassRefPtr<CustomFilterParameter> blend(const CustomFilterParameter* from, double progress, const LayoutSize&)
+    {
+        if (!from || !isSameType(*from))
+            return this;
+        const CustomFilterNumberParameter* fromNumber = static_cast<const CustomFilterNumberParameter*>(from);
+        if (size() != fromNumber->size())
+            return this;
+        RefPtr<CustomFilterNumberParameter> result = CustomFilterNumberParameter::create(name());
+        for (size_t i = 0; i < size(); ++i)
+            result->addValue(WebCore::blend(fromNumber->valueAt(i), valueAt(i), progress));
+        return result.release();
+    }
+    
+    virtual bool operator==(const CustomFilterParameter& o) const
+    {
+        if (!isSameType(o))
+            return false;
+        const CustomFilterNumberParameter* other = static_cast<const CustomFilterNumberParameter*>(&o);
+        return m_data == other->m_data;
+    }
     
 private:
     CustomFilterNumberParameter(const String& name)

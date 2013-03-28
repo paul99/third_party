@@ -30,47 +30,95 @@
 #include "config.h"
 #include "FileSystem.h"
 
+#include "FileMetadata.h"
 #include "NotImplemented.h"
 #include "PathWalker.h"
+#include <wtf/CryptographicallyRandomNumber.h>
 #include <wtf/HashMap.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/WTFString.h>
 
 #include <windows.h>
-#include <winbase.h>
 #include <shlobj.h>
 #include <shlwapi.h>
 
 namespace WebCore {
 
-static bool statFile(String path, struct _stat64& st)
-{
-    ASSERT_ARG(path, !path.isNull());
-    return !_wstat64(path.charactersWithNullTermination(), &st) && (st.st_mode & _S_IFMT) == _S_IFREG;
-}
+static const ULONGLONG kSecondsFromFileTimeToTimet = 11644473600;
 
-bool getFileSize(const String& path, long long& result)
+static bool getFindData(String path, WIN32_FIND_DATAW& findData)
 {
-    struct _stat64 sb;
-    if (!statFile(path, sb))
+    HANDLE handle = FindFirstFileW(path.charactersWithNullTermination(), &findData);
+    if (handle == INVALID_HANDLE_VALUE)
         return false;
-    result = sb.st_size;
+    FindClose(handle);
     return true;
 }
 
-bool getFileModificationTime(const String& path, time_t& result)
+static bool getFileSizeFromFindData(const WIN32_FIND_DATAW& findData, long long& size)
 {
-    struct _stat64 st;
-    if (!statFile(path, st))
+    ULARGE_INTEGER fileSize;
+    fileSize.HighPart = findData.nFileSizeHigh;
+    fileSize.LowPart = findData.nFileSizeLow;
+
+    if (fileSize.QuadPart > static_cast<ULONGLONG>(std::numeric_limits<long long>::max()))
         return false;
-    result = st.st_mtime;
+
+    size = fileSize.QuadPart;
     return true;
 }
 
-bool fileExists(const String& path) 
+static void getFileModificationTimeFromFindData(const WIN32_FIND_DATAW& findData, time_t& time)
 {
-    struct _stat64 st;
-    return statFile(path, st);
+    ULARGE_INTEGER fileTime;
+    fileTime.HighPart = findData.ftLastWriteTime.dwHighDateTime;
+    fileTime.LowPart = findData.ftLastWriteTime.dwLowDateTime;
+
+    // Information about converting time_t to FileTime is available at http://msdn.microsoft.com/en-us/library/ms724228%28v=vs.85%29.aspx
+    time = fileTime.QuadPart / 10000000 - kSecondsFromFileTimeToTimet;
+}
+
+bool getFileSize(const String& path, long long& size)
+{
+    WIN32_FIND_DATAW findData;
+    if (!getFindData(path, findData))
+        return false;
+
+    return getFileSizeFromFindData(findData, size);
+}
+
+bool getFileModificationTime(const String& path, time_t& time)
+{
+    WIN32_FIND_DATAW findData;
+    if (!getFindData(path, findData))
+        return false;
+
+    getFileModificationTimeFromFindData(findData, time);
+    return true;
+}
+
+bool getFileMetadata(const String& path, FileMetadata& metadata)
+{
+    WIN32_FIND_DATAW findData;
+    if (!getFindData(path, findData))
+        return false;
+
+    if (!getFileSizeFromFindData(findData, metadata.length))
+        return false;
+
+    time_t modificationTime;
+    getFileModificationTimeFromFindData(findData, modificationTime);
+    metadata.modificationTime = modificationTime;
+
+    metadata.type = (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? FileMetadata::TypeDirectory : FileMetadata::TypeFile;
+
+    return true;
+}
+
+bool fileExists(const String& path)
+{
+    WIN32_FIND_DATAW findData;
+    return getFindData(path, findData);
 }
 
 bool deleteFile(const String& path)
@@ -104,10 +152,22 @@ String pathByAppendingComponent(const String& path, const String& component)
     return String::adopt(buffer);
 }
 
-CString fileSystemRepresentation(const String&)
+#if !USE(CF)
+
+CString fileSystemRepresentation(const String& path)
 {
-    return "";
+    const UChar* characters = path.characters();
+    int size = WideCharToMultiByte(CP_ACP, 0, characters, path.length(), 0, 0, 0, 0) - 1;
+
+    char* buffer;
+    CString string = CString::newUninitialized(size, buffer);
+
+    WideCharToMultiByte(CP_ACP, 0, characters, path.length(), buffer, size, 0, 0);
+
+    return string;
 }
+
+#endif // !USE(CF)
 
 bool makeAllDirectories(const String& path)
 {
@@ -145,8 +205,10 @@ String directoryName(const String& path)
 
 static String bundleName()
 {
+    DEFINE_STATIC_LOCAL(String, name, (ASCIILiteral("WebKit")));
+
+#if USE(CF)
     static bool initialized;
-    static String name = "WebKit";
 
     if (!initialized) {
         initialized = true;
@@ -156,6 +218,7 @@ static String bundleName()
                 if (CFGetTypeID(bundleExecutable) == CFStringGetTypeID())
                     name = reinterpret_cast<CFStringRef>(bundleExecutable);
     }
+#endif
 
     return name;
 }
@@ -168,7 +231,7 @@ static String storageDirectory(DWORD pathIdentifier)
     buffer.resize(wcslen(buffer.data()));
     String directory = String::adopt(buffer);
 
-    static const String companyNameDirectory = "Apple Computer\\";
+    DEFINE_STATIC_LOCAL(String, companyNameDirectory, (ASCIILiteral("Apple Computer\\")));
     directory = pathByAppendingComponent(directory, companyNameDirectory + bundleName());
     if (!makeAllDirectories(directory))
         return String();
@@ -182,7 +245,7 @@ static String cachedStorageDirectory(DWORD pathIdentifier)
 
     HashMap<DWORD, String>::iterator it = directories.find(pathIdentifier);
     if (it != directories.end())
-        return it->second;
+        return it->value;
 
     String directory = storageDirectory(pathIdentifier);
     directories.add(pathIdentifier, directory);
@@ -194,21 +257,16 @@ String openTemporaryFile(const String&, PlatformFileHandle& handle)
 {
     handle = INVALID_HANDLE_VALUE;
 
-    char tempPath[MAX_PATH];
-    int tempPathLength = ::GetTempPathA(WTF_ARRAY_LENGTH(tempPath), tempPath);
+    wchar_t tempPath[MAX_PATH];
+    int tempPathLength = ::GetTempPathW(WTF_ARRAY_LENGTH(tempPath), tempPath);
     if (tempPathLength <= 0 || tempPathLength > WTF_ARRAY_LENGTH(tempPath))
         return String();
 
-    HCRYPTPROV hCryptProv = 0;
-    if (!CryptAcquireContext(&hCryptProv, 0, 0, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT))
-        return String();
-
-    char proposedPath[MAX_PATH];
-    while (1) {
-        char tempFile[] = "XXXXXXXX.tmp"; // Use 8.3 style name (more characters aren't helpful due to 8.3 short file names)
+    String proposedPath;
+    do {
+        wchar_t tempFile[] = L"XXXXXXXX.tmp"; // Use 8.3 style name (more characters aren't helpful due to 8.3 short file names)
         const int randomPartLength = 8;
-        if (!CryptGenRandom(hCryptProv, randomPartLength, reinterpret_cast<BYTE*>(tempFile)))
-            break;
+        cryptographicallyRandomValues(tempFile, randomPartLength * sizeof(wchar_t));
 
         // Limit to valid filesystem characters, also excluding others that could be problematic, like punctuation.
         // don't include both upper and lowercase since Windows file systems are typically not case sensitive.
@@ -216,25 +274,20 @@ String openTemporaryFile(const String&, PlatformFileHandle& handle)
         for (int i = 0; i < randomPartLength; ++i)
             tempFile[i] = validChars[tempFile[i] % (sizeof(validChars) - 1)];
 
-        ASSERT(strlen(tempFile) == sizeof(tempFile) - 1);
+        ASSERT(wcslen(tempFile) == WTF_ARRAY_LENGTH(tempFile) - 1);
 
-        if (!PathCombineA(proposedPath, tempPath, tempFile))
+        proposedPath = pathByAppendingComponent(tempPath, tempFile);
+        if (proposedPath.isEmpty())
             break;
- 
+
         // use CREATE_NEW to avoid overwriting an existing file with the same name
-        handle = CreateFileA(proposedPath, GENERIC_READ | GENERIC_WRITE, 0, 0, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
-        if (!isHandleValid(handle) && GetLastError() == ERROR_ALREADY_EXISTS)
-            continue;
-
-        break;
-    }
-
-    CryptReleaseContext(hCryptProv, 0);
+        handle = ::CreateFileW(proposedPath.charactersWithNullTermination(), GENERIC_READ | GENERIC_WRITE, 0, 0, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, 0);
+    } while (!isHandleValid(handle) && GetLastError() == ERROR_ALREADY_EXISTS);
 
     if (!isHandleValid(handle))
         return String();
 
-    return String::fromUTF8(proposedPath);
+    return proposedPath;
 }
 
 PlatformFileHandle openFile(const String& path, FileOpenMode mode)
@@ -294,6 +347,8 @@ String roamingUserSpecificStorageDirectory()
     return cachedStorageDirectory(CSIDL_APPDATA);
 }
 
+#if USE(CF)
+
 bool safeCreateFile(const String& path, CFDataRef data)
 {
     // Create a temporary file.
@@ -323,6 +378,8 @@ bool safeCreateFile(const String& path, CFDataRef data)
 
     return true;
 }
+
+#endif // USE(CF)
 
 Vector<String> listDirectory(const String& directory, const String& filter)
 {

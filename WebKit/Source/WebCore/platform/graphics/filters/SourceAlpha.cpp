@@ -25,11 +25,10 @@
 #include "Color.h"
 #include "Filter.h"
 #include "GraphicsContext.h"
-#include "PlatformString.h"
 #include "RenderTreeAsText.h"
 #include "TextStream.h"
-
 #include <wtf/StdLibExtras.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -40,7 +39,7 @@ PassRefPtr<SourceAlpha> SourceAlpha::create(Filter* filter)
 
 const AtomicString& SourceAlpha::effectName()
 {
-    DEFINE_STATIC_LOCAL(const AtomicString, s_effectName, ("SourceAlpha"));
+    DEFINE_STATIC_LOCAL(const AtomicString, s_effectName, ("SourceAlpha", AtomicString::ConstructFromLiteral));
     return s_effectName;
 }
 
@@ -63,9 +62,8 @@ void SourceAlpha::platformApplySoftware()
 
     FloatRect imageRect(FloatPoint(), absolutePaintRect().size());
     GraphicsContext* filterContext = resultImage->context();
-    GraphicsContextStateSaver stateSaver(*filterContext);
-    filterContext->clipToImageBuffer(filter->sourceImage(), imageRect);
     filterContext->fillRect(imageRect, Color::black, ColorSpaceDeviceRGB);
+    filterContext->drawImageBuffer(filter->sourceImage(), ColorSpaceDeviceRGB, IntPoint(), CompositeDestinationIn);
 }
 
 void SourceAlpha::dump()

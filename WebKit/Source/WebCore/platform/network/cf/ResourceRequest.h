@@ -36,9 +36,7 @@ typedef const struct _CFURLRequest* CFURLRequestRef;
 
 OBJC_CLASS NSURLRequest;
 
-#if USE(CFURLSTORAGESESSIONS) && (defined(BUILDING_ON_SNOW_LEOPARD) || defined(BUILDING_ON_LEOPARD))
-typedef struct __CFURLStorageSession* CFURLStorageSessionRef;
-#elif USE(CFURLSTORAGESESSIONS)
+#if PLATFORM(MAC) || USE(CFNETWORK)
 typedef const struct __CFURLStorageSession* CFURLStorageSessionRef;
 #endif
 
@@ -96,7 +94,7 @@ namespace WebCore {
         NSURLRequest *nsURLRequest() const;
 #endif
 
-#if USE(CFURLSTORAGESESSIONS)
+#if PLATFORM(MAC) || USE(CFNETWORK)
         void setStorageSession(CFURLStorageSessionRef);
 #endif
 

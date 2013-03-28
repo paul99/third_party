@@ -29,14 +29,15 @@
 
 #include "BitmapImageSingleFrameSkia.h"
 #include "SkBlurImageFilter.h"
+#include "SkiaImageFilterBuilder.h"
 
 namespace WebCore {
 
-void FEGaussianBlur::platformApplySkia()
+bool FEGaussianBlur::platformApplySkia()
 {
     ImageBuffer* resultImage = createImageBufferResult();
     if (!resultImage)
-        return;
+        return false;
 
     FilterEffect* in = inputEffect(0);
 
@@ -51,13 +52,20 @@ void FEGaussianBlur::platformApplySkia()
 
     SkPaint paint;
     GraphicsContext* dstContext = resultImage->context();
-    SkCanvas* canvas = dstContext->platformContext()->canvas();
+    PlatformContextSkia* platformContext = dstContext->platformContext();
     paint.setImageFilter(new SkBlurImageFilter(stdX, stdY))->unref();
-    canvas->saveLayer(0, &paint);
+
+    platformContext->saveLayer(0, &paint);
     paint.setColor(0xFFFFFFFF);
     dstContext->drawImage(image.get(), ColorSpaceDeviceRGB, drawingRegion.location(), CompositeCopy);
-    canvas->restore();
-    return;
+    platformContext->restoreLayer();
+    return true;
+}
+
+SkImageFilter* FEGaussianBlur::createImageFilter(SkiaImageFilterBuilder* builder)
+{
+    SkAutoTUnref<SkImageFilter> input(builder->build(inputEffect(0)));
+    return new SkBlurImageFilter(SkFloatToScalar(m_stdX), SkFloatToScalar(m_stdY), input);
 }
 
 };

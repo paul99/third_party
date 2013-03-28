@@ -26,6 +26,7 @@
 
 #include "HTMLInputElement.h"
 #include "HTMLParserIdioms.h"
+#include "InputTypeNames.h"
 #include "LocalizedStrings.h"
 #include "RegularExpression.h"
 #include <wtf/PassOwnPtr.h>
@@ -92,11 +93,16 @@ bool EmailInputType::isEmailField() const
     return true;
 }
 
+bool EmailInputType::supportsSelectionAPI() const
+{
+    return false;
+}
+
 String EmailInputType::sanitizeValue(const String& proposedValue) const
 {
     String noLineBreakValue = proposedValue.removeCharacters(isHTMLLineBreak);
     if (!element()->multiple())
-        return noLineBreakValue;
+        return stripLeadingAndTrailingHTMLSpaces(noLineBreakValue);
     Vector<String> addresses;
     noLineBreakValue.split(',', true, addresses);
     StringBuilder strippedValue;

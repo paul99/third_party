@@ -31,10 +31,11 @@
 #ifndef BlobData_h
 #define BlobData_h
 
+#include "FileSystem.h"
 #include "KURL.h"
-#include "PlatformString.h"
 #include <wtf/Forward.h>
 #include <wtf/ThreadSafeRefCounted.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -59,14 +60,13 @@ private:
 
 struct BlobDataItem {
     static const long long toEndOfFile;
-    static const double doNotCheckFileChange;
 
     // Default constructor.
     BlobDataItem()
         : type(Data)
         , offset(0)
         , length(toEndOfFile)
-        , expectedModificationTime(doNotCheckFileChange)
+        , expectedModificationTime(invalidFileTime())
     {
     }
 
@@ -76,7 +76,7 @@ struct BlobDataItem {
         , data(data)
         , offset(0)
         , length(toEndOfFile)
-        , expectedModificationTime(doNotCheckFileChange)
+        , expectedModificationTime(invalidFileTime())
     {
     }
 
@@ -86,7 +86,7 @@ struct BlobDataItem {
         , path(path)
         , offset(0)
         , length(toEndOfFile)
-        , expectedModificationTime(doNotCheckFileChange)
+        , expectedModificationTime(invalidFileTime())
     {
     }
 
@@ -99,29 +99,48 @@ struct BlobDataItem {
         , expectedModificationTime(expectedModificationTime)
     {
     }
-    
+
     // Constructor for Blob type.
     BlobDataItem(const KURL& url, long long offset, long long length)
         : type(Blob)
         , url(url)
         , offset(offset)
         , length(length)
-        , expectedModificationTime(doNotCheckFileChange)
+        , expectedModificationTime(invalidFileTime())
     {
     }
+
+#if ENABLE(FILE_SYSTEM)
+    // Constructor for URL type (e.g. FileSystem files).
+    BlobDataItem(const KURL& url, long long offset, long long length, double expectedModificationTime)
+        : type(URL)
+        , url(url)
+        , offset(offset)
+        , length(length)
+        , expectedModificationTime(expectedModificationTime)
+    {
+    }
+#endif
 
     // Detaches from current thread so that it can be passed to another thread.
     void detachFromCurrentThread();
 
-    enum { Data, File, Blob } type;
-    
+    enum {
+        Data,
+        File,
+        Blob
+#if ENABLE(FILE_SYSTEM)
+        , URL
+#endif
+    } type;
+
     // For Data type.
     RefPtr<RawData> data;
 
     // For File type.
     String path;
 
-    // For Blob type.
+    // For Blob or URL type.
     KURL url;
 
     long long offset;
@@ -137,7 +156,7 @@ private:
         , data(data)
         , offset(offset)
         , length(length)
-        , expectedModificationTime(doNotCheckFileChange)
+        , expectedModificationTime(invalidFileTime())
     {
     }
 };
@@ -165,6 +184,9 @@ public:
     void appendFile(const String& path);
     void appendFile(const String& path, long long offset, long long length, double expectedModificationTime);
     void appendBlob(const KURL&, long long offset, long long length);
+#if ENABLE(FILE_SYSTEM)
+    void appendURL(const KURL&, long long offset, long long length, double expectedModificationTime);
+#endif
 
 private:
     friend class BlobRegistryImpl;

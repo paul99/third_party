@@ -28,6 +28,7 @@
 #if ENABLE(FULLSCREEN_API)
 
 #include "RenderDeprecatedFlexibleBox.h"
+#include "StyleInheritedData.h"
 
 namespace WebCore {
 
@@ -39,10 +40,10 @@ public:
 
     void setPlaceholder(RenderBlock*);
     RenderBlock* placeholder() { return m_placeholder; }
-    void createPlaceholder(PassRefPtr<RenderStyle>, const IntRect& frameRect);
+    void createPlaceholder(PassRefPtr<RenderStyle>, const LayoutRect& frameRect);
 
 
-    static RenderObject* wrapRenderer(RenderObject* renderer, Document*);
+    static RenderObject* wrapRenderer(RenderObject*, RenderObject*, Document*);
     void unwrapRenderer();
 
 private:

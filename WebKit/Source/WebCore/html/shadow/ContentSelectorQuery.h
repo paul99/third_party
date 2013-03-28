@@ -41,27 +41,39 @@ namespace WebCore {
 
 class Document;
 class Node;
-class HTMLContentElement;
+class InsertionPoint;
+
+class ContentSelectorChecker {
+public:
+    ContentSelectorChecker(Document*, bool strictParsing);
+
+    bool checkContentSelector(CSSSelector*, const Vector<RefPtr<Node> >& siblings, int nthNode) const;
+private:
+    SelectorChecker m_selectorChecker;
+};
+
+class ContentSelectorDataList {
+public:
+    void initialize(const CSSSelectorList&);
+    bool matches(const ContentSelectorChecker&, const Vector<RefPtr<Node> >& siblings, int nthNode) const;
+
+private:
+    Vector<CSSSelector*> m_selectors;
+};
 
 class ContentSelectorQuery {
     WTF_MAKE_NONCOPYABLE(ContentSelectorQuery);
 public:
-    explicit ContentSelectorQuery(const HTMLContentElement*);
+    explicit ContentSelectorQuery(InsertionPoint*);
 
-    bool isValidSelector() const;
-    bool matches(Node*) const;
+    bool matches(const Vector<RefPtr<Node> >& siblings, int nthNode) const;
 private:
-    bool validateSelectorList();
 
-    const HTMLContentElement* m_contentElement;
-    SelectorDataList m_selectors;
-    CSSSelectorList m_selectorList;
-    SelectorChecker m_selectorChecker;
-    bool m_isValidSelector;
+    InsertionPoint* m_insertionPoint;
+    ContentSelectorDataList m_selectors;
+    ContentSelectorChecker m_selectorChecker;
 };
 
 }
-
-
 
 #endif

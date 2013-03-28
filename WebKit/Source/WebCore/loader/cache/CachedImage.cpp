@@ -25,17 +25,18 @@
 #include "CachedImage.h"
 
 #include "BitmapImage.h"
-#include "MemoryCache.h"
+#include "CachedImageClient.h"
 #include "CachedResourceClient.h"
 #include "CachedResourceClientWalker.h"
 #include "CachedResourceLoader.h"
-#include "Frame.h"
 #include "FrameLoaderClient.h"
 #include "FrameLoaderTypes.h"
 #include "FrameView.h"
+#include "MemoryCache.h"
+#include "Page.h"
 #include "RenderObject.h"
+#include "ResourceBuffer.h"
 #include "Settings.h"
-#include "SharedBuffer.h"
 #include "SubresourceLoader.h"
 #include <wtf/CurrentTime.h>
 #include <wtf/StdLibExtras.h>
@@ -56,7 +57,6 @@ namespace WebCore {
 CachedImage::CachedImage(const ResourceRequest& resourceRequest)
     : CachedResource(resourceRequest, ImageResource)
     , m_image(0)
-    , m_decodedDataDeletionTimer(this, &CachedImage::decodedDataDeletionTimerFired)
     , m_shouldPaintBrokenImage(true)
 {
     setStatus(Unknown);
@@ -65,7 +65,6 @@ CachedImage::CachedImage(const ResourceRequest& resourceRequest)
 CachedImage::CachedImage(Image* image)
     : CachedResource(ResourceRequest(), ImageResource)
     , m_image(image)
-    , m_decodedDataDeletionTimer(this, &CachedImage::decodedDataDeletionTimerFired)
     , m_shouldPaintBrokenImage(true)
 {
     setStatus(Cached);
@@ -77,12 +76,6 @@ CachedImage::~CachedImage()
     clearImage();
 }
 
-void CachedImage::decodedDataDeletionTimerFired(Timer<CachedImage>*)
-{
-    ASSERT(!hasClients());
-    destroyDecodedData();
-}
-
 void CachedImage::load(CachedResourceLoader* cachedResourceLoader, const ResourceLoaderOptions& options)
 {
     if (!cachedResourceLoader || cachedResourceLoader->autoLoadImages())
@@ -91,23 +84,11 @@ void CachedImage::load(CachedResourceLoader* cachedResourceLoader, const Resourc
         setLoading(false);
 }
 
-void CachedImage::removeClientForRenderer(RenderObject* renderer)
-{
-#if ENABLE(SVG)
-    if (m_svgImageCache)
-        m_svgImageCache->removeRendererFromCache(renderer);
-#endif
-    removeClient(renderer);
-}
-
 void CachedImage::didAddClient(CachedResourceClient* c)
 {
-    if (m_decodedDataDeletionTimer.isActive())
-        m_decodedDataDeletionTimer.stop();
-    
     if (m_data && !m_image && !errorOccurred()) {
         createImage();
-        m_image->setData(m_data, true);
+        m_image->setData(m_data->sharedBuffer(), true);
     }
     
     ASSERT(c->resourceClientType() == CachedImageClient::expectedType());
@@ -117,25 +98,32 @@ void CachedImage::didAddClient(CachedResourceClient* c)
     CachedResource::didAddClient(c);
 }
 
+void CachedImage::didRemoveClient(CachedResourceClient* c)
+{
+    ASSERT(c->resourceClientType() == CachedImageClient::expectedType());
+#if ENABLE(SVG)
+    if (m_svgImageCache)
+        m_svgImageCache->removeClientFromCache(static_cast<CachedImageClient*>(c));
+#endif
+
+    CachedResource::didRemoveClient(c);
+}
+
 void CachedImage::allClientsRemoved()
 {
     if (m_image && !errorOccurred())
         m_image->resetAnimation();
-    if (double interval = memoryCache()->deadDecodedDataDeletionInterval())
-        m_decodedDataDeletionTimer.startOneShot(interval);
 }
 
 pair<Image*, float> CachedImage::brokenImage(float deviceScaleFactor) const
 {
-#if !OS(ANDROID) // FIXME: Provide a high-res missing image: http://b/5663192.
     if (deviceScaleFactor >= 2) {
         DEFINE_STATIC_LOCAL(Image*, brokenImageHiRes, (Image::loadPlatformResource("missingImage@2x").leakRef()));
-        return make_pair(brokenImageHiRes, 2);
+        return std::make_pair(brokenImageHiRes, 2);
     }
-#endif
 
     DEFINE_STATIC_LOCAL(Image*, brokenImageLoRes, (Image::loadPlatformResource("missingImage").leakRef()));
-    return make_pair(brokenImageLoRes, 1);
+    return std::make_pair(brokenImageLoRes, 1);
 }
 
 bool CachedImage::willPaintBrokenImage() const
@@ -205,7 +193,8 @@ void CachedImage::setContainerSizeForRenderer(const RenderObject* renderer, cons
         m_image->setContainerSize(containerSize);
         return;
     }
-    m_svgImageCache->setRequestedSizeAndZoom(renderer, SVGImageCache::SizeAndZoom(containerSize, containerZoom));
+
+    m_svgImageCache->setRequestedSizeAndScales(renderer, SVGImageCache::SizeAndScales(containerSize, containerZoom));
 #else
     UNUSED_PARAM(renderer);
     UNUSED_PARAM(containerZoom);
@@ -237,45 +226,47 @@ bool CachedImage::imageHasRelativeHeight() const
     return false;
 }
 
-IntSize CachedImage::imageSizeForRenderer(const RenderObject* renderer, float multiplier)
+LayoutSize CachedImage::imageSizeForRenderer(const RenderObject* renderer, float multiplier)
 {
     ASSERT(!isPurgeable());
 
     if (!m_image)
         return IntSize();
+
+    LayoutSize imageSize;
+
+    if (m_image->isBitmapImage() && (renderer && renderer->shouldRespectImageOrientation() == RespectImageOrientation))
+        imageSize = static_cast<BitmapImage*>(m_image.get())->sizeRespectingOrientation();
+    else
+        imageSize = m_image->size();
+
 #if ENABLE(SVG)
     if (m_image->isSVGImage()) {
-        // SVGImages already includes the zooming in its intrinsic size.
-        SVGImageCache::SizeAndZoom sizeAndZoom = m_svgImageCache->requestedSizeAndZoom(renderer);
-        if (sizeAndZoom.size.isEmpty())
-            return m_image->size();
-        if (sizeAndZoom.zoom == 1)
-            return sizeAndZoom.size;
-        if (multiplier == 1) {
-            // Consumer wants unscaled coordinates.
-            sizeAndZoom.size.setWidth(sizeAndZoom.size.width() / sizeAndZoom.zoom);
-            sizeAndZoom.size.setHeight(sizeAndZoom.size.height() / sizeAndZoom.zoom);
-            return sizeAndZoom.size;
+        SVGImageCache::SizeAndScales sizeAndScales = m_svgImageCache->requestedSizeAndScales(renderer);
+        if (!sizeAndScales.size.isEmpty()) {
+            float scale = sizeAndScales.scale;
+            if (!scale) {
+                Page* page = renderer->document()->page();
+                scale = page->deviceScaleFactor() * page->pageScaleFactor();
+            }
+
+            imageSize.setWidth(scale * sizeAndScales.size.width() / sizeAndScales.zoom);
+            imageSize.setHeight(scale * sizeAndScales.size.height() / sizeAndScales.zoom);
         }
-        return sizeAndZoom.size;
     }
-#else
-    UNUSED_PARAM(renderer);
 #endif
 
     if (multiplier == 1.0f)
-        return m_image->size();
+        return imageSize;
         
     // Don't let images that have a width/height >= 1 shrink below 1 when zoomed.
-    bool hasWidth = m_image->size().width() > 0;
-    bool hasHeight = m_image->size().height() > 0;
-    int width = m_image->size().width() * (m_image->hasRelativeWidth() ? 1.0f : multiplier);
-    int height = m_image->size().height() * (m_image->hasRelativeHeight() ? 1.0f : multiplier);
-    if (hasWidth)
-        width = max(1, width);
-    if (hasHeight)
-        height = max(1, height);
-    return IntSize(width, height);
+    float widthScale = m_image->hasRelativeWidth() ? 1.0f : multiplier;
+    float heightScale = m_image->hasRelativeHeight() ? 1.0f : multiplier;
+    LayoutSize minimumSize(imageSize.width() > 0 ? 1 : 0, imageSize.height() > 0 ? 1 : 0);
+    imageSize.scale(widthScale, heightScale);
+    imageSize.clampToMinimumSize(minimumSize);
+    ASSERT(multiplier != 1.0f || (imageSize.width().fraction() == 0.0f && imageSize.height().fraction() == 0.0f));
+    return imageSize;
 }
 
 void CachedImage::computeIntrinsicDimensions(Length& intrinsicWidth, Length& intrinsicHeight, FloatSize& intrinsicRatio)
@@ -348,7 +339,7 @@ size_t CachedImage::maximumDecodedImageSize()
     return settings ? settings->maximumDecodedImageSize() : 0;
 }
 
-void CachedImage::data(PassRefPtr<SharedBuffer> data, bool allDataReceived)
+void CachedImage::data(PassRefPtr<ResourceBuffer> data, bool allDataReceived)
 {
     m_data = data;
 
@@ -359,7 +350,7 @@ void CachedImage::data(PassRefPtr<SharedBuffer> data, bool allDataReceived)
     // Have the image update its data from its internal buffer.
     // It will not do anything now, but will delay decoding until 
     // queried for info (like size or specific image frames).
-    sizeAvailable = m_image->setData(m_data, allDataReceived);
+    sizeAvailable = m_image->setData(m_data ? m_data->sharedBuffer() : 0, allDataReceived);
 
     // Go ahead and tell our observers to try to draw if we have either
     // received all the data or the size is known.  Each chunk from the
@@ -394,12 +385,8 @@ void CachedImage::error(CachedResource::Status status)
 {
     checkShouldPaintBrokenImage();
     clear();
-    setStatus(status);
-    ASSERT(errorOccurred());
-    m_data.clear();
+    CachedResource::error(status);
     notifyObservers();
-    setLoading(false);
-    checkNotify();
 }
 
 void CachedImage::setResponse(const ResourceResponse& response)
@@ -476,6 +463,24 @@ void CachedImage::changedInRect(const Image* image, const IntRect& rect)
     }
 #endif
     notifyObservers(&rect);
+}
+
+void CachedImage::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CachedResourceImage);
+    CachedResource::reportMemoryUsage(memoryObjectInfo);
+    info.addMember(m_image);
+#if ENABLE(SVG)
+    info.addMember(m_svgImageCache);
+#endif
+}
+
+bool CachedImage::currentFrameHasAlpha(const RenderObject* renderer)
+{
+    Image* image = imageForRenderer(renderer);
+    if (image->isBitmapImage())
+        image->nativeImageForCurrentFrame(); // force decode
+    return image->currentFrameHasAlpha();
 }
 
 } // namespace WebCore

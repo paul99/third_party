@@ -37,6 +37,7 @@
 #endif
 
 #include "talk/base/basictypes.h"
+#include "talk/base/common.h"
 
 namespace talk_base {
 
@@ -45,13 +46,11 @@ class Event {
   Event(bool manual_reset, bool initially_signaled);
   ~Event();
 
-  bool Set();
-  bool Reset();
+  void Set();
+  void Reset();
   bool Wait(int cms);
 
  private:
-  bool EnsureInitialized();
-
   bool is_manual_reset_;
 
 #if defined(WIN32)
@@ -59,9 +58,7 @@ class Event {
   HANDLE event_handle_;
 #elif defined(POSIX)
   bool event_status_;
-  bool event_mutex_initialized_;
   pthread_mutex_t event_mutex_;
-  bool event_cond_initialized_;
   pthread_cond_t event_cond_;
 #endif
 };

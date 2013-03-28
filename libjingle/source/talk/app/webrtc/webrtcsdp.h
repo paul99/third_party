@@ -38,9 +38,6 @@
 #define TALK_APP_WEBRTC_WEBRTCSDP_H_
 
 #include <string>
-#include <vector>
-
-#include "talk/p2p/base/candidate.h"
 
 namespace cricket {
 class SessionDescription;
@@ -48,22 +45,36 @@ class SessionDescription;
 
 namespace webrtc {
 
-// Serializes the passed in SessionDescription and Candidates to an SDP string.
-// desc - The SessionDescription object to be serialized.
-// candidates - The Set of Candidate objects to be serialized.
-// return - SDP string serialized from the arguments.
-std::string SdpSerialize(const cricket::SessionDescription& desc,
-                         const std::vector<cricket::Candidate>& candidates);
+class IceCandidateInterface;
+class JsepIceCandidate;
+class JsepSessionDescription;
 
-// Deserializes the passed in SDP string to a SessionDescription and Candidates.
+// Serializes the passed in JsepSessionDescription.
+// Serialize SessionDescription including candidates if
+// JsepSessionDescription has candidates.
+// jdesc - The JsepSessionDescription object to be serialized.
+// return - SDP string serialized from the arguments.
+std::string SdpSerialize(const JsepSessionDescription& jdesc);
+
+// Serializes the passed in IceCandidateInterface to a SDP string.
+// candidate - The candidate to be serialized.
+std::string SdpSerializeCandidate(const IceCandidateInterface& candidate);
+
+// Deserializes the passed in SDP string to a JsepSessionDescription.
 // message - SDP string to be Deserialized.
-// desc - The SessionDescription object deserialized from the SDP string.
-// candidates - The set of Candidate deserialized from the SDP string.
+// jdesc - The JsepSessionDescription deserialized from the SDP string.
 // return - true on success, false on failure.
 bool SdpDeserialize(const std::string& message,
-                    cricket::SessionDescription* desc,
-                    std::vector<cricket::Candidate>* candidates);
+                    JsepSessionDescription* jdesc);
 
+// Deserializes the passed in SDP string to one JsepIceCandidate.
+// The first line must be a=candidate line and only the first line will be
+// parsed.
+// message - The SDP string to be Deserialized.
+// candidates - The JsepIceCandidate from the SDP string.
+// return - true on success, false on failure.
+bool SdpDeserializeCandidate(const std::string& message,
+                             JsepIceCandidate* candidate);
 }  // namespace webrtc
 
 #endif  // TALK_APP_WEBRTC_WEBRTCSDP_H_

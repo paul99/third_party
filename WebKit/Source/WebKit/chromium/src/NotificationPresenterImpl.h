@@ -31,19 +31,19 @@
 #ifndef NotificationPresenterImpl_h
 #define NotificationPresenterImpl_h
 
-#include "NotificationPresenter.h"
+#include "NotificationClient.h"
 #include "VoidCallback.h"
 
 #include <wtf/HashMap.h>
 #include <wtf/PassRefPtr.h>
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 
 namespace WebKit {
 
 class WebNotificationPresenter;
 
-class NotificationPresenterImpl : public WebCore::NotificationPresenter {
+class NotificationPresenterImpl : public WebCore::NotificationClient {
 public:
     NotificationPresenterImpl() : m_presenter(0) { }
 
@@ -55,8 +55,13 @@ public:
     virtual void cancel(WebCore::Notification* object);
     virtual void notificationObjectDestroyed(WebCore::Notification* object);
     virtual void notificationControllerDestroyed();
-    virtual WebCore::NotificationPresenter::Permission checkPermission(WebCore::ScriptExecutionContext*);
-    virtual void requestPermission(WebCore::ScriptExecutionContext* , WTF::PassRefPtr<WebCore::VoidCallback> callback);
+    virtual WebCore::NotificationClient::Permission checkPermission(WebCore::ScriptExecutionContext*);
+#if ENABLE(LEGACY_NOTIFICATIONS)
+    virtual void requestPermission(WebCore::ScriptExecutionContext*, WTF::PassRefPtr<WebCore::VoidCallback> callback);
+#endif
+#if ENABLE(NOTIFICATIONS)
+    virtual void requestPermission(WebCore::ScriptExecutionContext*, WTF::PassRefPtr<WebCore::NotificationPermissionCallback>);
+#endif
     virtual void cancelRequestsForPermission(WebCore::ScriptExecutionContext*) {}
 
 private:
@@ -66,6 +71,6 @@ private:
 
 } // namespace WebKit
 
-#endif // ENABLE(NOTIFICATIONS)
+#endif // ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 
 #endif

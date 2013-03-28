@@ -15,17 +15,16 @@
  *
  */
 
-#ifndef TALK_BASE_MD5_H__
-#define TALK_BASE_MD5_H__
+// Changes(fbarchard): Ported to C++ and Google style guide.
+// Made context first parameter in MD5Final for consistency with Sha1.
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#ifndef TALK_BASE_MD5_H_
+#define TALK_BASE_MD5_H_
 
-typedef long unsigned int uint32;
+#include "talk/base/basictypes.h"
+
+// Canonical name for a MD5 context structure, used in many crypto libs.
 typedef struct MD5Context MD5_CTX;
-
-#define md5byte unsigned char
 
 struct MD5Context {
   uint32 buf[4];
@@ -33,13 +32,9 @@ struct MD5Context {
   uint32 in[16];
 };
 
-void MD5Init(struct MD5Context *context);
-void MD5Update(struct MD5Context *context, md5byte const *buf, unsigned len);
-void MD5Final(unsigned char digest[16], struct MD5Context *context);
-void MD5Transform(uint32 buf[4], uint32 const in[16]);
+void MD5Init(MD5Context* context);
+void MD5Update(MD5Context* context, const uint8* data, size_t len);
+void MD5Final(MD5Context* context, uint8 digest[16]);
+void MD5Transform(uint32 buf[4], const uint32 in[16]);
 
-#ifdef __cplusplus
-};
-#endif
-
-#endif // TALK_BASE_MD5_H__
+#endif  // TALK_BASE_MD5_H_

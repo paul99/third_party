@@ -31,12 +31,17 @@
 #include "config.h"
 #include "WebInputElement.h"
 
+#include "ElementShadow.h"
+#include "HTMLDataListElement.h"
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
-#include "RenderObject.h"
-#include "RenderTextControlSingleLine.h"
+#include "ShadowRoot.h"
 #include "TextControlInnerElements.h"
-#include "platform/WebString.h"
+#include "TextFieldDecorationElement.h"
+#include "TextFieldDecoratorImpl.h"
+#include "WebNodeCollection.h"
+#include "WebTextFieldDecoratorClient.h"
+#include <public/WebString.h>
 #include <wtf/PassRefPtr.h>
 
 using namespace WebCore;
@@ -90,12 +95,22 @@ int WebInputElement::size() const
 
 void WebInputElement::setValue(const WebString& value, bool sendChangeEvent)
 {
-    unwrap<HTMLInputElement>()->setValue(value, sendChangeEvent);
+    unwrap<HTMLInputElement>()->setValue(value, sendChangeEvent ? DispatchChangeEvent : DispatchNoEvent);
 }
 
 WebString WebInputElement::value() const
 {
     return constUnwrap<HTMLInputElement>()->value();
+}
+
+WebString WebInputElement::editingValue() const
+{
+    return constUnwrap<HTMLInputElement>()->innerTextValue();
+}
+
+void WebInputElement::setEditingValue(const WebString& value)
+{
+    unwrap<HTMLInputElement>()->setEditingValue(value);
 }
 
 void WebInputElement::setSuggestedValue(const WebString& value)
@@ -110,12 +125,12 @@ WebString WebInputElement::suggestedValue() const
 
 void WebInputElement::setPlaceholder(const WebString& value)
 {
-    unwrap<HTMLInputElement>()->setPlaceholder(value);
+    unwrap<HTMLInputElement>()->setAttribute(HTMLNames::placeholderAttr, value);
 }
 
 WebString WebInputElement::placeholder() const
 {
-    return constUnwrap<HTMLInputElement>()->placeholder();
+    return constUnwrap<HTMLInputElement>()->fastGetAttribute(HTMLNames::placeholderAttr);
 }
 
 bool WebInputElement::isAutofilled() const
@@ -148,9 +163,34 @@ bool WebInputElement::isValidValue(const WebString& value) const
     return constUnwrap<HTMLInputElement>()->isValidValue(value);
 }
 
+void WebInputElement::setChecked(bool nowChecked, bool sendChangeEvent)
+{
+    unwrap<HTMLInputElement>()->setChecked(nowChecked, sendChangeEvent ? DispatchChangeEvent : DispatchNoEvent);
+}
+
 bool WebInputElement::isChecked() const
 {
     return constUnwrap<HTMLInputElement>()->checked();
+}
+
+bool WebInputElement::isMultiple() const
+{
+    return constUnwrap<HTMLInputElement>()->multiple();
+}
+
+WebNodeCollection WebInputElement::dataListOptions() const
+{
+#if ENABLE(DATALIST_ELEMENT)
+    HTMLDataListElement* dataList = static_cast<HTMLDataListElement*>(constUnwrap<HTMLInputElement>()->list());
+    if (dataList)
+        return WebNodeCollection(dataList->options());
+#endif
+    return WebNodeCollection();
+}
+
+WebString WebInputElement::localizeValue(const WebString& proposedValue) const
+{
+    return constUnwrap<HTMLInputElement>()->localizeValue(proposedValue);
 }
 
 bool WebInputElement::isSpeechInputEnabled() const
@@ -165,12 +205,7 @@ bool WebInputElement::isSpeechInputEnabled() const
 WebInputElement::SpeechInputState WebInputElement::getSpeechInputState() const
 {
 #if ENABLE(INPUT_SPEECH)
-    RenderObject* renderer = constUnwrap<HTMLInputElement>()->renderer();
-    if (!renderer)
-        return Idle;
-
-    RenderTextControlSingleLine* control = toRenderTextControlSingleLine(renderer);
-    InputFieldSpeechButtonElement* speechButton = toInputFieldSpeechButtonElement(control->speechButtonElement());
+    InputFieldSpeechButtonElement* speechButton = toInputFieldSpeechButtonElement(constUnwrap<HTMLInputElement>()->speechButtonElement());
     if (speechButton)
         return static_cast<WebInputElement::SpeechInputState>(speechButton->state());
 #endif
@@ -181,12 +216,7 @@ WebInputElement::SpeechInputState WebInputElement::getSpeechInputState() const
 void WebInputElement::startSpeechInput()
 {
 #if ENABLE(INPUT_SPEECH)
-    RenderObject* renderer = constUnwrap<HTMLInputElement>()->renderer();
-    if (!renderer)
-        return;
-
-    RenderTextControlSingleLine* control = toRenderTextControlSingleLine(renderer);
-    InputFieldSpeechButtonElement* speechButton = toInputFieldSpeechButtonElement(control->speechButtonElement());
+    InputFieldSpeechButtonElement* speechButton = toInputFieldSpeechButtonElement(constUnwrap<HTMLInputElement>()->speechButtonElement());
     if (speechButton)
         speechButton->startSpeechInput();
 #endif
@@ -195,12 +225,7 @@ void WebInputElement::startSpeechInput()
 void WebInputElement::stopSpeechInput()
 {
 #if ENABLE(INPUT_SPEECH)
-    RenderObject* renderer = constUnwrap<HTMLInputElement>()->renderer();
-    if (!renderer)
-        return;
-
-    RenderTextControlSingleLine* control = toRenderTextControlSingleLine(renderer);
-    InputFieldSpeechButtonElement* speechButton = toInputFieldSpeechButtonElement(control->speechButtonElement());
+    InputFieldSpeechButtonElement* speechButton = toInputFieldSpeechButtonElement(constUnwrap<HTMLInputElement>()->speechButtonElement());
     if (speechButton)
         speechButton->stopSpeechInput();
 #endif
@@ -209,6 +234,18 @@ void WebInputElement::stopSpeechInput()
 int WebInputElement::defaultMaxLength()
 {
     return HTMLInputElement::maximumLength;
+}
+
+WebElement WebInputElement::decorationElementFor(WebTextFieldDecoratorClient* decoratorClient)
+{
+    ShadowRoot* shadowRoot = unwrap<HTMLInputElement>()->youngestShadowRoot();
+    while (shadowRoot) {
+        TextFieldDecorationElement* decoration = TextFieldDecorationElement::fromShadowRoot(shadowRoot);
+        if (decoration && decoratorClient->isClientFor(decoration->textFieldDecorator()))
+            return WebElement(decoration);
+        shadowRoot = shadowRoot->olderShadowRoot();
+    }
+    return WebElement();
 }
 
 WebInputElement::WebInputElement(const PassRefPtr<HTMLInputElement>& elem)
@@ -235,5 +272,4 @@ WebInputElement* toWebInputElement(WebElement* webElement)
 
     return static_cast<WebInputElement*>(webElement);
 }
-
 } // namespace WebKit

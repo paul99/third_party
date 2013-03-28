@@ -27,8 +27,9 @@
 #include "WebKeyValueStorageManagerProxy.h"
 
 #include "SecurityOriginData.h"
-#include "WebKeyValueStorageManagerMessages.h"
 #include "WebContext.h"
+#include "WebKeyValueStorageManagerMessages.h"
+#include "WebKeyValueStorageManagerProxyMessages.h"
 #include "WebSecurityOrigin.h"
 
 namespace WebKit {
@@ -41,6 +42,7 @@ PassRefPtr<WebKeyValueStorageManagerProxy> WebKeyValueStorageManagerProxy::creat
 WebKeyValueStorageManagerProxy::WebKeyValueStorageManagerProxy(WebContext* context)
     : m_webContext(context)
 {
+    m_webContext->addMessageReceiver(Messages::WebKeyValueStorageManagerProxy::messageReceiverName(), this);
 }
 
 WebKeyValueStorageManagerProxy::~WebKeyValueStorageManagerProxy()
@@ -57,9 +59,9 @@ bool WebKeyValueStorageManagerProxy::shouldTerminate(WebProcessProxy*) const
     return m_arrayCallbacks.isEmpty();
 }
 
-void WebKeyValueStorageManagerProxy::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::ArgumentDecoder* arguments)
+void WebKeyValueStorageManagerProxy::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
 {
-    didReceiveWebKeyValueStorageManagerProxyMessage(connection, messageID, arguments);
+    didReceiveWebKeyValueStorageManagerProxyMessage(connection, messageID, decoder);
 }
 
 void WebKeyValueStorageManagerProxy::getKeyValueStorageOrigins(PassRefPtr<ArrayCallback> prpCallback)
@@ -68,7 +70,7 @@ void WebKeyValueStorageManagerProxy::getKeyValueStorageOrigins(PassRefPtr<ArrayC
     uint64_t callbackID = callback->callbackID();
     m_arrayCallbacks.set(callbackID, callback.release());
 
-    // FIXME (Multi-WebProcess): Should key-value storage be handled in the web process?
+    // FIXME (Multi-WebProcess): <rdar://problem/12239765> Should key-value storage be handled in the web process?
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebKeyValueStorageManager::GetKeyValueStorageOrigins(callbackID));
 }
     
@@ -85,13 +87,13 @@ void WebKeyValueStorageManagerProxy::deleteEntriesForOrigin(WebSecurityOrigin* o
     securityOriginData.host = origin->host();
     securityOriginData.port = origin->port();
 
-    // FIXME (Multi-WebProcess): Should key-value storage be handled in the web process?
+    // FIXME (Multi-WebProcess): <rdar://problem/12239765> Should key-value storage be handled in the web process?
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebKeyValueStorageManager::DeleteEntriesForOrigin(securityOriginData));
 }
 
 void WebKeyValueStorageManagerProxy::deleteAllEntries()
 {
-    // FIXME (Multi-WebProcess): Should key-value storage be handled in the web process?
+    // FIXME (Multi-WebProcess): <rdar://problem/12239765> Should key-value storage be handled in the web process?
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebKeyValueStorageManager::DeleteAllEntries());
 }
 

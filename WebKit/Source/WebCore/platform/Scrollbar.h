@@ -26,6 +26,7 @@
 #ifndef Scrollbar_h
 #define Scrollbar_h
 
+#include "ScrollbarThemeClient.h"
 #include "ScrollTypes.h"
 #include "Timer.h"
 #include "Widget.h"
@@ -40,12 +41,63 @@ class PlatformMouseEvent;
 class ScrollableArea;
 class ScrollbarTheme;
 
-class Scrollbar : public Widget {
+#if ENABLE(GESTURE_EVENTS)
+class PlatformGestureEvent;
+#endif
+
+class Scrollbar : public Widget,
+                  public ScrollbarThemeClient {
+
 public:
     // Must be implemented by platforms that can't simply use the Scrollbar base class.  Right now the only platform that is not using the base class is GTK.
     static PassRefPtr<Scrollbar> createNativeScrollbar(ScrollableArea*, ScrollbarOrientation orientation, ScrollbarControlSize size);
 
     virtual ~Scrollbar();
+
+    // ScrollbarThemeClient implementation.
+    virtual int x() const { return Widget::x(); }
+    virtual int y() const { return Widget::y(); }
+    virtual int width() const { return Widget::width(); }
+    virtual int height() const { return Widget::height(); }
+    virtual IntSize size() const { return Widget::size(); }
+    virtual IntPoint location() const { return Widget::location(); }
+
+    virtual ScrollView* parent() const { return Widget::parent(); }
+    virtual ScrollView* root() const { return Widget::root(); }
+
+    virtual void setFrameRect(const IntRect&);
+    virtual IntRect frameRect() const { return Widget::frameRect(); }
+
+    virtual void invalidate() { Widget::invalidate(); }
+    virtual void invalidateRect(const IntRect&);
+
+    virtual ScrollbarOverlayStyle scrollbarOverlayStyle() const;
+    virtual void getTickmarks(Vector<IntRect>&) const;
+    virtual bool isScrollableAreaActive() const;
+    virtual bool isScrollViewScrollbar() const;
+
+    virtual IntPoint convertFromContainingWindow(const IntPoint& windowPoint) { return Widget::convertFromContainingWindow(windowPoint); }
+
+    virtual bool isCustomScrollbar() const { return false; }
+    virtual ScrollbarOrientation orientation() const { return m_orientation; }
+
+    virtual int value() const { return lroundf(m_currentPos); }
+    virtual float currentPos() const { return m_currentPos; }
+    virtual int visibleSize() const { return m_visibleSize; }
+    virtual int totalSize() const { return m_totalSize; }
+    virtual int maximum() const { return m_totalSize - m_visibleSize; }
+    virtual ScrollbarControlSize controlSize() const { return m_controlSize; }
+
+    virtual int lineStep() const { return m_lineStep; }
+    virtual int pageStep() const { return m_pageStep; }
+
+    virtual ScrollbarPart pressedPart() const { return m_pressedPart; }
+    virtual ScrollbarPart hoveredPart() const { return m_hoveredPart; }
+
+    virtual void styleChanged() { }
+
+    virtual bool enabled() const { return m_enabled; }
+    virtual void setEnabled(bool);
 
     // Called by the ScrollableArea when the scroll offset changes.
     void offsetDidChange();
@@ -57,39 +109,27 @@ public:
     void disconnectFromScrollableArea() { m_scrollableArea = 0; }
     ScrollableArea* scrollableArea() const { return m_scrollableArea; }
 
-    virtual bool isCustomScrollbar() const { return false; }
-    ScrollbarOrientation orientation() const { return m_orientation; }
-
-    int value() const { return lroundf(m_currentPos); }
-    float currentPos() const { return m_currentPos; }
     int pressedPos() const { return m_pressedPos; }
-    int visibleSize() const { return m_visibleSize; }
-    int totalSize() const { return m_totalSize; }
-    int maximum() const { return m_totalSize - m_visibleSize; }        
-    ScrollbarControlSize controlSize() const { return m_controlSize; }
 
-    int lineStep() const { return m_lineStep; }
-    int pageStep() const { return m_pageStep; }
     float pixelStep() const { return m_pixelStep; }
 
-    ScrollbarPart pressedPart() const { return m_pressedPart; }
-    ScrollbarPart hoveredPart() const { return m_hoveredPart; }
     virtual void setHoveredPart(ScrollbarPart);
     virtual void setPressedPart(ScrollbarPart);
 
     void setSteps(int lineStep, int pageStep, int pixelsPerStep = 1);
     void setProportion(int visibleSize, int totalSize);
     void setPressedPos(int p) { m_pressedPos = p; }
-    
-    virtual void paint(GraphicsContext*, const IntRect& damageRect);
 
-    bool enabled() const { return m_enabled; }
-    virtual void setEnabled(bool e);
+    virtual void paint(GraphicsContext*, const IntRect& damageRect);
 
     virtual bool isOverlayScrollbar() const;
     bool shouldParticipateInHitTesting();
 
     bool isWindowActive() const;
+
+#if ENABLE(GESTURE_EVENTS)
+    bool gestureEvent(const PlatformGestureEvent&);
+#endif
 
     // These methods are used for platform scrollbars to give :hover feedback.  They will not get called
     // when the mouse went down in a scrollbar, since it is assumed the scrollbar will start
@@ -97,36 +137,29 @@ public:
     bool mouseMoved(const PlatformMouseEvent&);
     void mouseEntered();
     bool mouseExited();
-    
+
     // Used by some platform scrollbars to know when they've been released from capture.
     bool mouseUp(const PlatformMouseEvent&);
 
     bool mouseDown(const PlatformMouseEvent&);
 
-#if PLATFORM(QT)
-    // For platforms that wish to handle context menu events.
-    // FIXME: This is misplaced.  Normal hit testing should be used to populate a correct
-    // context menu.  There's no reason why the scrollbar should have to do it.
-    bool contextMenu(const PlatformMouseEvent& event);
-#endif
-
     ScrollbarTheme* theme() const { return m_theme; }
 
     virtual void setParent(ScrollView*);
-    virtual void setFrameRect(const IntRect&);
 
-    virtual void invalidateRect(const IntRect&);
-    
     bool suppressInvalidation() const { return m_suppressInvalidation; }
     void setSuppressInvalidation(bool s) { m_suppressInvalidation = s; }
 
-    virtual void styleChanged() { }
-
     virtual IntRect convertToContainingView(const IntRect&) const;
     virtual IntRect convertFromContainingView(const IntRect&) const;
-    
+
     virtual IntPoint convertToContainingView(const IntPoint&) const;
     virtual IntPoint convertFromContainingView(const IntPoint&) const;
+
+    void moveThumb(int pos, bool draggingDocument = false);
+
+    virtual bool isAlphaLocked() const { return m_isAlphaLocked; }
+    virtual void setIsAlphaLocked(bool flag) { m_isAlphaLocked = flag; }
 
 protected:
     Scrollbar(ScrollableArea*, ScrollbarOrientation, ScrollbarControlSize, ScrollbarTheme* = 0);
@@ -142,8 +175,6 @@ protected:
     ScrollDirection pressedPartScrollDirection();
     ScrollGranularity pressedPartScrollGranularity();
     
-    void moveThumb(int pos, bool draggingDocument = false);
-
     ScrollableArea* m_scrollableArea;
     ScrollbarOrientation m_orientation;
     ScrollbarControlSize m_controlSize;
@@ -160,6 +191,7 @@ protected:
     ScrollbarPart m_hoveredPart;
     ScrollbarPart m_pressedPart;
     int m_pressedPos;
+    float m_scrollPos;
     bool m_draggingDocument;
     int m_documentDragPos;
 
@@ -167,8 +199,10 @@ protected:
 
     Timer<Scrollbar> m_scrollTimer;
     bool m_overlapsResizer;
-    
+
     bool m_suppressInvalidation;
+
+    bool m_isAlphaLocked;
 
 private:
     virtual bool isScrollbar() const { return true; }

@@ -252,6 +252,10 @@ class MemoryRegionMap {
   static RegionIterator BeginRegionLocked();
   static RegionIterator EndRegionLocked();
 
+  // Return the accumulated sizes of mapped and unmapped regions.
+  static int64 MapSize() { return map_size_; }
+  static int64 UnmapSize() { return unmap_size_; }
+
   // Effectively private type from our .cc =================================
   // public to let us declare global objects:
   union RegionSetRep;
@@ -286,6 +290,11 @@ class MemoryRegionMap {
   // The thread id of the thread that's inside the recursive lock.
   static pthread_t lock_owner_tid_;
 
+  // Total size of all mapped pages so far
+  static int64 map_size_;
+  // Total size of all unmapped pages so far
+  static int64 unmap_size_;
+
   // helpers ==================================================================
 
   // Helper for FindRegion and FindAndMarkStackRegion:
@@ -319,7 +328,7 @@ class MemoryRegionMap {
   static void MremapHook(const void* result, const void* old_addr,
                          size_t old_size, size_t new_size, int flags,
                          const void* new_addr);
-  static void SbrkHook(const void* result, std::ptrdiff_t increment);
+  static void SbrkHook(const void* result, ptrdiff_t increment);
 
   // Log all memory regions; Useful for debugging only.
   // Assumes Lock() is held

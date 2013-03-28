@@ -29,43 +29,50 @@
 
 #include "hb-private.hh"
 
-#include "hb-ot-shape.h"
-
 #include "hb-ot-map-private.hh"
-#include "hb-ot-shape-complex-private.hh"
 
 
 
-enum hb_ot_complex_shaper_t;
+/* buffer var allocations, used during the entire shaping process */
+#define unicode_props0()	var2.u8[0]
+#define unicode_props1()	var2.u8[1]
+
+
 
 struct hb_ot_shape_plan_t
 {
-  friend struct hb_ot_shape_planner_t;
-
+  hb_segment_properties_t props;
+  const struct hb_ot_complex_shaper_t *shaper;
   hb_ot_map_t map;
-  hb_ot_complex_shaper_t shaper;
+  const void *data;
 
-  hb_ot_shape_plan_t (void) : map () {}
-  ~hb_ot_shape_plan_t (void) { map.finish (); }
+  inline void substitute_closure (hb_face_t *face, hb_set_t *glyphs) const { map.substitute_closure (this, face, glyphs); }
+  inline void substitute (hb_font_t *font, hb_buffer_t *buffer) const { map.substitute (this, font, buffer); }
+  inline void position (hb_font_t *font, hb_buffer_t *buffer) const { map.position (this, font, buffer); }
 
-  private:
-  NO_COPY (hb_ot_shape_plan_t);
+  void finish (void) { map.finish (); }
 };
 
 struct hb_ot_shape_planner_t
 {
+  /* In the order that they are filled in. */
+  hb_face_t *face;
+  hb_segment_properties_t props;
+  const struct hb_ot_complex_shaper_t *shaper;
   hb_ot_map_builder_t map;
-  hb_ot_complex_shaper_t shaper;
 
-  hb_ot_shape_planner_t (void) : map () {}
+  hb_ot_shape_planner_t (const hb_shape_plan_t *master_plan) :
+			 face (master_plan->face),
+			 props (master_plan->props),
+			 shaper (NULL),
+			 map () {}
   ~hb_ot_shape_planner_t (void) { map.finish (); }
 
-  inline void compile (hb_face_t *face,
-		       const hb_segment_properties_t *props,
-		       struct hb_ot_shape_plan_t &plan)
+  inline void compile (hb_ot_shape_plan_t &plan)
   {
+    plan.props = props;
     plan.shaper = shaper;
-    map.compile (face, props, plan.map);
+    map.compile (face, &props, plan.map);
   }
 
   private:
@@ -73,57 +80,37 @@ struct hb_ot_shape_planner_t
 };
 
 
-struct hb_ot_shape_context_t
+
+inline void
+_hb_glyph_info_set_unicode_props (hb_glyph_info_t *info, hb_unicode_funcs_t *unicode)
 {
-  /* Input to hb_ot_shape_execute() */
-  hb_ot_shape_plan_t *plan;
-  hb_font_t *font;
-  hb_face_t *face;
-  hb_buffer_t  *buffer;
-  const hb_feature_t *user_features;
-  unsigned int        num_user_features;
-
-  /* Transient stuff */
-  hb_direction_t target_direction;
-  hb_bool_t applied_substitute_complex;
-  hb_bool_t applied_position_complex;
-};
-
-
-static inline hb_bool_t
-is_variation_selector (hb_codepoint_t unicode)
-{
-  return unlikely ((unicode >=  0x180B && unicode <=  0x180D) || /* MONGOLIAN FREE VARIATION SELECTOR ONE..THREE */
-		   (unicode >=  0xFE00 && unicode <=  0xFE0F) || /* VARIATION SELECTOR-1..16 */
-		   (unicode >= 0xE0100 && unicode <= 0xE01EF));  /* VARIATION SELECTOR-17..256 */
+  info->unicode_props0() = ((unsigned int) unicode->general_category (info->codepoint)) |
+			   (unicode->is_default_ignorable (info->codepoint) ? 0x80 : 0);
+  info->unicode_props1() = unicode->modified_combining_class (info->codepoint);
 }
 
-static inline unsigned int
-_hb_unicode_modified_combining_class (hb_unicode_funcs_t *ufuncs,
-				      hb_codepoint_t      unicode)
+inline hb_unicode_general_category_t
+_hb_glyph_info_get_general_category (const hb_glyph_info_t *info)
 {
-  int c = hb_unicode_combining_class (ufuncs, unicode);
-
-  /* Modify the combining-class to suit Arabic better.  See:
-   * http://unicode.org/faq/normalization.html#8
-   * http://unicode.org/faq/normalization.html#9
-   */
-  if (unlikely (hb_in_range<int> (c, 27, 33)))
-    c = c == 33 ? 27 : c + 1;
-
-  return c;
+  return (hb_unicode_general_category_t) (info->unicode_props0() & 0x7F);
 }
 
-static inline void
-hb_glyph_info_set_unicode_props (hb_glyph_info_t *info, hb_unicode_funcs_t *unicode)
+inline void
+_hb_glyph_info_set_modified_combining_class (hb_glyph_info_t *info, unsigned int modified_class)
 {
-  info->general_category() = hb_unicode_general_category (unicode, info->codepoint);
-  info->combining_class() = _hb_unicode_modified_combining_class (unicode, info->codepoint);
+  info->unicode_props1() = modified_class;
 }
 
-HB_INTERNAL void _hb_set_unicode_props (hb_buffer_t *buffer);
+inline unsigned int
+_hb_glyph_info_get_modified_combining_class (const hb_glyph_info_t *info)
+{
+  return info->unicode_props1();
+}
 
-HB_INTERNAL void _hb_ot_shape_normalize (hb_ot_shape_context_t *c);
-
+inline hb_bool_t
+_hb_glyph_info_is_default_ignorable (const hb_glyph_info_t *info)
+{
+  return !!(info->unicode_props0() & 0x80);
+}
 
 #endif /* HB_OT_SHAPE_PRIVATE_HH */

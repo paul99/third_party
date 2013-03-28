@@ -36,33 +36,13 @@ String SVGPointList::valueAsString() const
     unsigned size = this->size();
     for (unsigned i = 0; i < size; ++i) {
         if (i > 0)
-            builder.append(" "); // FIXME: Shouldn't we use commas to seperate?
+            builder.append(' '); // FIXME: Shouldn't we use commas to seperate?
 
         const FloatPoint& point = at(i);
         builder.append(String::number(point.x()) + ' ' + String::number(point.y()));
     }
 
     return builder.toString();
-}
-
-float inline adjustAnimatedValue(float from, float to, float progress)
-{
-    return (to - from) * progress + from;
-}
-
-bool SVGPointList::createAnimated(const SVGPointList& fromList, const SVGPointList& toList, SVGPointList& resultList, float progress)
-{
-    unsigned itemCount = fromList.size();
-    if (!itemCount || itemCount != toList.size())
-        return false;
-    for (unsigned n = 0; n < itemCount; ++n) {
-        const FloatPoint& from = fromList.at(n);
-        const FloatPoint& to = toList.at(n);
-        FloatPoint segment = FloatPoint(adjustAnimatedValue(from.x(), to.x(), progress),
-                                        adjustAnimatedValue(from.y(), to.y(), progress));
-        resultList.append(segment);
-    }
-    return true;
 }
 
 }

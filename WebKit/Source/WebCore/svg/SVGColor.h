@@ -72,11 +72,16 @@ public:
     String customCssText() const;
 
     ~SVGColor() { }
+    
+    PassRefPtr<SVGColor> cloneForCSSOM() const;
+
+    void reportDescendantMemoryUsage(MemoryObjectInfo*) const;
 
 protected:
     friend class CSSComputedStyleDeclaration;
 
     SVGColor(ClassType, const SVGColorType&);
+    SVGColor(ClassType, const SVGColor& cloneFrom);
 
     void setColor(const Color& color) { m_color = color; }
     void setColorType(const SVGColorType& type) { m_colorType = type; }

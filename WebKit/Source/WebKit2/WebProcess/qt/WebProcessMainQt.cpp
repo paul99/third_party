@@ -25,22 +25,23 @@
  */
 
 #include "config.h"
-
 #include "WebProcess.h"
-#include <WebCore/RunLoop.h>
-#include <runtime/InitializeThreading.h>
-#include <wtf/MainThread.h>
 
-#include <QApplication>
+#include <QGuiApplication>
 #include <QList>
 #include <QNetworkProxyFactory>
 #include <QString>
 #include <QStringList>
 #include <QUrl>
-#include <QtGlobal>
+#include <WebCore/RunLoop.h>
+#include <runtime/InitializeThreading.h>
+#include <wtf/MainThread.h>
 
 #if USE(ACCELERATED_COMPOSITING)
-#include "WebGraphicsLayer.h"
+#include "CoordinatedGraphicsLayer.h"
+#endif
+#if USE(QTKIT)
+#include "WebSystemInterface.h"
 #endif
 
 #ifndef NDEBUG
@@ -53,7 +54,7 @@
 #include <QDebug>
 #endif
 
-#if !USE(UNIX_DOMAIN_SOCKETS)
+#if OS(DARWIN) && !USE(UNIX_DOMAIN_SOCKETS)
 #include <servers/bootstrap.h>
 
 extern "C" kern_return_t bootstrap_look_up2(mach_port_t, const name_t, mach_port_t*, pid_t, uint64_t);
@@ -141,40 +142,17 @@ static void initializeProxy()
     QNetworkProxyFactory::setUseSystemConfiguration(true);
 }
 
-void messageHandler(QtMsgType type, const char* message)
+Q_DECL_EXPORT int WebProcessMainQt(QGuiApplication* app)
 {
-    if (type == QtCriticalMsg) {
-        fprintf(stderr, "%s\n", message);
-        return;
-    }
-
-    // Do nothing
-}
-
-Q_DECL_EXPORT int WebProcessMainQt(int argc, char** argv)
-{
-    // Has to be done before QApplication is constructed in case
-    // QApplication itself produces debug output.
-    QByteArray suppressOutput = qgetenv("QT_WEBKIT_SUPPRESS_WEB_PROCESS_OUTPUT");
-    if (!suppressOutput.isEmpty() && suppressOutput != "0")
-        qInstallMsgHandler(messageHandler);
-
-    QApplication::setGraphicsSystem(QLatin1String("raster"));
-    QApplication* app = new QApplication(argc, argv);
-#ifndef NDEBUG
-    if (qgetenv("QT_WEBKIT2_DEBUG") == "1") {
-        qDebug() << "Waiting 3 seconds for debugger";
-        sleep(3);
-    }
-#endif
-
     initializeProxy();
-
-    srandom(time(0));
 
     JSC::initializeThreading();
     WTF::initializeMainThread();
     RunLoop::initializeMainRunLoop();
+    
+#if USE(QTKIT)
+    InitWebCoreSystemInterfaceForWK2();
+#endif
 
     // Create the connection.
     if (app->arguments().size() <= 1) {
@@ -194,14 +172,22 @@ Q_DECL_EXPORT int WebProcessMainQt(int argc, char** argv)
     }
 #else
     bool wasNumber = false;
-    int identifier = app->arguments().at(1).toInt(&wasNumber, 10);
+    qulonglong id = app->arguments().at(1).toULongLong(&wasNumber, 10);
     if (!wasNumber) {
         qDebug() << "Error: connection identifier wrong.";
         return 1;
     }
+    CoreIPC::Connection::Identifier identifier;
+#if OS(WINDOWS)
+    // Convert to HANDLE
+    identifier = reinterpret_cast<CoreIPC::Connection::Identifier>(id);
+#else
+    // Convert to int
+    identifier = static_cast<CoreIPC::Connection::Identifier>(id);
+#endif
 #endif
 #if USE(ACCELERATED_COMPOSITING)
-    WebGraphicsLayer::initFactory();
+    CoordinatedGraphicsLayer::initFactory();
 #endif
 
     WebKit::WebProcess::shared().initialize(identifier, RunLoop::main());
@@ -209,6 +195,7 @@ Q_DECL_EXPORT int WebProcessMainQt(int argc, char** argv)
     RunLoop::run();
 
     // FIXME: Do more cleanup here.
+    delete app;
 
     return 0;
 }

@@ -30,50 +30,30 @@
 #include "JSConsole.h"
 
 #include "Console.h"
-#include "JSScriptProfile.h"
 #include "ScriptCallStack.h"
-#include "ScriptCallStackFactory.h"
-#include "ScriptProfile.h"
-#include <runtime/JSArray.h>
 #include <wtf/OwnPtr.h>
 
 using namespace JSC;
 
 namespace WebCore {
 
-typedef Vector<RefPtr<ScriptProfile> > ProfilesArray;
-
-JSValue JSConsole::profiles(ExecState* exec) const
-{
-    const ProfilesArray& profiles = impl()->profiles();
-    MarkedArgumentBuffer list;
-
-    ProfilesArray::const_iterator end = profiles.end();
-    for (ProfilesArray::const_iterator iter = profiles.begin(); iter != end; ++iter)
-        list.append(toJS(exec, globalObject(), iter->get()));
-
-    return constructArray(exec, globalObject(), list);
-}
-
 JSValue JSConsole::profile(ExecState* exec)
 {
-    RefPtr<ScriptCallStack> callStack(createScriptCallStack(exec, 1));
     const String& title = valueToStringWithUndefinedOrNullCheck(exec, exec->argument(0));
     if (exec->hadException())
         return jsUndefined();
 
-    impl()->profile(title, exec, callStack);
+    impl()->profile(title, exec);
     return jsUndefined();
 }
 
 JSValue JSConsole::profileEnd(ExecState* exec)
 {
-    RefPtr<ScriptCallStack> callStack(createScriptCallStack(exec, 1));
     const String& title = valueToStringWithUndefinedOrNullCheck(exec, exec->argument(0));
     if (exec->hadException())
         return jsUndefined();
 
-    impl()->profileEnd(title, exec, callStack);
+    impl()->profileEnd(title, exec);
     return jsUndefined();
 }
 

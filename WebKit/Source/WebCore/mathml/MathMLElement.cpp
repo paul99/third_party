@@ -33,6 +33,7 @@
 
 #include "MathMLNames.h"
 #include "RenderObject.h"
+#include "RenderTableCell.h"
 
 namespace WebCore {
     
@@ -48,45 +49,70 @@ PassRefPtr<MathMLElement> MathMLElement::create(const QualifiedName& tagName, Do
     return adoptRef(new MathMLElement(tagName, document));
 }
 
-bool MathMLElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+int MathMLElement::colSpan() const
 {
-    if (attrName == mathcolorAttr || attrName == mathbackgroundAttr
-        || attrName == colorAttr || attrName == backgroundAttr
-        || attrName == fontsizeAttr || attrName == fontstyleAttr
-        || attrName == fontweightAttr || attrName == fontfamilyAttr) {
-        result = eMathML;
-        return false;
-    }
-    return StyledElement::mapToEntry(attrName, result);
+    if (!hasTagName(mtdTag))
+        return 1;
+    const AtomicString& colSpanValue = fastGetAttribute(columnspanAttr);
+    return std::max(1, colSpanValue.toInt());
 }
 
-void MathMLElement::parseMappedAttribute(Attribute* attr)
+int MathMLElement::rowSpan() const
 {
-    if (attr->name() == mathbackgroundAttr)
-        addCSSProperty(attr, CSSPropertyBackgroundColor, attr->value());
-    else if (attr->name() == mathsizeAttr) {
-        // The following three values of mathsize are handled in WebCore/css/mathml.css
-        if (attr->value() != "normal" && attr->value() != "small" && attr->value() != "big")
-            addCSSProperty(attr, CSSPropertyFontSize, attr->value());
-    } else if (attr->name() == mathcolorAttr)
-        addCSSProperty(attr, CSSPropertyColor, attr->value());
-    // FIXME: deprecated attributes that should loose in a conflict with a non deprecated attribute
-    else if (attr->name() == fontsizeAttr)
-        addCSSProperty(attr, CSSPropertyFontSize, attr->value());
-    else if (attr->name() == backgroundAttr)
-        addCSSProperty(attr, CSSPropertyBackgroundColor, attr->value());
-    else if (attr->name() == colorAttr)
-        addCSSProperty(attr, CSSPropertyColor, attr->value());
-    else if (attr->name() == fontstyleAttr)
-        addCSSProperty(attr, CSSPropertyFontStyle, attr->value());
-    else if (attr->name() == fontweightAttr)
-        addCSSProperty(attr, CSSPropertyFontWeight, attr->value());
-    else if (attr->name() == fontfamilyAttr)
-        addCSSProperty(attr, CSSPropertyFontFamily, attr->value());
-    else
-        StyledElement::parseMappedAttribute(attr);
+    if (!hasTagName(mtdTag))
+        return 1;
+    const AtomicString& rowSpanValue = fastGetAttribute(rowspanAttr);
+    return std::max(1, rowSpanValue.toInt());
 }
-    
+
+void MathMLElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+{
+    if (name == rowspanAttr) {
+        if (renderer() && renderer()->isTableCell() && hasTagName(mtdTag))
+            toRenderTableCell(renderer())->colSpanOrRowSpanChanged();
+    } else if (name == columnspanAttr) {
+        if (renderer() && renderer()->isTableCell() && hasTagName(mtdTag))
+            toRenderTableCell(renderer())->colSpanOrRowSpanChanged();
+    } else
+        StyledElement::parseAttribute(name, value);
+}
+
+bool MathMLElement::isPresentationAttribute(const QualifiedName& name) const
+{
+    if (name == mathbackgroundAttr || name == mathsizeAttr || name == mathcolorAttr || name == fontsizeAttr || name == backgroundAttr || name == colorAttr || name == fontstyleAttr || name == fontweightAttr || name == fontfamilyAttr)
+        return true;
+    return StyledElement::isPresentationAttribute(name);
+}
+
+void MathMLElement::collectStyleForPresentationAttribute(const Attribute& attribute, StylePropertySet* style)
+{
+    if (attribute.name() == mathbackgroundAttr)
+        addPropertyToPresentationAttributeStyle(style, CSSPropertyBackgroundColor, attribute.value());
+    else if (attribute.name() == mathsizeAttr) {
+        // The following three values of mathsize are handled in WebCore/css/mathml.css
+        if (attribute.value() != "normal" && attribute.value() != "small" && attribute.value() != "big")
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyFontSize, attribute.value());
+    } else if (attribute.name() == mathcolorAttr)
+        addPropertyToPresentationAttributeStyle(style, CSSPropertyColor, attribute.value());
+    // FIXME: deprecated attributes that should loose in a conflict with a non deprecated attribute
+    else if (attribute.name() == fontsizeAttr)
+        addPropertyToPresentationAttributeStyle(style, CSSPropertyFontSize, attribute.value());
+    else if (attribute.name() == backgroundAttr)
+        addPropertyToPresentationAttributeStyle(style, CSSPropertyBackgroundColor, attribute.value());
+    else if (attribute.name() == colorAttr)
+        addPropertyToPresentationAttributeStyle(style, CSSPropertyColor, attribute.value());
+    else if (attribute.name() == fontstyleAttr)
+        addPropertyToPresentationAttributeStyle(style, CSSPropertyFontStyle, attribute.value());
+    else if (attribute.name() == fontweightAttr)
+        addPropertyToPresentationAttributeStyle(style, CSSPropertyFontWeight, attribute.value());
+    else if (attribute.name() == fontfamilyAttr)
+        addPropertyToPresentationAttributeStyle(style, CSSPropertyFontFamily, attribute.value());
+    else {
+        ASSERT(!isPresentationAttribute(attribute.name()));
+        StyledElement::collectStyleForPresentationAttribute(attribute, style);
+    }
+}
+
 }
 
 #endif // ENABLE(MATHML)

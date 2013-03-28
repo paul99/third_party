@@ -26,7 +26,6 @@
 #include "HTMLFormElement.h"
 
 #include "Attribute.h"
-#include "Console.h"
 #include "DOMFormData.h"
 #include "DOMWindow.h"
 #include "Document.h"
@@ -34,19 +33,21 @@
 #include "EventNames.h"
 #include "FileList.h"
 #include "FileSystem.h"
+#include "FormController.h"
 #include "FormData.h"
 #include "FormDataList.h"
 #include "FormState.h"
 #include "Frame.h"
 #include "FrameLoader.h"
 #include "FrameLoaderClient.h"
+#include "HTMLCollection.h"
 #include "HTMLDocument.h"
-#include "HTMLFormCollection.h"
 #include "HTMLImageElement.h"
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
 #include "MIMETypeRegistry.h"
 #include "NodeRenderingContext.h"
+#include "NodeTraversal.h"
 #include "Page.h"
 #include "RenderTextControl.h"
 #include "ScriptEventListener.h"
@@ -73,8 +74,10 @@ HTMLFormElement::HTMLFormElement(const QualifiedName& tagName, Document* documen
     , m_isSubmittingOrPreparingForSubmission(false)
     , m_shouldSubmit(false)
     , m_isInResetFunction(false)
-    , m_wasMalformed(false)
     , m_wasDemoted(false)
+#if ENABLE(REQUEST_AUTOCOMPLETE)
+    , m_requestAutocompleteTimer(this, &HTMLFormElement::requestAutocompleteTimerFired)
+#endif
 {
     ASSERT(hasTagName(formTag));
 }
@@ -91,6 +94,7 @@ PassRefPtr<HTMLFormElement> HTMLFormElement::create(const QualifiedName& tagName
 
 HTMLFormElement::~HTMLFormElement()
 {
+    document()->formController()->willDeleteForm(this);
     if (!shouldAutocomplete())
         document()->unregisterForPageCacheSuspensionCallbacks(this);
 
@@ -112,10 +116,11 @@ bool HTMLFormElement::rendererIsNeeded(const NodeRenderingContext& context)
 
     ContainerNode* node = parentNode();
     RenderObject* parentRenderer = node->renderer();
+    // FIXME: Shouldn't we also check for table caption (see |formIsTablePart| below).
     bool parentIsTableElementPart = (parentRenderer->isTable() && node->hasTagName(tableTag))
         || (parentRenderer->isTableRow() && node->hasTagName(trTag))
         || (parentRenderer->isTableSection() && node->hasTagName(tbodyTag))
-        || (parentRenderer->isTableCol() && node->hasTagName(colTag))
+        || (parentRenderer->isRenderTableCol() && node->hasTagName(colTag))
         || (parentRenderer->isTableCell() && node->hasTagName(trTag));
 
     if (!parentIsTableElementPart)
@@ -130,20 +135,27 @@ bool HTMLFormElement::rendererIsNeeded(const NodeRenderingContext& context)
     return formIsTablePart;
 }
 
-void HTMLFormElement::insertedIntoDocument()
+Node::InsertionNotificationRequest HTMLFormElement::insertedInto(ContainerNode* insertionPoint)
 {
-    HTMLElement::insertedIntoDocument();
-
-    if (hasID())
-        document()->resetFormElementsOwner();
+    HTMLElement::insertedInto(insertionPoint);
+    return InsertionDone;
 }
 
-void HTMLFormElement::removedFromDocument()
+static inline Node* findRoot(Node* n)
 {
-    HTMLElement::removedFromDocument();
+    Node* root = n;
+    for (; n; n = n->parentNode())
+        root = n;
+    return root;
+}
 
-    if (hasID())
-        document()->resetFormElementsOwner();
+void HTMLFormElement::removedFrom(ContainerNode* insertionPoint)
+{
+    Node* root = findRoot(this);
+    Vector<FormAssociatedElement*> associatedElements(m_associatedElements);
+    for (unsigned i = 0; i < associatedElements.size(); ++i)
+        associatedElements[i]->formRemovedFromTree(root);
+    HTMLElement::removedFrom(insertionPoint);
 }
 
 void HTMLFormElement::handleLocalEvents(Event* event)
@@ -240,7 +252,7 @@ bool HTMLFormElement::validateInteractively(Event* event)
         }
     }
     // Warn about all of unfocusable controls.
-    if (Frame* frame = document()->frame()) {
+    if (document()->frame()) {
         for (unsigned i = 0; i < unhandledInvalidControls.size(); ++i) {
             FormAssociatedElement* unhandledAssociatedElement = unhandledInvalidControls[i].get();
             HTMLElement* unhandled = toHTMLElement(unhandledAssociatedElement);
@@ -248,7 +260,7 @@ bool HTMLFormElement::validateInteractively(Event* event)
                 continue;
             String message("An invalid form control with name='%name' is not focusable.");
             message.replace("%name", unhandledAssociatedElement->name());
-            frame->domWindow()->console()->addMessage(HTMLMessageSource, LogMessageType, ErrorMessageLevel, message, document()->url().string());
+            document()->addConsoleMessage(HTMLMessageSource, ErrorMessageLevel, message);
         }
     }
     return false;
@@ -269,7 +281,10 @@ bool HTMLFormElement::prepareForSubmission(Event* event)
         return false;
     }
 
-    frame->loader()->client()->dispatchWillSendSubmitEvent(this);
+    StringPairVector controlNamesAndValues;
+    getTextFieldValues(controlNamesAndValues);
+    RefPtr<FormState> formState = FormState::create(this, controlNamesAndValues, document(), NotSubmittedByJavaScript);
+    frame->loader()->client()->dispatchWillSendSubmitEvent(formState.release());
 
     if (dispatchEvent(Event::create(eventNames().submitEvent, true, true)))
         m_shouldSubmit = true;
@@ -290,6 +305,25 @@ void HTMLFormElement::submit()
 void HTMLFormElement::submitFromJavaScript()
 {
     submit(0, false, ScriptController::processingUserGesture(), SubmittedByJavaScript);
+}
+
+void HTMLFormElement::getTextFieldValues(StringPairVector& fieldNamesAndValues) const
+{
+    ASSERT_ARG(fieldNamesAndValues, fieldNamesAndValues.isEmpty());
+
+    fieldNamesAndValues.reserveCapacity(m_associatedElements.size());
+    for (unsigned i = 0; i < m_associatedElements.size(); ++i) {
+        FormAssociatedElement* control = m_associatedElements[i];
+        HTMLElement* element = toHTMLElement(control);
+        if (!element->hasLocalName(inputTag))
+            continue;
+
+        HTMLInputElement* input = static_cast<HTMLInputElement*>(control);
+        if (!input->isTextField())
+            continue;
+
+        fieldNamesAndValues.append(make_pair(input->name().string(), input->value()));
+    }
 }
 
 void HTMLFormElement::submit(Event* event, bool activateSubmitButton, bool processingUserGesture, FormSubmissionTrigger formSubmissionTrigger)
@@ -357,29 +391,73 @@ void HTMLFormElement::reset()
     m_isInResetFunction = false;
 }
 
-void HTMLFormElement::parseMappedAttribute(Attribute* attr)
+#if ENABLE(REQUEST_AUTOCOMPLETE)
+void HTMLFormElement::requestAutocomplete()
 {
-    if (attr->name() == actionAttr)
-        m_attributes.parseAction(attr->value());
-    else if (attr->name() == targetAttr)
-        m_attributes.setTarget(attr->value());
-    else if (attr->name() == methodAttr)
-        m_attributes.updateMethodType(attr->value());
-    else if (attr->name() == enctypeAttr)
-        m_attributes.updateEncodingType(attr->value());
-    else if (attr->name() == accept_charsetAttr)
-        m_attributes.setAcceptCharset(attr->value());
-    else if (attr->name() == autocompleteAttr) {
+    Frame* frame = document()->frame();
+    if (!frame)
+        return;
+
+    if (!shouldAutocomplete() || !ScriptController::processingUserGesture()) {
+        finishRequestAutocomplete(AutocompleteResultError);
+        return;
+    }
+
+    StringPairVector controlNamesAndValues;
+    getTextFieldValues(controlNamesAndValues);
+    RefPtr<FormState> formState = FormState::create(this, controlNamesAndValues, document(), SubmittedByJavaScript);
+    frame->loader()->client()->didRequestAutocomplete(formState.release());
+}
+
+void HTMLFormElement::finishRequestAutocomplete(AutocompleteResult result)
+{
+    RefPtr<Event> event(Event::create(result == AutocompleteResultSuccess ? eventNames().autocompleteEvent : eventNames().autocompleteerrorEvent, false, false));
+    event->setTarget(this);
+    m_pendingAutocompleteEvents.append(event.release());
+
+    // Dispatch events later as this API is meant to work asynchronously in all situations and implementations.
+    if (!m_requestAutocompleteTimer.isActive())
+        m_requestAutocompleteTimer.startOneShot(0);
+}
+
+void HTMLFormElement::requestAutocompleteTimerFired(Timer<HTMLFormElement>*)
+{
+    Vector<RefPtr<Event> > pendingEvents;
+    m_pendingAutocompleteEvents.swap(pendingEvents);
+    for (size_t i = 0; i < pendingEvents.size(); ++i)
+        dispatchEvent(pendingEvents[i].release());
+}
+#endif
+
+void HTMLFormElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+{
+    if (name == actionAttr)
+        m_attributes.parseAction(value);
+    else if (name == targetAttr)
+        m_attributes.setTarget(value);
+    else if (name == methodAttr)
+        m_attributes.updateMethodType(value);
+    else if (name == enctypeAttr)
+        m_attributes.updateEncodingType(value);
+    else if (name == accept_charsetAttr)
+        m_attributes.setAcceptCharset(value);
+    else if (name == autocompleteAttr) {
         if (!shouldAutocomplete())
             document()->registerForPageCacheSuspensionCallbacks(this);
         else
             document()->unregisterForPageCacheSuspensionCallbacks(this);
-    } else if (attr->name() == onsubmitAttr)
-        setAttributeEventListener(eventNames().submitEvent, createAttributeEventListener(this, attr));
-    else if (attr->name() == onresetAttr)
-        setAttributeEventListener(eventNames().resetEvent, createAttributeEventListener(this, attr));
+    } else if (name == onsubmitAttr)
+        setAttributeEventListener(eventNames().submitEvent, createAttributeEventListener(this, name, value));
+    else if (name == onresetAttr)
+        setAttributeEventListener(eventNames().resetEvent, createAttributeEventListener(this, name, value));
+#if ENABLE(REQUEST_AUTOCOMPLETE)
+    else if (name == onautocompleteAttr)
+        setAttributeEventListener(eventNames().autocompleteEvent, createAttributeEventListener(this, name, value));
+    else if (name == onautocompleteerrorAttr)
+        setAttributeEventListener(eventNames().autocompleteerrorEvent, createAttributeEventListener(this, name, value));
+#endif
     else
-        HTMLElement::parseMappedAttribute(attr);
+        HTMLElement::parseAttribute(name, value);
 }
 
 template<class T, size_t n> static void removeFromVector(Vector<T*, n> & vec, T* item)
@@ -392,33 +470,33 @@ template<class T, size_t n> static void removeFromVector(Vector<T*, n> & vec, T*
         }
 }
 
-unsigned HTMLFormElement::formElementIndexWithFormAttribute(Element* element)
+unsigned HTMLFormElement::formElementIndexWithFormAttribute(Element* element, unsigned rangeStart, unsigned rangeEnd)
 {
-    // Compares the position of the form element and the inserted element.
-    // Updates the indeces in order to the relation of the position:
-    unsigned short position = compareDocumentPosition(element);
-    if (position & (DOCUMENT_POSITION_CONTAINS | DOCUMENT_POSITION_CONTAINED_BY))
-        ++m_associatedElementsAfterIndex;
-    else if (position & DOCUMENT_POSITION_PRECEDING) {
-        ++m_associatedElementsBeforeIndex;
-        ++m_associatedElementsAfterIndex;
-    }
-
     if (m_associatedElements.isEmpty())
         return 0;
 
+    ASSERT(rangeStart <= rangeEnd);
+
+    if (rangeStart == rangeEnd)
+        return rangeStart;
+
+    unsigned left = rangeStart;
+    unsigned right = rangeEnd - 1;
+    unsigned short position;
+
     // Does binary search on m_associatedElements in order to find the index
     // to be inserted.
-    unsigned left = 0, right = m_associatedElements.size() - 1;
     while (left != right) {
         unsigned middle = left + ((right - left) / 2);
+        ASSERT(middle < m_associatedElementsBeforeIndex || middle >= m_associatedElementsAfterIndex);
         position = element->compareDocumentPosition(toHTMLElement(m_associatedElements[middle]));
         if (position & DOCUMENT_POSITION_FOLLOWING)
             right = middle;
         else
             left = middle + 1;
     }
-
+    
+    ASSERT(left < m_associatedElementsBeforeIndex || left >= m_associatedElementsAfterIndex);
     position = element->compareDocumentPosition(toHTMLElement(m_associatedElements[left]));
     if (position & DOCUMENT_POSITION_FOLLOWING)
         return left;
@@ -427,28 +505,36 @@ unsigned HTMLFormElement::formElementIndexWithFormAttribute(Element* element)
 
 unsigned HTMLFormElement::formElementIndex(FormAssociatedElement* associatedElement)
 {
-    HTMLElement* element = toHTMLElement(associatedElement);
+    HTMLElement* associatedHTMLElement = toHTMLElement(associatedElement);
     // Treats separately the case where this element has the form attribute
     // for performance consideration.
-    if (element->fastHasAttribute(formAttr))
-        return formElementIndexWithFormAttribute(element);
+    if (associatedHTMLElement->fastHasAttribute(formAttr)) {
+        unsigned short position = compareDocumentPosition(associatedHTMLElement);
+        if (position & DOCUMENT_POSITION_PRECEDING) {
+            ++m_associatedElementsBeforeIndex;
+            ++m_associatedElementsAfterIndex;
+            return HTMLFormElement::formElementIndexWithFormAttribute(associatedHTMLElement, 0, m_associatedElementsBeforeIndex - 1);
+        }
+        if (position & DOCUMENT_POSITION_FOLLOWING && !(position & DOCUMENT_POSITION_CONTAINED_BY))
+            return HTMLFormElement::formElementIndexWithFormAttribute(associatedHTMLElement, m_associatedElementsAfterIndex, m_associatedElements.size());
+    }
 
     // Check for the special case where this element is the very last thing in
     // the form's tree of children; we don't want to walk the entire tree in that
     // common case that occurs during parsing; instead we'll just return a value
     // that says "add this form element to the end of the array".
-    if (element->traverseNextNode(this)) {
+    if (ElementTraversal::next(associatedHTMLElement, this)) {
         unsigned i = m_associatedElementsBeforeIndex;
-        for (Node* node = this; node; node = node->traverseNextNode(this)) {
-            if (node == element) {
+        for (Element* element = this; element; element = ElementTraversal::next(element, this)) {
+            if (element == associatedHTMLElement) {
                 ++m_associatedElementsAfterIndex;
                 return i;
             }
-            if (node->isHTMLElement()
-                    && (static_cast<Element*>(node)->isFormControlElement()
-                        || node->hasTagName(objectTag))
-                    && toHTMLElement(node)->form() == this)
-                ++i;
+            if (!element->isFormControlElement() && !element->hasTagName(objectTag))
+                continue;
+            if (!element->isHTMLElement() || toHTMLElement(element)->form() != this)
+                continue;
+            ++i;
         }
     }
     return m_associatedElementsAfterIndex++;
@@ -474,9 +560,9 @@ void HTMLFormElement::removeFormElement(FormAssociatedElement* e)
     removeFromVector(m_associatedElements, e);
 }
 
-bool HTMLFormElement::isURLAttribute(Attribute* attr) const
+bool HTMLFormElement::isURLAttribute(const Attribute& attribute) const
 {
-    return attr->name() == actionAttr || HTMLElement::isURLAttribute(attr);
+    return attribute.name() == actionAttr || HTMLElement::isURLAttribute(attribute);
 }
 
 void HTMLFormElement::registerImgElement(HTMLImageElement* e)
@@ -491,16 +577,14 @@ void HTMLFormElement::removeImgElement(HTMLImageElement* e)
     removeFromVector(m_imageElements, e);
 }
 
-HTMLCollection* HTMLFormElement::elements()
+PassRefPtr<HTMLCollection> HTMLFormElement::elements()
 {
-    if (!m_elementsCollection)
-        m_elementsCollection = HTMLFormCollection::create(this);
-    return m_elementsCollection.get();
+    return ensureCachedHTMLCollection(FormControls);
 }
 
 String HTMLFormElement::name() const
 {
-    return getAttribute(nameAttr);
+    return getNameAttribute();
 }
 
 bool HTMLFormElement::noValidate() const
@@ -641,6 +725,18 @@ void HTMLFormElement::didMoveToNewDocument(Document* oldDocument)
 bool HTMLFormElement::shouldAutocomplete() const
 {
     return !equalIgnoringCase(fastGetAttribute(autocompleteAttr), "off");
+}
+
+void HTMLFormElement::finishParsingChildren()
+{
+    HTMLElement::finishParsingChildren();
+    document()->formController()->restoreControlStateIn(*this);
+}
+
+void HTMLFormElement::copyNonAttributePropertiesFromElement(const Element& source)
+{
+    m_wasDemoted = static_cast<const HTMLFormElement&>(source).m_wasDemoted;
+    HTMLElement::copyNonAttributePropertiesFromElement(source);
 }
 
 } // namespace

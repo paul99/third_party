@@ -78,6 +78,8 @@ void setPathOnCairoContext(cairo_t* to, cairo_t* from)
 
 void appendWebCorePathToCairoContext(cairo_t* context, const Path& path)
 {
+    if (path.isEmpty())
+        return;
     appendPathToCairoContext(context, path.platformPath()->context());
 }
 
@@ -120,13 +122,11 @@ cairo_operator_t toCairoOperator(CompositeOperator op)
     case CompositeXOR:
         return CAIRO_OPERATOR_XOR;
     case CompositePlusDarker:
-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 10, 0)
         return CAIRO_OPERATOR_DARKEN;
-#else
-        return CAIRO_OPERATOR_SATURATE;
-#endif
     case CompositePlusLighter:
         return CAIRO_OPERATOR_ADD;
+    case CompositeDifference:
+        return CAIRO_OPERATOR_DIFFERENCE;
     default:
         return CAIRO_OPERATOR_SOURCE;
     }

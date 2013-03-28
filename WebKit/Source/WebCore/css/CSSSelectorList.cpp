@@ -28,6 +28,7 @@
 #include "CSSSelectorList.h"
 
 #include "CSSParserValues.h"
+#include "WebCoreMemoryInstrumentation.h"
 #include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
@@ -35,6 +36,19 @@ namespace WebCore {
 CSSSelectorList::~CSSSelectorList()
 {
     deleteSelectors();
+}
+
+CSSSelectorList::CSSSelectorList(const CSSSelectorList& o)
+{
+    unsigned length = o.length();
+    if (length == 1) {
+        // Destructor expects a single selector to be allocated by new, multiple with fastMalloc.
+        m_selectorArray = new CSSSelector(o.m_selectorArray[0]);
+        return;
+    }
+    m_selectorArray = reinterpret_cast<CSSSelector*>(fastMalloc(sizeof(CSSSelector) * length));
+    for (unsigned i = 0; i < length; ++i)
+        new (&m_selectorArray[i]) CSSSelector(o.m_selectorArray[i]);
 }
 
 void CSSSelectorList::adopt(CSSSelectorList& list)
@@ -81,6 +95,16 @@ void CSSSelectorList::adoptSelectorVector(Vector<OwnPtr<CSSParserSelector> >& se
     selectorVector.shrink(0);
 }
 
+unsigned CSSSelectorList::length() const
+{
+    if (!m_selectorArray)
+        return 0;
+    CSSSelector* current = m_selectorArray;
+    while (!current->isLastInSelectorList())
+        ++current;
+    return (current - m_selectorArray) + 1;
+}
+
 void CSSSelectorList::deleteSelectors()
 {
     if (!m_selectorArray)
@@ -117,6 +141,12 @@ String CSSSelectorList::selectorsText() const
     }
 
     return result.toString();
+}
+
+void CSSSelectorList::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CSS);
+    info.addRawBuffer(m_selectorArray, length() * sizeof(CSSSelector));
 }
 
 template <typename Functor>
@@ -167,17 +197,17 @@ bool CSSSelectorList::selectorsNeedNamespaceResolution()
     return forEachSelector(functor, this);
 }
 
-class SelectorHasUnknownPseudoElementFunctor {
+class SelectorHasInvalidSelectorFunctor {
 public:
     bool operator()(CSSSelector* selector)
     {
-        return selector->isUnknownPseudoElement();
+        return selector->isUnknownPseudoElement() || selector->isCustomPseudoElement();
     }
 };
 
-bool CSSSelectorList::hasUnknownPseudoElements() const
+bool CSSSelectorList::hasInvalidSelector() const
 {
-    SelectorHasUnknownPseudoElementFunctor functor;
+    SelectorHasInvalidSelectorFunctor functor;
     return forEachSelector(functor, this);
 }
 

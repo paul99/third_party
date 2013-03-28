@@ -27,6 +27,8 @@
 #include <webkit/webkitdom.h>
 #include <webkit/webkitdownload.h>
 #include <webkit/webkitenumtypes.h>
+#include <webkit/webkitfavicondatabase.h>
+#include <webkit/webkitfilechooserrequest.h>
 #include <webkit/webkitgeolocationpolicydecision.h>
 #include <webkit/webkitglobals.h>
 #include <webkit/webkithittestresult.h>

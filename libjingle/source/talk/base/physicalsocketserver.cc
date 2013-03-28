@@ -101,8 +101,10 @@ const uint16 PACKET_MAXIMUMS[] = {
   0,        // End of list marker
 };
 
-const uint32 IP_HEADER_SIZE = 20;
-const uint32 ICMP_HEADER_SIZE = 8;
+static const int IP_HEADER_SIZE = 20u;
+static const int IPV6_HEADER_SIZE = 40u;
+static const int ICMP_HEADER_SIZE = 8u;
+static const int ICMP_PING_TIMEOUT_MILLIS = 10000u;
 
 class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
  public:
@@ -133,9 +135,9 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
   }
 
   // Creates the underlying OS socket (same as the "socket" function).
-  virtual bool Create(int type) {
+  virtual bool Create(int family, int type) {
     Close();
-    s_ = ::socket(AF_INET, type, 0);
+    s_ = ::socket(family, type, 0);
     udp_ = (SOCK_DGRAM == type);
     UpdateLastError();
     if (udp_)
@@ -144,13 +146,13 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
   }
 
   SocketAddress GetLocalAddress() const {
-    sockaddr_in addr;
-    socklen_t addrlen = sizeof(addr);
-    int result = ::getsockname(s_, (sockaddr*)&addr, &addrlen);
+    sockaddr_storage addr_storage = {0};
+    socklen_t addrlen = sizeof(addr_storage);
+    sockaddr* addr = reinterpret_cast<sockaddr*>(&addr_storage);
+    int result = ::getsockname(s_, addr, &addrlen);
     SocketAddress address;
     if (result >= 0) {
-      ASSERT(addrlen == sizeof(addr));
-      address.FromSockAddr(addr);
+      SocketAddressFromSockAddrStorage(addr_storage, &address);
     } else {
       LOG(LS_WARNING) << "GetLocalAddress: unable to get local addr, socket="
                       << s_;
@@ -159,13 +161,13 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
   }
 
   SocketAddress GetRemoteAddress() const {
-    sockaddr_in addr;
-    socklen_t addrlen = sizeof(addr);
-    int result = ::getpeername(s_, (sockaddr*)&addr, &addrlen);
+    sockaddr_storage addr_storage = {0};
+    socklen_t addrlen = sizeof(addr_storage);
+    sockaddr* addr = reinterpret_cast<sockaddr*>(&addr_storage);
+    int result = ::getpeername(s_, addr, &addrlen);
     SocketAddress address;
     if (result >= 0) {
-      ASSERT(addrlen == sizeof(addr));
-      address.FromSockAddr(addr);
+      SocketAddressFromSockAddrStorage(addr_storage, &address);
     } else {
       LOG(LS_WARNING) << "GetRemoteAddress: unable to get remote addr, socket="
                       << s_;
@@ -173,10 +175,11 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return address;
   }
 
-  int Bind(const SocketAddress& addr) {
-    sockaddr_in saddr;
-    addr.ToSockAddr(&saddr);
-    int err = ::bind(s_, (sockaddr*)&saddr, sizeof(saddr));
+  int Bind(const SocketAddress& bind_addr) {
+    sockaddr_storage addr_storage;
+    size_t len = bind_addr.ToSockAddrStorage(&addr_storage);
+    sockaddr* addr = reinterpret_cast<sockaddr*>(&addr_storage);
+    int err = ::bind(s_, addr, static_cast<int>(len));
     UpdateLastError();
 #ifdef _DEBUG
     if (0 == err) {
@@ -190,14 +193,11 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
   int Connect(const SocketAddress& addr) {
     // TODO: Implicit creation is required to reconnect...
     // ...but should we make it more explicit?
-    if ((s_ == INVALID_SOCKET) && !Create(SOCK_STREAM))
+    if (state_ != CS_CLOSED) {
+      SetError(EALREADY);
       return SOCKET_ERROR;
+    }
     if (addr.IsUnresolved()) {
-      if (state_ != CS_CLOSED) {
-        SetError(EALREADY);
-        return SOCKET_ERROR;
-      }
-
       LOG(LS_VERBOSE) << "Resolving addr in PhysicalSocket::Connect";
       resolver_ = new AsyncResolver();
       resolver_->set_address(addr);
@@ -210,10 +210,15 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return DoConnect(addr);
   }
 
-  int DoConnect(const SocketAddress& addr) {
-    sockaddr_in saddr;
-    addr.ToSockAddr(&saddr);
-    int err = ::connect(s_, (sockaddr*)&saddr, sizeof(saddr));
+  int DoConnect(const SocketAddress& connect_addr) {
+    if ((s_ == INVALID_SOCKET) &&
+        !Create(connect_addr.family(), SOCK_STREAM)) {
+      return SOCKET_ERROR;
+    }
+    sockaddr_storage addr_storage;
+    size_t len = connect_addr.ToSockAddrStorage(&addr_storage);
+    sockaddr* addr = reinterpret_cast<sockaddr*>(&addr_storage);
+    int err = ::connect(s_, addr, static_cast<int>(len));
     UpdateLastError();
     if (err == 0) {
       state_ = CS_CONNECTED;
@@ -290,30 +295,31 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return sent;
   }
 
-  int SendTo(const void *pv, size_t cb, const SocketAddress& addr) {
-    sockaddr_in saddr;
-    addr.ToSockAddr(&saddr);
+  int SendTo(const void* buffer, size_t length, const SocketAddress& addr) {
+    sockaddr_storage saddr;
+    size_t len = addr.ToSockAddrStorage(&saddr);
     int sent = ::sendto(
-        s_, (const char *)pv, (int)cb,
+        s_, static_cast<const char *>(buffer), static_cast<int>(length),
 #ifdef LINUX
         // Suppress SIGPIPE. See above for explanation.
         MSG_NOSIGNAL,
 #else
         0,
 #endif
-        (sockaddr*)&saddr, sizeof(saddr));
+        reinterpret_cast<sockaddr*>(&saddr), static_cast<int>(len));
     UpdateLastError();
     // We have seen minidumps where this may be false.
-    ASSERT(sent <= static_cast<int>(cb));
+    ASSERT(sent <= static_cast<int>(length));
     if ((sent < 0) && IsBlockingError(error_)) {
       enabled_events_ |= DE_WRITE;
     }
     return sent;
   }
 
-  int Recv(void *pv, size_t cb) {
-    int received = ::recv(s_, (char *)pv, (int)cb, 0);
-    if ((received == 0) && (cb != 0)) {
+  int Recv(void* buffer, size_t length) {
+    int received = ::recv(s_, static_cast<char*>(buffer),
+                          static_cast<int>(length), 0);
+    if ((received == 0) && (length != 0)) {
       // Note: on graceful shutdown, recv can return 0.  In this case, we
       // pretend it is blocking, and then signal close, so that simplifying
       // assumptions can be made about Recv.
@@ -335,14 +341,15 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return received;
   }
 
-  int RecvFrom(void *pv, size_t cb, SocketAddress *paddr) {
-    sockaddr_in saddr;
-    socklen_t cbAddr = sizeof(saddr);
-    int received = ::recvfrom(s_, (char *)pv, (int)cb, 0, (sockaddr*)&saddr,
-                              &cbAddr);
+  int RecvFrom(void* buffer, size_t length, SocketAddress *out_addr) {
+    sockaddr_storage addr_storage;
+    socklen_t addr_len = sizeof(addr_storage);
+    sockaddr* addr = reinterpret_cast<sockaddr*>(&addr_storage);
+    int received = ::recvfrom(s_, static_cast<char*>(buffer),
+                              static_cast<int>(length), 0, addr, &addr_len);
     UpdateLastError();
-    if ((received >= 0) && (paddr != NULL))
-      paddr->FromSockAddr(saddr);
+    if ((received >= 0) && (out_addr != NULL))
+      SocketAddressFromSockAddrStorage(addr_storage, out_addr);
     bool success = (received >= 0) || IsBlockingError(error_);
     if (udp_ || success) {
       enabled_events_ |= DE_READ;
@@ -367,16 +374,17 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
     return err;
   }
 
-  AsyncSocket* Accept(SocketAddress *paddr) {
-    sockaddr_in saddr;
-    socklen_t cbAddr = sizeof(saddr);
-    SOCKET s = ::accept(s_, (sockaddr*)&saddr, &cbAddr);
+  AsyncSocket* Accept(SocketAddress *out_addr) {
+    sockaddr_storage addr_storage;
+    socklen_t addr_len = sizeof(addr_storage);
+    sockaddr* addr = reinterpret_cast<sockaddr*>(&addr_storage);
+    SOCKET s = ::accept(s_, addr, &addr_len);
     UpdateLastError();
     if (s == INVALID_SOCKET)
       return NULL;
     enabled_events_ |= DE_ACCEPT;
-    if (paddr != NULL)
-      paddr->FromSockAddr(saddr);
+    if (out_addr != NULL)
+      SocketAddressFromSockAddrStorage(addr_storage, out_addr);
     return ss_->WrapSocket(s);
   }
 
@@ -409,10 +417,18 @@ class PhysicalSocket : public AsyncSocket, public sigslot::has_slots<> {
       error_ = EINVAL; // can't think of a better error ID
       return -1;
     }
+    int header_size = ICMP_HEADER_SIZE;
+    if (addr.family() == AF_INET6) {
+      header_size += IPV6_HEADER_SIZE;
+    } else if (addr.family() == AF_INET) {
+      header_size += IP_HEADER_SIZE;
+    }
 
     for (int level = 0; PACKET_MAXIMUMS[level + 1] > 0; ++level) {
-      int32 size = PACKET_MAXIMUMS[level] - IP_HEADER_SIZE - ICMP_HEADER_SIZE;
-      WinPing::PingResult result = ping.Ping(addr.ip(), size, 0, 1, false);
+      int32 size = PACKET_MAXIMUMS[level] - header_size;
+      WinPing::PingResult result = ping.Ping(addr.ipaddr(), size,
+                                             ICMP_PING_TIMEOUT_MILLIS,
+                                             1, false);
       if (result == WinPing::PING_FAIL) {
         error_ = EINVAL; // can't think of a better error ID
         return -1;
@@ -785,8 +801,12 @@ class SocketDispatcher : public Dispatcher, public PhysicalSocket {
   }
 
   virtual bool Create(int type) {
+    return Create(AF_INET, type);
+  }
+
+  virtual bool Create(int family, int type) {
     // Change the socket to be non-blocking.
-    if (!PhysicalSocket::Create(type))
+    if (!PhysicalSocket::Create(family, type))
       return false;
 
     return Initialize();
@@ -843,14 +863,8 @@ class SocketDispatcher : public Dispatcher, public PhysicalSocket {
   }
 
   virtual void OnEvent(uint32 ff, int err) {
-    if ((ff & DE_READ) != 0) {
-      enabled_events_ &= ~DE_READ;
-      SignalReadEvent(this);
-    }
-    if ((ff & DE_WRITE) != 0) {
-      enabled_events_ &= ~DE_WRITE;
-      SignalWriteEvent(this);
-    }
+    // Make sure we deliver connect/accept first. Otherwise, consumers may see
+    // something like a READ followed by a CONNECT, which would be odd.
     if ((ff & DE_CONNECT) != 0) {
       enabled_events_ &= ~DE_CONNECT;
       SignalConnectEvent(this);
@@ -858,6 +872,14 @@ class SocketDispatcher : public Dispatcher, public PhysicalSocket {
     if ((ff & DE_ACCEPT) != 0) {
       enabled_events_ &= ~DE_ACCEPT;
       SignalReadEvent(this);
+    }
+    if ((ff & DE_READ) != 0) {
+      enabled_events_ &= ~DE_READ;
+      SignalReadEvent(this);
+    }
+    if ((ff & DE_WRITE) != 0) {
+      enabled_events_ &= ~DE_WRITE;
+      SignalWriteEvent(this);
     }
     if ((ff & DE_CLOSE) != 0) {
       // The socket is now dead to us, so stop checking it.
@@ -1038,8 +1060,12 @@ class SocketDispatcher : public Dispatcher, public PhysicalSocket {
   }
 
   virtual bool Create(int type) {
+    return Create(AF_INET, type);
+  }
+
+  virtual bool Create(int family, int type) {
     // Create socket
-    if (!PhysicalSocket::Create(type))
+    if (!PhysicalSocket::Create(family, type))
       return false;
 
     if (!Initialize())
@@ -1071,14 +1097,8 @@ class SocketDispatcher : public Dispatcher, public PhysicalSocket {
 
   virtual void OnEvent(uint32 ff, int err) {
     int cache_id = id_;
-    if ((ff & DE_READ) != 0) {
-      enabled_events_ &= ~DE_READ;
-      SignalReadEvent(this);
-    }
-    if (((ff & DE_WRITE) != 0) && (id_ == cache_id)) {
-      enabled_events_ &= ~DE_WRITE;
-      SignalWriteEvent(this);
-    }
+    // Make sure we deliver connect/accept first. Otherwise, consumers may see
+    // something like a READ followed by a CONNECT, which would be odd.
     if (((ff & DE_CONNECT) != 0) && (id_ == cache_id)) {
       if (ff != DE_CONNECT)
         LOG(LS_VERBOSE) << "Signalled with DE_CONNECT: " << ff;
@@ -1092,6 +1112,14 @@ class SocketDispatcher : public Dispatcher, public PhysicalSocket {
     if (((ff & DE_ACCEPT) != 0) && (id_ == cache_id)) {
       enabled_events_ &= ~DE_ACCEPT;
       SignalReadEvent(this);
+    }
+    if ((ff & DE_READ) != 0) {
+      enabled_events_ &= ~DE_READ;
+      SignalReadEvent(this);
+    }
+    if (((ff & DE_WRITE) != 0) && (id_ == cache_id)) {
+      enabled_events_ &= ~DE_WRITE;
+      SignalWriteEvent(this);
     }
     if (((ff & DE_CLOSE) != 0) && (id_ == cache_id)) {
       signal_close_ = true;
@@ -1169,8 +1197,12 @@ void PhysicalSocketServer::WakeUp() {
 }
 
 Socket* PhysicalSocketServer::CreateSocket(int type) {
+  return CreateSocket(AF_INET, type);
+}
+
+Socket* PhysicalSocketServer::CreateSocket(int family, int type) {
   PhysicalSocket* socket = new PhysicalSocket(this);
-  if (socket->Create(type)) {
+  if (socket->Create(family, type)) {
     return socket;
   } else {
     delete socket;
@@ -1179,8 +1211,12 @@ Socket* PhysicalSocketServer::CreateSocket(int type) {
 }
 
 AsyncSocket* PhysicalSocketServer::CreateAsyncSocket(int type) {
+  return CreateAsyncSocket(AF_INET, type);
+}
+
+AsyncSocket* PhysicalSocketServer::CreateAsyncSocket(int family, int type) {
   SocketDispatcher* dispatcher = new SocketDispatcher(this);
-  if (dispatcher->Create(type)) {
+  if (dispatcher->Create(family, type)) {
     return dispatcher;
   } else {
     delete dispatcher;
@@ -1355,8 +1391,7 @@ bool PhysicalSocketServer::Wait(int cmsWait, bool process_io) {
 
     // Recalc the time remaining to wait. Doing it here means it doesn't get
     // calced twice the first time through the loop
-
-    if (cmsWait != kForever) {
+    if (ptvWait) {
       ptvWait->tv_sec = 0;
       ptvWait->tv_usec = 0;
       struct timeval tvT;
@@ -1390,14 +1425,14 @@ bool PhysicalSocketServer::SetPosixSignalHandler(int signum,
     if (!InstallSignal(signum, handler)) {
       return false;
     }
-    if (signal_dispatcher_.get()) {
+    if (signal_dispatcher_) {
       signal_dispatcher_->ClearHandler(signum);
       if (!signal_dispatcher_->HasHandlers()) {
         signal_dispatcher_.reset();
       }
     }
   } else {
-    if (!signal_dispatcher_.get()) {
+    if (!signal_dispatcher_) {
       signal_dispatcher_.reset(new PosixSignalDispatcher(this));
     }
     signal_dispatcher_->SetHandler(signum, handler);

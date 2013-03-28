@@ -37,32 +37,28 @@ OBJC_CLASS NSWindow;
 
 typedef uint32_t PlatformDisplayID;
 
+typedef WTF::Vector<char> ColorProfile;
+
 namespace WebCore {
 
     class FloatRect;
-    class FrameView;
     class Widget;
 
-    int screenHorizontalDPI(Widget*);
-    int screenVerticalDPI(Widget*);
     int screenDepth(Widget*);
     int screenDepthPerComponent(Widget*);
     bool screenIsMonochrome(Widget*);
 
-    FloatRect screenRect(FrameView*);
-    FloatRect screenAvailableRect(FrameView*);
+    FloatRect screenRect(Widget*);
+    FloatRect screenAvailableRect(Widget*);
+    void screenColorProfile(ColorProfile&);
 
 #if PLATFORM(MAC)
     NSScreen *screenForWindow(NSWindow *);
 
-    FloatRect toUserSpace(const NSRect&, NSWindow *destination, float deviceScaleFactor);
-    NSRect toDeviceSpace(const FloatRect&, NSWindow *source, float deviceScaleFactor);
+    FloatRect toUserSpace(const NSRect&, NSWindow *destination);
+    NSRect toDeviceSpace(const FloatRect&, NSWindow *source);
 
     NSPoint flipScreenPoint(const NSPoint&, NSScreen *);
-#endif
-
-#if OS(ANDROID)
-    float defaultDevicePixelRatio(Widget*);
 #endif
 
 } // namespace WebCore

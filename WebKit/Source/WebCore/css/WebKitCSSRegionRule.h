@@ -1,5 +1,6 @@
 /*
- * Copyright 2011 Adobe Systems Incorporated. All Rights Reserved.
+ * Copyright (C) 2011 Adobe Systems Incorporated. All rights reserved.
+ * Copyright (C) 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,38 +31,45 @@
 #ifndef WebKitCSSRegionRule_h
 #define WebKitCSSRegionRule_h
 
-#include "CSSSelectorList.h"
-#include "CSSStyleRule.h"
-
-#include <wtf/PassRefPtr.h>
-#include <wtf/RefPtr.h>
+#include "CSSRule.h"
 #include <wtf/Vector.h>
+
+#if ENABLE(CSS_REGIONS)
 
 namespace WebCore {
 
-class CSSParserSelector;
 class CSSRuleList;
+class StyleRuleRegion;
 
-class WebKitCSSRegionRule: public CSSRule {
+class WebKitCSSRegionRule : public CSSRule {
 public:
-    static PassRefPtr<WebKitCSSRegionRule> create(CSSStyleSheet* parent, Vector<OwnPtr<CSSParserSelector> >* selectors, PassRefPtr<CSSRuleList> rules)
-    {
-        return adoptRef(new WebKitCSSRegionRule(parent, selectors, rules));
-    }
+    static PassRefPtr<WebKitCSSRegionRule> create(StyleRuleRegion* rule, CSSStyleSheet* sheet) { return adoptRef(new WebKitCSSRegionRule(rule, sheet)); }
 
-    ~WebKitCSSRegionRule();
+    virtual ~WebKitCSSRegionRule();
 
-    String cssText() const;
-    const CSSSelectorList& selectorList() const { return m_selectorList; }
-    CSSRuleList* cssRules() const { return m_ruleList.get(); }
+    virtual CSSRule::Type type() const OVERRIDE { return WEBKIT_REGION_RULE; }
+    virtual String cssText() const OVERRIDE;
+    virtual void reattach(StyleRuleBase*) OVERRIDE;
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
+
+    CSSRuleList* cssRules() const;
+    
+    // For CSSRuleList
+    unsigned length() const;
+    CSSRule* item(unsigned index) const;
 
 private:
-    WebKitCSSRegionRule(CSSStyleSheet* parent, Vector<OwnPtr<CSSParserSelector> >* selectors, PassRefPtr<CSSRuleList> rules);
+    WebKitCSSRegionRule(StyleRuleRegion*, CSSStyleSheet* parent);
 
-    CSSSelectorList m_selectorList;
-    RefPtr<CSSRuleList> m_ruleList;
+    RefPtr<StyleRuleRegion> m_regionRule;
+    mutable Vector<RefPtr<CSSRule> > m_childRuleCSSOMWrappers;
+    mutable OwnPtr<CSSRuleList> m_ruleListCSSOMWrapper;
+    
+    friend class StyleRuleBlock;
 };
 
 }
 
-#endif
+#endif // ENABLE(CSS_REGIONS)
+
+#endif // WebKitCSSRegionRule_h

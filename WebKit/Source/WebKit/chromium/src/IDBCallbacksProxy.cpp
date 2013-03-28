@@ -31,12 +31,19 @@
 
 #if ENABLE(INDEXED_DATABASE)
 
+#include "DOMStringList.h"
+#include "IDBCursorBackendInterface.h"
+#include "IDBDatabaseBackendInterface.h"
 #include "IDBDatabaseBackendProxy.h"
+#include "IDBDatabaseCallbacksProxy.h"
 #include "IDBDatabaseError.h"
+#include "IDBObjectStoreBackendInterface.h"
+#include "IDBTransactionBackendInterface.h"
 #include "WebIDBCallbacks.h"
 #include "WebIDBCursorImpl.h"
-#include "WebIDBDatabaseImpl.h"
+#include "WebIDBDatabaseCallbacks.h"
 #include "WebIDBDatabaseError.h"
+#include "WebIDBDatabaseImpl.h"
 #include "WebIDBKey.h"
 #include "WebIDBTransactionImpl.h"
 #include "platform/WebSerializedScriptValue.h"
@@ -52,6 +59,7 @@ PassRefPtr<IDBCallbacksProxy> IDBCallbacksProxy::create(PassOwnPtr<WebIDBCallbac
 
 IDBCallbacksProxy::IDBCallbacksProxy(PassOwnPtr<WebIDBCallbacks> callbacks)
     : m_callbacks(callbacks)
+    , m_didCreateProxy(false)
 {
 }
 
@@ -64,24 +72,21 @@ void IDBCallbacksProxy::onError(PassRefPtr<IDBDatabaseError> idbDatabaseError)
     m_callbacks->onError(WebIDBDatabaseError(idbDatabaseError));
 }
 
-void IDBCallbacksProxy::onSuccess(PassRefPtr<IDBCursorBackendInterface> idbCursorBackend)
+void IDBCallbacksProxy::onSuccess(PassRefPtr<IDBCursorBackendInterface> idbCursorBackend, PassRefPtr<IDBKey> key, PassRefPtr<IDBKey> primaryKey, PassRefPtr<SerializedScriptValue> value)
 {
-    m_callbacks->onSuccess(new WebIDBCursorImpl(idbCursorBackend));
+    m_callbacks->onSuccess(new WebIDBCursorImpl(idbCursorBackend), key, primaryKey, value);
 }
 
 void IDBCallbacksProxy::onSuccess(PassRefPtr<IDBDatabaseBackendInterface> backend)
 {
-    m_callbacks->onSuccess(new WebIDBDatabaseImpl(backend));
+    ASSERT(m_databaseCallbacks.get());
+    WebIDBDatabaseImpl* impl = m_didCreateProxy ? 0 : new WebIDBDatabaseImpl(backend, m_databaseCallbacks.release());
+    m_callbacks->onSuccess(impl);
 }
 
 void IDBCallbacksProxy::onSuccess(PassRefPtr<IDBKey> idbKey)
 {
     m_callbacks->onSuccess(WebIDBKey(idbKey));
-}
-
-void IDBCallbacksProxy::onSuccess(PassRefPtr<IDBTransactionBackendInterface> backend)
-{
-    m_callbacks->onSuccess(new WebIDBTransactionImpl(backend));
 }
 
 void IDBCallbacksProxy::onSuccess(PassRefPtr<DOMStringList> domStringList)
@@ -94,9 +99,24 @@ void IDBCallbacksProxy::onSuccess(PassRefPtr<SerializedScriptValue> serializedSc
     m_callbacks->onSuccess(WebSerializedScriptValue(serializedScriptValue));
 }
 
-void IDBCallbacksProxy::onSuccessWithContinuation()
+void IDBCallbacksProxy::onSuccess(PassRefPtr<SerializedScriptValue> serializedScriptValue, PassRefPtr<IDBKey> key, const IDBKeyPath& keyPath)
 {
-    m_callbacks->onSuccessWithContinuation();
+    m_callbacks->onSuccess(serializedScriptValue, key, keyPath);
+}
+
+void IDBCallbacksProxy::onSuccess(int64_t value)
+{
+    m_callbacks->onSuccess(value);
+}
+
+void IDBCallbacksProxy::onSuccess()
+{
+    m_callbacks->onSuccess();
+}
+
+void IDBCallbacksProxy::onSuccess(PassRefPtr<IDBKey> key, PassRefPtr<IDBKey> primaryKey, PassRefPtr<SerializedScriptValue> value)
+{
+    m_callbacks->onSuccess(key, primaryKey, value);
 }
 
 void IDBCallbacksProxy::onSuccessWithPrefetch(const Vector<RefPtr<IDBKey> >& keys, const Vector<RefPtr<IDBKey> >& primaryKeys, const Vector<RefPtr<SerializedScriptValue> >& values)
@@ -121,6 +141,25 @@ void IDBCallbacksProxy::onBlocked()
     m_callbacks->onBlocked();
 }
 
+void IDBCallbacksProxy::onBlocked(int64_t existingVersion)
+{
+    m_callbacks->onBlocked(existingVersion);
+}
+
+void IDBCallbacksProxy::onUpgradeNeeded(int64_t oldVersion, PassRefPtr<IDBTransactionBackendInterface> transaction, PassRefPtr<IDBDatabaseBackendInterface> database)
+{
+    ASSERT(m_databaseCallbacks);
+    m_didCreateProxy = true;
+    m_callbacks->onUpgradeNeeded(oldVersion, new WebIDBTransactionImpl(transaction), new WebIDBDatabaseImpl(database, m_databaseCallbacks));
+}
+
+void IDBCallbacksProxy::setDatabaseCallbacks(PassRefPtr<IDBDatabaseCallbacksProxy> databaseCallbacks)
+{
+    ASSERT(!m_databaseCallbacks);
+    m_databaseCallbacks = databaseCallbacks;
+}
+
 } // namespace WebKit
+
 
 #endif // ENABLE(INDEXED_DATABASE)

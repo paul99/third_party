@@ -28,15 +28,21 @@
 #include "FloatPoint.h"
 
 #include "AffineTransform.h"
-#include "TransformationMatrix.h"
 #include "FloatConversion.h"
 #include "IntPoint.h"
+#include "LayoutPoint.h"
+#include "LayoutSize.h"
+#include "TransformationMatrix.h"
 #include <limits>
 #include <math.h>
 
 namespace WebCore {
 
 FloatPoint::FloatPoint(const IntPoint& p) : m_x(p.x()), m_y(p.y())
+{
+}
+
+FloatPoint::FloatPoint(const LayoutPoint& p) : m_x(p.x()), m_y(p.y())
 {
 }
 
@@ -53,6 +59,18 @@ void FloatPoint::normalize()
 float FloatPoint::length() const
 {
     return sqrtf(lengthSquared());
+}
+
+void FloatPoint::move(const LayoutSize& size)
+{
+    m_x += size.width();
+    m_y += size.height();
+}
+
+void FloatPoint::moveBy(const LayoutPoint& point)
+{
+    m_x += point.x();
+    m_y += point.y();
 }
 
 FloatPoint FloatPoint::matrixTransform(const AffineTransform& transform) const

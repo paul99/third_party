@@ -26,14 +26,15 @@
 #include "config.h"
 #include "ClipboardWx.h"
 
+#include "Editor.h"
 #include "FileList.h"
+#include "Frame.h"
 #include "HashTable.h"
 #include "IntPoint.h"
 #include "NotImplemented.h"
 #include "Pasteboard.h"
-#include "PlatformString.h"
 #include <wtf/text/StringHash.h>
-
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
     
@@ -57,7 +58,7 @@ void ClipboardWx::clearAllData()
     Pasteboard::generalPasteboard()->clear();
 }
 
-String ClipboardWx::getData(const String& type, bool& success) const 
+String ClipboardWx::getData(const String& type) const 
 {
     notImplemented();
     return ""; 
@@ -70,10 +71,10 @@ bool ClipboardWx::setData(const String& type, const String& data)
 }
 
 // extensions beyond IE's API
-HashSet<String> ClipboardWx::types() const 
+ListHashSet<String> ClipboardWx::types() const
 {
     notImplemented();
-    HashSet<String> result;
+    ListHashSet<String> result;
     return result;
 }
 
@@ -127,9 +128,9 @@ void ClipboardWx::writeURL(const KURL& url, const String& string, Frame* frame)
     Pasteboard::generalPasteboard()->writeURL(url, string, frame);
 }
 
-void ClipboardWx::writeRange(Range*, Frame*) 
+void ClipboardWx::writeRange(Range* range, Frame* frame) 
 {
-    notImplemented();
+    Pasteboard::generalPasteboard()->writeSelection(range, frame->editor()->smartInsertDeleteEnabled() && frame->selection()->granularity() == WordGranularity, frame);
 }
 
 bool ClipboardWx::hasData() 
@@ -140,7 +141,7 @@ bool ClipboardWx::hasData()
 
 void ClipboardWx::writePlainText(const WTF::String& text)
 {
-    Pasteboard::generalPasteboard()->writePlainText(text);
+    Pasteboard::generalPasteboard()->writePlainText(text, Pasteboard::CannotSmartReplace);
 }
 
 }

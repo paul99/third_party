@@ -32,8 +32,8 @@
 #include <wtf/RefPtr.h>
 
 namespace CoreIPC {
-class ArgumentDecoder;
 class Connection;
+class MessageDecoder;
 class MessageID;
 }
 
@@ -52,16 +52,11 @@ public:
     static PassRefPtr<WebFullScreenManager> create(WebPage*);
     virtual ~WebFullScreenManager();
 
-    void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+    void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
 
     bool supportsFullScreen(bool withKeyboard);
     void enterFullScreenForElement(WebCore::Element*);
     void exitFullScreenForElement(WebCore::Element*);
-    void beganEnterFullScreenAnimation();
-    void finishedEnterFullScreenAnimation(bool completed);
-    void beganExitFullScreenAnimation();
-    void finishedExitFullScreenAnimation(bool completed);
-    virtual void setRootFullScreenLayer(WebCore::GraphicsLayer*) = 0;
 
     void willEnterFullScreen();
     void didEnterFullScreen();
@@ -70,17 +65,18 @@ public:
 
     WebCore::Element* element();
 
+    void close();
+
 protected:
     WebFullScreenManager(WebPage*);
 
-    virtual void beginEnterFullScreenAnimation(float duration) = 0;
-    virtual void beginExitFullScreenAnimation(float duration) = 0;
-    virtual void disposeOfLayerClient() { }
-    WebCore::IntRect getFullScreenRect();
+    void setAnimatingFullScreen(bool);
+    void requestExitFullScreen();
 
-    void didReceiveWebFullScreenManagerMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+    void didReceiveWebFullScreenManagerMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
 
     WebCore::IntRect m_initialFrame;
+    WebCore::IntRect m_finalFrame;
     RefPtr<WebPage> m_page;
     RefPtr<WebCore::Element> m_element;
 };

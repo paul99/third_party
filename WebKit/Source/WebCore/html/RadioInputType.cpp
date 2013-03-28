@@ -25,9 +25,11 @@
 #include "Frame.h"
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
+#include "InputTypeNames.h"
 #include "KeyboardEvent.h"
 #include "LocalizedStrings.h"
 #include "MouseEvent.h"
+#include "NodeTraversal.h"
 #include "Settings.h"
 #include "SpatialNavigation.h"
 #include <wtf/PassOwnPtr.h>
@@ -48,7 +50,7 @@ const AtomicString& RadioInputType::formControlType() const
 
 bool RadioInputType::valueMissing(const String&) const
 {
-    return !element()->checkedRadioButtons().checkedButtonForGroup(element()->name());
+    return element()->isInRequiredRadioButtonGroup() && !element()->checkedRadioButtonForGroup();
 }
 
 String RadioInputType::valueMissingText() const
@@ -83,7 +85,7 @@ void RadioInputType::handleKeydownEvent(KeyboardEvent* event)
     // We can only stay within the form's children if the form hasn't been demoted to a leaf because
     // of malformed HTML.
     Node* node = element();
-    while ((node = (forward ? node->traverseNextNode() : node->traversePreviousNode()))) {
+    while ((node = (forward ? NodeTraversal::next(node) : NodeTraversal::previous(node)))) {
         // Once we encounter a form element, we know we're through.
         if (node->hasTagName(formTag))
             break;
@@ -95,7 +97,7 @@ void RadioInputType::handleKeydownEvent(KeyboardEvent* event)
             break;
         if (inputElement->isRadioButton() && inputElement->name() == element()->name() && inputElement->isFocusable()) {
             document->setFocusedNode(inputElement);
-            inputElement->dispatchSimulatedClick(event, false, false);
+            inputElement->dispatchSimulatedClick(event, SendNoEvents, DoNotShowPressedLook);
             event->setDefaultHandled();
             return;
         }
@@ -114,8 +116,11 @@ void RadioInputType::handleKeyupEvent(KeyboardEvent* event)
     dispatchSimulatedClickIfActive(event);
 }
 
-bool RadioInputType::isKeyboardFocusable() const
+bool RadioInputType::isKeyboardFocusable(KeyboardEvent* event) const
 {
+    if (!InputType::isKeyboardFocusable(event))
+        return false;
+
     // When using Spatial Navigation, every radio button should be focusable.
     if (isSpatialNavigationEnabled(element()->document()->frame()))
         return true;
@@ -130,13 +135,7 @@ bool RadioInputType::isKeyboardFocusable() const
     }
 
     // Allow keyboard focus if we're checked or if nothing in the group is checked.
-    return element()->checked() || !element()->checkedRadioButtons().checkedButtonForGroup(element()->name());
-}
-
-void RadioInputType::attach()
-{
-    InputType::attach();
-    element()->updateCheckedRadioButtons();
+    return element()->checked() || !element()->checkedRadioButtonForGroup();
 }
 
 bool RadioInputType::shouldSendChangeEventAfterCheckedChanged()
@@ -158,12 +157,16 @@ PassOwnPtr<ClickHandlingState> RadioInputType::willDispatchClick()
     OwnPtr<ClickHandlingState> state = adoptPtr(new ClickHandlingState);
 
     state->checked = element()->checked();
+    state->checkedRadioButton = element()->checkedRadioButtonForGroup();
+
+#if PLATFORM(IOS)
     state->indeterminate = element()->indeterminate();
-    state->checkedRadioButton = element()->checkedRadioButtons().checkedButtonForGroup(element()->name());
 
     if (element()->indeterminate())
         element()->setIndeterminate(false);
-    element()->setChecked(true, true);
+#endif
+
+    element()->setChecked(true, DispatchChangeEvent);
 
     return state.release();
 }
@@ -180,7 +183,11 @@ void RadioInputType::didDispatchClick(Event* event, const ClickHandlingState& st
                 && checkedRadioButton->name() == element()->name()) {
             checkedRadioButton->setChecked(true);
         }
+
+#if PLATFORM(IOS)        
         element()->setIndeterminate(state.indeterminate);
+#endif
+
     }
 
     // The work we did in willDispatchClick was default handling.
@@ -190,6 +197,15 @@ void RadioInputType::didDispatchClick(Event* event, const ClickHandlingState& st
 bool RadioInputType::isRadioButton() const
 {
     return true;
+}
+
+bool RadioInputType::supportsIndeterminateAppearance() const
+{
+#if PLATFORM(IOS)
+    return true;
+#else
+    return false;
+#endif
 }
 
 } // namespace WebCore

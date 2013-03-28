@@ -22,6 +22,9 @@
 
 #include <cstring>
 #include <stdint.h>
+#include <wtf/StdLibExtras.h>
+
+using namespace std;
 
 // MIME type sniffing implementation based on http://tools.ietf.org/html/draft-abarth-mime-sniff-06
 
@@ -62,7 +65,13 @@ const size_t unknownTypesSize = sizeof(unknownTypes) / sizeof(unknownTypes[0]);
 
 static inline bool isUnknownType(const char* type)
 {
-    return isTextInList(type, unknownTypesSize, unknownTypes);
+    if (isTextInList(type, unknownTypesSize, unknownTypes))
+        return true;
+    if (!strchr(type, '/')) {
+        // Firefox/Chrome rejects a mime type if it does not contain a slash.
+        return true;
+    }
+    return false;
 }
 
 const char* xmlTypes[] = {
@@ -223,11 +232,25 @@ const size_t imageTypesSize = sizeof(imageTypes) / sizeof(imageTypes[0]);
 static inline size_t dataSizeNeededForImageSniffing()
 {
     size_t result = 0;
-    for (int i = 0; i < imageTypesSize; ++i) {
+    for (size_t i = 0; i < imageTypesSize; ++i) {
         if (imageTypes[i].size > result)
             result = imageTypes[i].size;
     }
     return result;
+}
+
+static inline bool maskedCompareSlowCase(const MagicNumbers& info, const char* data)
+{
+    const char* pattern = reinterpret_cast<const char*>(info.pattern);
+    const char* mask = reinterpret_cast<const char*>(info.mask);
+
+    size_t count = info.size;
+
+    for (size_t i = 0; i < count; ++i) {
+        if ((*data++ & *mask++) != *pattern++)
+            return false;
+    }
+    return true;
 }
 
 static inline bool maskedCompare(const MagicNumbers& info, const char* data, size_t dataSize)
@@ -235,9 +258,12 @@ static inline bool maskedCompare(const MagicNumbers& info, const char* data, siz
     if (dataSize < info.size)
         return false;
 
-    const uint32_t* pattern32 = reinterpret_cast<const uint32_t*>(info.pattern);
-    const uint32_t* mask32 = reinterpret_cast<const uint32_t*>(info.mask);
-    const uint32_t* data32 = reinterpret_cast<const uint32_t*>(data);
+    if (!isPointerTypeAlignmentOkay(static_cast<const uint32_t*>(static_cast<const void*>(data))))
+        return maskedCompareSlowCase(info, data);
+
+    const uint32_t* pattern32 = reinterpret_cast_ptr<const uint32_t*>(info.pattern);
+    const uint32_t* mask32 = reinterpret_cast_ptr<const uint32_t*>(info.mask);
+    const uint32_t* data32 = reinterpret_cast_ptr<const uint32_t*>(data);
 
     size_t count = info.size >> 2;
 

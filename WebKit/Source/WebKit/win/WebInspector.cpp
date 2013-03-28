@@ -29,6 +29,8 @@
 #include "config.h"
 #include "WebInspector.h"
 
+#if ENABLE(INSPECTOR)
+
 #include "WebInspectorClient.h"
 #include "WebKitDLL.h"
 #include "WebView.h"
@@ -230,10 +232,7 @@ HRESULT STDMETHODCALLTYPE WebInspector::setJavaScriptProfilingEnabled(BOOL enabl
     if (!page)
         return S_OK;
 
-    if (enabled)
-        page->inspectorController()->enableProfiler();
-    else
-        page->inspectorController()->disableProfiler();
+    page->inspectorController()->setProfilerEnabled(enabled);
 
     return S_OK;
 }
@@ -276,3 +275,5 @@ HRESULT STDMETHODCALLTYPE WebInspector::setTimelineProfilingEnabled(BOOL enabled
     frontendClient()->setTimelineProfilingEnabled(enabled);
     return S_OK;
 }
+
+#endif // ENABLE(INSPECTOR)

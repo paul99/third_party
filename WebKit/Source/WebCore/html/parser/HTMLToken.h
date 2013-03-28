@@ -27,6 +27,8 @@
 #define HTMLToken_h
 
 #include "MarkupTokenBase.h"
+#include <wtf/RefCounted.h>
+#include <wtf/RefPtr.h>
 
 namespace WebCore {
 
@@ -61,7 +63,7 @@ public:
         ASSERT(m_type == HTMLTokenTypes::StartTag || m_type == HTMLTokenTypes::EndTag || m_type == HTMLTokenTypes::DOCTYPE);
         MarkupTokenBase<HTMLTokenTypes, HTMLTokenTypes::DoctypeData>::appendToName(character);
     }
-    
+
     const DataVector& name() const
     {
         ASSERT(m_type == HTMLTokenTypes::StartTag || m_type == HTMLTokenTypes::EndTag || m_type == HTMLTokenTypes::DOCTYPE);
@@ -81,20 +83,33 @@ public:
     }
 };
 
-class AtomicHTMLToken : public AtomicMarkupTokenBase<HTMLToken> {
+class AtomicHTMLToken : public AtomicMarkupTokenBase<HTMLToken>, public RefCounted<AtomicHTMLToken> {
     WTF_MAKE_NONCOPYABLE(AtomicHTMLToken);
 public:
-    AtomicHTMLToken(HTMLToken& token) : AtomicMarkupTokenBase<HTMLToken>(&token) { }
-
-    AtomicHTMLToken(HTMLTokenTypes::Type type, AtomicString name, PassOwnPtr<NamedNodeMap> attributes = nullptr)
-        : AtomicMarkupTokenBase<HTMLToken>(type, name, attributes)
+    static PassRefPtr<AtomicHTMLToken> create(HTMLToken& token)
     {
+        return adoptRef(new AtomicHTMLToken(token));
+    }
+
+    static PassRefPtr<AtomicHTMLToken> create(HTMLTokenTypes::Type type, const AtomicString& name, const Vector<Attribute>& attributes = Vector<Attribute>())
+    {
+        return adoptRef(new AtomicHTMLToken(type, name, attributes));
     }
 
     bool forceQuirks() const
     {
         ASSERT(m_type == HTMLTokenTypes::DOCTYPE);
         return m_doctypeData->m_forceQuirks;
+    }
+private:
+    AtomicHTMLToken(HTMLToken& token)
+        : AtomicMarkupTokenBase<HTMLToken>(&token)
+    {
+    }
+
+    AtomicHTMLToken(HTMLTokenTypes::Type type, const AtomicString& name, const Vector<Attribute>& attributes = Vector<Attribute>())
+        : AtomicMarkupTokenBase<HTMLToken>(type, name, attributes)
+    {
     }
 };
 

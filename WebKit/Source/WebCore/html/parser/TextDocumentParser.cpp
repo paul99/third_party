@@ -60,12 +60,11 @@ void TextDocumentParser::insertFakePreElement()
     // sending fake bytes through the front-end of the parser to avoid
     // distrubing the line/column number calculations.
 
-    RefPtr<Attribute> styleAttribute = Attribute::createMapped("style", "word-wrap: break-word; white-space: pre-wrap;");
-    OwnPtr<NamedNodeMap> attributes = NamedNodeMap::create();
-    attributes->insertAttribute(styleAttribute.release(), false);
-    AtomicHTMLToken fakePre(HTMLTokenTypes::StartTag, preTag.localName(), attributes.release());
+    Vector<Attribute> attributes;
+    attributes.append(Attribute(styleAttr, "word-wrap: break-word; white-space: pre-wrap;"));
+    RefPtr<AtomicHTMLToken> fakePre = AtomicHTMLToken::create(HTMLTokenTypes::StartTag, preTag.localName(), attributes);
 
-    treeBuilder()->constructTreeFromAtomicToken(fakePre);
+    treeBuilder()->constructTreeFromAtomicToken(fakePre.get());
     // Normally we would skip the first \n after a <pre> element, but we don't
     // want to skip the first \n for text documents!
     treeBuilder()->setShouldSkipLeadingNewline(false);

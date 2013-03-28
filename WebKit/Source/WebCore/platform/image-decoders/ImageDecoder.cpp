@@ -20,19 +20,27 @@
  */
 
 #include "config.h"
-
 #include "ImageDecoder.h"
-
-#include <algorithm>
-#include <cmath>
 
 #include "BMPImageDecoder.h"
 #include "GIFImageDecoder.h"
 #include "ICOImageDecoder.h"
+#if PLATFORM(QT)
+#include "ImageDecoderQt.h"
+#endif
+#if !PLATFORM(QT) || USE(LIBJPEG)
 #include "JPEGImageDecoder.h"
+#endif
 #include "PNGImageDecoder.h"
-#include "WEBPImageDecoder.h"
+#include "PlatformMemoryInstrumentation.h"
 #include "SharedBuffer.h"
+#if USE(WEBP)
+#include "WEBPImageDecoder.h"
+#endif
+
+#include <algorithm>
+#include <cmath>
+#include <wtf/MemoryInstrumentationVector.h>
 
 using namespace std;
 
@@ -105,11 +113,18 @@ ImageDecoder* ImageDecoder::create(const SharedBuffer& data, ImageSource::AlphaO
     if (matchesGIFSignature(contents))
         return new GIFImageDecoder(alphaOption, gammaAndColorProfileOption);
 
+#if !PLATFORM(QT) || (PLATFORM(QT) && USE(LIBPNG))
     if (matchesPNGSignature(contents))
         return new PNGImageDecoder(alphaOption, gammaAndColorProfileOption);
 
+    if (matchesICOSignature(contents) || matchesCURSignature(contents))
+        return new ICOImageDecoder(alphaOption, gammaAndColorProfileOption);
+#endif
+
+#if !PLATFORM(QT) || (PLATFORM(QT) && USE(LIBJPEG))
     if (matchesJPEGSignature(contents))
         return new JPEGImageDecoder(alphaOption, gammaAndColorProfileOption);
+#endif
 
 #if USE(WEBP)
     if (matchesWebPSignature(contents))
@@ -119,9 +134,9 @@ ImageDecoder* ImageDecoder::create(const SharedBuffer& data, ImageSource::AlphaO
     if (matchesBMPSignature(contents))
         return new BMPImageDecoder(alphaOption, gammaAndColorProfileOption);
 
-    if (matchesICOSignature(contents) || matchesCURSignature(contents))
-        return new ICOImageDecoder(alphaOption, gammaAndColorProfileOption);
-
+#if PLATFORM(QT)
+    return new ImageDecoderQt(alphaOption, gammaAndColorProfileOption);
+#endif
     return 0;
 }
 
@@ -141,7 +156,7 @@ ImageFrame& ImageFrame::operator=(const ImageFrame& other)
     if (this == &other)
         return *this;
 
-    copyReferenceToBitmapData(other);
+    copyBitmapData(other);
     setOriginalFrameRect(other.originalFrameRect());
     setStatus(other.status());
     setDuration(other.duration());
@@ -165,14 +180,6 @@ void ImageFrame::zeroFillPixelData()
 {
     memset(m_bytes, 0, m_size.width() * m_size.height() * sizeof(PixelData));
     m_hasAlpha = true;
-}
-
-#if !USE(CG)
-
-void ImageFrame::copyReferenceToBitmapData(const ImageFrame& other)
-{
-    ASSERT(this != &other);
-    copyBitmapData(other);
 }
 
 bool ImageFrame::copyBitmapData(const ImageFrame& other)
@@ -201,8 +208,6 @@ bool ImageFrame::setSize(int newWidth, int newHeight)
     return true;
 }
 
-#endif
-
 bool ImageFrame::hasAlpha() const
 {
     return m_hasAlpha;
@@ -223,14 +228,10 @@ void ImageFrame::setStatus(FrameStatus status)
     m_status = status;
 }
 
-int ImageFrame::width() const
+void ImageFrame::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
 {
-    return m_size.width();
-}
-
-int ImageFrame::height() const
-{
-    return m_size.height();
+    MemoryClassInfo info(memoryObjectInfo, this, PlatformMemoryTypes::Image);
+    info.addMember(m_backingStore);
 }
 
 #endif
@@ -276,6 +277,23 @@ template <MatchType type> int getScaledValue(const Vector<int>& scaledValues, in
 
 }
 
+bool ImageDecoder::frameHasAlphaAtIndex(size_t index) const
+{
+    if (m_frameBufferCache.size() <= index)
+        return true;
+    if (m_frameBufferCache[index].status() == ImageFrame::FrameComplete)
+        return m_frameBufferCache[index].hasAlpha();
+    return true;
+}
+
+unsigned ImageDecoder::frameBytesAtIndex(size_t index) const
+{
+    if (m_frameBufferCache.size() <= index)
+        return 0;
+    // FIXME: Use the dimension of the requested frame.
+    return m_size.area() * sizeof(ImageFrame::PixelData);
+}
+
 void ImageDecoder::prepareScaleDataIfNecessary()
 {
     m_scaled = false;
@@ -317,6 +335,16 @@ int ImageDecoder::lowerBoundScaledY(int origY, int searchStart)
 int ImageDecoder::scaledY(int origY, int searchStart)
 {
     return getScaledValue<Exact>(m_scaledRows, origY, searchStart);
+}
+
+void ImageDecoder::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, PlatformMemoryTypes::Image);
+    info.addMember(m_data);
+    info.addMember(m_frameBufferCache);
+    info.addMember(m_colorProfile);
+    info.addMember(m_scaledColumns);
+    info.addMember(m_scaledRows);
 }
 
 }

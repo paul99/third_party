@@ -35,7 +35,6 @@
 #include "FontDescription.h"
 #include "FontPlatformData.h"
 #include "NotImplemented.h"
-#include "PlatformSupport.h"
 #include "SimpleFontData.h"
 
 #include "SkPaint.h"
@@ -48,89 +47,6 @@
 #include <wtf/text/CString.h>
 
 namespace WebCore {
-
-// Load custom fonts from file for layout tests, as we need to match
-// font of chromium/linux.
-static CString getCustomFontPath(const char* name, bool bold, bool italic) {
-    static const char* kDeviceFontDirForTest = "/data/drt/fonts/";
-
-    static const struct AliasToFontName {
-        const char* alias;
-        const char* font_name;
-    } kAliasToFontName[] = {
-        // The following mapping roughly equals to fonts.conf used by
-        // TestShellGtk.cpp.
-        { "Times", "Times New Roman" },
-        { "sans", "Arial" },
-        { "sans serif", "Arial" },
-        { "Helvetica", "Arial" },
-        { "sans-serif", "Arial" },
-        { "serif", "Times New Roman" },
-        { "mono", "Courier New" },
-        { "monospace", "Courier New" },
-        { "Courier", "Courier New" },
-        { "cursive", "Comic Sans MS" },
-        { "fantasy", "Impact" },
-        { "Monaco", "Times New Roman" },
-    };
-
-    static const struct FontNameToFont {
-        const char* font_name;
-        const char* font_files[4];  // 0: normal; 1: bold; 2: italic; 3: bold italic
-    } kFontNameToFont[] = {
-        { "Times New Roman",
-            { "Times_New_Roman.ttf", "Times_New_Roman_Bold.ttf",
-              "Times_New_Roman_Italic.ttf", "Times_New_Roman_Bold_Italic.ttf" }
-        },
-        { "Arial",
-            { "Arial.ttf", "Arial_Bold.ttf",
-              "Arial_Italic.ttf", "Arial_Bold_Italic.ttf" }
-        },
-        { "Courier New",
-            { "Courier_New.ttf", "Courier_New_Bold.ttf",
-              "Courier_New_Italic.ttf", "Courier_New_Bold_Italic.ttf" }
-        },
-        { "Comic Sans MS",
-            { "Comic_Sans_MS.ttf", "Comic_Sans_MS_Bold.ttf",
-              "Comic_Sans_MS.ttf", "Comic_Sans_MS_Bold.ttf" }
-        },
-        { "Impact",
-            { "Impact.ttf", "Impact.ttf", "Impact.ttf", "Impact.ttf" }
-        },
-        { "Georgia",
-            { "Georgia.ttf", "Georgia_Bold.ttf",
-              "Georgia_Italic.ttf", "Georgia_Bold_Italic.ttf" }
-        },
-        { "Trebuchet MS",
-            { "Trebuchet_MS.ttf", "Trebuchet_MS_Bold.ttf",
-              "Trebuchet_MS_Italic.ttf", "Trebuchet_MS_Bold_Italic.ttf" }
-        },
-        { "Verdana",
-            { "Verdana.ttf", "Verdana_Bold.ttf",
-              "Verdana_Italic.ttf", "Verdana_Bold_Italic.ttf" }
-        },
-        { "Ahem",
-            { "AHEM____.TTF", "AHEM____.TTF", "AHEM____.TTF", "AHEM____.TTF" }
-        },
-    };
-
-    for (size_t i = 0; i < sizeof(kAliasToFontName) / sizeof(kAliasToFontName[0]); ++i) {
-        if (!strcasecmp(name, kAliasToFontName[i].alias)) {
-            name = kAliasToFontName[i].font_name;
-            break;
-        }
-    }
-
-    for (size_t i = 0; i < sizeof(kFontNameToFont) / sizeof(kFontNameToFont[0]); ++i) {
-        if (!strcasecmp(name, kFontNameToFont[i].font_name)) {
-            size_t style_index = bold ? (italic ? 3 : 1) : (italic ? 2 : 0);
-            std::string font_path(kDeviceFontDirForTest);
-            font_path += kFontNameToFont[i].font_files[style_index];
-            return CString(font_path.c_str());
-        }
-    }
-    return CString();
-}
 
 static const char* getFallbackFontName(const FontDescription& fontDescription)
 {
@@ -181,28 +97,34 @@ void FontCache::platformInit()
 {
 }
 
-const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, const UChar* characters, int length)
+PassRefPtr<SimpleFontData> FontCache::getFontDataForCharacters(const Font& font, const UChar* characters, int length)
 {
-    icu::Locale locale = icu::Locale::getDefault();
-    PlatformSupport::FontFamily family;
-    PlatformSupport::getFontFamilyForCharacters(characters, length, locale.getLanguage(), &family);
-    if (family.name.isEmpty())
+    if (!length)
         return 0;
 
-    AtomicString atomicFamily(family.name);
-    return getCachedFontData(getCachedFontPlatformData(font.fontDescription(), atomicFamily, DoNotRetain), DoNotRetain);
+    SkUnichar skiaChar;
+    if (U16_IS_LEAD(characters[0])) {
+        ASSERT(length >= 2);
+        skiaChar = U16_GET_SUPPLEMENTARY(characters[0], characters[1]);
+    } else
+        skiaChar = characters[0];
+
+    SkString skiaFamilyName;
+    if (!SkGetFallbackFamilyNameForChar(skiaChar, &skiaFamilyName) || skiaFamilyName.isEmpty())
+        return 0;
+    return getCachedFontData(getCachedFontPlatformData(font.fontDescription(), AtomicString(skiaFamilyName.c_str()), DoNotRetain), DoNotRetain);
 }
 
-SimpleFontData* FontCache::getSimilarFontPlatformData(const Font& font)
+PassRefPtr<SimpleFontData> FontCache::getSimilarFontPlatformData(const Font& font)
 {
     return 0;
 }
 
-SimpleFontData* FontCache::getLastResortFallbackFont(const FontDescription& description, ShouldRetain shouldRetain)
+PassRefPtr<SimpleFontData> FontCache::getLastResortFallbackFont(const FontDescription& description, ShouldRetain shouldRetain)
 {
-    DEFINE_STATIC_LOCAL(const AtomicString, serif, ("Serif"));
-    DEFINE_STATIC_LOCAL(const AtomicString, monospace, ("Monospace"));
-    DEFINE_STATIC_LOCAL(const AtomicString, sans, ("Sans"));
+    DEFINE_STATIC_LOCAL(const AtomicString, serif, ("Serif", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(const AtomicString, monospace, ("Monospace", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(const AtomicString, sans, ("Sans", AtomicString::ConstructFromLiteral));
 
     FontPlatformData* fontPlatformData = 0;
     switch (description.genericFamily()) {
@@ -227,11 +149,6 @@ void FontCache::getTraitsInFamily(const AtomicString& familyName, Vector<unsigne
     notImplemented();
 }
 
-FontPlatformData* FontCache::getCachedFallbackScriptFontPlatformData(const FontDescription& fontDescription, const AtomicString& family)
-{
-    return getCachedFontPlatformData(fontDescription, family, true);
-}
-
 FontPlatformData* FontCache::createFontPlatformData(const FontDescription& fontDescription, const AtomicString& family)
 {
     const char* name = 0;
@@ -254,64 +171,43 @@ FontPlatformData* FontCache::createFontPlatformData(const FontDescription& fontD
 
     SkTypeface* typeface = 0;
     FontPlatformData* result = 0;
-    if (PlatformSupport::layoutTestMode()) {
-        CString customFontPath = getCustomFontPath(name,
-                                                   style & SkTypeface::kBold,
-                                                   style & SkTypeface::kItalic);
-        if (customFontPath.length()) {
-            typeface = SkTypeface::CreateFromFile(customFontPath.data());
+    FallbackScripts fallbackScript = SkGetFallbackScriptFromID(name);
+    if (SkTypeface_ValidScript(fallbackScript)) {
+        typeface = SkCreateTypefaceForScript(fallbackScript);
+        if (typeface)
             result = new FontPlatformData(typeface, name, fontDescription.computedSize(),
                                           (style & SkTypeface::kBold) && !typeface->isBold(),
                                           (style & SkTypeface::kItalic) && !typeface->isItalic(),
-                                          fontDescription.orientation(),
-                                          fontDescription.textOrientation());
-        }
-    }
-    if (!typeface) {
-        FallbackScripts fallbackScript = SkGetFallbackScriptFromID(name);
-        if (SkTypeface_ValidScript(fallbackScript)) {
-            // Do not use fallback fonts in layout test.
-            if (PlatformSupport::layoutTestMode())
-                return NULL;
-            typeface = SkCreateTypefaceForScript(fallbackScript);
-            if (typeface)
-                result = new FontPlatformData(typeface, name, fontDescription.computedSize(),
-                                              (style & SkTypeface::kBold) && !typeface->isBold(),
-                                              (style & SkTypeface::kItalic) && !typeface->isItalic(),
-                                              fontDescription.orientation(),
-                                              fontDescription.textOrientation());
-        } else {
-            typeface = SkTypeface::CreateFromName(name, SkTypeface::kNormal);
+                                          fontDescription.orientation());
+    } else {
+        typeface = SkTypeface::CreateFromName(name, SkTypeface::kNormal);
 
-            // CreateFromName always returns a typeface, falling back to a default font
-            // if the one requested could not be found. Calling Equal() with a null
-            // pointer will compare the returned font against the default, with the
-            // caveat that the default is always of normal style. When that happens,
-            // ignore the default font and allow WebCore to provide the next font on the
-            // CSS fallback list. The only exception to this occurs when the family name
-            // is a commonly used generic family, which is the case when called by
-            // getSimilarFontPlatformData() or getLastResortFallbackFont(). In that case
-            // the default font is an acceptable result.
+        // CreateFromName always returns a typeface, falling back to a default font
+        // if the one requested could not be found. Calling Equal() with a null
+        // pointer will compare the returned font against the default, with the
+        // caveat that the default is always of normal style. When that happens,
+        // ignore the default font and allow WebCore to provide the next font on the
+        // CSS fallback list. The only exception to this occurs when the family name
+        // is a commonly used generic family, which is the case when called by
+        // getSimilarFontPlatformData() or getLastResortFallbackFont(). In that case
+        // the default font is an acceptable result.
 
-            if (!SkTypeface::Equal(typeface, 0) || isFallbackFamily(family.string())) {
-                // We had to use normal styling to see if this was a default font. If
-                // we need bold or italic, replace with the corrected typeface.
-                if (style != SkTypeface::kNormal) {
-                    typeface->unref();
-                    typeface = SkTypeface::CreateFromName(name, static_cast<SkTypeface::Style>(style));
-                }
-                result = new FontPlatformData(typeface, name, fontDescription.computedSize(),
-                                              (style & SkTypeface::kBold) && !typeface->isBold(),
-                                              (style & SkTypeface::kItalic) && !typeface->isItalic(),
-                                              fontDescription.orientation(),
-                                              fontDescription.textOrientation());
+        if (!SkTypeface::Equal(typeface, 0) || isFallbackFamily(family.string())) {
+            // We had to use normal styling to see if this was a default font. If
+            // we need bold or italic, replace with the corrected typeface.
+            if (style != SkTypeface::kNormal) {
+                typeface->unref();
+                typeface = SkTypeface::CreateFromName(name, static_cast<SkTypeface::Style>(style));
             }
+            result = new FontPlatformData(typeface, name, fontDescription.computedSize(),
+                                          (style & SkTypeface::kBold) && !typeface->isBold(),
+                                          (style & SkTypeface::kItalic) && !typeface->isItalic(),
+                                          fontDescription.orientation());
         }
     }
 
     SkSafeUnref(typeface);
     return result;
-
 }
 
-}  // namespace WebCore
+} // namespace WebCore

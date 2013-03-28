@@ -46,9 +46,11 @@
 
 namespace WebCore {
 
+#if ENABLE(DRAG_SUPPORT)
 const double EventHandler::TextDragDelay = 0.0;
+#endif
 
-bool EventHandler::tabsToAllFormControls(KeyboardEvent* event) const
+bool EventHandler::tabsToAllFormControls(KeyboardEvent*) const
 {
     return true;
 }
@@ -61,7 +63,7 @@ void EventHandler::focusDocumentView()
 
 bool EventHandler::passWidgetMouseDownEventToWidget(const MouseEventWithHitTestResults& event)
 {
-    RenderObject* target = targetNode(event) ? targetNode(event)->renderer() : 0;
+    RenderObject* target = event.targetNode() ? event.targetNode()->renderer() : 0;
 
     if (!target || !target->isWidget())
         return false;
@@ -74,7 +76,7 @@ bool EventHandler::passWidgetMouseDownEventToWidget(RenderWidget* renderWidget)
     return passMouseDownEventToWidget(renderWidget->widget());
 }
 
-bool EventHandler::passMouseDownEventToWidget(Widget* widget)
+bool EventHandler::passMouseDownEventToWidget(Widget*)
 {
     notImplemented();
     return false;
@@ -95,10 +97,12 @@ bool EventHandler::passWheelEventToWidget(const PlatformWheelEvent& event, Widge
     return static_cast<FrameView*>(widget)->frame()->eventHandler()->handleWheelEvent(event);
 }
 
+#if ENABLE(DRAG_SUPPORT)
 PassRefPtr<Clipboard> EventHandler::createDraggingClipboard() const
 {
     return ClipboardEfl::create(ClipboardWritable, Clipboard::DragAndDrop);
 }
+#endif
 
 bool EventHandler::passMousePressEventToSubframe(MouseEventWithHitTestResults& mev, Frame* subframe)
 {

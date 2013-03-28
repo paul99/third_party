@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2008 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2012 Google Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,7 +29,7 @@
 #define WorkerScriptController_h
 
 #if ENABLE(WORKERS)
-
+#include <debugger/Debugger.h>
 #include <heap/Strong.h>
 #include <wtf/Forward.h>
 #include <wtf/Threading.h>
@@ -56,10 +57,10 @@ namespace WebCore {
             return m_workerContextWrapper.get();
         }
 
-        ScriptValue evaluate(const ScriptSourceCode&);
-        ScriptValue evaluate(const ScriptSourceCode&, ScriptValue* exception);
+        void evaluate(const ScriptSourceCode&);
+        void evaluate(const ScriptSourceCode&, ScriptValue* exception);
 
-        void setException(ScriptValue);
+        void setException(const ScriptValue&);
 
         // Async request to terminate a JS run execution. Eventually causes termination
         // exception raised during JS execution, if the worker thread happens to run JS.
@@ -67,15 +68,19 @@ namespace WebCore {
         // forbidExecution()/isExecutionForbidden() to guard against reentry into JS.
         // Can be called from any thread.
         void scheduleExecutionTermination();
+        bool isExecutionTerminating() const;
 
         // Called on Worker thread when JS exits with termination exception caused by forbidExecution() request,
         // or by Worker thread termination code to prevent future entry into JS.
         void forbidExecution();
         bool isExecutionForbidden() const;
 
-        void disableEval();
+        void disableEval(const String& errorMessage);
 
         JSC::JSGlobalData* globalData() { return m_globalData.get(); }
+
+        void attachDebugger(JSC::Debugger*);
+        void detachDebugger(JSC::Debugger*);
 
     private:
         void initScriptIfNeeded()
@@ -89,6 +94,7 @@ namespace WebCore {
         WorkerContext* m_workerContext;
         JSC::Strong<JSWorkerContext> m_workerContextWrapper;
         bool m_executionForbidden;
+        mutable Mutex m_scheduledTerminationMutex;
     };
 
 } // namespace WebCore

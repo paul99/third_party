@@ -31,7 +31,19 @@
 #include "CSSGradientValue.h"
 #include "Image.h"
 #include "RenderObject.h"
+#include "WebCoreMemoryInstrumentation.h"
+#include <wtf/MemoryInstrumentationHashCountedSet.h>
+#include <wtf/MemoryInstrumentationHashMap.h>
 #include <wtf/text/WTFString.h>
+
+
+namespace WTF {
+
+template<> struct SequenceMemoryInstrumentationTraits<const WebCore::RenderObject*> {
+    template <typename I> static void reportMemoryUsage(I, I, MemoryClassInfo&) { }
+};
+
+}
 
 namespace WebCore {
 
@@ -56,7 +68,7 @@ void CSSImageGeneratorValue::addClient(RenderObject* renderer, const IntSize& si
     if (it == m_clients.end())
         m_clients.add(renderer, SizeAndCount(size, 1));
     else {
-        SizeAndCount& sizeCount = it->second;
+        SizeAndCount& sizeCount = it->value;
         ++sizeCount.count;
     }
 }
@@ -68,7 +80,7 @@ void CSSImageGeneratorValue::removeClient(RenderObject* renderer)
     ASSERT(it != m_clients.end());
 
     IntSize removedImageSize;
-    SizeAndCount& sizeCount = it->second;
+    SizeAndCount& sizeCount = it->value;
     IntSize size = sizeCount.size;
     if (!size.isEmpty()) {
         m_sizes.remove(size);
@@ -86,7 +98,7 @@ Image* CSSImageGeneratorValue::getImage(RenderObject* renderer, const IntSize& s
 {
     RenderObjectSizeCountMap::iterator it = m_clients.find(renderer);
     if (it != m_clients.end()) {
-        SizeAndCount& sizeCount = it->second;
+        SizeAndCount& sizeCount = it->value;
         IntSize oldSize = sizeCount.size;
         if (oldSize != size) {
             RefPtr<CSSImageGeneratorValue> protect(this);
@@ -106,6 +118,14 @@ Image* CSSImageGeneratorValue::getImage(RenderObject* renderer, const IntSize& s
 void CSSImageGeneratorValue::putImage(const IntSize& size, PassRefPtr<Image> image)
 {
     m_images.add(size, image);
+}
+
+void CSSImageGeneratorValue::reportBaseClassMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CSS);
+    info.addMember(m_sizes);
+    info.addMember(m_clients);
+    info.addMember(m_images); // FIXME: instrument Image
 }
 
 PassRefPtr<Image> CSSImageGeneratorValue::image(RenderObject* renderer, const IntSize& size)
@@ -174,6 +194,23 @@ bool CSSImageGeneratorValue::isPending() const
         ASSERT_NOT_REACHED();
     }
     return false;
+}
+
+bool CSSImageGeneratorValue::hasAlpha(const RenderObject* renderer) const
+{
+    switch (classType()) {
+    case CrossfadeClass:
+        return static_cast<const CSSCrossfadeValue*>(this)->hasAlpha(renderer);
+    case CanvasClass:
+        return true;
+    case LinearGradientClass:
+        return static_cast<const CSSLinearGradientValue*>(this)->hasAlpha(renderer);
+    case RadialGradientClass:
+        return static_cast<const CSSRadialGradientValue*>(this)->hasAlpha(renderer);
+    default:
+        ASSERT_NOT_REACHED();
+    }
+    return true;
 }
 
 void CSSImageGeneratorValue::loadSubimages(CachedResourceLoader* cachedResourceLoader)

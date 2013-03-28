@@ -28,6 +28,9 @@
 #define PlatformKeyboardEvent_h
 
 #include "PlatformEvent.h"
+#if OS(WINDOWS)
+#include "WindowsExtras.h"
+#endif
 #include <wtf/text/WTFString.h>
 
 #if PLATFORM(MAC)
@@ -35,14 +38,9 @@
 OBJC_CLASS NSEvent;
 #endif
 
-#if PLATFORM(WIN)
-typedef struct HWND__ *HWND;
-typedef unsigned WPARAM;
-typedef long LPARAM;
-#endif
-
 #if PLATFORM(GTK)
 typedef struct _GdkEventKey GdkEventKey;
+#include "CompositionResults.h"
 #endif
 
 #if PLATFORM(QT)
@@ -55,6 +53,14 @@ QT_END_NAMESPACE
 class wxKeyEvent;
 #endif
 
+#if PLATFORM(BLACKBERRY)
+namespace BlackBerry {
+namespace Platform {
+class KeyboardEvent;
+}
+}
+#endif
+
 #if PLATFORM(EFL)
 typedef struct _Evas_Event_Key_Down Evas_Event_Key_Down;
 typedef struct _Evas_Event_Key_Up Evas_Event_Key_Up;
@@ -63,6 +69,7 @@ typedef struct _Evas_Event_Key_Up Evas_Event_Key_Up;
 namespace WebCore {
 
     class PlatformKeyboardEvent : public PlatformEvent {
+        WTF_MAKE_FAST_ALLOCATED;
     public:
         PlatformKeyboardEvent()
             : PlatformEvent(PlatformEvent::KeyDown)
@@ -72,6 +79,9 @@ namespace WebCore {
             , m_autoRepeat(false)
             , m_isKeypad(false)
             , m_isSystemKey(false)
+#if PLATFORM(BLACKBERRY)
+            , m_unmodifiedCharacter(0)
+#endif
 #if PLATFORM(GTK)
             , m_gdkEventKey(0)
 #endif
@@ -127,6 +137,10 @@ namespace WebCore {
         static bool currentCapsLockState();
         static void getCurrentModifierState(bool& shiftKey, bool& ctrlKey, bool& altKey, bool& metaKey);
 
+#if PLATFORM(BLACKBERRY)
+        unsigned short unmodifiedCharacter() const { return m_unmodifiedCharacter; }
+#endif
+
 #if PLATFORM(MAC)
         NSEvent* macEvent() const { return m_macEvent.get(); }
 #endif
@@ -136,8 +150,9 @@ namespace WebCore {
 #endif
 
 #if PLATFORM(GTK)
-        PlatformKeyboardEvent(GdkEventKey*);
-        GdkEventKey* gdkEventKey() const;
+        PlatformKeyboardEvent(GdkEventKey*, const CompositionResults&);
+        GdkEventKey* gdkEventKey() const { return m_gdkEventKey; }
+        const CompositionResults& compositionResults() const { return m_compositionResults; }
 
         // Used by WebKit2
         static String keyIdentifierForGdkKeyCode(unsigned);
@@ -156,9 +171,13 @@ namespace WebCore {
         PlatformKeyboardEvent(wxKeyEvent&);
 #endif
 
+#if PLATFORM(BLACKBERRY)
+        PlatformKeyboardEvent(const BlackBerry::Platform::KeyboardEvent&);
+#endif
+
 #if PLATFORM(EFL)
-        PlatformKeyboardEvent(const Evas_Event_Key_Down*);
-        PlatformKeyboardEvent(const Evas_Event_Key_Up*);
+        explicit PlatformKeyboardEvent(const Evas_Event_Key_Down*);
+        explicit PlatformKeyboardEvent(const Evas_Event_Key_Up*);
 #endif
 
     protected:
@@ -172,11 +191,16 @@ namespace WebCore {
         bool m_isKeypad;
         bool m_isSystemKey;
 
+#if PLATFORM(BLACKBERRY)
+        unsigned short m_unmodifiedCharacter;
+#endif
+
 #if PLATFORM(MAC)
         RetainPtr<NSEvent> m_macEvent;
 #endif
 #if PLATFORM(GTK)
         GdkEventKey* m_gdkEventKey;
+        CompositionResults m_compositionResults;
 #endif
 #if PLATFORM(QT)
         QKeyEvent* m_qtEvent;

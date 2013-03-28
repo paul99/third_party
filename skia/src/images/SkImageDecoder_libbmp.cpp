@@ -6,7 +6,7 @@
  * found in the LICENSE file.
  */
 
- 
+
 #include "bmpdecoderhelper.h"
 #include "SkImageDecoder.h"
 #include "SkScaledBitmapSampler.h"
@@ -18,7 +18,7 @@
 class SkBMPImageDecoder : public SkImageDecoder {
 public:
     SkBMPImageDecoder() {}
-    
+
     virtual Format getFormat() const {
         return kBMP_Format;
     }
@@ -27,12 +27,16 @@ protected:
     virtual bool onDecode(SkStream* stream, SkBitmap* bm, Mode mode);
 };
 
-static SkImageDecoder* Factory(SkStream* stream) {
+///////////////////////////////////////////////////////////////////////////////
+DEFINE_DECODER_CREATOR(BMPImageDecoder);
+///////////////////////////////////////////////////////////////////////////////
+
+static SkImageDecoder* sk_libbmp_dfactory(SkStream* stream) {
     static const char kBmpMagic[] = { 'B', 'M' };
-    
+
     size_t len = stream->getLength();
     char buffer[sizeof(kBmpMagic)];
-    
+
     if (len > sizeof(kBmpMagic) &&
             stream->read(buffer, sizeof(kBmpMagic)) == sizeof(kBmpMagic) &&
             !memcmp(buffer, kBmpMagic, sizeof(kBmpMagic))) {
@@ -41,7 +45,7 @@ static SkImageDecoder* Factory(SkStream* stream) {
     return NULL;
 }
 
-static SkTRegistry<SkImageDecoder*, SkStream*> gReg(Factory);
+static SkTRegistry<SkImageDecoder*, SkStream*> gReg(sk_libbmp_dfactory);
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -57,7 +61,7 @@ public:
         if (fJustBounds) {
             return NULL;
         }
-        
+
         fRGB.setCount(width * height * 3);  // 3 == r, g, b
         return fRGB.begin();
     }
@@ -77,11 +81,11 @@ bool SkBMPImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
 
     size_t length = stream->getLength();
     SkAutoMalloc storage(length);
-    
+
     if (stream->read(storage.get(), length) != length) {
         return false;
     }
-    
+
     const bool justBounds = SkImageDecoder::kDecodeBounds_Mode == mode;
     SkBmpDecoderCallback callback(justBounds);
 
@@ -94,11 +98,11 @@ bool SkBMPImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
             return false;
         }
     }
-    
+
     // we don't need this anymore, so free it now (before we try to allocate
     // the bitmap's pixels) rather than waiting for its destructor
     storage.free();
-    
+
     int width = callback.width();
     int height = callback.height();
     SkBitmap::Config config = this->getPrefConfig(k32Bit_SrcDepth, false);
@@ -120,9 +124,9 @@ bool SkBMPImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
     if (!this->allocPixelRef(bm, NULL)) {
         return false;
     }
-    
+
     SkAutoLockPixels alp(*bm);
-    
+
     if (!sampler.begin(bm, SkScaledBitmapSampler::kRGB, getDitherImage())) {
         return false;
     }
@@ -130,7 +134,7 @@ bool SkBMPImageDecoder::onDecode(SkStream* stream, SkBitmap* bm, Mode mode) {
     const int srcRowBytes = width * 3;
     const int dstHeight = sampler.scaledHeight();
     const uint8_t* srcRow = callback.rgb();
-    
+
     srcRow += sampler.srcY0() * srcRowBytes;
     for (int y = 0; y < dstHeight; y++) {
         sampler.next(srcRow);

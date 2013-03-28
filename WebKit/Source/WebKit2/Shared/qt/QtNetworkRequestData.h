@@ -26,7 +26,7 @@
 #ifndef QtNetworkRequestData_h
 #define QtNetworkRequestData_h
 
-#include "RefCounted.h"
+#include <wtf/RefCounted.h>
 #include <wtf/text/WTFString.h>
 
 namespace CoreIPC {
@@ -34,15 +34,17 @@ class ArgumentEncoder;
 class ArgumentDecoder;
 };
 
+QT_BEGIN_NAMESPACE
 class QNetworkRequest;
 class QNetworkReply;
+QT_END_NAMESPACE
 
 namespace WebKit {
 
 struct QtNetworkRequestData {
     QtNetworkRequestData();
     QtNetworkRequestData(const QNetworkRequest&, QNetworkReply*);
-    void encode(CoreIPC::ArgumentEncoder*) const;
+    void encode(CoreIPC::ArgumentEncoder&) const;
     static bool decode(CoreIPC::ArgumentDecoder*, QtNetworkRequestData&);
 
     String m_scheme;

@@ -24,14 +24,15 @@
 
 #include "ExceptionHelpers.h"
 #include "Interpreter.h"
+#include "JSProxy.h"
 #include "JSString.h"
-#include "JSValueInlineMethods.h"
+#include "JSValueInlines.h"
 
 namespace JSC {
 
     NEVER_INLINE JSValue jsAddSlowCase(CallFrame*, JSValue, JSValue);
     JSValue jsTypeStringForValue(CallFrame*, JSValue);
-    bool jsIsObjectType(JSValue);
+    bool jsIsObjectType(CallFrame*, JSValue);
     bool jsIsFunctionType(JSValue);
 
     ALWAYS_INLINE JSValue jsString(ExecState* exec, JSString* s1, JSString* s2)
@@ -47,10 +48,10 @@ namespace JSC {
         if ((length1 + length2) < length1)
             return throwOutOfMemoryError(exec);
 
-        return JSString::create(globalData, s1, s2);
+        return JSRopeString::create(globalData, s1, s2);
     }
 
-    ALWAYS_INLINE JSValue jsString(ExecState* exec, const UString& u1, const UString& u2, const UString& u3)
+    ALWAYS_INLINE JSValue jsString(ExecState* exec, const String& u1, const String& u2, const String& u3)
     {
         JSGlobalData* globalData = &exec->globalData();
 
@@ -69,13 +70,13 @@ namespace JSC {
         if ((length1 + length2 + length3) < length3)
             return throwOutOfMemoryError(exec);
 
-        return JSString::create(exec->globalData(), jsString(globalData, u1), jsString(globalData, u2), jsString(globalData, u3));
+        return JSRopeString::create(exec->globalData(), jsString(globalData, u1), jsString(globalData, u2), jsString(globalData, u3));
     }
 
     ALWAYS_INLINE JSValue jsString(ExecState* exec, Register* strings, unsigned count)
     {
         JSGlobalData* globalData = &exec->globalData();
-        JSString::RopeBuilder ropeBuilder(*globalData);
+        JSRopeString::RopeBuilder ropeBuilder(*globalData);
 
         unsigned oldLength = 0;
 
@@ -85,6 +86,7 @@ namespace JSC {
 
             if (ropeBuilder.length() < oldLength) // True for overflow
                 return throwOutOfMemoryError(exec);
+            oldLength = ropeBuilder.length();
         }
 
         return ropeBuilder.release();
@@ -93,7 +95,7 @@ namespace JSC {
     ALWAYS_INLINE JSValue jsStringFromArguments(ExecState* exec, JSValue thisValue)
     {
         JSGlobalData* globalData = &exec->globalData();
-        JSString::RopeBuilder ropeBuilder(*globalData);
+        JSRopeString::RopeBuilder ropeBuilder(*globalData);
         ropeBuilder.append(thisValue.toString(exec));
 
         unsigned oldLength = 0;
@@ -104,6 +106,7 @@ namespace JSC {
 
             if (ropeBuilder.length() < oldLength) // True for overflow
                 return throwOutOfMemoryError(exec);
+            oldLength = ropeBuilder.length();
         }
 
         return ropeBuilder.release();
@@ -134,13 +137,13 @@ namespace JSC {
                     return true;
                 if (!v2.isCell())
                     return false;
-                return v2.asCell()->structure()->typeInfo().masqueradesAsUndefined();
+                return v2.asCell()->structure()->masqueradesAsUndefined(exec->lexicalGlobalObject());
             }
 
             if (v2.isUndefinedOrNull()) {
                 if (!v1.isCell())
                     return false;
-                return v1.asCell()->structure()->typeInfo().masqueradesAsUndefined();
+                return v1.asCell()->structure()->masqueradesAsUndefined(exec->lexicalGlobalObject());
             }
 
             if (v1.isObject()) {
@@ -221,7 +224,7 @@ namespace JSC {
             return v1.asNumber() < v2.asNumber();
 
         if (isJSString(v1) && isJSString(v2))
-            return asString(v1)->value(callFrame) < asString(v2)->value(callFrame);
+            return codePointCompareLessThan(asString(v1)->value(callFrame), asString(v2)->value(callFrame));
 
         double n1;
         double n2;
@@ -239,7 +242,7 @@ namespace JSC {
 
         if (wasNotString1 | wasNotString2)
             return n1 < n2;
-        return asString(p1)->value(callFrame) < asString(p2)->value(callFrame);
+        return codePointCompareLessThan(asString(p1)->value(callFrame), asString(p2)->value(callFrame));
     }
 
     // See ES5 11.8.3/11.8.4/11.8.5 for definition of leftFirst, this value ensures correct
@@ -255,7 +258,7 @@ namespace JSC {
             return v1.asNumber() <= v2.asNumber();
 
         if (isJSString(v1) && isJSString(v2))
-            return !(asString(v2)->value(callFrame) < asString(v1)->value(callFrame));
+            return !codePointCompareLessThan(asString(v2)->value(callFrame), asString(v1)->value(callFrame));
 
         double n1;
         double n2;
@@ -273,7 +276,7 @@ namespace JSC {
 
         if (wasNotString1 | wasNotString2)
             return n1 <= n2;
-        return !(asString(p2)->value(callFrame) < asString(p1)->value(callFrame));
+        return !codePointCompareLessThan(asString(p2)->value(callFrame), asString(p1)->value(callFrame));
     }
 
     // Fast-path choices here are based on frequency data from SunSpider:
@@ -297,19 +300,27 @@ namespace JSC {
         return jsAddSlowCase(callFrame, v1, v2);
     }
 
-    inline size_t normalizePrototypeChain(CallFrame* callFrame, JSValue base, JSValue slotBase, const Identifier& propertyName, size_t& slotOffset)
+#define InvalidPrototypeChain (std::numeric_limits<size_t>::max())
+
+    inline size_t normalizePrototypeChainForChainAccess(CallFrame* callFrame, JSValue base, JSValue slotBase, const Identifier& propertyName, PropertyOffset& slotOffset)
     {
         JSCell* cell = base.asCell();
         size_t count = 0;
-
+        
         while (slotBase != cell) {
+            if (cell->isProxy())
+                return InvalidPrototypeChain;
+            
+            if (cell->structure()->typeInfo().hasImpureGetOwnPropertySlot())
+                return InvalidPrototypeChain;
+            
             JSValue v = cell->structure()->prototypeForLookup(callFrame);
 
             // If we didn't find slotBase in base's prototype chain, then base
             // must be a proxy for another object.
 
             if (v.isNull())
-                return 0;
+                return InvalidPrototypeChain;
 
             cell = v.asCell();
 
@@ -320,7 +331,7 @@ namespace JSC {
                 if (slotBase == cell)
                     slotOffset = cell->structure()->get(callFrame->globalData(), propertyName); 
             }
-
+            
             ++count;
         }
         
@@ -332,6 +343,9 @@ namespace JSC {
     {
         size_t count = 0;
         while (1) {
+            if (base->isProxy())
+                return InvalidPrototypeChain;
+            
             JSValue v = base->structure()->prototypeForLookup(callFrame);
             if (v.isNull())
                 return count;
@@ -347,33 +361,23 @@ namespace JSC {
         }
     }
 
-    ALWAYS_INLINE JSValue resolveBase(CallFrame* callFrame, Identifier& property, ScopeChainNode* scopeChain, bool isStrictPut)
+    inline bool isPrototypeChainNormalized(JSGlobalObject* globalObject, Structure* structure)
     {
-        ScopeChainIterator iter = scopeChain->begin();
-        ScopeChainIterator next = iter;
-        ++next;
-        ScopeChainIterator end = scopeChain->end();
-        ASSERT(iter != end);
-
-        PropertySlot slot;
-        JSObject* base;
-        while (true) {
-            base = iter->get();
-            if (next == end) {
-                if (isStrictPut && !base->getPropertySlot(callFrame, property, slot))
-                    return JSValue();
-                return base;
-            }
-            if (base->getPropertySlot(callFrame, property, slot))
-                return base;
-
-            iter = next;
-            ++next;
+        for (;;) {
+            if (structure->typeInfo().type() == ProxyType)
+                return false;
+            
+            JSValue v = structure->prototypeForLookup(globalObject);
+            if (v.isNull())
+                return true;
+            
+            structure = v.asCell()->structure();
+            
+            if (structure->isDictionary())
+                return false;
         }
-
-        ASSERT_NOT_REACHED();
-        return JSValue();
     }
+
 } // namespace JSC
 
 #endif // Operations_h

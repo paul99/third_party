@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,20 +27,16 @@
 #define WebGeolocationManagerProxy_h
 
 #include "APIObject.h"
-#include "MessageID.h"
+#include "MessageReceiver.h"
 #include "WebGeolocationProvider.h"
-
-namespace CoreIPC {
-class ArgumentDecoder;
-class Connection;
-}
+#include <wtf/text/WTFString.h>
 
 namespace WebKit {
 
 class WebContext;
 class WebGeolocationPosition;
 
-class WebGeolocationManagerProxy : public APIObject {
+class WebGeolocationManagerProxy : public APIObject, private CoreIPC::MessageReceiver {
 public:
     static const Type APIType = TypeGeolocationManager;
 
@@ -53,17 +49,18 @@ public:
     void initializeProvider(const WKGeolocationProvider*);
 
     void providerDidChangePosition(WebGeolocationPosition*);
-    void providerDidFailToDeterminePosition();
-
-    void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+    void providerDidFailToDeterminePosition(const String& errorMessage = String());
 
 private:
     explicit WebGeolocationManagerProxy(WebContext*);
 
     virtual Type type() const { return APIType; }
 
+    // CoreIPC::MessageReceiver
+    virtual void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&) OVERRIDE;
+
     // Implemented in generated WebGeolocationManagerProxyMessageReceiver.cpp
-    void didReceiveWebGeolocationManagerProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+    void didReceiveWebGeolocationManagerProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
 
     void startUpdating();
     void stopUpdating();

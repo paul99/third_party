@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,8 @@
 
 #include "config.h"
 #include "PluginInfoStore.h"
+
+#if ENABLE(NETSCAPE_PLUGIN_API)
 
 #include "PluginModuleInfo.h"
 #include <WebCore/KURL.h>
@@ -69,6 +71,16 @@ typedef ListHashSet<String, 32, CaseFoldingHash> PathHashSet;
 typedef ListHashSet<String, 32> PathHashSet;
 #endif
 
+static inline Vector<PluginModuleInfo> deepIsolatedCopyPluginInfoVector(const Vector<PluginModuleInfo>& vector)
+{
+    // Let the copy begin!
+    Vector<PluginModuleInfo> copy;
+    copy.reserveCapacity(vector.size());
+    for (unsigned i = 0; i < vector.size(); ++i)
+        copy.append(vector[i].isolatedCopy());
+    return copy;
+}
+
 void PluginInfoStore::loadPluginsIfNecessary()
 {
     if (m_pluginListIsUpToDate)
@@ -94,7 +106,8 @@ void PluginInfoStore::loadPluginsIfNecessary()
     for (PathHashSet::const_iterator it = uniquePluginPaths.begin(); it != end; ++it)
         loadPlugin(plugins, *it);
 
-    m_plugins.swap(plugins);
+    m_plugins = deepIsolatedCopyPluginInfoVector(plugins);
+
     m_pluginListIsUpToDate = true;
 }
 
@@ -113,15 +126,15 @@ void PluginInfoStore::loadPlugin(Vector<PluginModuleInfo>& plugins, const String
 
 Vector<PluginModuleInfo> PluginInfoStore::plugins()
 {
+    MutexLocker locker(m_pluginsLock);
     loadPluginsIfNecessary();
-
-    Vector<PluginModuleInfo> plugins(m_plugins);
-
-    return plugins;
+    return deepIsolatedCopyPluginInfoVector(m_plugins);
 }
 
 PluginModuleInfo PluginInfoStore::findPluginForMIMEType(const String& mimeType) const
 {
+    MutexLocker locker(m_pluginsLock);
+
     ASSERT(!mimeType.isNull());
     
     for (size_t i = 0; i < m_plugins.size(); ++i) {
@@ -139,6 +152,8 @@ PluginModuleInfo PluginInfoStore::findPluginForMIMEType(const String& mimeType) 
 
 PluginModuleInfo PluginInfoStore::findPluginForExtension(const String& extension, String& mimeType) const
 {
+    MutexLocker locker(m_pluginsLock);
+
     ASSERT(!extension.isNull());
     
     for (size_t i = 0; i < m_plugins.size(); ++i) {
@@ -164,7 +179,7 @@ static inline String pathExtension(const KURL& url)
 {
     String extension;
     String filename = url.lastPathComponent();
-    if (!filename.endsWith("/")) {
+    if (!filename.endsWith('/')) {
         int extensionPos = filename.reverseFind('.');
         if (extensionPos != -1)
             extension = filename.substring(extensionPos + 1);
@@ -174,6 +189,16 @@ static inline String pathExtension(const KURL& url)
 }
 
 #if !PLATFORM(MAC)
+PluginModuleLoadPolicy PluginInfoStore::policyForPlugin(const PluginModuleInfo&)
+{
+    return PluginModuleLoadNormally;
+}
+
+bool PluginInfoStore::reactivateInactivePlugin(const PluginModuleInfo&)
+{
+    return false;
+}
+
 String PluginInfoStore::getMIMETypeForExtension(const String& extension)
 {
     return MIMETypeRegistry::getMIMETypeForExtension(extension);
@@ -182,7 +207,10 @@ String PluginInfoStore::getMIMETypeForExtension(const String& extension)
 
 PluginModuleInfo PluginInfoStore::findPlugin(String& mimeType, const KURL& url)
 {
-    loadPluginsIfNecessary();
+    {
+        MutexLocker locker(m_pluginsLock);
+        loadPluginsIfNecessary();
+    }
     
     // First, check if we can get the plug-in based on its MIME type.
     if (!mimeType.isNull()) {
@@ -214,6 +242,8 @@ PluginModuleInfo PluginInfoStore::findPlugin(String& mimeType, const KURL& url)
 
 PluginModuleInfo PluginInfoStore::infoForPluginWithPath(const String& pluginPath) const
 {
+    MutexLocker locker(m_pluginsLock);
+
     for (size_t i = 0; i < m_plugins.size(); ++i) {
         if (m_plugins[i].path == pluginPath)
             return m_plugins[i];
@@ -224,3 +254,5 @@ PluginModuleInfo PluginInfoStore::infoForPluginWithPath(const String& pluginPath
 }
 
 } // namespace WebKit
+
+#endif // ENABLE(NETSCAPE_PLUGIN_API)

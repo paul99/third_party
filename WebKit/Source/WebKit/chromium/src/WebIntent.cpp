@@ -32,9 +32,32 @@
 #include "WebIntent.h"
 
 #include "Intent.h"
+#include "MessagePort.h"
+#include "PlatformMessagePortChannel.h"
 #include "SerializedScriptValue.h"
+#include "platform/WebSerializedScriptValue.h"
+#include <wtf/HashMap.h>
 
 namespace WebKit {
+
+WebIntent WebIntent::create(const WebString& action, const WebString& type, const WebString& data,
+                            const WebVector<WebString>& extrasNames, const WebVector<WebString>& extrasValues)
+{
+#if ENABLE(WEB_INTENTS)
+    WebCore::ExceptionCode ec = 0;
+    WebCore::MessagePortArray dummyPorts;
+    RefPtr<WebCore::Intent> intent = WebCore::Intent::create(action, type, WebCore::SerializedScriptValue::createFromWire(data), dummyPorts, ec);
+    if (ec)
+        return WebIntent();
+
+    HashMap<String, String> extras;
+    for (size_t i = 0; i < extrasNames.size() && i < extrasValues.size(); ++i)
+        extras.add(extrasNames[i], extrasValues[i]);
+    intent->setExtras(extras);
+
+    return WebIntent(intent.release());
+#endif
+}
 
 #if ENABLE(WEB_INTENTS)
 WebIntent::WebIntent(const PassRefPtr<WebCore::Intent>& intent)
@@ -97,6 +120,75 @@ WebString WebIntent::data() const
 {
 #if ENABLE(WEB_INTENTS)
     return m_private->data()->toWireString();
+#else
+    return WebString();
+#endif
+}
+
+WebURL WebIntent::service() const
+{
+#if ENABLE(WEB_INTENTS)
+    return WebURL(m_private->service());
+#else
+    return WebURL();
+#endif
+}
+
+WebVector<WebURL> WebIntent::suggestions() const
+{
+#if ENABLE(WEB_INTENTS)
+    WebVector<WebURL> suggestions(m_private->suggestions().size());
+    for (size_t i = 0; i < m_private->suggestions().size(); ++i)
+        suggestions[i] = m_private->suggestions().at(i);
+    return suggestions;
+#else
+    return WebVector<WebURL>();
+#endif
+}
+
+WebMessagePortChannelArray* WebIntent::messagePortChannelsRelease() const
+{
+    // Note: see PlatformMessagePortChannel::postMessageToRemote.
+    WebMessagePortChannelArray* webChannels = 0;
+    WebCore::MessagePortChannelArray* messagePorts = m_private->messagePorts();
+    if (messagePorts) {
+        webChannels = new WebMessagePortChannelArray(messagePorts->size());
+        for (size_t i = 0; i < messagePorts->size(); ++i) {
+            WebCore::PlatformMessagePortChannel* platformChannel = messagePorts->at(i)->channel();
+            (*webChannels)[i] = platformChannel->webChannelRelease();
+            (*webChannels)[i]->setClient(0);
+        }
+    }
+
+    return webChannels;
+}
+
+WebIntent::operator WebCore::Intent*() const
+{
+    return m_private.get();
+}
+
+WebVector<WebString> WebIntent::extrasNames() const
+{
+#if ENABLE(WEB_INTENTS)
+    size_t numExtras = m_private->extras().size();
+    WebVector<WebString> keyStrings(numExtras);
+    WTF::HashMap<String, String>::const_iterator::Keys keyIter = m_private->extras().begin().keys();
+    for (size_t i = 0; keyIter != m_private->extras().end().keys(); ++keyIter, ++i)
+        keyStrings[i] = *keyIter;
+    return keyStrings;
+#else
+    return WebVector<WebString>();
+#endif
+}
+
+WebString WebIntent::extrasValue(const WebString& name) const
+{
+#if ENABLE(WEB_INTENTS)
+    WTF::HashMap<String, String>::const_iterator val = m_private->extras().find(name);
+    if (val == m_private->extras().end())
+        return WebString();
+    return val->value;
 #else
     return WebString();
 #endif

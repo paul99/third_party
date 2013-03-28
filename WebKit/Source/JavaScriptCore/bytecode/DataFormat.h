@@ -47,10 +47,16 @@ enum DataFormat {
     DataFormatJSInteger = DataFormatJS | DataFormatInteger,
     DataFormatJSDouble = DataFormatJS | DataFormatDouble,
     DataFormatJSCell = DataFormatJS | DataFormatCell,
-    DataFormatJSBoolean = DataFormatJS | DataFormatBoolean
+    DataFormatJSBoolean = DataFormatJS | DataFormatBoolean,
+    
+    // Marker deliminating ordinary data formats and OSR-only data formats.
+    DataFormatOSRMarker = 32, 
+    
+    // Special data formats used only for OSR.
+    DataFormatDead = 33, // Implies jsUndefined().
+    DataFormatArguments = 34 // Implies that the arguments object must be reified.
 };
 
-#ifndef NDEBUG
 inline const char* dataFormatToString(DataFormat dataFormat)
 {
     switch (dataFormat) {
@@ -80,7 +86,6 @@ inline const char* dataFormatToString(DataFormat dataFormat)
         return "Unknown";
     }
 }
-#endif
 
 #if USE(JSVALUE64)
 inline bool needDataFormatConversion(DataFormat from, DataFormat to)

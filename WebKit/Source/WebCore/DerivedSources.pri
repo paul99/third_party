@@ -11,8 +11,6 @@
 sanitizedFile = $$toSanitizedPath($$_FILE_)
 equals(sanitizedFile, $$toSanitizedPath($$_PRO_FILE_)):TEMPLATE = derived
 
-load(features)
-
 mac {
     # FIXME: This runs the perl script every time. Is there a way we can run it only when deps change?
     fwheader_generator.commands = perl $${ROOT_WEBKIT_DIR}/Source/WebKit2/Scripts/generate-forwarding-headers.pl $${ROOT_WEBKIT_DIR}/Source/WebCore $${ROOT_BUILD_DIR}/Source/include mac
@@ -26,9 +24,9 @@ SVG_NAMES = $$PWD/svg/svgtags.in
 
 XLINK_NAMES = $$PWD/svg/xlinkattrs.in
 
-CSSBISON = $$PWD/css/CSSGrammar.y
+CSSBISON = $$PWD/css/CSSGrammar.y.in
 
-contains(DEFINES, ENABLE_XSLT=1) {
+enable?(XSLT) {
     XMLVIEWER_CSS = $$PWD/xml/XMLViewer.css
     XMLVIEWER_JS = $$PWD/xml/XMLViewer.js
 }
@@ -43,11 +41,13 @@ XMLNS_NAMES = $$PWD/xml/xmlnsattrs.in
 
 HTML_ENTITIES = $$PWD/html/parser/HTMLEntityNames.in
 
-EVENT_FACTORY = $$PWD/dom/EventFactory.in
+EVENTS_NAMES = $$PWD/dom/EventNames.in
 
 EVENT_TARGET_FACTORY = $$PWD/dom/EventTargetFactory.in
 
 DOM_EXCEPTIONS = $$PWD/dom/DOMExceptions.in
+
+SETTINGS_MACROS = $$PWD/page/Settings.in
 
 COLORDATA_GPERF = $$PWD/platform/ColorData.gperf
 
@@ -57,19 +57,17 @@ WALDOCSSVALUES = $$PWD/css/CSSValueKeywords.in
 
 INSPECTOR_JSON = $$PWD/inspector/Inspector.json
 
-INSPECTOR_BACKEND_STUB_QRC = $$PWD/inspector/front-end/InspectorBackendStub.qrc
+INSPECTOR_BACKEND_COMMANDS_QRC = $$PWD/inspector/front-end/InspectorBackendCommands.qrc
+
+INSPECTOR_OVERLAY_PAGE = $$PWD/inspector/InspectorOverlayPage.html
 
 INJECTED_SCRIPT_SOURCE = $$PWD/inspector/InjectedScriptSource.js
 
-DEBUGGER_SCRIPT_SOURCE = $$PWD/bindings/v8/DebuggerScript.js
-
-ARRAY_BUFFER_VIEW_CUSTOM_SCRIPT_SOURCE = $$PWD/bindings/v8/custom/V8ArrayBufferViewCustomScript.js
-
-contains(DEFINES, ENABLE_DASHBOARD_SUPPORT=1): DASHBOARDSUPPORTCSSPROPERTIES = $$PWD/css/DashboardSupportCSSPropertyNames.in
+INJECTED_SCRIPT_CANVAS_MODULE_SOURCE = $$PWD/inspector/InjectedScriptCanvasModuleSource.js
 
 XPATHBISON = $$PWD/xml/XPathGrammar.y
 
-contains(DEFINES, ENABLE_SVG=1) {
+enable?(SVG) {
     EXTRACSSPROPERTIES += $$PWD/css/SVGCSSPropertyNames.in
     EXTRACSSVALUES += $$PWD/css/SVGCSSValueKeywords.in
 }
@@ -88,6 +86,106 @@ STYLESHEETS_EMBED = \
     $$PWD/css/mobileThemeQt.css
 
 IDL_BINDINGS += \
+    $$PWD/Modules/filesystem/DOMFileSystem.idl \
+    $$PWD/Modules/filesystem/DOMFileSystemSync.idl \
+    $$PWD/Modules/filesystem/DOMWindowFileSystem.idl \
+    $$PWD/Modules/filesystem/DirectoryEntry.idl \
+    $$PWD/Modules/filesystem/DirectoryEntrySync.idl \
+    $$PWD/Modules/filesystem/DirectoryReader.idl \
+    $$PWD/Modules/filesystem/DirectoryReaderSync.idl \
+    $$PWD/Modules/filesystem/EntriesCallback.idl \
+    $$PWD/Modules/filesystem/Entry.idl \
+    $$PWD/Modules/filesystem/EntryArray.idl \
+    $$PWD/Modules/filesystem/EntryArraySync.idl \
+    $$PWD/Modules/filesystem/EntryCallback.idl \
+    $$PWD/Modules/filesystem/EntrySync.idl \
+    $$PWD/Modules/filesystem/ErrorCallback.idl \
+    $$PWD/Modules/filesystem/FileCallback.idl \
+    $$PWD/Modules/filesystem/FileEntry.idl \
+    $$PWD/Modules/filesystem/FileEntrySync.idl \
+    $$PWD/Modules/filesystem/FileSystemCallback.idl \
+    $$PWD/Modules/filesystem/FileWriter.idl \
+    $$PWD/Modules/filesystem/FileWriterCallback.idl \
+    $$PWD/Modules/filesystem/Metadata.idl \
+    $$PWD/Modules/filesystem/MetadataCallback.idl \
+    $$PWD/Modules/filesystem/WorkerContextFileSystem.idl \
+    $$PWD/Modules/geolocation/Geolocation.idl \
+    $$PWD/Modules/geolocation/Geoposition.idl \
+    $$PWD/Modules/geolocation/NavigatorGeolocation.idl \
+    $$PWD/Modules/geolocation/PositionCallback.idl \
+    $$PWD/Modules/geolocation/PositionError.idl \
+    $$PWD/Modules/geolocation/PositionErrorCallback.idl \
+    $$PWD/Modules/indexeddb/DOMWindowIndexedDatabase.idl \
+    $$PWD/Modules/indexeddb/IDBAny.idl \
+    $$PWD/Modules/indexeddb/IDBCursor.idl \
+    $$PWD/Modules/indexeddb/IDBDatabase.idl \
+    $$PWD/Modules/indexeddb/IDBFactory.idl \
+    $$PWD/Modules/indexeddb/IDBIndex.idl \
+    $$PWD/Modules/indexeddb/IDBKey.idl \
+    $$PWD/Modules/indexeddb/IDBKeyRange.idl \
+    $$PWD/Modules/indexeddb/IDBObjectStore.idl \
+    $$PWD/Modules/indexeddb/IDBRequest.idl \
+    $$PWD/Modules/indexeddb/IDBTransaction.idl \
+    $$PWD/Modules/indexeddb/WorkerContextIndexedDatabase.idl \
+    $$PWD/Modules/notifications/DOMWindowNotifications.idl \
+    $$PWD/Modules/notifications/Notification.idl \
+    $$PWD/Modules/notifications/NotificationCenter.idl \
+    $$PWD/Modules/notifications/NotificationPermissionCallback.idl \
+    $$PWD/Modules/notifications/WorkerContextNotifications.idl \
+    $$PWD/Modules/quota/DOMWindowQuota.idl \
+    $$PWD/Modules/quota/StorageInfo.idl \
+    $$PWD/Modules/quota/StorageInfoErrorCallback.idl \
+    $$PWD/Modules/quota/StorageInfoQuotaCallback.idl \
+    $$PWD/Modules/quota/StorageInfoUsageCallback.idl \
+    $$PWD/Modules/webaudio/AudioBuffer.idl \
+    $$PWD/Modules/webaudio/AudioBufferCallback.idl \
+    $$PWD/Modules/webaudio/AudioBufferSourceNode.idl \
+    $$PWD/Modules/webaudio/ChannelMergerNode.idl \
+    $$PWD/Modules/webaudio/ChannelSplitterNode.idl \
+    $$PWD/Modules/webaudio/AudioContext.idl \
+    $$PWD/Modules/webaudio/AudioDestinationNode.idl \
+    $$PWD/Modules/webaudio/AudioGain.idl \
+    $$PWD/Modules/webaudio/GainNode.idl \
+    $$PWD/Modules/webaudio/AudioListener.idl \
+    $$PWD/Modules/webaudio/AudioNode.idl \
+    $$PWD/Modules/webaudio/PannerNode.idl \
+    $$PWD/Modules/webaudio/AudioParam.idl \
+    $$PWD/Modules/webaudio/AudioProcessingEvent.idl \
+    $$PWD/Modules/webaudio/AudioSourceNode.idl \
+    $$PWD/Modules/webaudio/BiquadFilterNode.idl \
+    $$PWD/Modules/webaudio/ConvolverNode.idl \
+    $$PWD/Modules/webaudio/DelayNode.idl \
+    $$PWD/Modules/webaudio/DOMWindowWebAudio.idl \
+    $$PWD/Modules/webaudio/DynamicsCompressorNode.idl \
+    $$PWD/Modules/webaudio/ScriptProcessorNode.idl \
+    $$PWD/Modules/webaudio/MediaElementAudioSourceNode.idl \
+    $$PWD/Modules/webaudio/MediaStreamAudioSourceNode.idl \
+    $$PWD/Modules/webaudio/OfflineAudioContext.idl \
+    $$PWD/Modules/webaudio/OfflineAudioCompletionEvent.idl \
+    $$PWD/Modules/webaudio/OscillatorNode.idl \
+    $$PWD/Modules/webaudio/AnalyserNode.idl \
+    $$PWD/Modules/webaudio/WaveShaperNode.idl \
+    $$PWD/Modules/webaudio/WaveTable.idl \
+    $$PWD/Modules/webdatabase/DOMWindowWebDatabase.idl \
+    $$PWD/Modules/webdatabase/Database.idl \
+    $$PWD/Modules/webdatabase/DatabaseCallback.idl \
+    $$PWD/Modules/webdatabase/DatabaseSync.idl \
+    $$PWD/Modules/webdatabase/SQLError.idl \
+    $$PWD/Modules/webdatabase/SQLException.idl \
+    $$PWD/Modules/webdatabase/SQLResultSet.idl \
+    $$PWD/Modules/webdatabase/SQLResultSetRowList.idl \
+    $$PWD/Modules/webdatabase/SQLStatementCallback.idl \
+    $$PWD/Modules/webdatabase/SQLStatementErrorCallback.idl \
+    $$PWD/Modules/webdatabase/SQLTransaction.idl \
+    $$PWD/Modules/webdatabase/SQLTransactionCallback.idl \
+    $$PWD/Modules/webdatabase/SQLTransactionErrorCallback.idl \
+    $$PWD/Modules/webdatabase/SQLTransactionSync.idl \
+    $$PWD/Modules/webdatabase/SQLTransactionSyncCallback.idl \
+    $$PWD/Modules/webdatabase/WorkerContextWebDatabase.idl \
+    $$PWD/Modules/websockets/CloseEvent.idl \
+    $$PWD/Modules/websockets/DOMWindowWebSocket.idl \
+    $$PWD/Modules/websockets/WebSocket.idl \
+    $$PWD/Modules/websockets/WorkerContextWebSocket.idl \
     $$PWD/css/Counter.idl \
     $$PWD/css/CSSCharsetRule.idl \
     $$PWD/css/CSSFontFaceRule.idl \
@@ -113,8 +211,10 @@ IDL_BINDINGS += \
     $$PWD/css/WebKitCSSKeyframeRule.idl \
     $$PWD/css/WebKitCSSKeyframesRule.idl \
     $$PWD/css/WebKitCSSMatrix.idl \
+    $$PWD/css/WebKitCSSMixFunctionValue.idl \
     $$PWD/css/WebKitCSSRegionRule.idl \
     $$PWD/css/WebKitCSSTransformValue.idl \
+    $$PWD/css/WebKitCSSViewportRule.idl \
     $$PWD/dom/Attr.idl \
     $$PWD/dom/BeforeLoadEvent.idl \
     $$PWD/dom/CharacterData.idl \
@@ -133,6 +233,7 @@ IDL_BINDINGS += \
     $$PWD/dom/Document.idl \
     $$PWD/dom/DocumentType.idl \
     $$PWD/dom/DOMCoreException.idl \
+    $$PWD/dom/DOMError.idl \
     $$PWD/dom/DOMImplementation.idl \
     $$PWD/dom/DOMStringList.idl \
     $$PWD/dom/DOMStringMap.idl \
@@ -143,14 +244,17 @@ IDL_BINDINGS += \
     $$PWD/dom/Event.idl \
     $$PWD/dom/EventException.idl \
 #    $$PWD/dom/EventListener.idl \
-#    $$PWD/dom/EventTarget.idl \
+    $$PWD/dom/EventTarget.idl \
     $$PWD/dom/HashChangeEvent.idl \
     $$PWD/dom/KeyboardEvent.idl \
     $$PWD/dom/MouseEvent.idl \
     $$PWD/dom/MessageChannel.idl \
     $$PWD/dom/MessageEvent.idl \
     $$PWD/dom/MessagePort.idl \
+    $$PWD/dom/MutationCallback.idl \
     $$PWD/dom/MutationEvent.idl \
+    $$PWD/dom/MutationObserver.idl \
+    $$PWD/dom/MutationRecord.idl \
     $$PWD/dom/NamedNodeMap.idl \
     $$PWD/dom/Node.idl \
     $$PWD/dom/NodeFilter.idl \
@@ -162,6 +266,7 @@ IDL_BINDINGS += \
     $$PWD/dom/PopStateEvent.idl \
     $$PWD/dom/ProcessingInstruction.idl \
     $$PWD/dom/ProgressEvent.idl \
+    $$PWD/dom/PropertyNodeList.idl \
     $$PWD/dom/RangeException.idl \
     $$PWD/dom/Range.idl \
     $$PWD/dom/RequestAnimationFrameCallback.idl \
@@ -176,38 +281,16 @@ IDL_BINDINGS += \
     $$PWD/dom/UIEvent.idl \
     $$PWD/dom/WebKitAnimationEvent.idl \
     $$PWD/dom/WebKitNamedFlow.idl \
+    $$PWD/dom/DOMNamedFlowCollection.idl \
     $$PWD/dom/WebKitTransitionEvent.idl \
     $$PWD/dom/WheelEvent.idl \
     $$PWD/fileapi/Blob.idl \
-    $$PWD/fileapi/DirectoryEntry.idl \
-    $$PWD/fileapi/DirectoryEntrySync.idl \
-    $$PWD/fileapi/DirectoryReader.idl \
-    $$PWD/fileapi/DirectoryReaderSync.idl \
-    $$PWD/fileapi/DOMFileSystem.idl \
-    $$PWD/fileapi/DOMFileSystemSync.idl \
-    $$PWD/fileapi/EntriesCallback.idl \
-    $$PWD/fileapi/Entry.idl \
-    $$PWD/fileapi/EntryArray.idl \
-    $$PWD/fileapi/EntryArraySync.idl \
-    $$PWD/fileapi/EntryCallback.idl \
-    $$PWD/fileapi/EntrySync.idl \
-    $$PWD/fileapi/ErrorCallback.idl \
     $$PWD/fileapi/File.idl \
-    $$PWD/fileapi/FileCallback.idl \
-    $$PWD/fileapi/FileEntry.idl \
-    $$PWD/fileapi/FileEntrySync.idl \
     $$PWD/fileapi/FileError.idl \
     $$PWD/fileapi/FileException.idl \
     $$PWD/fileapi/FileList.idl \
     $$PWD/fileapi/FileReader.idl \
     $$PWD/fileapi/FileReaderSync.idl \
-    $$PWD/fileapi/FileSystemCallback.idl \
-    $$PWD/fileapi/FileWriter.idl \
-    $$PWD/fileapi/FileWriterCallback.idl \
-    $$PWD/fileapi/OperationNotAllowedException.idl \
-    $$PWD/fileapi/Metadata.idl \
-    $$PWD/fileapi/MetadataCallback.idl \
-    $$PWD/fileapi/WebKitBlobBuilder.idl \
     $$PWD/html/canvas/ArrayBufferView.idl \
     $$PWD/html/canvas/ArrayBuffer.idl \
     $$PWD/html/canvas/DataView.idl \
@@ -219,21 +302,26 @@ IDL_BINDINGS += \
     $$PWD/html/canvas/CanvasPattern.idl \
     $$PWD/html/canvas/CanvasRenderingContext.idl \
     $$PWD/html/canvas/CanvasRenderingContext2D.idl \
+    $$PWD/html/canvas/EXTTextureFilterAnisotropic.idl \
     $$PWD/html/canvas/OESStandardDerivatives.idl \
     $$PWD/html/canvas/OESTextureFloat.idl \
     $$PWD/html/canvas/OESVertexArrayObject.idl \
+    $$PWD/html/canvas/OESElementIndexUint.idl \
     $$PWD/html/canvas/WebGLActiveInfo.idl \
     $$PWD/html/canvas/WebGLBuffer.idl \
+    $$PWD/html/canvas/WebGLCompressedTextureS3TC.idl \
     $$PWD/html/canvas/WebGLContextAttributes.idl \
     $$PWD/html/canvas/WebGLContextEvent.idl \
     $$PWD/html/canvas/WebGLDebugRendererInfo.idl \
     $$PWD/html/canvas/WebGLDebugShaders.idl \
+    $$PWD/html/canvas/WebGLDepthTexture.idl \
     $$PWD/html/canvas/WebGLFramebuffer.idl \
     $$PWD/html/canvas/WebGLLoseContext.idl \
     $$PWD/html/canvas/WebGLProgram.idl \
     $$PWD/html/canvas/WebGLRenderbuffer.idl \
     $$PWD/html/canvas/WebGLRenderingContext.idl \
     $$PWD/html/canvas/WebGLShader.idl \
+    $$PWD/html/canvas/WebGLShaderPrecisionFormat.idl \
     $$PWD/html/canvas/Int16Array.idl \
     $$PWD/html/canvas/WebGLTexture.idl \
     $$PWD/html/canvas/WebGLUniformLocation.idl \
@@ -260,6 +348,7 @@ IDL_BINDINGS += \
     $$PWD/html/HTMLCollection.idl \
     $$PWD/html/HTMLDataListElement.idl \
     $$PWD/html/HTMLDetailsElement.idl \
+    $$PWD/html/HTMLDialogElement.idl \
     $$PWD/html/HTMLDirectoryElement.idl \
     $$PWD/html/HTMLDivElement.idl \
     $$PWD/html/HTMLDListElement.idl \
@@ -268,6 +357,7 @@ IDL_BINDINGS += \
     $$PWD/html/HTMLEmbedElement.idl \
     $$PWD/html/HTMLFieldSetElement.idl \
     $$PWD/html/HTMLFontElement.idl \
+    $$PWD/html/HTMLFormControlsCollection.idl \
     $$PWD/html/HTMLFormElement.idl \
     $$PWD/html/HTMLFrameElement.idl \
     $$PWD/html/HTMLFrameSetElement.idl \
@@ -278,7 +368,6 @@ IDL_BINDINGS += \
     $$PWD/html/HTMLIFrameElement.idl \
     $$PWD/html/HTMLImageElement.idl \
     $$PWD/html/HTMLInputElement.idl \
-    $$PWD/html/HTMLIsIndexElement.idl \
     $$PWD/html/HTMLKeygenElement.idl \
     $$PWD/html/HTMLLabelElement.idl \
     $$PWD/html/HTMLLegendElement.idl \
@@ -323,109 +412,53 @@ IDL_BINDINGS += \
     $$PWD/html/ImageData.idl \
     $$PWD/html/MediaController.idl \
     $$PWD/html/MediaError.idl \
+    $$PWD/html/MicroDataItemValue.idl \
+    $$PWD/html/RadioNodeList.idl \
     $$PWD/html/TextMetrics.idl \
     $$PWD/html/TimeRanges.idl \
     $$PWD/html/ValidityState.idl \
     $$PWD/html/VoidCallback.idl \
     $$PWD/html/shadow/HTMLContentElement.idl \
+    $$PWD/html/shadow/HTMLShadowElement.idl \
     $$PWD/inspector/InjectedScriptHost.idl \
     $$PWD/inspector/InspectorFrontendHost.idl \
     $$PWD/inspector/JavaScriptCallFrame.idl \
     $$PWD/inspector/ScriptProfile.idl \
     $$PWD/inspector/ScriptProfileNode.idl \
     $$PWD/loader/appcache/DOMApplicationCache.idl \
-    $$PWD/notifications/Notification.idl \
-    $$PWD/notifications/NotificationCenter.idl \
     $$PWD/page/BarInfo.idl \
     $$PWD/page/Console.idl \
     $$PWD/page/Coordinates.idl \
     $$PWD/page/Crypto.idl \
+    $$PWD/page/DOMSecurityPolicy.idl \
     $$PWD/page/DOMSelection.idl \
     $$PWD/page/DOMWindow.idl \
     $$PWD/page/EventSource.idl \
-    $$PWD/page/Geolocation.idl \
-    $$PWD/page/Geoposition.idl \
     $$PWD/page/History.idl \
     $$PWD/page/Location.idl \
     $$PWD/page/MemoryInfo.idl \
     $$PWD/page/Navigator.idl \
     $$PWD/page/Performance.idl \
+    $$PWD/page/PerformanceEntry.idl \
+    $$PWD/page/PerformanceEntryList.idl \
     $$PWD/page/PerformanceNavigation.idl \
+    $$PWD/page/PerformanceResourceTiming.idl \
     $$PWD/page/PerformanceTiming.idl \
-    $$PWD/page/PositionCallback.idl \
-    $$PWD/page/PositionError.idl \
-    $$PWD/page/PositionErrorCallback.idl \
     $$PWD/page/Screen.idl \
     $$PWD/page/SpeechInputEvent.idl \
     $$PWD/page/SpeechInputResult.idl \
     $$PWD/page/SpeechInputResultList.idl \
-    $$PWD/page/WebKitAnimation.idl \
-    $$PWD/page/WebKitAnimationList.idl \
     $$PWD/page/WebKitPoint.idl \
     $$PWD/page/WorkerNavigator.idl \
     $$PWD/plugins/DOMPlugin.idl \
     $$PWD/plugins/DOMMimeType.idl \
     $$PWD/plugins/DOMPluginArray.idl \
     $$PWD/plugins/DOMMimeTypeArray.idl \
-    $$PWD/storage/DOMWindowSQLDatabase.idl \
-    $$PWD/storage/Database.idl \
-    $$PWD/storage/DatabaseCallback.idl \
-    $$PWD/storage/DatabaseSync.idl \
-    $$PWD/storage/IDBAny.idl \
-    $$PWD/storage/IDBCursor.idl \
-    $$PWD/storage/IDBDatabaseError.idl \
-    $$PWD/storage/IDBDatabaseException.idl \
-    $$PWD/storage/IDBDatabase.idl \
-    $$PWD/storage/IDBFactory.idl \
-    $$PWD/storage/IDBIndex.idl \
-    $$PWD/storage/IDBKey.idl \
-    $$PWD/storage/IDBKeyRange.idl \
-    $$PWD/storage/IDBObjectStore.idl \
-    $$PWD/storage/IDBRequest.idl \
-    $$PWD/storage/IDBTransaction.idl \
     $$PWD/storage/Storage.idl \
     $$PWD/storage/StorageEvent.idl \
-    $$PWD/storage/StorageInfo.idl \
-    $$PWD/storage/StorageInfoErrorCallback.idl \
-    $$PWD/storage/StorageInfoQuotaCallback.idl \
-    $$PWD/storage/StorageInfoUsageCallback.idl \
-    $$PWD/storage/SQLError.idl \
-    $$PWD/storage/SQLException.idl \
-    $$PWD/storage/SQLResultSet.idl \
-    $$PWD/storage/SQLResultSetRowList.idl \
-    $$PWD/storage/SQLStatementCallback.idl \
-    $$PWD/storage/SQLStatementErrorCallback.idl \
-    $$PWD/storage/SQLTransaction.idl \
-    $$PWD/storage/SQLTransactionCallback.idl \
-    $$PWD/storage/SQLTransactionErrorCallback.idl \
-    $$PWD/storage/SQLTransactionSync.idl \
-    $$PWD/storage/SQLTransactionSyncCallback.idl \
     $$PWD/testing/Internals.idl \
     $$PWD/testing/InternalSettings.idl \
-    $$PWD/webaudio/AudioBuffer.idl \
-    $$PWD/webaudio/AudioBufferSourceNode.idl \
-    $$PWD/webaudio/AudioChannelMerger.idl \
-    $$PWD/webaudio/AudioChannelSplitter.idl \
-    $$PWD/webaudio/AudioContext.idl \
-    $$PWD/webaudio/AudioDestinationNode.idl \
-    $$PWD/webaudio/AudioGain.idl \
-    $$PWD/webaudio/AudioGainNode.idl \
-    $$PWD/webaudio/AudioListener.idl \
-    $$PWD/webaudio/AudioNode.idl \
-    $$PWD/webaudio/AudioPannerNode.idl \
-    $$PWD/webaudio/AudioParam.idl \
-    $$PWD/webaudio/AudioProcessingEvent.idl \
-    $$PWD/webaudio/AudioSourceNode.idl \
-    $$PWD/webaudio/ConvolverNode.idl \
-    $$PWD/webaudio/DelayNode.idl \
-    $$PWD/webaudio/DOMWindowWebAudio.idl \
-    $$PWD/webaudio/HighPass2FilterNode.idl \
-    $$PWD/webaudio/JavaScriptAudioNode.idl \
-    $$PWD/webaudio/LowPass2FilterNode.idl \
-    $$PWD/webaudio/RealtimeAnalyserNode.idl \
-    $$PWD/websockets/CloseEvent.idl \
-    $$PWD/websockets/DOMWindowWebSocket.idl \
-    $$PWD/websockets/WebSocket.idl \
+    $$PWD/testing/MallocStatistics.idl \
     $$PWD/workers/AbstractWorker.idl \
     $$PWD/workers/DedicatedWorkerContext.idl \
     $$PWD/workers/SharedWorker.idl \
@@ -446,16 +479,8 @@ IDL_BINDINGS += \
     $$PWD/xml/XPathEvaluator.idl \
     $$PWD/xml/XSLTProcessor.idl
 
-v8 {
+enable?(SVG) {
   IDL_BINDINGS += \
-    $$PWD/html/canvas/CanvasPixelArray.idl \
-    $$PWD/storage/IDBVersionChangeEvent.idl \
-    $$PWD/storage/IDBVersionChangeRequest.idl
-}
-
-contains(DEFINES, ENABLE_SVG=1) {
-  IDL_BINDINGS += \
-    $$PWD/svg/SVGZoomEvent.idl \
     $$PWD/svg/SVGAElement.idl \
     $$PWD/svg/SVGAltGlyphDefElement.idl \
     $$PWD/svg/SVGAltGlyphElement.idl \
@@ -595,26 +620,42 @@ contains(DEFINES, ENABLE_SVG=1) {
     $$PWD/svg/SVGUnitTypes.idl \
     $$PWD/svg/SVGUseElement.idl \
     $$PWD/svg/SVGViewElement.idl \
-    $$PWD/svg/SVGVKernElement.idl
+    $$PWD/svg/SVGVKernElement.idl \
+    $$PWD/svg/SVGViewSpec.idl \
+    $$PWD/svg/SVGZoomAndPan.idl \
+    $$PWD/svg/SVGZoomEvent.idl
 }
 
-contains(DEFINES, ENABLE_VIDEO_TRACK=1) {
+enable?(GAMEPAD) {
   IDL_BINDINGS += \
-    $$PWD/html/TextTrack.idl \
-    $$PWD/html/TextTrackCue.idl \
-    $$PWD/html/TextTrackCueList.idl \
+    $$PWD/Modules/gamepad/Gamepad.idl \
+    $$PWD/Modules/gamepad/GamepadList.idl \
+    $$PWD/Modules/gamepad/NavigatorGamepad.idl
+}
+
+enable?(VIDEO_TRACK) {
+  IDL_BINDINGS += \
+    $$PWD/html/track/TextTrack.idl \
+    $$PWD/html/track/TextTrackCue.idl \
+    $$PWD/html/track/TextTrackCueList.idl \
     $$PWD/html/track/TextTrackList.idl \
     $$PWD/html/track/TrackEvent.idl \
 }
 
-v8: wrapperFactoryArg = --wrapperFactoryV8
-else: wrapperFactoryArg = --wrapperFactory
+enable?(MEDIA_SOURCE) {
+  IDL_BINDINGS += \
+    $$PWD/Modules/mediasource/MediaSource.idl \
+    $$PWD/Modules/mediasource/SourceBuffer.idl \
+    $$PWD/Modules/mediasource/SourceBufferList.idl
+}
+
+qtPrepareTool(QMAKE_MOC, moc)
 
 mathmlnames.output = MathMLNames.cpp
 mathmlnames.input = MATHML_NAMES
 mathmlnames.depends = $$PWD/mathml/mathattrs.in
 mathmlnames.script = $$PWD/dom/make_names.pl
-mathmlnames.commands = perl -I$$PWD/bindings/scripts $$mathmlnames.script --tags $$PWD/mathml/mathtags.in --attrs $$PWD/mathml/mathattrs.in --extraDefines \"$${DEFINES}\" --preprocessor \"$${QMAKE_MOC} -E\" --factory $$wrapperFactoryArg --outputDir ${QMAKE_FUNC_FILE_OUT_PATH}
+mathmlnames.commands = perl -I$$PWD/bindings/scripts $$mathmlnames.script --tags $$PWD/mathml/mathtags.in --attrs $$PWD/mathml/mathattrs.in --extraDefines \"$${DEFINES} $$configDefines()\" --preprocessor \"$${QMAKE_MOC} -E\" --factory --wrapperFactory --outputDir ${QMAKE_FUNC_FILE_OUT_PATH}
 mathmlnames.extra_sources = MathMLElementFactory.cpp
 GENERATORS += mathmlnames
 
@@ -623,13 +664,9 @@ svgnames.output = SVGNames.cpp
 svgnames.input = SVG_NAMES
 svgnames.depends = $$PWD/svg/svgattrs.in
 svgnames.script = $$PWD/dom/make_names.pl
-svgnames.commands = perl -I$$PWD/bindings/scripts $$svgnames.script --tags $$PWD/svg/svgtags.in --attrs $$PWD/svg/svgattrs.in --extraDefines \"$${DEFINES}\" --preprocessor \"$${QMAKE_MOC} -E\" --factory $$wrapperFactoryArg --outputDir ${QMAKE_FUNC_FILE_OUT_PATH}
+svgnames.commands = perl -I$$PWD/bindings/scripts $$svgnames.script --tags $$PWD/svg/svgtags.in --attrs $$PWD/svg/svgattrs.in --extraDefines \"$${DEFINES} $$configDefines()\" --preprocessor \"$${QMAKE_MOC} -E\" --factory --wrapperFactory --outputDir ${QMAKE_FUNC_FILE_OUT_PATH}
 svgnames.extra_sources = SVGElementFactory.cpp
-v8 {
-    svgnames.extra_sources += V8SVGElementWrapperFactory.cpp
-} else {
     svgnames.extra_sources += JSSVGElementWrapperFactory.cpp
-}
 GENERATORS += svgnames
 
 # GENERATOR 5-D:
@@ -643,15 +680,15 @@ GENERATORS += xlinknames
 cssprops.script = $$PWD/css/makeprop.pl
 cssprops.output = CSSPropertyNames.cpp
 cssprops.input = WALDOCSSPROPS
-cssprops.commands = perl -ne \"print $1\" ${QMAKE_FILE_NAME} $${DASHBOARDSUPPORTCSSPROPERTIES} $${EXTRACSSPROPERTIES} > ${QMAKE_FUNC_FILE_OUT_PATH}/${QMAKE_FILE_BASE}.in && cd ${QMAKE_FUNC_FILE_OUT_PATH} && perl -I$$PWD/bindings/scripts $$cssprops.script --defines \"$${FEATURE_DEFINES_JAVASCRIPT}\" --preprocessor \"$${QMAKE_MOC} -E\" ${QMAKE_FILE_NAME} && $(DEL_FILE) ${QMAKE_FILE_BASE}.in ${QMAKE_FILE_BASE}.gperf
-cssprops.depends = ${QMAKE_FILE_NAME} $${DASHBOARDSUPPORTCSSPROPERTIES} $${EXTRACSSPROPERTIES} $$cssprops.script
+cssprops.commands = perl -ne \"print $1\" ${QMAKE_FILE_NAME} $${EXTRACSSPROPERTIES} > ${QMAKE_FUNC_FILE_OUT_PATH}/${QMAKE_FILE_BASE}.in && cd ${QMAKE_FUNC_FILE_OUT_PATH} && perl -I$$PWD/bindings/scripts $$cssprops.script --defines \"$$javascriptFeatureDefines()\" --preprocessor \"$${QMAKE_MOC} -E\" ${QMAKE_FILE_NAME} && $(DEL_FILE) ${QMAKE_FILE_BASE}.in ${QMAKE_FILE_BASE}.gperf
+cssprops.depends = ${QMAKE_FILE_NAME} $${EXTRACSSPROPERTIES} $$cssprops.script
 GENERATORS += cssprops
 
 # GENERATOR 6-B:
 cssvalues.script = $$PWD/css/makevalues.pl
 cssvalues.output = CSSValueKeywords.cpp
 cssvalues.input = WALDOCSSVALUES
-cssvalues.commands = perl -ne \"print $1\" ${QMAKE_FILE_NAME} $$EXTRACSSVALUES > ${QMAKE_FUNC_FILE_OUT_PATH}/${QMAKE_FILE_BASE}.in && cd ${QMAKE_FUNC_FILE_OUT_PATH} && perl -I$$PWD/bindings/scripts $$cssvalues.script --defines \"$${FEATURE_DEFINES_JAVASCRIPT}\" --preprocessor \"$${QMAKE_MOC} -E\" ${QMAKE_FILE_NAME} && $(DEL_FILE) ${QMAKE_FILE_BASE}.in ${QMAKE_FILE_BASE}.gperf
+cssvalues.commands = perl -ne \"print $1\" ${QMAKE_FILE_NAME} $$EXTRACSSVALUES > ${QMAKE_FUNC_FILE_OUT_PATH}/${QMAKE_FILE_BASE}.in && cd ${QMAKE_FUNC_FILE_OUT_PATH} && perl -I$$PWD/bindings/scripts $$cssvalues.script --defines \"$$javascriptFeatureDefines()\" --preprocessor \"$${QMAKE_MOC} -E\" ${QMAKE_FILE_NAME} && $(DEL_FILE) ${QMAKE_FILE_BASE}.in ${QMAKE_FILE_BASE}.gperf
 cssvalues.depends = ${QMAKE_FILE_NAME} $${EXTRACSSVALUES} $$cssvalues.script
 cssvalues.clean = ${QMAKE_FILE_OUT} ${QMAKE_FUNC_FILE_OUT_PATH}/${QMAKE_FILE_BASE}.h
 GENERATORS += cssvalues
@@ -659,62 +696,72 @@ GENERATORS += cssvalues
 # GENERATOR 0: Resolve [Supplemental] dependency in IDLs
 SUPPLEMENTAL_DEPENDENCY_FILE = supplemental_dependency.tmp
 IDL_FILES_TMP = ${QMAKE_FUNC_FILE_OUT_PATH}/idl_files.tmp
-RESOLVE_SUPPLEMENTAL_SCRIPT = $$PWD/bindings/scripts/resolve-supplemental.pl
+PREPROCESS_IDLS_SCRIPT = $$PWD/bindings/scripts/preprocess-idls.pl
+IDL_ATTRIBUTES_FILE = $$PWD/bindings/scripts/IDLAttributes.txt
 
-resolveSupplemental.input = RESOLVE_SUPPLEMENTAL_SCRIPT # dummy input to fire this rule
-resolveSupplemental.script = $$RESOLVE_SUPPLEMENTAL_SCRIPT
+preprocessIdls.input = IDL_ATTRIBUTES_FILE
+preprocessIdls.script = $$PREPROCESS_IDLS_SCRIPT
 # FIXME : We need to use only perl at some point.
-resolveSupplemental.commands = echo $$IDL_BINDINGS | tr \' \' \'\\n\' > $$IDL_FILES_TMP && \
-                               perl -I$$PWD/bindings/scripts $$resolveSupplemental.script \
-                               --defines \"$${FEATURE_DEFINES_JAVASCRIPT}\" \
+win_cmd_shell: preprocessIdls.commands = type nul > $$IDL_FILES_TMP $$EOC
+else: preprocessIdls.commands = cat /dev/null > $$IDL_FILES_TMP $$EOC
+for(binding, IDL_BINDINGS) {
+    # We need "$$binding" instead of "$$binding ", because Windows' echo writes trailing whitespaces. (http://wkb.ug/88304)
+    # A space is omitted between "$$IDL_FILES_TMP" and "$$EOC" to also avoid writing trailing whitespace. (http://wkb.ug/95730)
+    preprocessIdls.commands += echo $$binding>> $$IDL_FILES_TMP$$EOC
+}
+preprocessIdls.commands += perl -I$$PWD/bindings/scripts $$preprocessIdls.script \
+                               --defines \"$$javascriptFeatureDefines()\" \
                                --idlFilesList $$IDL_FILES_TMP \
                                --supplementalDependencyFile ${QMAKE_FUNC_FILE_OUT_PATH}/$$SUPPLEMENTAL_DEPENDENCY_FILE \
+                               --idlAttributesFile $${IDL_ATTRIBUTES_FILE} \
                                --preprocessor \"$${QMAKE_MOC} -E\"
-resolveSupplemental.output = $$SUPPLEMENTAL_DEPENDENCY_FILE
-resolveSupplemental.add_output_to_sources = false
-resolveSupplemental.depends = $$PWD/bindings/scripts/IDLParser.pm $$IDL_BINDINGS
-GENERATORS += resolveSupplemental
+preprocessIdls.output = $$SUPPLEMENTAL_DEPENDENCY_FILE
+preprocessIdls.add_output_to_sources = false
+preprocessIdls.depends = $$PWD/bindings/scripts/IDLParser.pm $$IDL_BINDINGS
+GENERATORS += preprocessIdls
 
 # GENERATOR 1: Generate .h and .cpp from IDLs
 generateBindings.input = IDL_BINDINGS
 generateBindings.script = $$PWD/bindings/scripts/generate-bindings.pl
-v8: generator = V8
-else: generator = JS
-generateBindings.commands = perl -I$$PWD/bindings/scripts $$generateBindings.script \
-                            --defines \"$${FEATURE_DEFINES_JAVASCRIPT}\" \
-                            --generator $$generator \
-                            --include $$PWD/dom \
-                            --include $$PWD/fileapi \
-                            --include $$PWD/html \
-                            --include $$PWD/xml \
-                            --include $$PWD/svg \
-                            --include $$PWD/storage \
-                            --include $$PWD/css \
-                            --include $$PWD/testing \
-                            --include $$PWD/webaudio \
-                            --include $$PWD/workers \
+generateBindings.commands = $$setEnvironmentVariable(SOURCE_ROOT, $$toSystemPath($$PWD)) && perl -I$$PWD/bindings/scripts $$generateBindings.script \
+                            --defines \"$$javascriptFeatureDefines()\" \
+                            --generator JS \
+                            --include Modules/filesystem \
+                            --include Modules/geolocation \
+                            --include Modules/indexeddb \
+                            --include Modules/mediasource \
+                            --include Modules/notifications \
+                            --include Modules/quota \
+                            --include Modules/webaudio \
+                            --include Modules/webdatabase \
+                            --include Modules/websockets \
+                            --include css \
+                            --include dom \
+                            --include editing \
+                            --include fileapi \
+                            --include html \
+                            --include html/canvas \
+                            --include html/shadow \
+                            --include html/track \
+                            --include inspector \
+                            --include loader/appcache \
+                            --include page \
+                            --include plugins \
+                            --include storage \
+                            --include svg \
+                            --include testing \
+                            --include workers \
+                            --include xml \
                             --outputDir ${QMAKE_FUNC_FILE_OUT_PATH} \
                             --supplementalDependencyFile ${QMAKE_FUNC_FILE_OUT_PATH}/$$SUPPLEMENTAL_DEPENDENCY_FILE \
                             --preprocessor \"$${QMAKE_MOC} -E\" ${QMAKE_FILE_NAME}
-v8 {
-    generateBindings.output = V8${QMAKE_FILE_BASE}.cpp
-    generateBindings.depends = ${QMAKE_FUNC_FILE_OUT_PATH}/$$SUPPLEMENTAL_DEPENDENCY_FILE \
-                               $$PWD/bindings/scripts/CodeGenerator.pm \
-                               $$PWD/bindings/scripts/CodeGeneratorV8.pm \
-                               $$PWD/bindings/scripts/IDLParser.pm \
-                               $$PWD/bindings/scripts/IDLStructure.pm \
-                               $$PWD/bindings/scripts/InFilesParser.pm \
-                               $$PWD/bindings/scripts/preprocessor.pm
-} else {
-    generateBindings.output = JS${QMAKE_FILE_BASE}.cpp
-    generateBindings.depends = ${QMAKE_FUNC_FILE_OUT_PATH}/$$SUPPLEMENTAL_DEPENDENCY_FILE \
-                               $$PWD/bindings/scripts/CodeGenerator.pm \
-                               $$PWD/bindings/scripts/CodeGeneratorJS.pm \
-                               $$PWD/bindings/scripts/IDLParser.pm \
-                               $$PWD/bindings/scripts/IDLStructure.pm \
-                               $$PWD/bindings/scripts/InFilesParser.pm \
-                               $$PWD/bindings/scripts/preprocessor.pm
-}
+generateBindings.output = JS${QMAKE_FILE_BASE}.cpp
+generateBindings.depends = ${QMAKE_FUNC_FILE_OUT_PATH}/$$SUPPLEMENTAL_DEPENDENCY_FILE \
+                           $$PWD/bindings/scripts/CodeGenerator.pm \
+                           $$PWD/bindings/scripts/CodeGeneratorJS.pm \
+                           $$PWD/bindings/scripts/IDLParser.pm \
+                           $$PWD/bindings/scripts/InFilesParser.pm \
+                           $$PWD/bindings/scripts/preprocessor.pm
 GENERATORS += generateBindings
 
 # GENERATOR 2: inspector idl compiler
@@ -733,37 +780,37 @@ inspectorJSON.commands = python $$inspectorJSON.script $$PWD/inspector/Inspector
 inspectorJSON.depends = $$inspectorJSON.script
 GENERATORS += inspectorJSON
 
-inspectorBackendStub.output = InspectorBackendStub.qrc
-inspectorBackendStub.input = INSPECTOR_BACKEND_STUB_QRC
-inspectorBackendStub.commands = $$QMAKE_COPY $$toSystemPath($$INSPECTOR_BACKEND_STUB_QRC) ${QMAKE_FUNC_FILE_OUT_PATH}$${QMAKE_DIR_SEP}InspectorBackendStub.qrc
-inspectorBackendStub.add_output_to_sources = false
-GENERATORS += inspectorBackendStub
+inspectorBackendCommands.output = InspectorBackendCommands.qrc
+inspectorBackendCommands.input = INSPECTOR_BACKEND_COMMANDS_QRC
+inspectorBackendCommands.commands = $$QMAKE_COPY $$toSystemPath($$INSPECTOR_BACKEND_COMMANDS_QRC) ${QMAKE_FUNC_FILE_OUT_PATH}$${QMAKE_DIR_SEP}InspectorBackendCommands.qrc
+inspectorBackendCommands.add_output_to_sources = false
+GENERATORS += inspectorBackendCommands
 
-# GENERATOR 2-a: inspector injected script source compiler
+inspectorOverlayPage.output = InspectorOverlayPage.h
+inspectorOverlayPage.input = INSPECTOR_OVERLAY_PAGE
+inspectorOverlayPage.commands = perl $$PWD/inspector/xxd.pl InspectorOverlayPage_html ${QMAKE_FILE_IN} ${QMAKE_FILE_OUT}
+inspectorOverlayPage.add_output_to_sources = false
+GENERATORS += inspectorOverlayPage
+
+# GENERATOR 2: inspector injected script source compiler
 injectedScriptSource.output = InjectedScriptSource.h
 injectedScriptSource.input = INJECTED_SCRIPT_SOURCE
-injectedScriptSource.commands = perl $$PWD/inspector/xxd.pl InjectedScriptSource_js $$PWD/inspector/InjectedScriptSource.js ${QMAKE_FILE_OUT}
+injectedScriptSource.commands = perl $$PWD/inspector/xxd.pl InjectedScriptSource_js ${QMAKE_FILE_IN} ${QMAKE_FILE_OUT}
 injectedScriptSource.add_output_to_sources = false
 GENERATORS += injectedScriptSource
 
-# GENERATOR 2-b: inspector debugger script source compiler
-debuggerScriptSource.output = DebuggerScriptSource.h
-debuggerScriptSource.input = DEBUGGER_SCRIPT_SOURCE
-debuggerScriptSource.commands = perl $$PWD/inspector/xxd.pl DebuggerScriptSource_js ${QMAKE_FILE_IN} ${QMAKE_FILE_OUT}
-debuggerScriptSource.add_output_to_sources = false
-GENERATORS += debuggerScriptSource
-
-arrayBufferViewCustomScript.output = V8ArrayBufferViewCustomScript.h
-arrayBufferViewCustomScript.input = ARRAY_BUFFER_VIEW_CUSTOM_SCRIPT_SOURCE
-arrayBufferViewCustomScript.commands = perl $$PWD/inspector/xxd.pl V8ArrayBufferViewCustomScript_js ${QMAKE_FILE_IN} ${QMAKE_FILE_OUT}
-arrayBufferViewCustomScript.add_output_to_sources = false
-GENERATORS += arrayBufferViewCustomScript
+# GENERATOR 3: inspector canvas injected script source compiler
+InjectedScriptCanvasModuleSource.output = InjectedScriptCanvasModuleSource.h
+InjectedScriptCanvasModuleSource.input = INJECTED_SCRIPT_CANVAS_MODULE_SOURCE
+InjectedScriptCanvasModuleSource.commands = perl $$PWD/inspector/xxd.pl InjectedScriptCanvasModuleSource_js ${QMAKE_FILE_IN} ${QMAKE_FILE_OUT}
+InjectedScriptCanvasModuleSource.add_output_to_sources = false
+GENERATORS += InjectedScriptCanvasModuleSource
 
 # GENERATOR 4: CSS grammar
-cssbison.output = ${QMAKE_FILE_BASE}.cpp
+cssbison.output = CSSGrammar.cpp
 cssbison.input = CSSBISON
 cssbison.script = $$PWD/css/makegrammar.pl
-cssbison.commands = perl $$cssbison.script ${QMAKE_FILE_NAME} ${QMAKE_FUNC_FILE_OUT_PATH}/${QMAKE_FILE_BASE}
+cssbison.commands = perl -I $$PWD/bindings/scripts $$cssbison.script --outputDir ${QMAKE_FUNC_FILE_OUT_PATH} --extraDefines \"$${DEFINES} $$configDefines()\" --preprocessor \"$${QMAKE_MOC} -E\" --symbolsPrefix cssyy ${QMAKE_FILE_NAME}
 cssbison.depends = ${QMAKE_FILE_NAME}
 GENERATORS += cssbison
 
@@ -772,13 +819,9 @@ htmlnames.output = HTMLNames.cpp
 htmlnames.input = HTML_NAMES
 htmlnames.script = $$PWD/dom/make_names.pl
 htmlnames.depends = $$PWD/html/HTMLAttributeNames.in
-htmlnames.commands = perl -I$$PWD/bindings/scripts $$htmlnames.script --tags $$PWD/html/HTMLTagNames.in --attrs $$PWD/html/HTMLAttributeNames.in --extraDefines \"$${DEFINES}\" --preprocessor \"$${QMAKE_MOC} -E\"  --factory $$wrapperFactoryArg --outputDir ${QMAKE_FUNC_FILE_OUT_PATH}
+htmlnames.commands = perl -I$$PWD/bindings/scripts $$htmlnames.script --tags $$PWD/html/HTMLTagNames.in --attrs $$PWD/html/HTMLAttributeNames.in --extraDefines \"$${DEFINES} $$configDefines()\" --preprocessor \"$${QMAKE_MOC} -E\"  --factory --wrapperFactory --outputDir ${QMAKE_FUNC_FILE_OUT_PATH}
 htmlnames.extra_sources = HTMLElementFactory.cpp
-v8 {
-    htmlnames.extra_sources += V8HTMLElementWrapperFactory.cpp
-} else {
-    htmlnames.extra_sources += JSHTMLElementWrapperFactory.cpp
-}
+htmlnames.extra_sources += JSHTMLElementWrapperFactory.cpp
 GENERATORS += htmlnames
 
 # GENERATOR 5-B:
@@ -805,10 +848,10 @@ GENERATORS += fontnames
 
 # GENERATOR 5-E:
 eventfactory.output = EventFactory.cpp
-eventfactory.input = EVENT_FACTORY
+eventfactory.input = EVENTS_NAMES
 eventfactory.script = $$PWD/dom/make_event_factory.pl
-eventfactory.commands = perl -I$$PWD/bindings/scripts $$eventfactory.script --input $$EVENT_FACTORY --outputDir ${QMAKE_FUNC_FILE_OUT_PATH}
-eventfactory.depends = $$PWD/dom/make_event_factory.pl $$EVENT_FACTORY
+eventfactory.commands = perl -I$$PWD/bindings/scripts $$eventfactory.script --input $$EVENTS_NAMES --outputDir ${QMAKE_FUNC_FILE_OUT_PATH}
+eventfactory.depends = $$PWD/dom/make_event_factory.pl $$EVENTS_NAMES
 GENERATORS += eventfactory
 
 # GENERATOR 5-F:
@@ -828,6 +871,14 @@ exceptioncodedescription.commands = perl -I$$PWD/bindings/scripts $$exceptioncod
 exceptioncodedescription.depends = $$PWD/dom/make_dom_exceptions.pl $$DOM_EXCEPTIONS
 GENERATORS += exceptioncodedescription
 
+# GENERATOR 5-H:
+settingsmacros.output = SettingsMacros.h
+settingsmacros.input = SETTINGS_MACROS
+settingsmacros.script = $$PWD/page/make_settings.pl
+settingsmacros.commands = perl -I$$PWD/bindings/scripts $$settingsmacros.script --input $$SETTINGS_MACROS --outputDir ${QMAKE_FUNC_FILE_OUT_PATH}
+settingsmacros.depends = $$PWD/page/make_settings.pl $$SETTINGS_MACROS
+GENERATORS += settingsmacros
+
 # GENERATOR 8-A:
 entities.output = HTMLEntityTable.cpp
 entities.input = HTML_ENTITIES
@@ -846,7 +897,7 @@ colordata.clean = ${QMAKE_FILE_OUT}
 colordata.depends = $$PWD/make-hash-tools.pl
 GENERATORS += colordata
 
-contains(DEFINES, ENABLE_XSLT=1) {
+enable?(XSLT) {
     # GENERATOR 8-C:
     xmlviewercss.output = XMLViewerCSS.h
     xmlviewercss.input = XMLVIEWER_CSS
@@ -893,12 +944,3 @@ webkitversion.commands = perl $$webkitversion.script --config $$PWD/../WebKit/ma
 webkitversion.clean = ${QMAKE_FUNC_FILE_OUT_PATH}/WebKitVersion.h
 webkitversion.add_output_to_sources = false
 GENERATORS += webkitversion
-
-# Stolen from JavaScriptCore, needed for YARR
-v8 {
-    retgen.output = RegExpJitTables.h
-    retgen.script = $$PWD/../JavaScriptCore/create_regex_tables
-    retgen.input = retgen.script
-    retgen.commands = python $$retgen.script > ${QMAKE_FILE_OUT}
-    GENERATORS += retgen
-}

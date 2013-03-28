@@ -25,7 +25,7 @@
 
 #include "config.h"
 
-#if ENABLE(WEBGL)
+#if USE(3D_GRAPHICS)
 
 #include "GraphicsContext3D.h"
 
@@ -57,15 +57,9 @@ namespace WebCore {
 // the restructuring in https://bugs.webkit.org/show_bug.cgi?id=66903 is done
 class GraphicsContext3DPrivate {
 public:
-    GraphicsContext3DPrivate(GraphicsContext3D* graphicsContext3D)
-        : m_graphicsContext3D(graphicsContext3D)
-    {
-    }
+    GraphicsContext3DPrivate(GraphicsContext3D*) { }
     
     ~GraphicsContext3DPrivate() { }
-
-private:
-    GraphicsContext3D* m_graphicsContext3D; // Weak back-pointer
 };
 
 static void setPixelFormat(Vector<CGLPixelFormatAttribute>& attribs, int colorBits, int depthBits, bool accelerated, bool supersample, bool closest)
@@ -98,11 +92,11 @@ PassRefPtr<GraphicsContext3D> GraphicsContext3D::create(GraphicsContext3D::Attri
     // This implementation doesn't currently support rendering directly to the HostWindow.
     if (renderStyle == RenderDirectlyToHostWindow)
         return 0;
-    RefPtr<GraphicsContext3D> context = adoptRef(new GraphicsContext3D(attrs, hostWindow, false));
+    RefPtr<GraphicsContext3D> context = adoptRef(new GraphicsContext3D(attrs, hostWindow, renderStyle));
     return context->m_contextObj ? context.release() : 0;
 }
 
-GraphicsContext3D::GraphicsContext3D(GraphicsContext3D::Attributes attrs, HostWindow* hostWindow, bool)
+GraphicsContext3D::GraphicsContext3D(GraphicsContext3D::Attributes attrs, HostWindow* hostWindow, GraphicsContext3D::RenderStyle renderStyle)
     : m_currentWidth(0)
     , m_currentHeight(0)
     , m_contextObj(0)
@@ -114,7 +108,7 @@ GraphicsContext3D::GraphicsContext3D(GraphicsContext3D::Attributes attrs, HostWi
     , m_layerComposited(false)
     , m_internalColorFormat(0)
     , m_boundFBO(0)
-    , m_activeTexture(0)
+    , m_activeTexture(GL_TEXTURE0)
     , m_boundTexture0(0)
     , m_multisampleFBO(0)
     , m_multisampleDepthStencilBuffer(0)
@@ -122,6 +116,7 @@ GraphicsContext3D::GraphicsContext3D(GraphicsContext3D::Attributes attrs, HostWi
     , m_private(adoptPtr(new GraphicsContext3DPrivate(this)))
 {
     UNUSED_PARAM(hostWindow);
+    UNUSED_PARAM(renderStyle);
 
     Vector<CGLPixelFormatAttribute> attribs;
     CGLPixelFormatObj pixelFormatObj = 0;
@@ -278,6 +273,10 @@ void GraphicsContext3D::setContextLostCallback(PassOwnPtr<ContextLostCallback>)
 {
 }
 
+void GraphicsContext3D::setErrorMessageCallback(PassOwnPtr<ErrorMessageCallback>)
+{
 }
 
-#endif // ENABLE(WEBGL)
+}
+
+#endif // USE(3D_GRAPHICS)

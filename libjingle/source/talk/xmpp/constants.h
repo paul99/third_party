@@ -70,6 +70,7 @@ extern const char STR_FROM[];
 extern const char STR_TO[];
 extern const char STR_BOTH[];
 extern const char STR_REMOVE[];
+extern const char STR_TRUE[];
 
 extern const char STR_TYPE[];
 extern const char STR_NAME[];
@@ -94,11 +95,22 @@ extern const char STR_OUTGOINGVOICEMAIL[];
 
 extern const char STR_UNAVAILABLE[];
 
+extern const char NS_PING[];
+extern const StaticQName QN_PING;
+
+extern const char NS_MUC_UNIQUE[];
+extern const StaticQName QN_MUC_UNIQUE_QUERY;
+extern const StaticQName QN_HANGOUT_ID;
+
 extern const char STR_GOOGLE_MUC_LOOKUP_JID[];
 extern const char STR_MUC_ROOMCONFIG_ROOMNAME[];
 extern const char STR_MUC_ROOMCONFIG_FEATURES[];
 extern const char STR_MUC_ROOM_FEATURE_ENTERPRISE[];
 extern const char STR_MUC_ROOMCONFIG[];
+extern const char STR_MUC_ROOM_FEATURE_HANGOUT[];
+extern const char STR_MUC_ROOM_FEATURE_HANGOUT_LITE[];
+extern const char STR_MUC_ROOM_FEATURE_BROADCAST[];
+extern const char STR_MUC_ROOM_FEATURE_MULTI_USER_VC[];
 
 extern const StaticQName QN_STREAM_STREAM;
 extern const StaticQName QN_STREAM_FEATURES;
@@ -156,6 +168,7 @@ extern const char NS_GOOGLE_AUTH[];
 extern const char NS_GOOGLE_AUTH_PROTOCOL[];
 extern const StaticQName QN_GOOGLE_AUTH_CLIENT_USES_FULL_BIND_RESULT;
 extern const StaticQName QN_GOOGLE_ALLOW_NON_GOOGLE_ID_XMPP_LOGIN;
+extern const StaticQName QN_GOOGLE_AUTH_SERVICE;
 
 extern const StaticQName QN_DIALBACK_RESULT;
 extern const StaticQName QN_DIALBACK_VERIFY;
@@ -292,6 +305,15 @@ extern const char STR_SHOW_DND[];
 extern const char STR_SHOW_XA[];
 extern const char STR_SHOW_OFFLINE[];
 
+extern const char NS_GOOGLE_PSTN_CONFERENCE[];
+extern const StaticQName QN_GOOGLE_PSTN_CONFERENCE_STATUS;
+extern const StaticQName QN_ATTR_STATUS;
+
+// Presence connection status
+extern const char STR_PSTN_CONFERENCE_STATUS_CONNECTING[];
+extern const char STR_PSTN_CONFERENCE_STATUS_CONNECTED[];
+extern const char STR_PSTN_CONFERENCE_STATUS_HANGUP[];
+
 // Subscription
 extern const char STR_SUBSCRIBE[];
 extern const char STR_SUBSCRIBED[];
@@ -304,6 +326,12 @@ extern const StaticQName QN_INVITATION;
 extern const StaticQName QN_INVITE_NAME;
 extern const StaticQName QN_INVITE_SUBJECT;
 extern const StaticQName QN_INVITE_MESSAGE;
+
+// Kick
+extern const char NS_GOOGLE_MUC_ADMIN[];
+extern const StaticQName QN_GOOGLE_MUC_ADMIN_QUERY;
+extern const StaticQName QN_GOOGLE_MUC_ADMIN_QUERY_ITEM;
+extern const StaticQName QN_GOOGLE_MUC_ADMIN_QUERY_ITEM_REASON;
 
 // PubSub: http://xmpp.org/extensions/xep-0060.html
 extern const char NS_PUBSUB[];
@@ -364,8 +392,15 @@ extern const StaticQName QN_MUC_X;
 extern const StaticQName QN_MUC_ITEM;
 extern const StaticQName QN_MUC_AFFILIATION;
 extern const StaticQName QN_MUC_ROLE;
+extern const StaticQName QN_CLIENT_VERSION;
 extern const char STR_AFFILIATION_NONE[];
 extern const char STR_ROLE_PARTICIPANT[];
+
+extern const char NS_GOOGLE_SESSION[];
+extern const StaticQName QN_GOOGLE_USER_ID;
+extern const StaticQName QN_GOOGLE_CIRCLE_ID;
+extern const StaticQName QN_GOOGLE_SESSION_BLOCKED;
+extern const StaticQName QN_GOOGLE_SESSION_BLOCKING;
 
 extern const char NS_MUC_OWNER[];
 extern const StaticQName QN_MUC_OWNER_QUERY;
@@ -375,6 +410,8 @@ extern const StaticQName QN_MUC_USER_CONTINUE;
 extern const StaticQName QN_MUC_USER_X;
 extern const StaticQName QN_MUC_USER_ITEM;
 extern const StaticQName QN_MUC_USER_STATUS;
+extern const StaticQName QN_MUC_USER_REASON;
+extern const StaticQName QN_MUC_USER_ABUSE_VIOLATION;
 
 // JEP 0055 - Jabber Search
 extern const char NS_SEARCH[];
@@ -383,6 +420,8 @@ extern const StaticQName QN_SEARCH_ITEM;
 extern const StaticQName QN_SEARCH_ROOM_NAME;
 extern const StaticQName QN_SEARCH_ROOM_JID;
 extern const StaticQName QN_SEARCH_ROOM_DOMAIN;
+extern const StaticQName QN_SEARCH_HANGOUT_ID;
+extern const StaticQName QN_SEARCH_EXTERNAL_ID;
 
 // JEP 0115
 extern const char NS_CAPS[];
@@ -495,9 +534,16 @@ extern const StaticQName QN_LABEL;
 extern const char NS_GOOGLE_MUC_MEDIA[];
 extern const StaticQName QN_GOOGLE_MUC_AUDIO_MUTE;
 extern const StaticQName QN_GOOGLE_MUC_VIDEO_MUTE;
+extern const StaticQName QN_GOOGLE_MUC_VIDEO_PAUSE;
 extern const StaticQName QN_GOOGLE_MUC_RECORDING;
 extern const StaticQName QN_GOOGLE_MUC_MEDIA_BLOCK;
 extern const StaticQName QN_STATE_ATTR;
+
+
+extern const char AUTH_MECHANISM_GOOGLE_COOKIE[];
+extern const char AUTH_MECHANISM_GOOGLE_TOKEN[];
+extern const char AUTH_MECHANISM_OAUTH2[];
+extern const char AUTH_MECHANISM_PLAIN[];
 
 }  // namespace buzz
 

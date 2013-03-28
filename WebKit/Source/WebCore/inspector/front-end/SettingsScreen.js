@@ -30,151 +30,148 @@
 
 /**
  * @constructor
+ * @param {!function()} onHide
  * @extends {WebInspector.HelpScreen}
  */
-WebInspector.SettingsScreen = function()
+WebInspector.SettingsScreen = function(onHide)
 {
-    WebInspector.HelpScreen.call(this, WebInspector.UIString("Settings"));
+    WebInspector.HelpScreen.call(this);
+    this.element.id = "settings-screen";
 
-    this._leftColumnElement = document.createElement("td");
-    this._rightColumnElement = document.createElement("td");
+    /** @type {function()} */
+    this._onHide = onHide;
 
-    if (Preferences.showDockToRight) {
-        var p = this._appendSection(WebInspector.UIString("General"));
-        p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Dock to right"), WebInspector.settings.dockToRight));
-    }
+    this._tabbedPane = new WebInspector.TabbedPane();
+    this._tabbedPane.element.addStyleClass("help-window-main");
+    var settingsLabelElement = document.createElement("div");
+    settingsLabelElement.className = "help-window-label";
+    settingsLabelElement.createTextChild(WebInspector.UIString("Settings"));
+    this._tabbedPane.element.insertBefore(settingsLabelElement, this._tabbedPane.element.firstChild);
+    this._tabbedPane.element.appendChild(this._createCloseButton());
+    this._tabbedPane.appendTab(WebInspector.SettingsScreen.Tabs.General, WebInspector.UIString("General"), new WebInspector.GenericSettingsTab());
+    if (!WebInspector.experimentsSettings.showOverridesInDrawer.isEnabled())
+        this._tabbedPane.appendTab(WebInspector.SettingsScreen.Tabs.Overrides, WebInspector.UIString("Overrides"), new WebInspector.OverridesSettingsTab());
+    if (WebInspector.experimentsSettings.experimentsEnabled)
+        this._tabbedPane.appendTab(WebInspector.SettingsScreen.Tabs.Experiments, WebInspector.UIString("Experiments"), new WebInspector.ExperimentsSettingsTab());
+    this._tabbedPane.appendTab(WebInspector.SettingsScreen.Tabs.Shortcuts, WebInspector.UIString("Shortcuts"), WebInspector.shortcutsScreen.createShortcutsTabView());
+    this._tabbedPane.shrinkableTabs = false;
+    this._tabbedPane.verticalTabLayout = true;
 
-    var p = this._appendSection(WebInspector.UIString("Elements"));
-    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Word wrap"), WebInspector.settings.domWordWrap));
+    this._lastSelectedTabSetting = WebInspector.settings.createSetting("lastSelectedSettingsTab", WebInspector.SettingsScreen.Tabs.General);
+    this.selectTab(this._lastSelectedTabSetting.get());
+    this._tabbedPane.addEventListener(WebInspector.TabbedPane.EventTypes.TabSelected, this._tabSelected, this);
+}
 
-    p = this._appendSection(WebInspector.UIString("Styles"));
-    p.appendChild(this._createRadioSetting(WebInspector.UIString("Color format"), [
-        [ WebInspector.StylesSidebarPane.ColorFormat.Original, WebInspector.UIString("As authored") ],
-        [ WebInspector.StylesSidebarPane.ColorFormat.HEX, "HEX: #DAC0DE" ],
-        [ WebInspector.StylesSidebarPane.ColorFormat.RGB, "RGB: rgb(128, 255, 255)" ],
-        [ WebInspector.StylesSidebarPane.ColorFormat.HSL, "HSL: hsl(300, 80%, 90%)" ] ], WebInspector.settings.colorFormat));
-    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Show user agent styles"), WebInspector.settings.showUserAgentStyles));
-
-    p = this._appendSection(WebInspector.UIString("Text editor"));
-    p.appendChild(this._createSelectSetting(WebInspector.UIString("Indent"), [
-            [ WebInspector.UIString("2 spaces"), WebInspector.TextEditorModel.Indent.TwoSpaces ],
-            [ WebInspector.UIString("4 spaces"), WebInspector.TextEditorModel.Indent.FourSpaces ],
-            [ WebInspector.UIString("8 spaces"), WebInspector.TextEditorModel.Indent.EightSpaces ],
-            [ WebInspector.UIString("Tab character"), WebInspector.TextEditorModel.Indent.TabCharacter ]
-        ], WebInspector.settings.textEditorIndent));
-
-    p = this._appendSection(WebInspector.UIString("Network"), true);
-    if (Preferences.exposeDisableCache)
-        p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Disable cache"), WebInspector.settings.cacheDisabled));
-    p.appendChild(this._createUserActionControl());
-
-    p = this._appendSection(WebInspector.UIString("Scripts"), true);
-    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Show script folders"), WebInspector.settings.showScriptFolders));
-    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Search in content scripts"), WebInspector.settings.searchInContentScripts));
-    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Enable source maps"), WebInspector.settings.sourceMapsEnabled));
-
-    p = this._appendSection(WebInspector.UIString("Profiler"), true);
-    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Show objects' hidden properties"), WebInspector.settings.showHeapSnapshotObjectsHiddenProperties));
-
-    p = this._appendSection(WebInspector.UIString("Console"), true);
-    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Log XMLHttpRequests"), WebInspector.settings.monitoringXHREnabled));
-    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Preserve log upon navigation"), WebInspector.settings.preserveConsoleLog));
-
-    if (WebInspector.extensionServer.hasExtensions()) {
-        var handlerSelector = new WebInspector.HandlerSelector(WebInspector.openAnchorLocationRegistry);
-        p = this._appendSection(WebInspector.UIString("Extensions"), true);
-        p.appendChild(this._createCustomSetting(WebInspector.UIString("Open links in"), handlerSelector.element));
-    }
-
-    var experiments = WebInspector.experimentsSettings.experiments;
-    if (WebInspector.experimentsSettings.experimentsEnabled && experiments.length) {
-        var experimentsSection = this._appendSection(WebInspector.UIString("Experiments"), true);
-        experimentsSection.appendChild(this._createExperimentsWarningSubsection());
-        for (var i = 0; i < experiments.length; ++i)
-            experimentsSection.appendChild(this._createExperimentCheckbox(experiments[i]));
-    }
-    
-    var table = document.createElement("table");
-    table.className = "help-table";
-    var tr = document.createElement("tr");
-    tr.appendChild(this._leftColumnElement);
-    tr.appendChild(this._rightColumnElement);
-    table.appendChild(tr);
-    this.contentElement.appendChild(table);
+WebInspector.SettingsScreen.Tabs = {
+    General: "general",
+    Overrides: "overrides",
+    Experiments: "experiments",
+    Shortcuts: "shortcuts"
 }
 
 WebInspector.SettingsScreen.prototype = {
     /**
-     * @param {string} name
-     * @param {boolean=} right
+     * @param {string} tabId
      */
-    _appendSection: function(name, right)
+    selectTab: function(tabId)
     {
-        var p = document.createElement("p");
-        p.className = "help-section";
-        var title = document.createElement("div");
-        title.className = "help-section-title";
-        title.textContent = name;
-        p.appendChild(title);
-        this._columnElement(right).appendChild(p);
-        return p;
+        this._tabbedPane.selectTab(tabId);
     },
 
     /**
-     * @return {Element} element
+     * @param {WebInspector.Event} event
      */
-    _createExperimentsWarningSubsection: function()
+    _tabSelected: function(event)
     {
-        var subsection = document.createElement("div");
-        var warning = subsection.createChild("span", "settings-experiments-warning-subsection-warning");
-        warning.textContent = WebInspector.UIString("WARNING:");
-        subsection.appendChild(document.createTextNode(" "));
-        var message = subsection.createChild("span", "settings-experiments-warning-subsection-message");
-        message.textContent = WebInspector.UIString("These experiments could be dangerous and may require restart.");
-        return subsection;
+        this._lastSelectedTabSetting.set(this._tabbedPane.selectedTabId);
     },
 
-    _columnElement: function(right)
+    /**
+     * @override
+     */
+    wasShown: function()
     {
-        return right ? this._rightColumnElement : this._leftColumnElement;
+        this._tabbedPane.show(this.element);
+        WebInspector.HelpScreen.prototype.wasShown.call(this);
     },
 
-    _createCheckboxSetting: function(name, setting)
+    /**
+     * @override
+     */
+    isClosingKey: function(keyCode)
     {
-        var input = document.createElement("input");
+        return [
+            WebInspector.KeyboardShortcut.Keys.Enter.code,
+            WebInspector.KeyboardShortcut.Keys.Esc.code,
+        ].indexOf(keyCode) >= 0;
+    },
+
+    /**
+     * @override
+     */
+    willHide: function()
+    {
+        this._onHide();
+        WebInspector.HelpScreen.prototype.willHide.call(this);
+    },
+
+    __proto__: WebInspector.HelpScreen.prototype
+}
+
+/**
+ * @constructor
+ * @extends {WebInspector.View}
+ * @param {string} name
+ * @param {string=} id
+ */
+WebInspector.SettingsTab = function(name, id)
+{
+    WebInspector.View.call(this);
+    this.element.className = "settings-tab-container";
+    if (id)
+        this.element.id = id;
+    var header = this.element.createChild("header");
+    header.createChild("h3").appendChild(document.createTextNode(name));
+    this.containerElement = this.element.createChild("div", "help-container-wrapper").createChild("div", "settings-tab help-content help-container");
+}
+
+WebInspector.SettingsTab.prototype = {
+    /**
+     *  @param {string=} name
+     *  @return {!Element}
+     */
+    _appendSection: function(name)
+    {
+        var block = this.containerElement.createChild("div", "help-block");
+        if (name)
+            block.createChild("div", "help-section-title").textContent = name;
+        return block;
+    },
+
+    /**
+     * @param {boolean=} omitParagraphElement
+     * @param {Element=} inputElement
+     */
+    _createCheckboxSetting: function(name, setting, omitParagraphElement, inputElement)
+    {
+        var input = inputElement || document.createElement("input");
         input.type = "checkbox";
         input.name = name;
         input.checked = setting.get();
+
         function listener()
         {
             setting.set(input.checked);
         }
         input.addEventListener("click", listener, false);
 
-        var p = document.createElement("p");
         var label = document.createElement("label");
         label.appendChild(input);
         label.appendChild(document.createTextNode(name));
-        p.appendChild(label);
-        return p;
-    },
-
-    _createExperimentCheckbox: function(experiment)
-    {
-        var input = document.createElement("input");
-        input.type = "checkbox";
-        input.name = experiment.name;
-        input.checked = experiment.isEnabled();
-        function listener()
-        {
-            experiment.setEnabled(input.checked);
-        }
-        input.addEventListener("click", listener, false);
+        if (omitParagraphElement)
+            return label;
 
         var p = document.createElement("p");
-        var label = document.createElement("label");
-        label.appendChild(input);
-        label.appendChild(document.createTextNode(WebInspector.UIString(experiment.title)));
         p.appendChild(label);
         return p;
     },
@@ -254,115 +251,326 @@ WebInspector.SettingsScreen.prototype = {
         return p;
     },
 
-    _createUserActionControl: function()
-    {
-        var userAgent = WebInspector.settings.userAgent.get();
+    __proto__: WebInspector.View.prototype
+}
 
-        var p = document.createElement("p");
-        var labelElement = p.createChild("label");
-        var checkboxElement = labelElement.createChild("input");
-        checkboxElement.type = "checkbox";
-        checkboxElement.checked = !!userAgent;
-        checkboxElement.addEventListener("click", checkboxClicked.bind(this), false);
-        labelElement.appendChild(document.createTextNode("Override User Agent"));
+/**
+ * @constructor
+ * @extends {WebInspector.SettingsTab}
+ */
+WebInspector.GenericSettingsTab = function()
+{
+    WebInspector.SettingsTab.call(this, WebInspector.UIString("General"));
 
-        var selectSectionElement;
-        function checkboxClicked()
-        {
-            if (checkboxElement.checked) {
-                selectSectionElement = this._createUserAgentSelectRowElement();
-                p.appendChild(selectSectionElement);
-            } else {
-                if (selectSectionElement) {
-                    p.removeChild(selectSectionElement);
-                    selectSectionElement = null;
-                }
-                WebInspector.settings.userAgent.set("");
-            }
-        }
+    var p = this._appendSection();
+    if (Preferences.exposeDisableCache)
+        p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Disable cache"), WebInspector.settings.cacheDisabled));
+    var disableJSElement = this._createCheckboxSetting(WebInspector.UIString("Disable JavaScript"), WebInspector.settings.javaScriptDisabled);
+    p.appendChild(disableJSElement);
+    WebInspector.settings.javaScriptDisabled.addChangeListener(this._javaScriptDisabledChanged, this);
+    this._disableJSCheckbox = disableJSElement.getElementsByTagName("input")[0];
+    this._updateScriptDisabledCheckbox();
 
-        checkboxClicked.call(this);
-        return p;
-    },
+    p = this._appendSection(WebInspector.UIString("Appearance"));
+    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Show toolbar icons"), WebInspector.settings.showToolbarIcons));
 
-    _createUserAgentSelectRowElement: function()
-    {
-        var userAgent = WebInspector.settings.userAgent.get();
-        const userAgents = [
-            ["Internet Explorer 9", "Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Trident/5.0)"],
-            ["Internet Explorer 8", "Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.0; Trident/4.0)"],
-            ["Internet Explorer 7", "Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 6.0)"],
+    p = this._appendSection(WebInspector.UIString("Elements"));
+    p.appendChild(this._createRadioSetting(WebInspector.UIString("Color format"), [
+        [ WebInspector.Color.Format.Original, WebInspector.UIString("As authored") ],
+        [ WebInspector.Color.Format.HEX, "HEX: #DAC0DE" ],
+        [ WebInspector.Color.Format.RGB, "RGB: rgb(128, 255, 255)" ],
+        [ WebInspector.Color.Format.HSL, "HSL: hsl(300, 80%, 90%)" ] ], WebInspector.settings.colorFormat));
+    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Show user agent styles"), WebInspector.settings.showUserAgentStyles));
+    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Word wrap"), WebInspector.settings.domWordWrap));
+    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Show Shadow DOM"), WebInspector.settings.showShadowDOM));
+    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Show rulers"), WebInspector.settings.showMetricsRulers));
 
-            ["Firefox 7 \u2014 Windows", "Mozilla/5.0 (Windows NT 6.1; Intel Mac OS X 10.6; rv:7.0.1) Gecko/20100101 Firefox/7.0.1"],
-            ["Firefox 7 \u2014 Mac", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.6; rv:7.0.1) Gecko/20100101 Firefox/7.0.1"],
-            ["Firefox 4 \u2014 Windows", "Mozilla/5.0 (Windows NT 6.1; rv:2.0.1) Gecko/20100101 Firefox/4.0.1"],
-            ["Firefox 4 \u2014 Mac", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.6; rv:2.0.1) Gecko/20100101 Firefox/4.0.1"],
+    p = this._appendSection(WebInspector.UIString("Rendering"));
+    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Show paint rectangles"), WebInspector.settings.showPaintRects));
+    WebInspector.settings.showPaintRects.addChangeListener(this._showPaintRectsChanged, this);
 
-            ["iPhone \u2014 iOS 5", "Mozilla/5.0 (iPhone; CPU iPhone OS 5_0 like Mac OS X) AppleWebKit/534.46 (KHTML, like Gecko) Version/5.1 Mobile/9A334 Safari/7534.48.3"],
-            ["iPhone \u2014 iOS 4", "Mozilla/5.0 (iPhone; U; CPU iPhone OS 4_3_2 like Mac OS X; en-us) AppleWebKit/533.17.9 (KHTML, like Gecko) Version/5.0.2 Mobile/8H7 Safari/6533.18.5"],
-            ["iPad \u2014 iOS 5", "Mozilla/5.0 (iPad; CPU OS 5_0 like Mac OS X) AppleWebKit/534.46 (KHTML, like Gecko) Version/5.1 Mobile/9A334 Safari/7534.48.3"],
-            ["iPad \u2014 iOS 4", "Mozilla/5.0 (iPad; CPU OS 4_3_2 like Mac OS X; en-us) AppleWebKit/533.17.9 (KHTML, like Gecko) Version/5.0.2 Mobile/8H7 Safari/6533.18.5"],
+    if (Capabilities.canShowFPSCounter) {
+        p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Show FPS meter"), WebInspector.settings.showFPSCounter));
+        WebInspector.settings.showFPSCounter.addChangeListener(this._showFPSCounterChanged, this);
+    }
 
-            ["Android 2.3 \u2014 Nexus S", "Mozilla/5.0 (Linux; U; Android 2.3.6; en-us; Nexus S Build/GRK39F) AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1"],
-            [WebInspector.UIString("Other..."), "Other"]
-        ];
+    p = this._appendSection(WebInspector.UIString("Sources"));
+    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Show folders"), WebInspector.settings.showScriptFolders));
+    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Search in content scripts"), WebInspector.settings.searchInContentScripts));
+    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Enable source maps"), WebInspector.settings.sourceMapsEnabled));
+    if (WebInspector.experimentsSettings.isEnabled("sass"))
+        p.appendChild(this._createCSSAutoReloadControls());
+    var indentationElement = this._createSelectSetting(WebInspector.UIString("Indentation"), [
+            [ WebInspector.UIString("2 spaces"), WebInspector.TextEditorModel.Indent.TwoSpaces ],
+            [ WebInspector.UIString("4 spaces"), WebInspector.TextEditorModel.Indent.FourSpaces ],
+            [ WebInspector.UIString("8 spaces"), WebInspector.TextEditorModel.Indent.EightSpaces ],
+            [ WebInspector.UIString("Tab character"), WebInspector.TextEditorModel.Indent.TabCharacter ]
+        ], WebInspector.settings.textEditorIndent);
+    indentationElement.firstChild.className = "toplevel";
+    p.appendChild(indentationElement);
 
-        var fieldsetElement = document.createElement("fieldset");
-        var selectElement = fieldsetElement.createChild("select");
-        var otherUserAgentElement = fieldsetElement.createChild("input");
-        otherUserAgentElement.value = userAgent;
-        otherUserAgentElement.title = userAgent;
+    p = this._appendSection(WebInspector.UIString("Profiler"));
+    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Show objects' hidden properties"), WebInspector.settings.showHeapSnapshotObjectsHiddenProperties));
+    if (WebInspector.experimentsSettings.nativeMemorySnapshots.isEnabled())
+        p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Show uninstrumented native memory"), WebInspector.settings.showNativeSnapshotUninstrumentedSize));
 
-        var selectionRestored = false;
-        for (var i = 0; i < userAgents.length; ++i) {
-            var agent = userAgents[i];
-            selectElement.add(new Option(agent[0], agent[1]));
-            if (userAgent === agent[1]) {
-                selectElement.selectedIndex = i;
-                selectionRestored = true;
-            }
-        }
+    if (Capabilities.timelineCanMonitorMainThread) {
+        p = this._appendSection(WebInspector.UIString("Timeline"));
+        p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Show CPU activity on the ruler"), WebInspector.settings.showCpuOnTimelineRuler));
+    }
 
-        if (!selectionRestored) {
-            if (!userAgent)
-                selectElement.selectedIndex = 0;
-            else
-                selectElement.selectedIndex = userAgents.length - 1;
-        }
+    p = this._appendSection(WebInspector.UIString("Console"));
+    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Log XMLHttpRequests"), WebInspector.settings.monitoringXHREnabled));
+    p.appendChild(this._createCheckboxSetting(WebInspector.UIString("Preserve log upon navigation"), WebInspector.settings.preserveConsoleLog));
 
-        selectElement.addEventListener("change", selectionChanged.bind(this), false);
-
-        function selectionChanged()
-        {
-            var value = selectElement.options[selectElement.selectedIndex].value;
-            if (value !== "Other") {
-                WebInspector.settings.userAgent.set(value);
-                otherUserAgentElement.value = value;
-                otherUserAgentElement.title = value;
-                otherUserAgentElement.disabled = true;
-            } else {
-                otherUserAgentElement.disabled = false;
-                otherUserAgentElement.focus();
-            }
-        }
-
-        fieldsetElement.addEventListener("dblclick", textDoubleClicked.bind(this), false);
-        otherUserAgentElement.addEventListener("blur", textChanged.bind(this), false);
-
-        function textDoubleClicked()
-        {
-            selectElement.selectedIndex = userAgents.length - 1;
-            selectionChanged.call(this);
-        }
-
-        function textChanged()
-        {
-            WebInspector.settings.userAgent.set(otherUserAgentElement.value);
-        }
-
-        selectionChanged.call(this);
-        return fieldsetElement;
+    if (WebInspector.extensionServer.hasExtensions()) {
+        var handlerSelector = new WebInspector.HandlerSelector(WebInspector.openAnchorLocationRegistry);
+        p = this._appendSection(WebInspector.UIString("Extensions"));
+        p.appendChild(this._createCustomSetting(WebInspector.UIString("Open links in"), handlerSelector.element));
     }
 }
 
-WebInspector.SettingsScreen.prototype.__proto__ = WebInspector.HelpScreen.prototype;
+WebInspector.GenericSettingsTab.prototype = {
+    _showPaintRectsChanged: function()
+    {
+        PageAgent.setShowPaintRects(WebInspector.settings.showPaintRects.get());
+    },
+
+    _showFPSCounterChanged: function()
+    {
+        PageAgent.setShowFPSCounter(WebInspector.settings.showFPSCounter.get());
+    },
+
+    _updateScriptDisabledCheckbox: function()
+    {
+        function executionStatusCallback(error, status)
+        {
+            if (error || !status)
+                return;
+
+            switch (status) {
+            case "forbidden":
+                this._disableJSCheckbox.checked = true;
+                this._disableJSCheckbox.disabled = true;
+                break;
+            case "disabled":
+                this._disableJSCheckbox.checked = true;
+                break;
+            default:
+                this._disableJSCheckbox.checked = false;
+                break;
+            }
+        }
+
+        PageAgent.getScriptExecutionStatus(executionStatusCallback.bind(this));
+    },
+
+    _javaScriptDisabledChanged: function()
+    {
+        // We need to manually update the checkbox state, since enabling JavaScript in the page can actually uncover the "forbidden" state.
+        PageAgent.setScriptExecutionDisabled(WebInspector.settings.javaScriptDisabled.get(), this._updateScriptDisabledCheckbox.bind(this));
+    },
+
+    _createCSSAutoReloadControls: function()
+    {
+        var fragment = document.createDocumentFragment();
+        var labelElement = fragment.createChild("label");
+        var checkboxElement = labelElement.createChild("input");
+        checkboxElement.type = "checkbox";
+        checkboxElement.checked = WebInspector.settings.cssReloadEnabled.get();
+        checkboxElement.addEventListener("click", checkboxClicked, false);
+        labelElement.appendChild(document.createTextNode(WebInspector.UIString("Auto-reload CSS upon Sass save")));
+
+        var fieldsetElement = fragment.createChild("fieldset");
+        fieldsetElement.disabled = !checkboxElement.checked;
+        var p = fieldsetElement.createChild("p");
+        p.appendChild(document.createTextNode(WebInspector.UIString("Timeout (ms)")));
+        p.appendChild(document.createTextNode(" "));
+        var timeoutInput = p.createChild("input");
+        timeoutInput.value = WebInspector.settings.cssReloadTimeout.get();
+        timeoutInput.className = "numeric";
+        timeoutInput.style.width = "60px";
+        timeoutInput.maxLength = 8;
+        timeoutInput.addEventListener("blur", blurListener, false);
+        return fragment;
+
+        function checkboxClicked()
+        {
+            var reloadEnabled = checkboxElement.checked;
+            WebInspector.settings.cssReloadEnabled.set(reloadEnabled);
+            fieldsetElement.disabled = !reloadEnabled;
+        }
+
+        function blurListener()
+        {
+            var value = timeoutInput.value;
+            if (!isFinite(value) || value <= 0) {
+                timeoutInput.value = WebInspector.settings.cssReloadTimeout.get();
+                return;
+            }
+            WebInspector.settings.cssReloadTimeout.set(Number(value));
+        }
+    },
+
+    __proto__: WebInspector.SettingsTab.prototype
+}
+
+/**
+ * @constructor
+ * @extends {WebInspector.SettingsTab}
+ */
+WebInspector.OverridesSettingsTab = function()
+{
+    WebInspector.SettingsTab.call(this, WebInspector.UIString("Overrides"), "overrides-tab-content");
+    this._view = new WebInspector.OverridesView();
+    this.containerElement.parentElement.appendChild(this._view.containerElement);
+    this.containerElement.remove();
+    this.containerElement = this._view.containerElement;
+}
+
+WebInspector.OverridesSettingsTab.prototype = {
+    __proto__: WebInspector.SettingsTab.prototype
+}
+
+/**
+ * @constructor
+ * @extends {WebInspector.SettingsTab}
+ */
+WebInspector.ExperimentsSettingsTab = function()
+{
+    WebInspector.SettingsTab.call(this, WebInspector.UIString("Experiments"), "experiments-tab-content");
+
+    var experiments = WebInspector.experimentsSettings.experiments;
+    if (experiments.length) {
+        var experimentsSection = this._appendSection();
+        experimentsSection.appendChild(this._createExperimentsWarningSubsection());
+        for (var i = 0; i < experiments.length; ++i)
+            experimentsSection.appendChild(this._createExperimentCheckbox(experiments[i]));
+    }
+}
+
+WebInspector.ExperimentsSettingsTab.prototype = {
+    /**
+     * @return {Element} element
+     */
+    _createExperimentsWarningSubsection: function()
+    {
+        var subsection = document.createElement("div");
+        var warning = subsection.createChild("span", "settings-experiments-warning-subsection-warning");
+        warning.textContent = WebInspector.UIString("WARNING:");
+        subsection.appendChild(document.createTextNode(" "));
+        var message = subsection.createChild("span", "settings-experiments-warning-subsection-message");
+        message.textContent = WebInspector.UIString("These experiments could be dangerous and may require restart.");
+        return subsection;
+    },
+
+    _createExperimentCheckbox: function(experiment)
+    {
+        var input = document.createElement("input");
+        input.type = "checkbox";
+        input.name = experiment.name;
+        input.checked = experiment.isEnabled();
+        function listener()
+        {
+            experiment.setEnabled(input.checked);
+        }
+        input.addEventListener("click", listener, false);
+
+        var p = document.createElement("p");
+        var label = document.createElement("label");
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(WebInspector.UIString(experiment.title)));
+        p.appendChild(label);
+        return p;
+    },
+
+    __proto__: WebInspector.SettingsTab.prototype
+}
+
+/**
+ * @constructor
+ */
+WebInspector.SettingsController = function()
+{
+    this._statusBarButton = new WebInspector.StatusBarButton(WebInspector.UIString("Settings"), "settings-status-bar-item");
+    if (WebInspector.experimentsSettings.showOverridesInDrawer.isEnabled())
+        this._statusBarButton.element.addEventListener("mousedown", this._mouseDown.bind(this), false);
+    else
+        this._statusBarButton.element.addEventListener("mouseup", this._mouseUp.bind(this), false);
+
+    /** @type {?WebInspector.SettingsScreen} */
+    this._settingsScreen;
+}
+
+WebInspector.SettingsController.prototype =
+{
+    get statusBarItem()
+    {
+        return this._statusBarButton.element;
+    },
+
+    /**
+     * @param {Event} event
+     */
+    _mouseDown: function(event)
+    {
+        var contextMenu = new WebInspector.ContextMenu(event);
+        contextMenu.appendItem(WebInspector.UIString("Overrides"), showOverrides.bind(this));
+        contextMenu.appendItem(WebInspector.UIString("Settings"), showSettings.bind(this));
+
+        function showOverrides()
+        {
+            if (this._settingsScreenVisible)
+                this._hideSettingsScreen();
+            WebInspector.OverridesView.showInDrawer();
+        }
+
+        function showSettings()
+        {
+            if (!this._settingsScreenVisible)
+                this.showSettingsScreen();
+        }
+
+        contextMenu.showSoftMenu();
+    },
+
+    /**
+     * @param {Event} event
+     */
+    _mouseUp: function(event)
+    {
+        this.showSettingsScreen();
+    },
+
+    _onHideSettingsScreen: function()
+    {
+        delete this._settingsScreenVisible;
+    },
+
+    /**
+     * @param {string=} tabId
+     */
+    showSettingsScreen: function(tabId)
+    {
+        if (!this._settingsScreen)
+            this._settingsScreen = new WebInspector.SettingsScreen(this._onHideSettingsScreen.bind(this));
+
+        if (tabId)
+            this._settingsScreen.selectTab(tabId);
+
+        this._settingsScreen.showModal();
+        this._settingsScreenVisible = true;
+    },
+
+    _hideSettingsScreen: function()
+    {
+        if (this._settingsScreen)
+            this._settingsScreen.hide();
+    },
+
+    resize: function()
+    {
+        if (this._settingsScreen && this._settingsScreen.isShowing())
+            this._settingsScreen.doResize();
+    }
+}

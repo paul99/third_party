@@ -30,7 +30,6 @@
 #include "ArchiveFactory.h"
 
 #include "MIMETypeRegistry.h"
-#include "PlatformString.h"
 
 #if USE(CF) && !PLATFORM(QT) && ENABLE(WEB_ARCHIVE)
 #include "LegacyWebArchive.h"
@@ -42,6 +41,7 @@
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/StdLibExtras.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -68,6 +68,11 @@ static ArchiveMIMETypesMap& archiveMIMETypes()
 #endif
 #if ENABLE(MHTML)
     mimeTypes.set("multipart/related", archiveFactoryCreate<MHTMLArchive>);
+#if PLATFORM(GTK)
+    mimeTypes.set("message/rfc822", archiveFactoryCreate<MHTMLArchive>);
+#elif PLATFORM(QT)
+    mimeTypes.set("application/x-mimearchive", archiveFactoryCreate<MHTMLArchive>);
+#endif
 #endif
 
     initialized = true;
@@ -92,7 +97,7 @@ void ArchiveFactory::registerKnownArchiveMIMETypes()
     ArchiveMIMETypesMap::iterator end = archiveMIMETypes().end();
 
     for (; i != end; ++i)
-        mimeTypes.add(i->first);
+        mimeTypes.add(i->key);
 }
 
 }

@@ -50,7 +50,9 @@ WebKeyboardEvent WebInputEventFactory::keyboardEvent(WebInputEvent::Type type,
     result.type = type;
     result.modifiers = modifiers;
     result.timeStampSeconds = timeStampSeconds;
-    result.windowsKeyCode = keycode;
+    int windowsKeyCode = WebCore::windowsKeyCodeForKeyEvent(keycode);
+    result.windowsKeyCode = WebKeyboardEvent::windowsKeyCodeWithoutLocation(windowsKeyCode);
+    result.modifiers |= WebKeyboardEvent::locationModifiersFromWindowsKeyCode(windowsKeyCode);
     result.nativeKeyCode = keycode;
     result.unmodifiedText[0] = unicodeCharacter;
     if (result.windowsKeyCode == WebCore::VKEY_RETURN) {
@@ -66,23 +68,23 @@ WebKeyboardEvent WebInputEventFactory::keyboardEvent(WebInputEvent::Type type,
     return result;
 }
 
-WebMouseEvent WebInputEventFactory::mouseEvent(int x, int y,
-                                               int windowX, int windowY,
-                                               MouseEventType type,
+WebMouseEvent WebInputEventFactory::mouseEvent(MouseEventType type,
+                                               WebMouseEvent::Button button,
                                                double timeStampSeconds,
-                                               WebMouseEvent::Button button)
+                                               int windowX,
+                                               int windowY,
+                                               int modifiers,
+                                               int clickCount)
 {
     WebMouseEvent result;
 
-    result.x = x;
-    result.y = y;
+    result.x = windowX;
+    result.y = windowY;
     result.windowX = windowX;
     result.windowY = windowY;
-    // FIXME: We need to decide what to use for the globalX/Y.
-    result.globalX = windowX;
-    result.globalY = windowY;
     result.timeStampSeconds = timeStampSeconds;
-    result.clickCount = 1;
+    result.clickCount = clickCount;
+    result.modifiers = modifiers;
 
     switch (type) {
     case MouseEventTypeDown:
@@ -104,21 +106,18 @@ WebMouseEvent WebInputEventFactory::mouseEvent(int x, int y,
 
 // WebMouseWheelEvent ------------------------------------------------------------
 
-WebMouseWheelEvent WebInputEventFactory::mouseWheelEvent(int x, int y,
-                                                         int windowX, int windowY,
+WebMouseWheelEvent WebInputEventFactory::mouseWheelEvent(MouseWheelDirectionType direction,
                                                          double timeStampSeconds,
-                                                         MouseWheelDirectionType direction)
+                                                         int windowX,
+                                                         int windowY)
 {
     WebMouseWheelEvent result;
 
     result.type = WebInputEvent::MouseWheel;
-    result.x = x;
-    result.y = y;
+    result.x = windowX;
+    result.y = windowY;
     result.windowX = windowX;
     result.windowY = windowY;
-    // FIXME: We need to decide what to use for the globalX/Y here as well.
-    result.globalX = windowX;
-    result.globalY = windowY;
     result.timeStampSeconds = timeStampSeconds;
     result.button = WebMouseEvent::ButtonNone;
 
@@ -126,19 +125,19 @@ WebMouseWheelEvent WebInputEventFactory::mouseWheelEvent(int x, int y,
     static const float scrollbarPixelsPerTick = 160.0f / 3.0f;
 
     switch (direction) {
-    case SCROLL_UP:
+    case MouseWheelDirectionTypeUp:
         result.deltaY = scrollbarPixelsPerTick;
         result.wheelTicksY = 1;
         break;
-    case SCROLL_DOWN:
+    case MouseWheelDirectionTypeDown:
         result.deltaY = -scrollbarPixelsPerTick;
         result.wheelTicksY = -1;
         break;
-    case SCROLL_LEFT:
+    case MouseWheelDirectionTypeLeft:
         result.deltaX = scrollbarPixelsPerTick;
         result.wheelTicksX = 1;
         break;
-    case SCROLL_RIGHT:
+    case MouseWheelDirectionTypeRight:
         result.deltaX = -scrollbarPixelsPerTick;
         result.wheelTicksX = -1;
         break;
@@ -149,79 +148,32 @@ WebMouseWheelEvent WebInputEventFactory::mouseWheelEvent(int x, int y,
 
 // WebGestureEvent ------------------------------------------------------------
 
-WebGestureEvent WebInputEventFactory::gestureEvent(int x,
+// FIXME: remove this obsolete version
+WebGestureEvent WebInputEventFactory::gestureEvent(WebInputEvent::Type type,
+                                                   double timeStampSeconds,
+                                                   int x,
                                                    int y,
-                                                   float delta_x,
-                                                   float delta_y,
-                                                   GestureEventType type,
-                                                   double timeStampSeconds)
+                                                   float,
+                                                   float,
+                                                   int modifiers) {
+    return gestureEvent(type, timeStampSeconds, x, y, modifiers);
+}
+
+WebGestureEvent WebInputEventFactory::gestureEvent(WebInputEvent::Type type,
+                                                   double timeStampSeconds,
+                                                   int x,
+                                                   int y,
+                                                   int modifiers)
 {
     WebGestureEvent result;
 
+    result.type = type;
     result.x = x;
     result.y = y;
-    result.deltaX = delta_x;
-    result.deltaY = delta_y;
     result.timeStampSeconds = timeStampSeconds;
-
-    switch (type) {
-    case SCROLL_BEGIN:
-        result.type = WebInputEvent::GestureScrollBegin;
-        break;
-    case SCROLL_END:
-        result.type = WebInputEvent::GestureScrollEnd;
-        break;
-    case SCROLL_UPDATE:
-        result.type = WebInputEvent::GestureScrollUpdate;
-        break;
-    case FLING_START:
-        result.type = WebInputEvent::GestureFlingStart;
-        break;
-    case FLING_CANCEL:
-        result.type = WebInputEvent::GestureFlingCancel;
-        break;
-    case PINCH_BEGIN:
-        result.type = WebInputEvent::GesturePinchBegin;
-        break;
-    case PINCH_END:
-        result.type = WebInputEvent::GesturePinchEnd;
-        break;
-    case PINCH_UPDATE:
-        result.type = WebInputEvent::GesturePinchUpdate;
-        break;
-    default:
-        ASSERT_NOT_REACHED();
-    };
+    result.modifiers = modifiers;
 
     return result;
 }
-
-#if defined(ANDROID)
-// WebPageScaleAnimationGestureEvent ------------------------------------------
-
-WebPageScaleAnimationGestureEvent WebInputEventFactory::pageScaleAnimationGestureEvent(
-    int x,
-    int y,
-    bool anchorPoint,
-    float pageScale,
-    double durationMs,
-    double timeStampSeconds)
-{
-    WebPageScaleAnimationGestureEvent result;
-
-    result.x = x;
-    result.y = y;
-    result.globalX = x;
-    result.globalY = y;
-    result.anchorPoint = anchorPoint;
-    result.pageScale = pageScale;
-    result.durationMs = durationMs;
-
-    result.type = WebInputEvent::GesturePageScaleAnimation;
-    result.timeStampSeconds = timeStampSeconds;
-
-    return result;
-}
-#endif
 
 } // namespace WebKit

@@ -28,7 +28,11 @@
 
 namespace WebCore {
 
+class HTMLStyleElement;
 class StyleSheet;
+
+template<typename T> class EventSender;
+typedef EventSender<HTMLStyleElement> StyleEventSender;
 
 class HTMLStyleElement : public HTMLElement, private StyleElement {
 public:
@@ -37,33 +41,40 @@ public:
 
     void setType(const AtomicString&);
 
-#if ENABLE(STYLE_SCOPED)
     bool scoped() const;
     void setScoped(bool);
     Element* scopingElement() const;
-#endif
+    bool isRegisteredAsScoped() const
+    {
+        // Note: We cannot rely on the 'scoped' attribute still being present when this method is invoked.
+        // Therefore we cannot rely on scoped()!
+        if (m_scopedStyleRegistrationState == NotRegistered)
+            return false;
+        return true;
+    }
 
     using StyleElement::sheet;
 
     bool disabled() const;
     void setDisabled(bool);
 
+    void dispatchPendingEvent(StyleEventSender*);
+    static void dispatchPendingLoadEvents();
+
 private:
     HTMLStyleElement(const QualifiedName&, Document*, bool createdByParser);
 
     // overload from HTMLElement
-    virtual void parseMappedAttribute(Attribute*);
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
-#if ENABLE(STYLE_SCOPED)
-    virtual void willRemove();
-#endif
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
+    virtual void removedFrom(ContainerNode*) OVERRIDE;
     virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
 
     virtual void finishParsingChildren();
 
     virtual bool isLoading() const { return StyleElement::isLoading(); }
     virtual bool sheetLoaded() { return StyleElement::sheetLoaded(document()); }
+    virtual void notifyLoadedSheetAndAllCriticalSubresources(bool errorOccurred);
     virtual void startLoadingDynamicSheet() { StyleElement::startLoadingDynamicSheet(document()); }
 
     virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
@@ -71,10 +82,19 @@ private:
     virtual const AtomicString& media() const;
     virtual const AtomicString& type() const;
 
-    void registerWithScopingNode();
-    void unregisterWithScopingNode();
+    void scopedAttributeChanged(bool);
+    void registerWithScopingNode(bool);
+    void unregisterWithScopingNode(ContainerNode*);
 
-    bool m_isRegisteredWithScopingNode;
+    bool m_firedLoad;
+    bool m_loadedSheet;
+
+    enum ScopedStyleRegistrationState {
+        NotRegistered,
+        RegisteredAsScoped,
+        RegisteredInShadowRoot
+    };
+    ScopedStyleRegistrationState m_scopedStyleRegistrationState;
 };
 
 } //namespace

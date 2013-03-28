@@ -33,11 +33,8 @@
 
 #include "FramelessScrollViewClient.h"
 #include "WebPopupMenu.h"
-#include "platform/WebPoint.h"
-#include "platform/WebSize.h"
-#if OS(ANDROID)
-#include "WebTextInputInfo.h"
-#endif
+#include <public/WebPoint.h>
+#include <public/WebSize.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/RefCounted.h>
 
@@ -76,12 +73,10 @@ public:
     virtual void willEndLiveResize() OVERRIDE;
     virtual void animate(double frameBeginTime) OVERRIDE;
     virtual void layout() OVERRIDE;
-    virtual void paint(WebCanvas*, const WebRect&) OVERRIDE;
+    virtual void paint(WebCanvas*, const WebRect&, PaintOptions = ReadbackFromCompositorIfAvailable) OVERRIDE;
     virtual void themeChanged() OVERRIDE;
+    virtual void setCompositorSurfaceReady() OVERRIDE;
     virtual void composite(bool finish) OVERRIDE;
-#if OS(ANDROID)
-    virtual void releaseGpuTextures() OVERRIDE;
-#endif
     virtual bool handleInputEvent(const WebInputEvent&) OVERRIDE;
     virtual void mouseCaptureLost() OVERRIDE;
     virtual void setFocus(bool enable) OVERRIDE;
@@ -92,23 +87,13 @@ public:
     virtual bool confirmComposition() OVERRIDE;
     virtual bool confirmComposition(const WebString& text) OVERRIDE;
     virtual bool compositionRange(size_t* location, size_t* length) OVERRIDE;
-#if OS(ANDROID)
-    virtual WebTextInputInfo textInputInfo() OVERRIDE;
-#endif
     virtual WebTextInputType textInputType() OVERRIDE;
-#if OS(ANDROID)
-    virtual WebColor backgroundColor() const OVERRIDE { return 0; }
-#endif
     virtual bool caretOrSelectionRange(size_t* location, size_t* length) OVERRIDE;
     virtual void setTextDirection(WebTextDirection) OVERRIDE;
     virtual bool isAcceleratedCompositingActive() const OVERRIDE { return false; }
 
-#if OS(ANDROID)
-    virtual void scrollBy(int dx, int dy) { }
-#endif
-
     // WebPopupMenuImpl
-    void init(WebCore::FramelessScrollView* widget, const WebRect& bounds);
+    void initialize(WebCore::FramelessScrollView* widget, const WebRect& bounds);
 
     WebWidgetClient* client() { return m_client; }
 
@@ -155,10 +140,6 @@ public:
     // This is a non-owning ref. The popup will notify us via popupClosed()
     // before it is destroyed.
     WebCore::FramelessScrollView* m_widget;
-
-#if ENABLE(GESTURE_RECOGNIZER)
-    OwnPtr<WebCore::PlatformGestureRecognizer> m_gestureRecognizer;
-#endif
 };
 
 } // namespace WebKit

@@ -27,8 +27,12 @@
 #include "config.h"
 #include "SharedBuffer.h"
 
+#include "PlatformMemoryInstrumentation.h"
 #include "PurgeableBuffer.h"
+#include <wtf/MemoryInstrumentationVector.h>
 #include <wtf/PassOwnPtr.h>
+#include <wtf/unicode/UTF8.h>
+#include <wtf/unicode/Unicode.h>
 
 using namespace std;
 
@@ -62,15 +66,29 @@ SharedBuffer::SharedBuffer()
 {
 }
 
+SharedBuffer::SharedBuffer(size_t size)
+    : m_size(size)
+    , m_buffer(size)
+{
+}
+
 SharedBuffer::SharedBuffer(const char* data, int size)
     : m_size(0)
 {
+    // FIXME: Use unsigned consistently, and check for invalid casts when calling into SharedBuffer from other code.
+    if (size < 0)
+        CRASH();
+
     append(data, size);
 }
 
 SharedBuffer::SharedBuffer(const unsigned char* data, int size)
     : m_size(0)
 {
+    // FIXME: Use unsigned consistently, and check for invalid casts when calling into SharedBuffer from other code.
+    if (size < 0)
+        CRASH();
+
     append(reinterpret_cast<const char*>(data), size);
 }
     
@@ -106,15 +124,36 @@ unsigned SharedBuffer::size() const
     return m_size;
 }
 
+void SharedBuffer::createPurgeableBuffer() const
+{
+    if (m_purgeableBuffer)
+        return;
+
+    if (hasPlatformData())
+        return;
+
+#if USE(NETWORK_CFDATA_ARRAY_CALLBACK)
+    if (singleDataArrayBuffer())
+        return;
+#endif
+
+    m_purgeableBuffer = PurgeableBuffer::create(buffer().data(), m_size);
+}
+
 const char* SharedBuffer::data() const
 {
     if (hasPlatformData())
         return platformData();
+
+#if USE(NETWORK_CFDATA_ARRAY_CALLBACK)
+    if (const char* buffer = singleDataArrayBuffer())
+        return buffer;
+#endif
     
     if (m_purgeableBuffer)
         return m_purgeableBuffer->data();
     
-    return buffer().data();
+    return this->buffer().data();
 }
 
 void SharedBuffer::append(SharedBuffer* data)
@@ -130,6 +169,8 @@ void SharedBuffer::append(SharedBuffer* data)
 void SharedBuffer::append(const char* data, unsigned length)
 {
     ASSERT(!m_purgeableBuffer);
+    if (!length)
+        return;
 
     maybeTransferPlatformData();
     
@@ -138,6 +179,8 @@ void SharedBuffer::append(const char* data, unsigned length)
 
     if (m_size <= segmentSize) {
         // No need to use segments for small resource data
+        if (m_buffer.isEmpty())
+            m_buffer.reserveInitialCapacity(length);
         m_buffer.append(data, length);
         return;
     }
@@ -182,7 +225,7 @@ void SharedBuffer::clear()
 
     m_buffer.clear();
     m_purgeableBuffer.clear();
-#if HAVE(NETWORK_CFDATA_ARRAY_CALLBACK)
+#if USE(NETWORK_CFDATA_ARRAY_CALLBACK)
     m_dataArray.clear();
 #endif
 }
@@ -224,25 +267,38 @@ const Vector<char>& SharedBuffer::buffer() const
             freeSegment(m_segments[i]);
         }
         m_segments.clear();
-#if HAVE(NETWORK_CFDATA_ARRAY_CALLBACK)
+#if USE(NETWORK_CFDATA_ARRAY_CALLBACK)
         copyDataArrayAndClear(destination, bytesLeft);
 #endif
     }
     return m_buffer;
 }
 
+void SharedBuffer::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this);
+    info.addMember(m_buffer);
+    info.addMember(m_segments);
+    for (unsigned i = 0; i < m_segments.size(); ++i)
+        info.addRawBuffer(m_segments[i], segmentSize);
+    info.addMember(m_purgeableBuffer.get());
+}
+
 unsigned SharedBuffer::getSomeData(const char*& someData, unsigned position) const
 {
-    if (hasPlatformData() || m_purgeableBuffer) {
-        someData = data() + position;
-        return size() - position;
-    }
-
-    if (position >= m_size) {
+    unsigned totalSize = size();
+    if (position >= totalSize) {
         someData = 0;
         return 0;
     }
 
+    if (hasPlatformData() || m_purgeableBuffer) {
+        ASSERT(position < size());
+        someData = data() + position;
+        return totalSize - position;
+    }
+
+    ASSERT(position < m_size);
     unsigned consecutiveSize = m_buffer.size();
     if (position < consecutiveSize) {
         someData = m_buffer.data() + position;
@@ -250,14 +306,25 @@ unsigned SharedBuffer::getSomeData(const char*& someData, unsigned position) con
     }
  
     position -= consecutiveSize;
-    unsigned segmentedSize = m_size - consecutiveSize;
     unsigned segments = m_segments.size();
+    unsigned maxSegmentedSize = segments * segmentSize;
     unsigned segment = segmentIndex(position);
-    ASSERT(segment < segments);
+    if (segment < segments) {
+        unsigned bytesLeft = totalSize - consecutiveSize;
+        unsigned segmentedSize = min(maxSegmentedSize, bytesLeft);
 
-    unsigned positionInSegment = offsetInSegment(position);
-    someData = m_segments[segment] + positionInSegment;
-    return segment == segments - 1 ? segmentedSize - position : segmentSize - positionInSegment;
+        unsigned positionInSegment = offsetInSegment(position);
+        someData = m_segments[segment] + positionInSegment;
+        return segment == segments - 1 ? segmentedSize - position : segmentSize - positionInSegment;
+    }
+#if USE(NETWORK_CFDATA_ARRAY_CALLBACK)
+    ASSERT(maxSegmentedSize <= position);
+    position -= maxSegmentedSize;
+    return copySomeDataFromDataArray(someData, position);
+#else
+    ASSERT_NOT_REACHED();
+    return 0;
+#endif
 }
 
 #if !USE(CF) || PLATFORM(QT)
@@ -291,4 +358,21 @@ inline unsigned SharedBuffer::platformDataSize() const
 
 #endif
 
+PassRefPtr<SharedBuffer> utf8Buffer(const String& string)
+{
+    // Allocate a buffer big enough to hold all the characters.
+    const int length = string.length();
+    Vector<char> buffer(length * 3);
+
+    // Convert to runs of 8-bit characters.
+    char* p = buffer.data();
+    const UChar* d = string.characters();
+    WTF::Unicode::ConversionResult result = WTF::Unicode::convertUTF16ToUTF8(&d, d + length, &p, p + buffer.size(), true);
+    if (result != WTF::Unicode::conversionOK)
+        return 0;
+
+    buffer.shrink(p - buffer.data());
+    return SharedBuffer::adoptVector(buffer);
 }
+
+} // namespace WebCore

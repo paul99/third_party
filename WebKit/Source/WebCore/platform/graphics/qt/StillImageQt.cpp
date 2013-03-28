@@ -52,6 +52,11 @@ StillImage::~StillImage()
         delete m_pixmap;
 }
 
+bool StillImage::currentFrameHasAlpha()
+{
+    return m_pixmap->hasAlpha();
+}
+
 IntSize StillImage::size() const
 {
     return IntSize(m_pixmap->width(), m_pixmap->height());
@@ -63,7 +68,7 @@ NativeImagePtr StillImage::nativeImageForCurrentFrame()
 }
 
 void StillImage::draw(GraphicsContext* ctxt, const FloatRect& dst,
-                      const FloatRect& src, ColorSpace, CompositeOperator op)
+    const FloatRect& src, ColorSpace, CompositeOperator op, BlendMode)
 {
     if (m_pixmap->isNull())
         return;

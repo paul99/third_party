@@ -47,14 +47,40 @@
 #include "WebFrameClient.h"
 #include "WebFrameImpl.h"
 #include "WebKit.h"
-#include "WebMessagePortChannel.h"
 #include "WebSharedWorker.h"
 #include "WebSharedWorkerRepository.h"
 #include "platform/WebKitPlatformSupport.h"
-#include "platform/WebString.h"
-#include "platform/WebURL.h"
 #include "WorkerScriptLoader.h"
 #include "WorkerScriptLoaderClient.h"
+
+#include <public/Platform.h>
+#include <public/WebMessagePortChannel.h>
+#include <public/WebString.h>
+#include <public/WebURL.h>
+
+namespace WebKit {
+
+WebSharedWorkerRepository* s_sharedWorkerRepository = 0;
+
+void setSharedWorkerRepository(WebSharedWorkerRepository* repository)
+{
+    s_sharedWorkerRepository = repository;
+}
+
+static WebSharedWorkerRepository* sharedWorkerRepository()
+{
+    WebSharedWorkerRepository* repository;
+
+    repository = s_sharedWorkerRepository;
+    if (!repository) {
+        repository = webKitPlatformSupport()->sharedWorkerRepository();
+        setSharedWorkerRepository(repository);
+    }
+
+    return repository;
+}
+
+}
 
 namespace WebCore {
 
@@ -171,8 +197,8 @@ void SharedWorkerScriptLoader::notifyFinished()
         InspectorInstrumentation::scriptImported(m_worker->scriptExecutionContext(), m_scriptLoader->identifier(), m_scriptLoader->script());
         // Pass the script off to the worker, then send a connect event.
         m_webWorker->startWorkerContext(m_url, m_name, m_worker->scriptExecutionContext()->userAgent(m_url), m_scriptLoader->script(),
-                                        m_worker->scriptExecutionContext()->contentSecurityPolicy()->policy(),
-                                        static_cast<WebKit::WebContentSecurityPolicyType>(m_worker->scriptExecutionContext()->contentSecurityPolicy()->headerType()),
+                                        m_worker->scriptExecutionContext()->contentSecurityPolicy()->deprecatedHeader(),
+                                        static_cast<WebKit::WebContentSecurityPolicyType>(m_worker->scriptExecutionContext()->contentSecurityPolicy()->deprecatedHeaderType()),
                                         m_responseAppCacheID);
         sendConnect();
     }
@@ -192,8 +218,9 @@ void SharedWorkerScriptLoader::connected()
 
 bool SharedWorkerRepository::isAvailable()
 {
-    // Allow the WebKitPlatformSupport to determine if SharedWorkers are available.
-    return WebKit::webKitPlatformSupport()->sharedWorkerRepository();
+    // Allow the WebKitPlatformSupport to determine if SharedWorkers
+    // are available.
+    return WebKit::sharedWorkerRepository();
 }
 
 static WebSharedWorkerRepository::DocumentID getId(void* document)
@@ -204,9 +231,11 @@ static WebSharedWorkerRepository::DocumentID getId(void* document)
 
 void SharedWorkerRepository::connect(PassRefPtr<SharedWorker> worker, PassOwnPtr<MessagePortChannel> port, const KURL& url, const String& name, ExceptionCode& ec)
 {
+    WebKit::WebSharedWorkerRepository* repository = WebKit::sharedWorkerRepository();
+
     // This should not be callable unless there's a SharedWorkerRepository for
     // this context (since isAvailable() should have returned null).
-    ASSERT(WebKit::webKitPlatformSupport()->sharedWorkerRepository());
+    ASSERT(repository);
 
     // No nested workers (for now) - connect() should only be called from document context.
     ASSERT(worker->scriptExecutionContext()->isDocument());
@@ -221,8 +250,7 @@ void SharedWorkerRepository::connect(PassRefPtr<SharedWorker> worker, PassOwnPtr
         return;
     }
 
-    WebKit::webKitPlatformSupport()->sharedWorkerRepository()->addSharedWorker(
-        webWorker.get(), getId(document));
+    repository->addSharedWorker(webWorker.get(), getId(document));
 
     // The loader object manages its own lifecycle (and the lifecycles of the two worker objects).
     // It will free itself once loading is completed.
@@ -232,9 +260,10 @@ void SharedWorkerRepository::connect(PassRefPtr<SharedWorker> worker, PassOwnPtr
 
 void SharedWorkerRepository::documentDetached(Document* document)
 {
-    WebSharedWorkerRepository* repo = WebKit::webKitPlatformSupport()->sharedWorkerRepository();
-    if (repo)
-        repo->documentDetached(getId(document));
+    WebKit::WebSharedWorkerRepository* repository = WebKit::sharedWorkerRepository();
+
+    if (repository)
+        repository->documentDetached(getId(document));
 
     // Stop the creation of any pending SharedWorkers for this context.
     // FIXME: Need a way to invoke this for WorkerContexts as well when we support for nested workers.
@@ -243,11 +272,10 @@ void SharedWorkerRepository::documentDetached(Document* document)
 
 bool SharedWorkerRepository::hasSharedWorkers(Document* document)
 {
-    WebSharedWorkerRepository* repo = WebKit::webKitPlatformSupport()->sharedWorkerRepository();
-    return repo && repo->hasSharedWorkers(getId(document));
+    WebKit::WebSharedWorkerRepository* repository = WebKit::sharedWorkerRepository();
+
+    return repository && repository->hasSharedWorkers(getId(document));
 }
-
-
 
 } // namespace WebCore
 

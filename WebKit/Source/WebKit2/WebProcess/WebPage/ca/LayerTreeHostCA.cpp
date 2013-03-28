@@ -51,7 +51,7 @@ LayerTreeHostCA::LayerTreeHostCA(WebPage* webPage)
 void LayerTreeHostCA::initialize()
 {
     // Create a root layer.
-    m_rootLayer = GraphicsLayer::create(this);
+    m_rootLayer = GraphicsLayer::create(graphicsLayerFactory(), this);
 #ifndef NDEBUG
     m_rootLayer->setName("LayerTreeHost root layer");
 #endif
@@ -59,7 +59,7 @@ void LayerTreeHostCA::initialize()
     m_rootLayer->setSize(m_webPage->size());
     static_cast<GraphicsLayerCA*>(m_rootLayer.get())->platformCALayer()->setGeometryFlipped(true);
 
-    m_nonCompositedContentLayer = GraphicsLayer::create(this);
+    m_nonCompositedContentLayer = GraphicsLayer::create(graphicsLayerFactory(), this);
     static_cast<GraphicsLayerCA*>(m_nonCompositedContentLayer.get())->setAllowTiledLayer(false);
 #ifndef NDEBUG
     m_nonCompositedContentLayer->setName("LayerTreeHost non-composited content");
@@ -75,7 +75,7 @@ void LayerTreeHostCA::initialize()
     if (m_webPage->hasPageOverlay())
         createPageOverlayLayer();
 
-    platformInitialize(m_layerTreeContext);
+    platformInitialize();
 
     setLayerFlushSchedulingEnabled(!m_webPage->drawingArea() || !m_webPage->drawingArea()->layerTreeStateIsFrozen());
     scheduleLayerFlush();
@@ -186,7 +186,7 @@ void LayerTreeHostCA::notifyAnimationStarted(const WebCore::GraphicsLayer*, doub
 {
 }
 
-void LayerTreeHostCA::notifySyncRequired(const WebCore::GraphicsLayer*)
+void LayerTreeHostCA::notifyFlushRequired(const WebCore::GraphicsLayer*)
 {
 }
 
@@ -201,16 +201,6 @@ void LayerTreeHostCA::paintContents(const GraphicsLayer* graphicsLayer, Graphics
         m_webPage->drawPageOverlay(graphicsContext, clipRect);
         return;
     }
-}
-
-bool LayerTreeHostCA::showDebugBorders(const GraphicsLayer*) const
-{
-    return m_webPage->corePage()->settings()->showDebugBorders();
-}
-
-bool LayerTreeHostCA::showRepaintCounter(const GraphicsLayer*) const
-{
-    return m_webPage->corePage()->settings()->showRepaintCounter();
 }
 
 float LayerTreeHostCA::deviceScaleFactor() const
@@ -245,19 +235,19 @@ void LayerTreeHostCA::didPerformScheduledLayerFlush()
 
 bool LayerTreeHostCA::flushPendingLayerChanges()
 {
-    m_rootLayer->syncCompositingStateForThisLayerOnly();
-    m_nonCompositedContentLayer->syncCompositingStateForThisLayerOnly();
+    m_rootLayer->flushCompositingStateForThisLayerOnly();
+    m_nonCompositedContentLayer->flushCompositingStateForThisLayerOnly();
     if (m_pageOverlayLayer)
-        m_pageOverlayLayer->syncCompositingStateForThisLayerOnly();
+        m_pageOverlayLayer->flushCompositingStateForThisLayerOnly();
 
-    return m_webPage->corePage()->mainFrame()->view()->syncCompositingStateIncludingSubframes();
+    return m_webPage->corePage()->mainFrame()->view()->flushCompositingStateIncludingSubframes();
 }
 
 void LayerTreeHostCA::createPageOverlayLayer()
 {
     ASSERT(!m_pageOverlayLayer);
 
-    m_pageOverlayLayer = GraphicsLayer::create(this);
+    m_pageOverlayLayer = GraphicsLayer::create(graphicsLayerFactory(), this);
 #ifndef NDEBUG
     m_pageOverlayLayer->setName("LayerTreeHost page overlay content");
 #endif

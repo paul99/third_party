@@ -34,48 +34,30 @@
 
 #include "ScriptProfileNode.h"
 #include "V8Binding.h"
-#include "V8Proxy.h"
 
 #include <v8-profiler.h>
 
 namespace WebCore {
 
-v8::Handle<v8::Value> V8ScriptProfileNode::childrenAccessorGetter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
-{
-    INC_STATS("DOM.ScriptProfileNode.childrenAccessorGetter");
-    ScriptProfileNode* imp = V8ScriptProfileNode::toNative(info.Holder());
-    const ProfileNodesList& children = imp->children();
-    v8::Handle<v8::Array> result = v8::Array::New(children.size());
-    int index = 0;
-    ProfileNodesList::const_iterator end = children.end();
-    for (ProfileNodesList::const_iterator iter = children.begin(); iter != end; ++iter)
-        result->Set(v8::Integer::New(index++), toV8(iter->get()));
-    return result;
-}
-
-v8::Handle<v8::Value> V8ScriptProfileNode::callUIDAccessorGetter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
-{
-    INC_STATS("DOM.ScriptProfileNode.callUIDAccessorGetter");
-    ScriptProfileNode* imp = V8ScriptProfileNode::toNative(info.Holder());
-    return v8::Number::New(imp->callUID());
-}
-
-v8::Handle<v8::Value> toV8(ScriptProfileNode* impl)
+v8::Handle<v8::Value> toV8(ScriptProfileNode* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
 {
     if (!impl)
-        return v8::Null();
+        return v8NullWithCheck(isolate);
+
+    // FIXME: Use the creationContext.
+
     v8::Local<v8::Function> function = V8ScriptProfileNode::GetTemplate()->GetFunction();
     if (function.IsEmpty()) {
         // Return if allocation failed.
-        return v8::Local<v8::Object>();
+        return v8Undefined();
     }
-    v8::Local<v8::Object> instance = SafeAllocation::newInstance(function);
+    v8::Local<v8::Object> instance = V8ObjectConstructor::newInstance(function);
     if (instance.IsEmpty()) {
         // Avoid setting the wrapper if allocation failed.
         return v8::Local<v8::Object>();
     }
     impl->ref();
-    V8DOMWrapper::setDOMWrapper(instance, &V8ScriptProfileNode::info, impl);
+    V8DOMWrapper::setNativeInfo(instance, &V8ScriptProfileNode::info, impl);
     return instance;
 }
 

@@ -35,13 +35,13 @@
 #include "Frame.h"
 #include "InspectorFrontendHost.h"
 #include "Page.h"
-#include "PlatformString.h"
+#include "ScriptController.h"
 #include "V8InspectorFrontendHost.h"
-#include "V8Proxy.h"
 #include "WebDevToolsFrontendClient.h"
 #include "WebDevToolsFrontendImpl.h"
-#include "platform/WebFloatPoint.h"
-#include "platform/WebString.h"
+#include <public/WebFloatPoint.h>
+#include <public/WebString.h>
+#include <wtf/text/WTFString.h>
 
 using namespace WebCore;
 
@@ -50,7 +50,6 @@ namespace WebKit {
 InspectorFrontendClientImpl::InspectorFrontendClientImpl(Page* frontendPage, WebDevToolsFrontendClient* client, WebDevToolsFrontendImpl* frontend)
     : m_frontendPage(frontendPage)
     , m_client(client)
-    , m_frontend(frontend)
 {
 }
 
@@ -64,7 +63,7 @@ InspectorFrontendClientImpl::~InspectorFrontendClientImpl()
 void InspectorFrontendClientImpl::windowObjectCleared()
 {
     v8::HandleScope handleScope;
-    v8::Handle<v8::Context> frameContext = V8Proxy::context(m_frontendPage->mainFrame());
+    v8::Handle<v8::Context> frameContext = m_frontendPage->mainFrame() ? m_frontendPage->mainFrame()->script()->currentWorldContext() : v8::Local<v8::Context>();
     v8::Context::Scope contextScope(frameContext);
 
     ASSERT(!m_frontendHost);
@@ -104,19 +103,15 @@ void InspectorFrontendClientImpl::closeWindow()
     m_client->closeWindow();
 }
 
-void InspectorFrontendClientImpl::requestAttachWindow()
+void InspectorFrontendClientImpl::requestSetDockSide(DockSide side)
 {
-    m_client->requestDockWindow();
-}
-
-void InspectorFrontendClientImpl::requestDetachWindow()
-{
-    m_client->requestUndockWindow();
-}
-
-void InspectorFrontendClientImpl::requestSetDockSide(const String& side)
-{
-    m_client->requestSetDockSide(side);
+    String sideString = "undocked";
+    switch (side) {
+    case DOCKED_TO_RIGHT: sideString = "right"; break;
+    case DOCKED_TO_BOTTOM: sideString = "bottom"; break;
+    case UNDOCKED: sideString = "undocked"; break;
+    }
+    m_client->requestSetDockSide(sideString);
 }
 
 void InspectorFrontendClientImpl::changeAttachedWindowHeight(unsigned)
@@ -129,14 +124,24 @@ void InspectorFrontendClientImpl::openInNewTab(const String& url)
     m_client->openInNewTab(url);
 }
 
-bool InspectorFrontendClientImpl::canSaveAs()
+bool InspectorFrontendClientImpl::canSave()
 {
     return true;
 }
 
-void InspectorFrontendClientImpl::saveAs(const String& fileName, const String& content)
+void InspectorFrontendClientImpl::save(const String& url, const String& content, bool forceSaveAs)
 {
-    m_client->saveAs(fileName, content);
+    m_client->save(url, content, forceSaveAs);
+}
+
+void InspectorFrontendClientImpl::append(const String& url, const String& content)
+{
+    m_client->append(url, content);
+}
+
+bool InspectorFrontendClientImpl::canInspectWorkers()
+{
+    return true;
 }
 
 void InspectorFrontendClientImpl::inspectedURLChanged(const String& url)
@@ -147,6 +152,11 @@ void InspectorFrontendClientImpl::inspectedURLChanged(const String& url)
 void InspectorFrontendClientImpl::sendMessageToBackend(const String& message)
 {
     m_client->sendMessageToBackend(message);
+}
+
+bool InspectorFrontendClientImpl::isUnderTest()
+{
+    return m_client->isUnderTest();
 }
 
 } // namespace WebKit

@@ -41,6 +41,13 @@ WebPreferences::WebPreferences(const String& identifier)
     platformInitializeStore();
 }
 
+WebPreferences::WebPreferences(const WebPreferences& other)
+    : APIObject()
+    , m_store(other.m_store)
+{
+    platformInitializeStore();
+}
+
 WebPreferences::~WebPreferences()
 {
 }
@@ -82,6 +89,12 @@ void WebPreferences::updateUInt32ValueForKey(const String& key, uint32_t value)
 void WebPreferences::updateDoubleValueForKey(const String& key, double value)
 {
     platformUpdateDoubleValueForKey(key, value);
+    update(); // FIXME: Only send over the changed key and value.
+}
+
+void WebPreferences::updateFloatValueForKey(const String& key, float value)
+{
+    platformUpdateFloatValueForKey(key, value);
     update(); // FIXME: Only send over the changed key and value.
 }
 

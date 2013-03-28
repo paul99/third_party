@@ -21,9 +21,12 @@
 
 #include "IntSize.h"
 #include "NotImplemented.h"
-#include <BlackBerryPlatformClient.h>
+#include <BlackBerryPlatformString.h>
+#include <LocaleHandler.h>
 #include <LocalizeResource.h>
 #include <wtf/Vector.h>
+#include <wtf/text/CString.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -56,17 +59,16 @@ String submitButtonDefaultLabel()
 
 String inputElementAltText()
 {
-    notImplemented();
-    return String();
+    return String::fromUTF8(s_resource.getString(BlackBerry::Platform::SUBMIT_BUTTON_LABEL));
 }
 
 static String platformLanguage()
 {
-    String lang = BlackBerry::Platform::Client::get()->getLocale().c_str();
+    String lang = BlackBerry::Platform::LocaleHandler::instance()->language().c_str();
     // getLocale() returns a POSIX locale which uses '_' to separate language and country.
     // However, we use '-' instead of '_' in WebCore (e.g. en_us should read en-us)
     size_t underscorePosition = lang.find('_');
-    String replaceWith = "-";
+    String replaceWith = ASCIILiteral("-");
     if (underscorePosition != notFound)
         return lang.replace(underscorePosition, replaceWith.length(), replaceWith);
     return lang;
@@ -369,10 +371,9 @@ String searchMenuClearRecentSearchesText()
     return String();
 }
 
-String imageTitle(String const&, IntSize const&)
+String imageTitle(String const& filename, IntSize const& size)
 {
-    notImplemented();
-    return String();
+    return filename + " (" + String::number(size.width()) + "x" + String::number(size.height()) + ")";
 }
 
 String AXButtonActionVerb()
@@ -394,6 +395,12 @@ String AXDefinitionListDefinitionText()
 }
 
 String AXDefinitionListTermText()
+{
+    notImplemented();
+    return String();
+}
+
+String AXFooterRoleDescriptionText()
 {
     notImplemented();
     return String();
@@ -452,16 +459,14 @@ String validationMessageTooLongText(int, int)
     return String();
 }
 
-String validationMessageRangeUnderflowText(const String&)
+String validationMessageRangeUnderflowText(const String& text)
 {
-    notImplemented();
-    return String();
+    return String::format(s_resource.getString(BlackBerry::Platform::VALIDATION_RANGE_UNDERFLOW), text.utf8().data());
 }
 
-String validationMessageRangeOverflowText(const String&)
+String validationMessageRangeOverflowText(const String& text)
 {
-    notImplemented();
-    return String();
+    return String::format(s_resource.getString(BlackBerry::Platform::VALIDATION_RANGE_OVERFLOW), text.utf8().data());
 }
 
 String validationMessageStepMismatchText(const String&, const String&)
@@ -476,17 +481,17 @@ String validationMessageTypeMismatchText()
 
 String validationMessageTypeMismatchForEmailText()
 {
-    return validationMessageTypeMismatchText();
+    return String::fromUTF8(s_resource.getString(BlackBerry::Platform::VALIDATION_TYPE_MISMATCH_EMAIL));
 }
 
 String validationMessageTypeMismatchForMultipleEmailText()
 {
-    return validationMessageTypeMismatchText();
+    return String::fromUTF8(s_resource.getString(BlackBerry::Platform::VALIDATION_TYPE_MISMATCH_MULTIPLE_EMAIL));
 }
 
 String validationMessageTypeMismatchForURLText()
 {
-    return validationMessageTypeMismatchText();
+    return String::fromUTF8(s_resource.getString(BlackBerry::Platform::VALIDATION_TYPE_MISMATCH_URL));
 }
 
 String validationMessageValueMissingText()
@@ -517,6 +522,12 @@ String validationMessageValueMissingForRadioText()
 String validationMessageValueMissingForSelectText()
 {
     return validationMessageValueMissingText();
+}
+
+String validationMessageBadInputForNumberText()
+{
+    notImplemented();
+    return validationMessageTypeMismatchText();
 }
 
 String localizedMediaControlElementString(const String&)
@@ -567,6 +578,24 @@ String crashedPluginText()
     return String();
 }
 
+String blockedPluginByContentSecurityPolicyText()
+{
+    notImplemented();
+    return String();
+}
+
+String insecurePluginVersionText()
+{
+    notImplemented();
+    return String();
+}
+
+String inactivePluginText()
+{
+    notImplemented();
+    return String();
+}
+
 String multipleFileUploadText(unsigned)
 {
     return String(", ...");
@@ -575,6 +604,11 @@ String multipleFileUploadText(unsigned)
 String defaultDetailsSummaryText()
 {
     return String::fromUTF8(s_resource.getString(BlackBerry::Platform::DETAILS_SUMMARY));
+}
+
+String fileButtonNoFilesSelectedLabel()
+{
+    return String::fromUTF8(s_resource.getString(BlackBerry::Platform::FILE_BUTTON_NO_FILE_SELECTED_LABEL));
 }
 
 } // namespace WebCore

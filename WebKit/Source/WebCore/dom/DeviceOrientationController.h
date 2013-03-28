@@ -1,5 +1,6 @@
 /*
  * Copyright 2010, The Android Open Source Project
+ * Copyright (C) 2012 Samsung Electronics. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,49 +27,34 @@
 #ifndef DeviceOrientationController_h
 #define DeviceOrientationController_h
 
-#include "DOMWindow.h"
-#include "Timer.h"
-
+#include "DeviceController.h"
 #include <wtf/HashCountedSet.h>
 
 namespace WebCore {
 
-class DeviceOrientation;
 class DeviceOrientationClient;
-class Page;
+class DeviceOrientationData;
 
-class DeviceOrientationController {
+class DeviceOrientationController : public DeviceController {
 public:
-    ~DeviceOrientationController();
+    ~DeviceOrientationController() { };
 
     static PassOwnPtr<DeviceOrientationController> create(Page*, DeviceOrientationClient*);
 
-    void addListener(DOMWindow*);
-    void removeListener(DOMWindow*);
-    void removeAllListeners(DOMWindow*);
+    void didChangeDeviceOrientation(DeviceOrientationData*);
+    DeviceOrientationClient* deviceOrientationClient();
 
-    void suspendEventsForAllListeners(DOMWindow*);
-    void resumeEventsForAllListeners(DOMWindow*);
+    virtual bool hasLastData() OVERRIDE;
+    virtual PassRefPtr<Event> getLastEvent() OVERRIDE;
 
-    void didChangeDeviceOrientation(DeviceOrientation*);
-
-    bool isActive() { return !m_listeners.isEmpty(); }
-
-    DeviceOrientationClient* client() const { return m_client; }
+    static const AtomicString& supplementName();
+    static DeviceOrientationController* from(Page*);
+    static bool isActiveAt(Page*);
 
 private:
     DeviceOrientationController(Page*, DeviceOrientationClient*);
 
-    void timerFired(Timer<DeviceOrientationController>*);
-
     Page* m_page;
-    DeviceOrientationClient* m_client;
-    typedef HashCountedSet<RefPtr<DOMWindow> > ListenersCountedSet;
-    ListenersCountedSet m_listeners;
-    ListenersCountedSet m_suspendedListeners;
-    typedef HashSet<RefPtr<DOMWindow> > ListenersSet;
-    ListenersSet m_newListeners;
-    Timer<DeviceOrientationController> m_timer;
 };
 
 } // namespace WebCore

@@ -34,11 +34,13 @@
 #include "IntRect.h"
 #include "WebView.h"
 
+using namespace WebKit;
+
 namespace WebCore {
 
 class ChromeClientWx : public ChromeClient {
 public:
-    ChromeClientWx(wxWebView*);
+    ChromeClientWx(WebView*);
     virtual ~ChromeClientWx();
     virtual void chromeDestroyed();
 
@@ -79,7 +81,6 @@ public:
     virtual void setResizable(bool);
 
     virtual void addMessageToConsole(MessageSource source,
-                                     MessageType type,
                                      MessageLevel level,
                                      const String& message,
                                      unsigned int lineNumber,
@@ -126,11 +127,6 @@ public:
 
     virtual void reachedMaxAppCacheSize(int64_t spaceNeeded);
     virtual void reachedApplicationCacheOriginQuota(SecurityOrigin*, int64_t totalSpaceNeeded);
-
-#if ENABLE(CONTEXT_MENUS)
-    virtual void showContextMenu() { }
-#endif
-
     virtual void runOpenPanel(Frame*, PassRefPtr<FileChooser>);
     virtual void loadIconForFiles(const Vector<String>&, FileIconLoader*);
 
@@ -140,9 +136,6 @@ public:
     virtual void setCursorHiddenUntilMouseMoves(bool) { }
 
     virtual void scrollRectIntoView(const IntRect&) const { }
-
-    virtual void requestGeolocationPermissionForFrame(Frame*, Geolocation*);
-    virtual void cancelGeolocationPermissionRequestForFrame(Frame*, Geolocation*) { }
 
     virtual bool selectItemWritingDirectionIsNatural();
     virtual bool selectItemAlignmentFollowsMenuWritingDirection();
@@ -155,7 +148,7 @@ public:
     virtual bool hasOpenedPopup() const;
 
 private:
-    wxWebView* m_webView;
+    WebView* m_webView;
 };
 
 }

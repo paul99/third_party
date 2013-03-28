@@ -29,6 +29,7 @@
 #include "APIClient.h"
 #include "SameDocumentNavigationType.h"
 #include "WKPage.h"
+#include <WebCore/LayoutMilestones.h>
 #include <wtf/Forward.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
@@ -47,6 +48,14 @@ class WebFrameProxy;
 class WebPageProxy;
 class WebProtectionSpace;
 
+#if ENABLE(WEB_INTENTS)
+class WebIntentData;
+#endif
+
+#if ENABLE(WEB_INTENTS_TAG)
+class WebIntentServiceInfo;
+#endif
+
 class WebLoaderClient : public APIClient<WKPageLoaderClient, kWKPageLoaderClientCurrentVersion> {
 public:
     void didStartProvisionalLoadForFrame(WebPageProxy*, WebFrameProxy*, APIObject*);
@@ -64,6 +73,18 @@ public:
     void didDisplayInsecureContentForFrame(WebPageProxy*, WebFrameProxy*, APIObject*);
     void didRunInsecureContentForFrame(WebPageProxy*, WebFrameProxy*, APIObject*);
     void didDetectXSSForFrame(WebPageProxy*, WebFrameProxy*, APIObject*);
+#if ENABLE(WEB_INTENTS)
+    void didReceiveIntentForFrame(WebPageProxy*, WebFrameProxy*, WebIntentData*, APIObject*);
+#endif
+
+#if ENABLE(WEB_INTENTS_TAG)
+    void registerIntentServiceForFrame(WebPageProxy*, WebFrameProxy*, WebIntentServiceInfo*, APIObject*);
+#endif
+
+    // FIXME: didNewFirstVisuallyNonEmptyLayout should be removed. We should consider removing didFirstVisuallyNonEmptyLayoutForFrame
+    // as well. They are both being replaced by didLayout.
+    void didNewFirstVisuallyNonEmptyLayout(WebPageProxy*, APIObject*);
+    void didLayout(WebPageProxy*, WebCore::LayoutMilestones, APIObject*);
     
     bool canAuthenticateAgainstProtectionSpaceInFrame(WebPageProxy*, WebFrameProxy*, WebProtectionSpace*);
     void didReceiveAuthenticationChallengeInFrame(WebPageProxy*, WebFrameProxy*, AuthenticationChallengeProxy*);
@@ -74,13 +95,16 @@ public:
 
     // FIXME: These three functions should not be part of this client.
     void processDidBecomeUnresponsive(WebPageProxy*);
+    void interactionOccurredWhileProcessUnresponsive(WebPageProxy*);
     void processDidBecomeResponsive(WebPageProxy*);
     void processDidCrash(WebPageProxy*);
 
     void didChangeBackForwardList(WebPageProxy*, WebBackForwardListItem* addedItem, Vector<RefPtr<APIObject> >* removedItems);
     bool shouldGoToBackForwardListItem(WebPageProxy*, WebBackForwardListItem*);
+    void willGoToBackForwardListItem(WebPageProxy*, WebBackForwardListItem*, APIObject*);
 
     void didFailToInitializePlugin(WebPageProxy*, const String& mimeType);
+    void didBlockInsecurePluginVersion(WebPageProxy*, const String& mimeType, const String& pluginIdentifier, const String& pluginVersion);
 };
 
 } // namespace WebKit

@@ -102,7 +102,7 @@ bool EditorClientWinCE::shouldChangeSelectedRange(Range*, Range*, EAffinity, boo
     return true;
 }
 
-bool EditorClientWinCE::shouldApplyStyle(WebCore::CSSStyleDeclaration*, WebCore::Range*)
+bool EditorClientWinCE::shouldApplyStyle(WebCore::StylePropertySet*, WebCore::Range*)
 {
     notImplemented();
     return true;
@@ -441,6 +441,11 @@ void EditorClientWinCE::textWillBeDeletedInTextField(Element*)
 void EditorClientWinCE::textDidChangeInTextArea(Element*)
 {
     notImplemented();
+}
+
+bool EditorClientWinCE::shouldEraseMarkersAfterChangeSelection(TextCheckingType) const
+{
+    return true;
 }
 
 void EditorClientWinCE::ignoreWordInSpellDocument(const String& text)

@@ -26,14 +26,15 @@
 #include "config.h"
 #include "AuthenticationManager.h"
 
+#include "AuthenticationManagerMessages.h"
 #include "Download.h"
 #include "DownloadProxyMessages.h"
 #include "MessageID.h"
+#include "MessageReceiverMap.h"
 #include "WebCoreArgumentCoders.h"
 #include "WebFrame.h"
 #include "WebPage.h"
 #include "WebPageProxyMessages.h"
-#include "WebProcess.h"
 #include <WebCore/AuthenticationChallenge.h>
 #include <WebCore/AuthenticationClient.h>
 
@@ -47,19 +48,20 @@ static uint64_t generateAuthenticationChallengeID()
     return uniqueAuthenticationChallengeID++;
 }
 
-AuthenticationManager& AuthenticationManager::shared()
+AuthenticationManager::AuthenticationManager(CoreIPC::MessageReceiverMap& messageReceiverMap)
 {
-    static AuthenticationManager& manager = *new AuthenticationManager;
-    return manager;
+    messageReceiverMap.addMessageReceiver(Messages::AuthenticationManager::messageReceiverName(), this);
 }
 
-AuthenticationManager::AuthenticationManager()
+void AuthenticationManager::setConnection(CoreIPC::Connection* connection)
 {
+    ASSERT(!m_connection);
+    m_connection = connection;
 }
 
-void AuthenticationManager::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::ArgumentDecoder* arguments)
+void AuthenticationManager::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
 {
-    didReceiveAuthenticationManagerMessage(connection, messageID, arguments);
+    didReceiveAuthenticationManagerMessage(connection, messageID, decoder);
 }
 
 void AuthenticationManager::didReceiveAuthenticationChallenge(WebFrame* frame, const AuthenticationChallenge& authenticationChallenge)
@@ -70,7 +72,7 @@ void AuthenticationManager::didReceiveAuthenticationChallenge(WebFrame* frame, c
     uint64_t challengeID = generateAuthenticationChallengeID();
     m_challenges.set(challengeID, authenticationChallenge);    
     
-    WebProcess::shared().connection()->send(Messages::WebPageProxy::DidReceiveAuthenticationChallenge(frame->frameID(), authenticationChallenge, challengeID), frame->page()->pageID());
+    m_connection->send(Messages::WebPageProxy::DidReceiveAuthenticationChallenge(frame->frameID(), authenticationChallenge, challengeID), frame->page()->pageID());
 }
 
 void AuthenticationManager::didReceiveAuthenticationChallenge(Download* download, const AuthenticationChallenge& authenticationChallenge)
@@ -82,7 +84,7 @@ void AuthenticationManager::didReceiveAuthenticationChallenge(Download* download
 }
 
 // Currently, only Mac knows how to respond to authentication challenges with certificate info.
-#if !PLATFORM(MAC)
+#if !USE(SECURITY_FRAMEWORK)
 bool AuthenticationManager::tryUsePlatformCertificateInfoForChallenge(const WebCore::AuthenticationChallenge&, const PlatformCertificateInfo&)
 {
     return false;
@@ -102,7 +104,6 @@ void AuthenticationManager::useCredentialForChallenge(uint64_t challengeID, cons
         // This authentication challenge comes from a download.
         Download::receivedCredential(challenge, credential);
         return;
-        
     }
 
     coreClient->receivedCredential(challenge, credential);

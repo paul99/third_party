@@ -31,6 +31,7 @@
 namespace WebCore {
 
 class HTMLAreaElement;
+class HTMLImageElement;
 class HTMLMapElement;
 
 class RenderImage : public RenderReplaced {
@@ -58,6 +59,8 @@ public:
     bool isGeneratedContent() const { return m_isGeneratedContent; }
 
 protected:
+    HTMLImageElement* hostImageElement() const;
+
     virtual bool needsPreferredWidthsRecalculation() const;
     virtual RenderBox* embeddedContentBox() const;
     virtual void computeIntrinsicRatioInformation(FloatSize& intrinsicSize, double& intrinsicRatio, bool& isPercentageIntrinsicSize) const;
@@ -68,6 +71,7 @@ protected:
 
     virtual void paintIntoRect(GraphicsContext*, const LayoutRect&);
     virtual void paint(PaintInfo&, const LayoutPoint&);
+    virtual void layout();
 
     virtual void intrinsicSizeChanged()
     {
@@ -85,12 +89,12 @@ private:
 
     virtual bool backgroundIsObscured() const;
 
-    virtual int minimumReplacedHeight() const;
+    virtual LayoutUnit minimumReplacedHeight() const OVERRIDE;
 
     virtual void notifyFinished(CachedResource*);
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction);
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) OVERRIDE;
 
-    virtual LayoutUnit computeReplacedLogicalWidth(bool includeMaxWidth = true) const;
+    virtual bool boxShadowShouldBeAppliedToBackground(BackgroundBleedAvoidance, InlineFlowBox*) const OVERRIDE;
 
     IntSize imageSizeForError(CachedImage*) const;
     void imageDimensionsChanged(bool imageSizeChanged, const IntRect* = 0);

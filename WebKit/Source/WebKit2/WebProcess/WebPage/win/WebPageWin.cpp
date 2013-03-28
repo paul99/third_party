@@ -266,20 +266,19 @@ static RetainPtr<CFCachedURLResponseRef> cachedResponseForURL(WebPage* webPage, 
 {
     RetainPtr<CFURLRef> cfURL(AdoptCF, url.createCFURL());
     RetainPtr<CFMutableURLRequestRef> request(AdoptCF, CFURLRequestCreateMutable(0, cfURL.get(), kCFURLRequestCachePolicyReloadIgnoringCache, 60, 0));
-#if USE(CFURLSTORAGESESSIONS)
+#if NEEDS_FIXING_AFTER_R134960
     wkSetRequestStorageSession(ResourceHandle::currentStorageSession(), request.get());
 #endif
 
-    RetainPtr<CFStringRef> userAgent(AdoptCF, webPage->userAgent().createCFString());
-    CFURLRequestSetHTTPHeaderFieldValue(request.get(), CFSTR("User-Agent"), userAgent.get());
+    CFURLRequestSetHTTPHeaderFieldValue(request.get(), CFSTR("User-Agent"), webPage->userAgent().createCFString().get());
 
     RetainPtr<CFURLCacheRef> cache;
-#if USE(CFURLSTORAGESESSIONS)
+#if NEEDS_FIXING_AFTER_R134960
     if (CFURLStorageSessionRef currentStorageSession = ResourceHandle::currentStorageSession())
         cache.adoptCF(wkCopyURLCache(currentStorageSession));
     else
-#endif
         cache.adoptCF(CFURLCacheCopySharedURLCache());
+#endif
 
     RetainPtr<CFCachedURLResponseRef> response(AdoptCF, CFURLCacheCopyResponseForRequest(cache.get(), request.get()));
     return response;        
@@ -447,7 +446,7 @@ void WebPage::gestureDidScroll(const IntSize& size)
             verticalScrollbar = view->verticalScrollbar();
     }
 
-    m_gestureTargetNode->renderer()->enclosingLayer()->scrollByRecursively(size.width(), size.height());
+    m_gestureTargetNode->renderer()->enclosingLayer()->scrollByRecursively(size);
     bool gestureReachedScrollingLimit = verticalScrollbar && scrollbarAtTopOrBottomOfDocument(verticalScrollbar);
 
     // FIXME: We really only want to update this state if the state was updated via scrolling the main frame,

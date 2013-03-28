@@ -39,8 +39,6 @@
 #include "SQLResultSet.h"
 #include "SQLValue.h"
 #include "V8Binding.h"
-#include "V8BindingMacros.h"
-#include "V8Proxy.h"
 #include "V8SQLResultSet.h"
 #include <wtf/Vector.h>
 
@@ -53,19 +51,19 @@ v8::Handle<v8::Value> V8SQLTransactionSync::executeSqlCallback(const v8::Argumen
     INC_STATS("DOM.SQLTransactionSync.executeSql()");
 
     if (!args.Length())
-        return throwError(SYNTAX_ERR);
+        return setDOMException(SYNTAX_ERR, args.GetIsolate());
 
-    STRING_TO_V8PARAMETER_EXCEPTION_BLOCK(V8Parameter<>, statement, args[0]);
+    V8TRYCATCH_FOR_V8STRINGRESOURCE(V8StringResource<>, statement, args[0]);
 
     Vector<SQLValue> sqlValues;
 
     if (args.Length() > 1 && !isUndefinedOrNull(args[1])) {
         if (!args[1]->IsObject())
-            return throwError(TYPE_MISMATCH_ERR);
+            return setDOMException(TYPE_MISMATCH_ERR, args.GetIsolate());
 
         uint32_t sqlArgsLength = 0;
         v8::Local<v8::Object> sqlArgsObject = args[1]->ToObject();
-        EXCEPTION_BLOCK(v8::Local<v8::Value>, length, sqlArgsObject->Get(v8::String::New("length")));
+        V8TRYCATCH(v8::Local<v8::Value>, length, sqlArgsObject->Get(v8::String::New("length")));
 
         if (isUndefinedOrNull(length))
             sqlArgsLength = sqlArgsObject->GetPropertyNames()->Length();
@@ -73,16 +71,16 @@ v8::Handle<v8::Value> V8SQLTransactionSync::executeSqlCallback(const v8::Argumen
             sqlArgsLength = length->Uint32Value();
 
         for (unsigned int i = 0; i < sqlArgsLength; ++i) {
-            v8::Local<v8::Integer> key = v8::Integer::New(i);
-            EXCEPTION_BLOCK(v8::Local<v8::Value>, value, sqlArgsObject->Get(key));
+            v8::Handle<v8::Integer> key = v8Integer(i, args.GetIsolate());
+            V8TRYCATCH(v8::Local<v8::Value>, value, sqlArgsObject->Get(key));
 
             if (value.IsEmpty() || value->IsNull())
                 sqlValues.append(SQLValue());
             else if (value->IsNumber()) {
-                EXCEPTION_BLOCK(double, sqlValue, value->NumberValue());
+                V8TRYCATCH(double, sqlValue, value->NumberValue());
                 sqlValues.append(SQLValue(sqlValue));
             } else {
-                STRING_TO_V8PARAMETER_EXCEPTION_BLOCK(V8Parameter<>, sqlValue, value);
+                V8TRYCATCH_FOR_V8STRINGRESOURCE(V8StringResource<>, sqlValue, value);
                 sqlValues.append(SQLValue(sqlValue));
             }
         }
@@ -91,8 +89,8 @@ v8::Handle<v8::Value> V8SQLTransactionSync::executeSqlCallback(const v8::Argumen
     SQLTransactionSync* transaction = V8SQLTransactionSync::toNative(args.Holder());
 
     ExceptionCode ec = 0;
-    v8::Handle<v8::Value> result = toV8(transaction->executeSQL(statement, sqlValues, ec));
-    V8Proxy::setDOMException(ec);
+    v8::Handle<v8::Value> result = toV8(transaction->executeSQL(statement, sqlValues, ec), args.Holder(), args.GetIsolate());
+    setDOMException(ec, args.GetIsolate());
 
     return result;
 }

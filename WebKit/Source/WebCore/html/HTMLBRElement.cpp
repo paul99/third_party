@@ -25,6 +25,7 @@
 
 #include "Attribute.h"
 #include "CSSPropertyNames.h"
+#include "CSSValueKeywords.h"
 #include "HTMLNames.h"
 #include "RenderBR.h"
 
@@ -48,30 +49,26 @@ PassRefPtr<HTMLBRElement> HTMLBRElement::create(const QualifiedName& tagName, Do
     return adoptRef(new HTMLBRElement(tagName, document));
 }
 
-bool HTMLBRElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+bool HTMLBRElement::isPresentationAttribute(const QualifiedName& name) const
 {
-    if (attrName == clearAttr) {
-        result = eUniversal;
-        return false;
-    }
-    
-    return HTMLElement::mapToEntry(attrName, result);
+    if (name == clearAttr)
+        return true;
+    return HTMLElement::isPresentationAttribute(name);
 }
 
-void HTMLBRElement::parseMappedAttribute(Attribute* attr)
+void HTMLBRElement::collectStyleForPresentationAttribute(const Attribute& attribute, StylePropertySet* style)
 {
-    if (attr->name() == clearAttr) {
-        // If the string is empty, then don't add the clear property. 
+    if (attribute.name() == clearAttr) {
+        // If the string is empty, then don't add the clear property.
         // <br clear> and <br clear=""> are just treated like <br> by Gecko, Mac IE, etc. -dwh
-        const AtomicString& str = attr->value();
-        if (!str.isEmpty()) {
-            if (equalIgnoringCase(str, "all"))
-                addCSSProperty(attr, CSSPropertyClear, "both");
+        if (!attribute.isEmpty()) {
+            if (equalIgnoringCase(attribute.value(), "all"))
+                addPropertyToPresentationAttributeStyle(style, CSSPropertyClear, CSSValueBoth);
             else
-                addCSSProperty(attr, CSSPropertyClear, str);
+                addPropertyToPresentationAttributeStyle(style, CSSPropertyClear, attribute.value());
         }
     } else
-        HTMLElement::parseMappedAttribute(attr);
+        HTMLElement::collectStyleForPresentationAttribute(attribute, style);
 }
 
 RenderObject* HTMLBRElement::createRenderer(RenderArena* arena, RenderStyle* style)

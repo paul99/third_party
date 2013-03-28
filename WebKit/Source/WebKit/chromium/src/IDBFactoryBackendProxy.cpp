@@ -34,17 +34,18 @@
 #include "CrossThreadTask.h"
 #include "DOMStringList.h"
 #include "IDBDatabaseBackendProxy.h"
+#include "IDBDatabaseCallbacks.h"
 #include "IDBDatabaseError.h"
+#include "ScriptExecutionContext.h"
 #include "SecurityOrigin.h"
 #include "WebFrameImpl.h"
 #include "WebIDBCallbacksImpl.h"
 #include "WebIDBDatabase.h"
+#include "WebIDBDatabaseCallbacksImpl.h"
 #include "WebIDBDatabaseError.h"
 #include "WebIDBFactory.h"
 #include "WebKit.h"
-#include "platform/WebKitPlatformSupport.h"
 #include "WebPermissionClient.h"
-#include "platform/WebVector.h"
 #include "WebViewImpl.h"
 #include "WebWorkerBase.h"
 #include "WebWorkerClientImpl.h"
@@ -52,6 +53,8 @@
 #include "WorkerLoaderProxy.h"
 #include "WorkerScriptController.h"
 #include "WorkerThread.h"
+#include "platform/WebKitPlatformSupport.h"
+#include <public/WebVector.h>
 
 
 using namespace WebCore;
@@ -72,34 +75,20 @@ IDBFactoryBackendProxy::~IDBFactoryBackendProxy()
 {
 }
 
-void IDBFactoryBackendProxy::getDatabaseNames(PassRefPtr<IDBCallbacks> callbacks, PassRefPtr<SecurityOrigin> prpOrigin, Frame* frame, const String& dataDir)
-{
-    WebSecurityOrigin origin(prpOrigin);
-    WebFrameImpl* webFrame = WebFrameImpl::fromFrame(frame);
-    WebViewImpl* webView = webFrame->viewImpl();
-
-    if (webView->permissionClient() && !webView->permissionClient()->allowIndexedDB(webFrame, "Database Listing", origin)) {
-        callbacks->onError(WebIDBDatabaseError(0, "The user denied permission to access the database."));
-        return;
-    }
-
-    m_webIDBFactory->getDatabaseNames(new WebIDBCallbacksImpl(callbacks), origin, webFrame, dataDir);
-}
-
 static const char allowIndexedDBMode[] = "allowIndexedDBMode";
 
 class AllowIndexedDBMainThreadBridge : public ThreadSafeRefCounted<AllowIndexedDBMainThreadBridge> {
 public:
-    static PassRefPtr<AllowIndexedDBMainThreadBridge> create(WebWorkerClientImpl* webWorkerClientImpl, const String& mode, const String& name)
+    static PassRefPtr<AllowIndexedDBMainThreadBridge> create(WebWorkerBase* webWorkerBase, const String& mode, const String& name)
     {
-        return adoptRef(new AllowIndexedDBMainThreadBridge(webWorkerClientImpl, mode, name));
+        return adoptRef(new AllowIndexedDBMainThreadBridge(webWorkerBase, mode, name));
     }
 
     // These methods are invoked on the worker context.
     void cancel()
     {
         MutexLocker locker(m_mutex);
-        m_webWorkerClientImpl = 0;
+        m_webWorkerBase = 0;
     }
 
     bool result()
@@ -111,31 +100,28 @@ public:
     void signalCompleted(bool result, const String& mode)
     {
         MutexLocker locker(m_mutex);
-        if (m_webWorkerClientImpl)
-            m_webWorkerClientImpl->postTaskForModeToWorkerContext(createCallbackTask(&didComplete, this, result), mode);
+        if (m_webWorkerBase)
+            m_webWorkerBase->postTaskForModeToWorkerContext(createCallbackTask(&didComplete, this, result), mode);
     }
 
 private:
-    AllowIndexedDBMainThreadBridge(WebWorkerClientImpl* webWorkerClientImpl, const String& mode, const String& name)
+    AllowIndexedDBMainThreadBridge(WebWorkerBase* webWorkerBase, const String& mode, const String& name)
         : m_result(false)
-        , m_webWorkerClientImpl(webWorkerClientImpl)
+        , m_webWorkerBase(webWorkerBase)
     {
-        WebFrameImpl* webFrame = static_cast<WebFrameImpl*>(webWorkerClientImpl->view()->mainFrame());
-        // webFrame is not deleted as long as the process is alive, relying on
-        // it to exist on the main thread should be ok.
+        WebCommonWorkerClient* commonClient = webWorkerBase->commonClient();
+        // See note about thread-safety below.
         WebWorkerBase::dispatchTaskToMainThread(
-            createCallbackTask(&allowIndexedDBTask, this, WebCore::AllowCrossThreadAccess(webFrame), name, mode));
+            createCallbackTask(&allowIndexedDBTask, this, WebCore::AllowCrossThreadAccess(commonClient), name, mode));
     }
 
-    static void allowIndexedDBTask(ScriptExecutionContext*, PassRefPtr<AllowIndexedDBMainThreadBridge> bridge, PassRefPtr<WebFrameImpl> prpWebFrame, const String& name, const String& mode)
+    static void allowIndexedDBTask(ScriptExecutionContext*, PassRefPtr<AllowIndexedDBMainThreadBridge> bridge, WebCommonWorkerClient* commonClient, const String& name, const String& mode)
     {
-        RefPtr<WebFrameImpl> webFrame = prpWebFrame;
-        WebViewImpl* webView = webFrame->viewImpl();
-        if (!webView) {
+        if (!commonClient) {
             bridge->signalCompleted(false, mode);
             return;
         }
-        bool allowed = !webView->permissionClient() || webView->permissionClient()->allowIndexedDB(webFrame.get(), name, WebSecurityOrigin());
+        bool allowed = commonClient->allowIndexedDB(name);
         bridge->signalCompleted(allowed, mode);
     }
 
@@ -146,76 +132,112 @@ private:
 
     bool m_result;
     Mutex m_mutex;
-    // WebWorkerClientImpl is never deleted as long as the renderer process
-    // is alive. We use it on the main thread to notify the worker thread that
-    // the permission result has been set. The underlying message proxy object
-    // is valid as long as the worker run loop hasn't returned
-    // MessageQueueTerminated, in which case we don't use the
-    // WebWorkerClientImpl.
-    WebWorkerClientImpl* m_webWorkerClientImpl;
+    // AllowIndexedDBMainThreadBridge uses two non-threadsafe classes across
+    // threads: WebWorkerBase and WebCommonWorkerClient.
+    // In the dedicated worker case, these are both the same object of type
+    // WebWorkerClientImpl, which isn't deleted for the life of the renderer
+    // process so we don't have to worry about use-after-frees.
+    // In the shared worker case, these are of type WebSharedWorkerImpl and
+    // chromium's WebSharedWorkerClientProxy, respectively. These are both
+    // deleted on the main thread in response to a request on the worker thread,
+    // but only after the worker run loop stops processing tasks. So even in
+    // the most interleaved case, we have:
+    // W AllowIndexedDBMainThreadBridge schedules allowIndexedDBTask
+    // M workerRunLoop marked as killed
+    // W runLoop stops and schedules object deletion on main thread
+    // M allowIndexedDBTask calls commonClient->allowIndexedDB()
+    // M WebWorkerBase and WebCommonWorkerClient are deleted
+    WebWorkerBase* m_webWorkerBase;
 };
 
-bool IDBFactoryBackendProxy::allowIDBFromWorkerThread(WorkerContext* workerContext, const String& name, const WebSecurityOrigin&)
+bool IDBFactoryBackendProxy::allowIndexedDB(ScriptExecutionContext* context, const String& name, const WebSecurityOrigin& origin, PassRefPtr<IDBCallbacks> callbacks)
 {
-    WebWorkerClientImpl* webWorkerClientImpl = static_cast<WebWorkerClientImpl*>(&workerContext->thread()->workerLoaderProxy());
-    WorkerRunLoop& runLoop = workerContext->thread()->runLoop();
+    bool allowed;
+    ASSERT(context->isDocument() || context->isWorkerContext());
+    if (context->isDocument()) {
+        Document* document = static_cast<Document*>(context);
+        WebFrameImpl* webFrame = WebFrameImpl::fromFrame(document->frame());
+        WebViewImpl* webView = webFrame->viewImpl();
+        // FIXME: webView->permissionClient() returns 0 in test_shell and content_shell http://crbug.com/137269
+        allowed = !webView->permissionClient() || webView->permissionClient()->allowIndexedDB(webFrame, name, origin);
+    } else {
+        WorkerContext* workerContext = static_cast<WorkerContext*>(context);
+        WebWorkerBase* webWorkerBase = static_cast<WebWorkerBase*>(&workerContext->thread()->workerLoaderProxy());
+        WorkerRunLoop& runLoop = workerContext->thread()->runLoop();
 
-    String mode = allowIndexedDBMode;
-    mode.append(String::number(runLoop.createUniqueId()));
-    RefPtr<AllowIndexedDBMainThreadBridge> bridge = AllowIndexedDBMainThreadBridge::create(webWorkerClientImpl, mode, name);
+        String mode = allowIndexedDBMode;
+        mode.append(String::number(runLoop.createUniqueId()));
+        RefPtr<AllowIndexedDBMainThreadBridge> bridge = AllowIndexedDBMainThreadBridge::create(webWorkerBase, mode, name);
 
-    // Either the bridge returns, or the queue gets terminated.
-    if (runLoop.runInMode(workerContext, mode) == MessageQueueTerminated) {
-        bridge->cancel();
-        return false;
+        // Either the bridge returns, or the queue gets terminated.
+        if (runLoop.runInMode(workerContext, mode) == MessageQueueTerminated) {
+            bridge->cancel();
+            allowed = false;
+        } else
+            allowed = bridge->result();
     }
 
-    return bridge->result();
+    if (!allowed)
+        callbacks->onError(WebIDBDatabaseError(IDBDatabaseException::UnknownError, "The user denied permission to access the database."));
+
+    return allowed;
 }
 
-void IDBFactoryBackendProxy::openFromWorker(const String& name, IDBCallbacks* callbacks, PassRefPtr<SecurityOrigin> prpOrigin, WorkerContext* context, const String& dataDir)
+static WebFrameImpl* getWebFrame(ScriptExecutionContext* context)
 {
-#if ENABLE(WORKERS)
-    WebSecurityOrigin origin(prpOrigin);
-    if (!allowIDBFromWorkerThread(context, name, origin)) {
-        callbacks->onError(WebIDBDatabaseError(0, "The user denied permission to access the database."));
-        return;
+    ASSERT(context->isDocument() || context->isWorkerContext());
+    if (context->isDocument()) {
+        Document* document = static_cast<Document*>(context);
+        return WebFrameImpl::fromFrame(document->frame());
     }
-    WorkerLoaderProxy* workerLoaderProxy = &context->thread()->workerLoaderProxy();
-    WebWorkerBase* webWorker = static_cast<WebWorkerBase*>(workerLoaderProxy);
-    WebView* webView = webWorker->view();
-    if (!webView) {
-        // Frame is closed, worker is terminaring.
-        return;
-    }
-    WebFrame* webFrame = webView->mainFrame();
-    m_webIDBFactory->open(name, new WebIDBCallbacksImpl(callbacks), origin, webFrame, dataDir);
-#endif
+    return 0;
 }
 
-void IDBFactoryBackendProxy::open(const String& name, IDBCallbacks* callbacks, PassRefPtr<SecurityOrigin> prpOrigin, Frame* frame, const String& dataDir)
+void IDBFactoryBackendProxy::getDatabaseNames(PassRefPtr<IDBCallbacks> prpCallbacks, PassRefPtr<SecurityOrigin> securityOrigin, ScriptExecutionContext* context, const String& dataDir)
 {
-    WebSecurityOrigin origin(prpOrigin);
-    WebFrameImpl* webFrame = WebFrameImpl::fromFrame(frame);
-    WebViewImpl* webView = webFrame->viewImpl();
-    if (webView->permissionClient() && !webView->permissionClient()->allowIndexedDB(webFrame, name, origin)) {
-        callbacks->onError(WebIDBDatabaseError(0, "The user denied permission to access the database."));
+    RefPtr<IDBCallbacks> callbacks(prpCallbacks);
+    WebSecurityOrigin origin(securityOrigin);
+    if (!allowIndexedDB(context, "Database Listing", origin, callbacks))
         return;
-    }
 
-    m_webIDBFactory->open(name, new WebIDBCallbacksImpl(callbacks), origin, webFrame, dataDir);
+    WebFrameImpl* webFrame = getWebFrame(context);
+    m_webIDBFactory->getDatabaseNames(new WebIDBCallbacksImpl(callbacks), origin, webFrame, dataDir);
 }
 
-void IDBFactoryBackendProxy::deleteDatabase(const String& name, PassRefPtr<IDBCallbacks> callbacks, PassRefPtr<SecurityOrigin> prpOrigin, Frame* frame, const String& dataDir)
-{
-    WebSecurityOrigin origin(prpOrigin);
-    WebFrameImpl* webFrame = WebFrameImpl::fromFrame(frame);
-    WebViewImpl* webView = webFrame->viewImpl();
-    if (webView->permissionClient() && !webView->permissionClient()->allowIndexedDB(webFrame, name, origin)) {
-        callbacks->onError(WebIDBDatabaseError(0, "The user denied permission to access the database."));
-        return;
-    }
 
+// FIXME: Remove this method in https://bugs.webkit.org/show_bug.cgi?id=103923.
+void IDBFactoryBackendProxy::open(const String& name, int64_t version, PassRefPtr<IDBCallbacks> prpCallbacks, PassRefPtr<IDBDatabaseCallbacks> prpDatabaseCallbacks, PassRefPtr<SecurityOrigin> securityOrigin, ScriptExecutionContext* context, const String& dataDir)
+{
+    RefPtr<IDBCallbacks> callbacks(prpCallbacks);
+    RefPtr<IDBDatabaseCallbacks> databaseCallbacks(prpDatabaseCallbacks);
+    WebSecurityOrigin origin(securityOrigin);
+    if (!allowIndexedDB(context, name, origin, callbacks))
+        return;
+
+    WebFrameImpl* webFrame = getWebFrame(context);
+    m_webIDBFactory->open(name, version, new WebIDBCallbacksImpl(callbacks), new WebIDBDatabaseCallbacksImpl(databaseCallbacks), origin, webFrame, dataDir);
+}
+
+void IDBFactoryBackendProxy::open(const String& name, int64_t version, int64_t transactionId, PassRefPtr<IDBCallbacks> prpCallbacks, PassRefPtr<IDBDatabaseCallbacks> prpDatabaseCallbacks, PassRefPtr<SecurityOrigin> securityOrigin, ScriptExecutionContext* context, const String& dataDir)
+{
+    RefPtr<IDBCallbacks> callbacks(prpCallbacks);
+    RefPtr<IDBDatabaseCallbacks> databaseCallbacks(prpDatabaseCallbacks);
+    WebSecurityOrigin origin(securityOrigin);
+    if (!allowIndexedDB(context, name, origin, callbacks))
+        return;
+
+    WebFrameImpl* webFrame = getWebFrame(context);
+    m_webIDBFactory->open(name, version, transactionId, new WebIDBCallbacksImpl(callbacks), new WebIDBDatabaseCallbacksImpl(databaseCallbacks), origin, webFrame, dataDir);
+}
+
+void IDBFactoryBackendProxy::deleteDatabase(const String& name, PassRefPtr<IDBCallbacks> prpCallbacks, PassRefPtr<SecurityOrigin> securityOrigin, ScriptExecutionContext* context, const String& dataDir)
+{
+    RefPtr<IDBCallbacks> callbacks(prpCallbacks);
+    WebSecurityOrigin origin(securityOrigin);
+    if (!allowIndexedDB(context, name, origin, callbacks))
+        return;
+
+    WebFrameImpl* webFrame = getWebFrame(context);
     m_webIDBFactory->deleteDatabase(name, new WebIDBCallbacksImpl(callbacks), origin, webFrame, dataDir);
 }
 

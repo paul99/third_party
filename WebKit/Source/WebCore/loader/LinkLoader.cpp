@@ -32,17 +32,23 @@
 #include "config.h"
 #include "LinkLoader.h"
 
-#include "CSSStyleSelector.h"
 #include "CSSStyleSheet.h"
 #include "CachedCSSStyleSheet.h"
 #include "CachedResourceLoader.h"
+#include "CachedResourceRequest.h"
 #include "ContainerNode.h"
+#include "DNS.h"
 #include "Document.h"
 #include "Frame.h"
 #include "FrameView.h"
 #include "LinkRelAttribute.h"
-#include "ResourceHandle.h"
 #include "Settings.h"
+#include "StyleResolver.h"
+
+#if ENABLE(LINK_PRERENDER)
+#include "PrerenderHandle.h"
+#include "Prerenderer.h"
+#endif
 
 namespace WebCore {
 
@@ -57,6 +63,10 @@ LinkLoader::~LinkLoader()
 {
     if (m_cachedLinkResource)
         m_cachedLinkResource->removeClient(this);
+#if ENABLE(LINK_PRERENDER)
+    if (m_prerenderHandle)
+        m_prerenderHandle->removeClient();
+#endif
 }
 
 void LinkLoader::linkLoadTimerFired(Timer<LinkLoader>* timer)
@@ -84,6 +94,30 @@ void LinkLoader::notifyFinished(CachedResource* resource)
     m_cachedLinkResource = 0;
 }
 
+#if ENABLE(LINK_PRERENDER)
+
+void LinkLoader::didStartPrerender()
+{
+    m_client->didStartLinkPrerender();
+}
+
+void LinkLoader::didStopPrerender()
+{
+    m_client->didStopLinkPrerender();
+}
+
+void LinkLoader::didSendLoadForPrerender()
+{
+    m_client->didSendLoadForLinkPrerender();
+}
+
+void LinkLoader::didSendDOMContentLoadedForPrerender()
+{
+    m_client->didSendDOMContentLoadedForLinkPrerender();
+}
+
+#endif
+
 bool LinkLoader::loadLink(const LinkRelAttribute& relAttribute, const String& type,
                           const String& sizes, const KURL& href, Document* document)
 {
@@ -99,11 +133,11 @@ bool LinkLoader::loadLink(const LinkRelAttribute& relAttribute, const String& ty
         // FIXME: The href attribute of the link element can be in "//hostname" form, and we shouldn't attempt
         // to complete that as URL <https://bugs.webkit.org/show_bug.cgi?id=48857>.
         if (settings && settings->dnsPrefetchingEnabled() && href.isValid() && !href.isEmpty())
-            ResourceHandle::prepareForURL(href);
+            prefetchDNS(href.host());
     }
 
 #if ENABLE(LINK_PREFETCH)
-    if ((relAttribute.m_isLinkPrefetch || relAttribute.m_isLinkPrerender || relAttribute.m_isLinkSubresource) && href.isValid() && document->frame()) {
+    if ((relAttribute.m_isLinkPrefetch || relAttribute.m_isLinkSubresource) && href.isValid() && document->frame()) {
         if (!m_client->shouldLoadLink())
             return false;
         ResourceLoadPriority priority = ResourceLoadPriorityUnresolved;
@@ -113,22 +147,39 @@ bool LinkLoader::loadLink(const LinkRelAttribute& relAttribute, const String& ty
         if (relAttribute.m_isLinkSubresource) {
             priority = ResourceLoadPriorityLow;
             type = CachedResource::LinkSubresource;
-        } else if (relAttribute.m_isLinkPrerender)
-            type = CachedResource::LinkPrerender;
-
-        ResourceRequest linkRequest(document->completeURL(href));
+        }
+        CachedResourceRequest linkRequest(ResourceRequest(document->completeURL(href)), priority);
         
         if (m_cachedLinkResource) {
             m_cachedLinkResource->removeClient(this);
             m_cachedLinkResource = 0;
         }
-        m_cachedLinkResource = document->cachedResourceLoader()->requestLinkResource(type, linkRequest, priority);
+        m_cachedLinkResource = document->cachedResourceLoader()->requestLinkResource(type, linkRequest);
         if (m_cachedLinkResource)
             m_cachedLinkResource->addClient(this);
+    }
+#endif
+
+#if ENABLE(LINK_PRERENDER)
+    if (relAttribute.m_isLinkPrerender) {
+        ASSERT(!m_prerenderHandle);
+        m_prerenderHandle = document->prerenderer()->render(this, href);
     }
 #endif
     return true;
 }
 
+void LinkLoader::released()
+{
+    // Only prerenders need treatment here; other links either use the CachedResource interface, or are notionally
+    // atomic (dns prefetch).
+#if ENABLE(LINK_PRERENDER)
+    if (m_prerenderHandle) {
+        m_prerenderHandle->cancel();
+        m_prerenderHandle->removeClient();
+        m_prerenderHandle.clear();
+    }
+#endif
+}
 
 }

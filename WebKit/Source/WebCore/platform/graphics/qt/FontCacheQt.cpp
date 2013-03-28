@@ -25,20 +25,18 @@
 #include "config.h"
 #include "FontCache.h"
 
+#include "Font.h"
 #include "FontDescription.h"
 #include "FontPlatformData.h"
-#include "Font.h"
-#include "PlatformString.h"
 #include <utility>
 #include <wtf/ListHashSet.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/text/StringHash.h>
+#include <wtf/text/WTFString.h>
 
 #include <QFont>
 #include <QFontDatabase>
-#if HAVE(QRAWFONT)
 #include <QTextLayout>
-#endif
 
 using namespace WTF;
 
@@ -48,54 +46,39 @@ void FontCache::platformInit()
 {
 }
 
-#if HAVE(QRAWFONT)
-static QRawFont rawFontForCharacters(const QString& string, const QFont& requestedFont)
+static QRawFont rawFontForCharacters(const QString& string, const QRawFont& font)
 {
-    QFont font(requestedFont);
-    font.setStyleStrategy(QFont::NoFontMerging);
-
-    QTextLayout layout(string, font);
+    QTextLayout layout(string);
+    layout.setRawFont(font);
     layout.beginLayout();
     layout.createLine();
     layout.endLayout();
 
     QList<QGlyphRun> glyphList = layout.glyphRuns();
-
-    ASSERT(glyphList.size() == 1);
-
-    const QGlyphRun& glyphs(glyphList.at(0));
-    QVector<quint32> glyphIndexes = glyphs.glyphIndexes();
-
-    if (glyphIndexes.isEmpty())
+    ASSERT(glyphList.size() <= 1);
+    if (!glyphList.size())
         return QRawFont();
 
+    const QGlyphRun& glyphs(glyphList.at(0));
     return glyphs.rawFont();
 }
-#endif
 
-const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, const UChar* characters, int length)
+PassRefPtr<SimpleFontData> FontCache::getFontDataForCharacters(const Font& font, const UChar* characters, int length)
 {
-#if HAVE(QRAWFONT)
     QString qstring = QString::fromRawData(reinterpret_cast<const QChar*>(characters), length);
-    QRawFont computedFont = rawFontForCharacters(qstring, font.font());
+    QRawFont computedFont = rawFontForCharacters(qstring, font.rawFont());
     if (!computedFont.isValid())
         return 0;
     FontPlatformData alternateFont(computedFont);
     return getCachedFontData(&alternateFont, DoNotRetain);
-#else
-    Q_UNUSED(font);
-    Q_UNUSED(characters);
-    Q_UNUSED(length);
-    return 0;
-#endif
 }
 
-SimpleFontData* FontCache::getSimilarFontPlatformData(const Font& font)
+PassRefPtr<SimpleFontData> FontCache::getSimilarFontPlatformData(const Font& font)
 {
     return 0;
 }
 
-SimpleFontData* FontCache::getLastResortFallbackFont(const FontDescription& fontDescription, ShouldRetain shouldRetain)
+PassRefPtr<SimpleFontData> FontCache::getLastResortFallbackFont(const FontDescription& fontDescription, ShouldRetain shouldRetain)
 {
     const AtomicString fallbackFamily = QFont(fontDescription.family().family()).lastResortFamily();
     return getCachedFontData(new FontPlatformData(fontDescription, fallbackFamily), shouldRetain);
@@ -107,11 +90,9 @@ void FontCache::getTraitsInFamily(const AtomicString&, Vector<unsigned>&)
 
 FontPlatformData* FontCache::createFontPlatformData(const FontDescription& fontDescription, const AtomicString& familyName)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(4, 8, 0)
     QFontDatabase db;
     if (!db.hasFamily(familyName))
         return 0;
-#endif
     return new FontPlatformData(fontDescription, familyName);
 }
 

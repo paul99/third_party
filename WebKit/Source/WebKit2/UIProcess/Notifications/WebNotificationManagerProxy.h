@@ -27,19 +27,13 @@
 #define WebNotificationManagerProxy_h
 
 #include "APIObject.h"
-#include "MessageID.h"
+#include "MessageReceiver.h"
 #include "WebNotificationProvider.h"
-#include <WebCore/NotificationPresenter.h>
+#include <WebCore/NotificationClient.h>
 #include <wtf/HashMap.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/text/StringHash.h>
-
-namespace CoreIPC {
-class ArgumentDecoder;
-class ArgumentEncoder;
-class Connection;
-}
 
 namespace WebKit {
 
@@ -48,7 +42,7 @@ class WebContext;
 class WebPageProxy;
 class WebSecurityOrigin;
 
-class WebNotificationManagerProxy : public APIObject {
+class WebNotificationManagerProxy : public APIObject, private CoreIPC::MessageReceiver {
 public:
     static const Type APIType = TypeNotificationManager;
     
@@ -60,7 +54,7 @@ public:
     void initializeProvider(const WKNotificationProvider*);
     void populateCopyOfNotificationPermissions(HashMap<String, bool>&);
 
-    void show(WebPageProxy*, const String& title, const String& body, const String& originString, uint64_t notificationID);
+    void show(WebPageProxy*, const String& title, const String& body, const String& iconURL, const String& tag, const String& lang, const String& dir, const String& originString, uint64_t notificationID);
 
     void providerDidShowNotification(uint64_t notificationID);
     void providerDidClickNotification(uint64_t notificationID);
@@ -68,18 +62,19 @@ public:
     void providerDidUpdateNotificationPolicy(const WebSecurityOrigin*, bool allowed);
     void providerDidRemoveNotificationPolicies(ImmutableArray* origins);
     
-    void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
-
 private:
     explicit WebNotificationManagerProxy(WebContext*);
     
     virtual Type type() const { return APIType; }
-    
-    void didReceiveWebNotificationManagerProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+
+    // CoreIPC::MessageReceiver
+    virtual void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&) OVERRIDE;
+    void didReceiveWebNotificationManagerProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
     
     // Message handlers
     void cancel(uint64_t notificationID);
     void didDestroyNotification(uint64_t notificationID);
+    void clearNotifications(const Vector<uint64_t>& notificationIDs);
 
     typedef HashMap<uint64_t, RefPtr<WebNotification> > WebNotificationMap;
     

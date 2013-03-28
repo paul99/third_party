@@ -30,22 +30,25 @@ namespace WebCore {
 class SVGAnimateMotionElement : public SVGAnimationElement {
 public:
     static PassRefPtr<SVGAnimateMotionElement> create(const QualifiedName&, Document*);
+    void updateAnimationPath();
 
 private:
     SVGAnimateMotionElement(const QualifiedName&, Document*);
 
     virtual bool hasValidAttributeType();
+    virtual bool hasValidAttributeName();
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
 
-    virtual void resetToBaseValue(const String&);
+    virtual void resetAnimatedType();
+    virtual void clearAnimatedType(SVGElement* targetElement);
+    virtual bool calculateToAtEndOfDurationValue(const String& toAtEndOfDurationString);
     virtual bool calculateFromAndToValues(const String& fromString, const String& toString);
     virtual bool calculateFromAndByValues(const String& fromString, const String& byString);
-    virtual void calculateAnimatedValue(float percentage, unsigned repeat, SVGSMILElement* resultElement);
+    virtual void calculateAnimatedValue(float percentage, unsigned repeatCount, SVGSMILElement* resultElement);
     virtual void applyResultsToTarget();
     virtual float calculateDistance(const String& fromString, const String& toString);
-    virtual Path animationPath() const;
 
     enum RotateMode {
         RotateAngle,
@@ -53,21 +56,19 @@ private:
         RotateAutoReverse
     };
     RotateMode rotateMode() const;
+    void buildTransformForProgress(AffineTransform*, float percentage);
 
-    FloatSize m_animatedTranslation;
-    float m_animatedAngle;
+    bool m_hasToPointAtEndOfDuration;
+
+    virtual void updateAnimationMode() OVERRIDE;
 
     // Note: we do not support percentage values for to/from coords as the spec implies we should (opera doesn't either)
     FloatPoint m_fromPoint;
-    float m_fromAngle;
     FloatPoint m_toPoint;
-    float m_toAngle;
-
-    unsigned m_baseIndexInTransformList;
+    FloatPoint m_toPointAtEndOfDuration;
 
     Path m_path;
-    Vector<float> m_keyPoints;
-    float m_angle;
+    Path m_animationPath;
 };
     
 } // namespace WebCore

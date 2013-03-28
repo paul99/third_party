@@ -89,13 +89,38 @@
 
 #ifdef __cplusplus
 
+
+#include <ciso646>
+
+#if defined(_LIBCPP_VERSION)
+
+// Add work around for a bug in libc++ that caused standard heap
+// APIs to not compile <rdar://problem/10858112>.
+
+#include <type_traits>
+
+namespace WebCore {
+    class TimerHeapReference;
+}
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+inline _LIBCPP_INLINE_VISIBILITY
+const WebCore::TimerHeapReference& move(const WebCore::TimerHeapReference& t)
+{
+    return t;
+}
+
+_LIBCPP_END_NAMESPACE_STD
+
+#endif // defined(_LIBCPP_VERSION)
+
 #include <algorithm>
 #include <cstddef>
 #include <new>
 
 #endif
 
-#include <sys/types.h>
 #if defined(__APPLE__)
 #include <sys/param.h>
 #endif
@@ -105,14 +130,11 @@
 #include <sys/resource.h>
 #endif
 
-#include <time.h>
-
 #if !defined(BUILDING_WX__)
 #include <CoreFoundation/CoreFoundation.h>
 #ifdef WTF_PLATFORM_WIN_CAIRO
 #include <ConditionalMacros.h>
 #include <windows.h>
-#include <stdio.h>
 #else
 
 #if defined(WIN32) || defined(_WIN32)

@@ -165,23 +165,30 @@ NSURLCredential *mac(const Credential& coreCredential)
 
 #else
 
-#ifdef BUILDING_ON_LEOPARD
+#if !PLATFORM(IOS) && __MAC_OS_X_VERSION_MIN_REQUIRED == 1050
 // There is no constant in headers, but NTLM is supported.
 NSString * const NSURLAuthenticationMethodNTLM = @"NSURLAuthenticationMethodNTLM";
 #endif
 
+static uint64_t generateUniqueIdentifier()
+{
+    static uint64_t uniqueIdentifier;
+    return ++uniqueIdentifier;
+}
 
 AuthenticationChallenge::AuthenticationChallenge(const ProtectionSpace& protectionSpace,
                                                  const Credential& proposedCredential,
                                                  unsigned previousFailureCount,
                                                  const ResourceResponse& response,
-                                                 const ResourceError& error)
+                                                 const ResourceError& error,
+                                                 uint64_t identifier)
     : AuthenticationChallengeBase(protectionSpace,
                                   proposedCredential,
                                   previousFailureCount,
                                   response,
                                   error)
 {
+    m_identifier = identifier;
 }
 
 AuthenticationChallenge::AuthenticationChallenge(NSURLAuthenticationChallenge *challenge)
@@ -193,6 +200,7 @@ AuthenticationChallenge::AuthenticationChallenge(NSURLAuthenticationChallenge *c
     , m_sender([challenge sender])
     , m_nsChallenge(challenge)
 {
+    m_identifier = generateUniqueIdentifier();
 }
 
 void AuthenticationChallenge::setAuthenticationClient(AuthenticationClient* client)

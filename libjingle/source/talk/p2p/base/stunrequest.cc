@@ -91,13 +91,14 @@ bool StunRequestManager::CheckResponse(StunMessage* msg) {
     return false;
 
   StunRequest* request = iter->second;
-  if (msg->type() == GetStunResponseType(request->type())) {
+  if (msg->type() == GetStunSuccessResponseType(request->type())) {
     request->OnResponse(msg);
   } else if (msg->type() == GetStunErrorResponseType(request->type())) {
     request->OnErrorResponse(msg);
   } else {
     LOG(LERROR) << "Received response with wrong type: " << msg->type()
-               << " (expecting " << GetStunResponseType(request->type()) << ")";
+                << " (expecting "
+                << GetStunSuccessResponseType(request->type()) << ")";
     return false;
   }
 
@@ -122,24 +123,25 @@ bool StunRequestManager::CheckResponse(const char* data, size_t size) {
   // Parse the STUN message and continue processing as usual.
 
   talk_base::ByteBuffer buf(data, size);
-  StunMessage msg;
-  if (!msg.Read(&buf))
+  talk_base::scoped_ptr<StunMessage> response(iter->second->msg_->CreateNew());
+  if (!response->Read(&buf))
     return false;
 
-  return CheckResponse(&msg);
+  return CheckResponse(response.get());
 }
 
 StunRequest::StunRequest()
     : count_(0), timeout_(false), manager_(0),
-      id_(talk_base::CreateRandomString(kStunTransactionIdLength)),
-      msg_(new StunMessage()),
-      tstamp_(0) {
-  msg_->SetTransactionID(id_);
+      msg_(new StunMessage()), tstamp_(0) {
+  msg_->SetTransactionID(
+      talk_base::CreateRandomString(kStunTransactionIdLength));
 }
 
 StunRequest::StunRequest(StunMessage* request)
-  : count_(0), timeout_(false), manager_(0),
-    id_(request->transaction_id()), msg_(request) {
+    : count_(0), timeout_(false), manager_(0),
+      msg_(request), tstamp_(0) {
+  msg_->SetTransactionID(
+      talk_base::CreateRandomString(kStunTransactionIdLength));
 }
 
 StunRequest::~StunRequest() {
@@ -154,12 +156,11 @@ StunRequest::~StunRequest() {
 void StunRequest::Construct() {
   if (msg_->type() == 0) {
     Prepare(msg_);
-    ASSERT(msg_->transaction_id() == id_);
     ASSERT(msg_->type() != 0);
   }
 }
 
-StunMessageType StunRequest::type() {
+int StunRequest::type() {
   ASSERT(msg_ != NULL);
   return msg_->type();
 }

@@ -67,6 +67,7 @@ public:
     virtual bool paused() const { return m_paused; }
     virtual void play();
     virtual void pause();
+    void unpause();
     
     virtual float defaultPlaybackRate() const { return m_defaultPlaybackRate; }
     virtual void setDefaultPlaybackRate(float);
@@ -83,7 +84,7 @@ public:
     virtual ReadyState readyState() const { return m_readyState; }
 
     enum PlaybackState { WAITING, PLAYING, ENDED };
-    virtual PlaybackState playbackState() const { return m_playbackState; }
+    const AtomicString& playbackState() const;
 
     virtual bool supportsFullscreen() const { return false; }
     virtual bool isFullscreen() const { return false; }
@@ -123,7 +124,11 @@ private:
     void bringElementUpToSpeed(HTMLMediaElement*);
     void scheduleEvent(const AtomicString& eventName);
     void asyncEventTimerFired(Timer<MediaController>*);
+    void clearPositionTimerFired(Timer<MediaController>*);
     bool hasEnded() const;
+    void scheduleTimeupdateEvent();
+    void timeupdateTimerFired(Timer<MediaController>*);
+    void startTimeupdateTimer();
 
     // EventTarget
     virtual void refEventTarget() { ref(); }
@@ -140,15 +145,19 @@ private:
     bool m_paused;
     float m_defaultPlaybackRate;
     float m_volume;
+    mutable float m_position;
     bool m_muted;
     ReadyState m_readyState;
     PlaybackState m_playbackState;
     Vector<RefPtr<Event> > m_pendingEvents;
     Timer<MediaController> m_asyncEventTimer;
+    mutable Timer<MediaController> m_clearPositionTimer;
     String m_mediaGroup;
     bool m_closedCaptionsVisible;
     PassRefPtr<Clock> m_clock;
     ScriptExecutionContext* m_scriptExecutionContext;
+    Timer<MediaController> m_timeupdateTimer;
+    double m_previousTimeupdateTime;
 };
 
 } // namespace WebCore

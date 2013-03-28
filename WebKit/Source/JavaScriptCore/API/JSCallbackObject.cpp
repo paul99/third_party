@@ -32,15 +32,24 @@
 
 namespace JSC {
 
-ASSERT_CLASS_FITS_IN_CELL(JSCallbackObject<JSNonFinalObject>);
-ASSERT_CLASS_FITS_IN_CELL(JSCallbackObject<JSGlobalObject>);
-
 // Define the two types of JSCallbackObjects we support.
-template <> const ClassInfo JSCallbackObject<JSNonFinalObject>::s_info = { "CallbackObject", &JSNonFinalObject::s_info, 0, 0, CREATE_METHOD_TABLE(JSCallbackObject) };
-template <> const ClassInfo JSCallbackObject<JSGlobalObject>::s_info = { "CallbackGlobalObject", &JSGlobalObject::s_info, 0, 0, CREATE_METHOD_TABLE(JSCallbackObject) };
+template <> const ClassInfo JSCallbackObject<JSDestructibleObject>::s_info = { "CallbackObject", &Base::s_info, 0, 0, CREATE_METHOD_TABLE(JSCallbackObject) };
+template <> const ClassInfo JSCallbackObject<JSGlobalObject>::s_info = { "CallbackGlobalObject", &Base::s_info, 0, 0, CREATE_METHOD_TABLE(JSCallbackObject) };
+
+template<> const bool JSCallbackObject<JSDestructibleObject>::needsDestruction = true;
+template<> const bool JSCallbackObject<JSGlobalObject>::needsDestruction = false;
+
+template<>
+JSCallbackObject<JSGlobalObject>* JSCallbackObject<JSGlobalObject>::create(JSGlobalData& globalData, JSClassRef classRef, Structure* structure)
+{
+    JSCallbackObject<JSGlobalObject>* callbackObject = new (NotNull, allocateCell<JSCallbackObject<JSGlobalObject> >(globalData.heap)) JSCallbackObject(globalData, classRef, structure);
+    callbackObject->finishCreation(globalData);
+    globalData.heap.addFinalizer(callbackObject, destroy);
+    return callbackObject;
+}
 
 template <>
-Structure* JSCallbackObject<JSNonFinalObject>::createStructure(JSGlobalData& globalData, JSGlobalObject* globalObject, JSValue proto)
+Structure* JSCallbackObject<JSDestructibleObject>::createStructure(JSGlobalData& globalData, JSGlobalObject* globalObject, JSValue proto)
 { 
     return Structure::create(globalData, globalObject, proto, TypeInfo(ObjectType, StructureFlags), &s_info); 
 }
@@ -54,19 +63,18 @@ Structure* JSCallbackObject<JSGlobalObject>::createStructure(JSGlobalData& globa
 template <class Parent>
 void JSCallbackObject<Parent>::destroy(JSCell* cell)
 {
-    jsCast<JSCallbackObject*>(cell)->JSCallbackObject::~JSCallbackObject();
+    static_cast<JSCallbackObject*>(cell)->JSCallbackObject::~JSCallbackObject();
 }
 
 void JSCallbackObjectData::finalize(Handle<Unknown> handle, void* context)
 {
     JSClassRef jsClass = static_cast<JSClassRef>(context);
-    JSObjectRef thisRef = toRef(asObject(handle.get()));
+    JSObjectRef thisRef = toRef(static_cast<JSObject*>(handle.get().asCell()));
     
     for (; jsClass; jsClass = jsClass->parentClass)
         if (JSObjectFinalizeCallback finalize = jsClass->finalize)
             finalize(thisRef);
-    HandleSlot slot = handle.slot();
-    HandleHeap::heapFor(slot)->deallocate(slot);
+    WeakSet::deallocate(WeakImpl::asWeakImpl(handle.slot()));
 }
     
 } // namespace JSC

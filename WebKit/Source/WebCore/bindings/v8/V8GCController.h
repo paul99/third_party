@@ -32,55 +32,31 @@
 #define V8GCController_h
 
 #include <v8.h>
+#include <wtf/Vector.h>
 
 namespace WebCore {
 
-#ifndef NDEBUG
+class Node;
 
-#define GlobalHandleTypeList(V)   \
-    V(PROXY)                      \
-    V(NPOBJECT)                   \
-    V(SCHEDULED_ACTION)           \
-    V(EVENT_LISTENER)             \
-    V(NODE_FILTER)                \
-    V(SCRIPTINSTANCE)             \
-    V(SCRIPTVALUE)                \
-    V(DATASOURCE)
+class V8GCController {
+public:
+    static void gcPrologue(v8::GCType, v8::GCCallbackFlags);
+    static void gcEpilogue(v8::GCType, v8::GCCallbackFlags);
+    static void minorGCPrologue();
+    static void minorGCEpilogue();
+    static void majorGCPrologue();
+    static void majorGCEpilogue();
 
+    static void checkMemoryUsage();
+    static void hintForCollectGarbage();
+    static void collectGarbage();
 
-    // Host information of persistent handles.
-    enum GlobalHandleType {
-#define ENUM(name) name,
-        GlobalHandleTypeList(ENUM)
-#undef ENUM
-    };
+    static void* opaqueRootForGC(Node*);
+    static void didCreateWrapperForNode(Node*);
 
-    class GlobalHandleInfo {
-    public:
-        GlobalHandleInfo(void* host, GlobalHandleType type) : m_host(host), m_type(type) { }
-        void* m_host;
-        GlobalHandleType m_type;
-    };
-
-#endif // NDEBUG
-
-    class V8GCController {
-    public:
-#ifndef NDEBUG
-        // For debugging and leak detection purpose.
-        static void registerGlobalHandle(GlobalHandleType, void*, v8::Persistent<v8::Value>);
-        static void unregisterGlobalHandle(void*, v8::Persistent<v8::Value>);
-#endif
-
-        static void gcPrologue();
-        static void gcEpilogue();
-
-        static void checkMemoryUsage();
-
-    private:
-        // Estimate of current working set.
-        static int workingSetEstimateMB;
-    };
+private:
+    static Vector<Node*>* m_edenNodes;
+};
 
 }
 

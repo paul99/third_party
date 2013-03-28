@@ -32,7 +32,7 @@
 
 vars = {
   'chromium_svn': 'http://src.chromium.org/svn/trunk/src',
-  'chromium_rev': '119700'
+  'chromium_rev': '173133'
 }
 
 deps = {
@@ -58,8 +58,8 @@ deps = {
     From('chromium_deps', 'src/third_party/skia/src'),
   'third_party/skia/include':
     From('chromium_deps', 'src/third_party/skia/include'),
-  'third_party/skia/third_party/glu':
-    From('chromium_deps', 'src/third_party/skia/third_party/glu'),
+  'third_party/skia/gyp':
+    From('chromium_deps', 'src/third_party/skia/gyp'),
 
   # testing
   'testing':
@@ -89,6 +89,10 @@ deps = {
   # webkit dependencies
   'webkit': Var('chromium_svn')+'/webkit@'+Var('chromium_rev'),
 
+  'cc':
+    Var('chromium_svn')+'/cc@'+Var('chromium_rev'),
+  'google_apis':
+    Var('chromium_svn')+'/google_apis@' + Var('chromium_rev'),
   'gpu':
     Var('chromium_svn')+'/gpu@'+Var('chromium_rev'),
   'ipc':
@@ -113,14 +117,20 @@ deps = {
     From('chromium_deps', 'src/tools/grit'),
   'tools/gritsettings':
     Var('chromium_svn')+'/tools/gritsettings@'+Var('chromium_rev'),
+  'tools/generate_library_loader':
+    Var('chromium_svn')+'/tools/generate_library_loader@'+Var('chromium_rev'),
   'tools/generate_stubs':
     Var('chromium_svn')+'/tools/generate_stubs@'+Var('chromium_rev'),
   'tools/win':
     Var('chromium_svn')+'/tools/win@'+Var('chromium_rev'),
   'ui':
-    Var('chromium_svn')+'/ui@'+Var('chromium_rev'), # needed by app
+    Var('chromium_svn')+'/ui@'+Var('chromium_rev'),
+  'win8':
+    Var('chromium_svn')+'/win8@'+Var('chromium_rev'),
 
   # other third party
+  'third_party/pyftpdlib/src':
+    From('chromium_deps', 'src/third_party/pyftpdlib/src'),
   'third_party/icu':
     From('chromium_deps', 'src/third_party/icu'),
   'third_party/ots':
@@ -131,6 +141,8 @@ deps = {
     From('chromium_deps', 'src/third_party/libjpeg_turbo'),
   'third_party/leveldatabase/src':
     From('chromium_deps', 'src/third_party/leveldatabase/src'),
+  'third_party/smhasher/src':
+    From('chromium_deps', 'src/third_party/smhasher/src'),
   'third_party/snappy/src':
     From('chromium_deps', 'src/third_party/snappy/src'),
   'third_party/sfntly/cpp/src':
@@ -143,14 +155,18 @@ deps = {
 
 deps_os = {
   'win': {
+    'third_party/bison':
+      From('chromium_deps', 'src/third_party/bison'),
     'third_party/cygwin':
       From('chromium_deps', 'src/third_party/cygwin'),
-    'third_party/ffmpeg/binaries/chromium/win/ia32':
-      From('chromium_deps', 'src/third_party/ffmpeg/binaries/chromium/win/ia32'),
+    'third_party/gperf':
+      From('chromium_deps', 'src/third_party/gperf'),
     'third_party/lighttpd':
       From('chromium_deps', 'src/third_party/lighttpd'),
     'third_party/nss':
       From('chromium_deps', 'src/third_party/nss'),
+    'third_party/perl':
+      From('chromium_deps', 'src/third_party/perl'),
     # Dependencies used by libjpeg-turbo
     'third_party/yasm/binaries':
       From('chromium_deps', 'src/third_party/yasm/binaries'),
@@ -158,17 +174,25 @@ deps_os = {
   'mac': {
     'third_party/nss':
       From('chromium_deps', 'src/third_party/nss'),
+    'third_party/GTM':
+      From('chromium_deps', 'src/third_party/GTM'),
   },
   'unix': {
     # Linux, actually.
     'tools/xdisplaycheck':
       Var('chromium_svn')+'/tools/xdisplaycheck@'+Var('chromium_rev'),
+    'third_party/gold':
+      From('chromium_deps', 'src/third_party/gold'),
     'third_party/openssl':
       From('chromium_deps', 'src/third_party/openssl'),
   },
   'android': {
+    'third_party/android_tools':
+      From('chromium_deps', 'src/third_party/android_tools'),
     'third_party/freetype':
-      'https://git.chromium.org/chromium/src/third_party/freetype.git',
+      From('chromium_deps', 'src/third_party/freetype'),
+    'tools/android':
+      Var('chromium_svn') + '/tools/android@' + Var('chromium_rev'),
   },
 }
 

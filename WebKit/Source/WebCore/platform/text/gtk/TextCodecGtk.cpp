@@ -30,12 +30,12 @@
 #include "TextCodecGtk.h"
 
 #include <gio/gio.h>
-#include "GOwnPtr.h"
+#include <wtf/gobject/GOwnPtr.h>
 #include "Logging.h"
-#include "PlatformString.h"
 #include <wtf/Assertions.h>
 #include <wtf/HashMap.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/WTFString.h>
 
 using std::min;
 

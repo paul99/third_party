@@ -118,14 +118,8 @@ static inline void setHeaderFields(CFMutableURLRequestRef request, const HTTPHea
             CFURLRequestSetHTTPHeaderFieldValue(request, oldHeaderFieldNames[i], 0);
     }
 
-    HTTPHeaderMap::const_iterator end = requestHeaders.end();
-    for (HTTPHeaderMap::const_iterator it = requestHeaders.begin(); it != end; ++it) {
-        CFStringRef key = it->first.createCFString();
-        CFStringRef value = it->second.createCFString();
-        CFURLRequestSetHTTPHeaderFieldValue(request, key, value);
-        CFRelease(key);
-        CFRelease(value);
-    }
+    for (HTTPHeaderMap::const_iterator it = requestHeaders.begin(), end = requestHeaders.end(); it != end; ++it)
+        CFURLRequestSetHTTPHeaderFieldValue(request, it->key.string().createCFString().get(), it->value.createCFString().get());
 }
 
 void ResourceRequest::doUpdatePlatformRequest()
@@ -142,15 +136,14 @@ void ResourceRequest::doUpdatePlatformRequest()
         CFURLRequestSetTimeoutInterval(cfRequest, timeoutInterval());
     } else
         cfRequest = CFURLRequestCreateMutable(0, url.get(), (CFURLRequestCachePolicy)cachePolicy(), timeoutInterval(), firstPartyForCookies.get());
-#if USE(CFURLSTORAGESESSIONS)
-    wkSetRequestStorageSession(ResourceHandle::currentStorageSession(), cfRequest);
-#endif
 
-    RetainPtr<CFStringRef> requestMethod(AdoptCF, httpMethod().createCFString());
-    CFURLRequestSetHTTPRequestMethod(cfRequest, requestMethod.get());
+    CFURLRequestSetHTTPRequestMethod(cfRequest, httpMethod().createCFString().get());
 
     if (httpPipeliningEnabled())
         wkSetHTTPPipeliningPriority(cfRequest, toHTTPPipeliningPriority(m_priority));
+#if !PLATFORM(WIN)
+    wkCFURLRequestAllowAllPostCaching(cfRequest);
+#endif
 
     setHeaderFields(cfRequest, httpHeaderFields());
     RefPtr<FormData> formData = httpBody();
@@ -161,7 +154,7 @@ void ResourceRequest::doUpdatePlatformRequest()
     unsigned fallbackCount = m_responseContentDispositionEncodingFallbackArray.size();
     RetainPtr<CFMutableArrayRef> encodingFallbacks(AdoptCF, CFArrayCreateMutable(kCFAllocatorDefault, fallbackCount, 0));
     for (unsigned i = 0; i != fallbackCount; ++i) {
-        RetainPtr<CFStringRef> encodingName(AdoptCF, m_responseContentDispositionEncodingFallbackArray[i].createCFString());
+        RetainPtr<CFStringRef> encodingName = m_responseContentDispositionEncodingFallbackArray[i].createCFString();
         CFStringEncoding encoding = CFStringConvertIANACharSetNameToEncoding(encodingName.get());
         if (encoding != kCFStringEncodingInvalidId)
             CFArrayAppendValue(encodingFallbacks.get(), reinterpret_cast<const void*>(encoding));
@@ -228,8 +221,6 @@ void ResourceRequest::doUpdateResourceRequest()
     m_httpBody = httpBodyFromRequest(m_cfRequest.get());
 }
 
-#if USE(CFURLSTORAGESESSIONS)
-
 void ResourceRequest::setStorageSession(CFURLStorageSessionRef storageSession)
 {
     CFMutableURLRequestRef cfRequest = CFURLRequestCreateMutableCopy(0, m_cfRequest.get());
@@ -239,8 +230,6 @@ void ResourceRequest::setStorageSession(CFURLStorageSessionRef storageSession)
     updateNSURLRequest();
 #endif
 }
-
-#endif
 
 #if PLATFORM(MAC)
 void ResourceRequest::applyWebArchiveHackForMail()
@@ -262,15 +251,6 @@ void ResourceRequest::setHTTPPipeliningEnabled(bool flag)
     s_httpPipeliningEnabled = flag;
 }
 
-#if USE(CFNETWORK) || PLATFORM(MAC) && !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
-static inline bool readBooleanPreference(CFStringRef key)
-{
-    Boolean keyExistsAndHasValidFormat;
-    Boolean result = CFPreferencesGetAppBooleanValue(key, kCFPreferencesCurrentApplication, &keyExistsAndHasValidFormat);
-    return keyExistsAndHasValidFormat ? result : false;
-}
-#endif
-
 unsigned initializeMaximumHTTPConnectionCountPerHost()
 {
     static const unsigned preferredConnectionCount = 6;
@@ -278,11 +258,12 @@ unsigned initializeMaximumHTTPConnectionCountPerHost()
     // Always set the connection count per host, even when pipelining.
     unsigned maximumHTTPConnectionCountPerHost = wkInitializeMaximumHTTPConnectionCountPerHost(preferredConnectionCount);
 
-#if USE(CFNETWORK) || PLATFORM(MAC) && !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
     static const unsigned unlimitedConnectionCount = 10000;
 
-    if (!ResourceRequest::httpPipeliningEnabled() && readBooleanPreference(CFSTR("WebKitEnableHTTPPipelining")))
-        ResourceRequest::setHTTPPipeliningEnabled(true);
+    Boolean keyExistsAndHasValidFormat = false;
+    Boolean prefValue = CFPreferencesGetAppBooleanValue(CFSTR("WebKitEnableHTTPPipelining"), kCFPreferencesCurrentApplication, &keyExistsAndHasValidFormat);
+    if (keyExistsAndHasValidFormat)
+        ResourceRequest::setHTTPPipeliningEnabled(prefValue);
 
     if (ResourceRequest::httpPipeliningEnabled()) {
         wkSetHTTPPipeliningMaximumPriority(toHTTPPipeliningPriority(ResourceLoadPriorityHighest));
@@ -293,7 +274,6 @@ unsigned initializeMaximumHTTPConnectionCountPerHost()
         // When pipelining do not rate-limit requests sent from WebCore since CFNetwork handles that.
         return unlimitedConnectionCount;
     }
-#endif
 
     return maximumHTTPConnectionCountPerHost;
 }

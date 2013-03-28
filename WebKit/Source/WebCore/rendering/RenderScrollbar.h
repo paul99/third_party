@@ -26,7 +26,6 @@
 #ifndef RenderScrollbar_h
 #define RenderScrollbar_h
 
-#include "Node.h"
 #include "RenderStyleConstants.h"
 #include "Scrollbar.h"
 #include <wtf/HashMap.h>
@@ -34,6 +33,7 @@
 namespace WebCore {
 
 class Frame;
+class Node;
 class RenderBox;
 class RenderScrollbarPart;
 class RenderStyle;
@@ -90,7 +90,7 @@ private:
     HashMap<unsigned, RenderScrollbarPart*> m_parts;
 };
 
-inline RenderScrollbar* toRenderScrollbar(Scrollbar* scrollbar)
+inline RenderScrollbar* toRenderScrollbar(ScrollbarThemeClient* scrollbar)
 {
     ASSERT(!scrollbar || scrollbar->isCustomScrollbar());
     return static_cast<RenderScrollbar*>(scrollbar);

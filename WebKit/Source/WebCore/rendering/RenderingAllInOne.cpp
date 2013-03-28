@@ -25,6 +25,7 @@
 
 // This all-in-one cpp file cuts down on template bloat to allow us to build our Windows release build.
 
+
 #include "AutoTableLayout.cpp"
 #include "BidiRun.cpp"
 #include "CounterNode.cpp"
@@ -50,8 +51,8 @@
 #include "RenderCombineText.cpp"
 #include "RenderCounter.cpp"
 #include "RenderDeprecatedFlexibleBox.cpp"
-#include "RenderDetails.cpp"
 #include "RenderDetailsMarker.cpp"
+#include "RenderDialog.cpp"
 #include "RenderEmbeddedObject.cpp"
 #include "RenderFieldset.cpp"
 #include "RenderFileUploadControl.cpp"
@@ -66,15 +67,20 @@
 #include "RenderInline.cpp"
 #include "RenderLayer.cpp"
 #include "RenderLayerCompositor.cpp"
+#include "RenderLayerModelObject.cpp"
 #include "RenderLineBoxList.cpp"
 #include "RenderListBox.cpp"
 #include "RenderListItem.cpp"
 #include "RenderListMarker.cpp"
 #include "RenderMarquee.cpp"
 #include "RenderMedia.cpp"
+#include "RenderMediaControlElements.cpp"
 #include "RenderMediaControls.cpp"
 #include "RenderMenuList.cpp"
 #include "RenderMeter.cpp"
+#include "RenderMultiColumnBlock.cpp"
+#include "RenderMultiColumnFlowThread.cpp"
+#include "RenderMultiColumnSet.cpp"
 #include "RenderObject.cpp"
 #include "RenderObjectChildList.cpp"
 #include "RenderPart.cpp"
@@ -89,8 +95,9 @@
 #include "RenderScrollbar.cpp"
 #include "RenderScrollbarPart.cpp"
 #include "RenderScrollbarTheme.cpp"
+#include "RenderSearchField.cpp"
 #include "RenderSlider.cpp"
-#include "RenderSummary.cpp"
+#include "RenderSnapshottedPlugIn.cpp"
 #include "RenderTable.cpp"
 #include "RenderTableCaption.cpp"
 #include "RenderTableCell.cpp"
@@ -102,8 +109,11 @@
 #include "RenderTextControlMultiLine.cpp"
 #include "RenderTextControlSingleLine.cpp"
 #include "RenderTextFragment.cpp"
+#include "RenderTextTrackCue.cpp"
 #include "RenderTheme.cpp"
+#if PLATFORM(WIN)
 #include "RenderThemeWin.cpp"
+#endif
 #include "RenderTreeAsText.cpp"
 #include "RenderVideo.cpp"
 #include "RenderView.cpp"
@@ -112,3 +122,4 @@
 #include "RootInlineBox.cpp"
 #include "ScrollBehavior.cpp"
 #include "break_lines.cpp"
+

@@ -28,17 +28,21 @@
 #include "ProcessLauncher.h"
 
 #include "Connection.h"
+#include "ProcessExecutablePath.h"
 #include "WebProcess.h"
-#include <QCoreApplication>
 #include <QDebug>
-#include <QFile>
 #include <QLocalServer>
 #include <QMetaType>
 #include <QProcess>
 #include <QString>
 #include <QtCore/qglobal.h>
-#include <WebCore/NotImplemented.h>
 #include <WebCore/RunLoop.h>
+#include <wtf/HashSet.h>
+#include <wtf/PassRefPtr.h>
+#include <wtf/Threading.h>
+#include <wtf/text/WTFString.h>
+
+#if defined(Q_OS_UNIX)
 #include <errno.h>
 #include <fcntl.h>
 #include <runtime/InitializeThreading.h>
@@ -46,14 +50,15 @@
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <wtf/HashSet.h>
-#include <wtf/PassRefPtr.h>
-#include <wtf/Threading.h>
-#include <wtf/text/WTFString.h>
+#endif
 
 #if defined(Q_OS_LINUX)
 #include <sys/prctl.h>
 #include <signal.h>
+#endif
+
+#if OS(WINDOWS)
+#include <windows.h>
 #endif
 
 #if OS(DARWIN)
@@ -63,7 +68,8 @@
 extern "C" kern_return_t bootstrap_register2(mach_port_t, name_t, mach_port_t, uint64_t);
 #endif
 
-#if defined(SOCK_SEQPACKET) && !defined(Q_OS_MACX)
+// for QNX we need SOCK_DGRAM, see https://bugs.webkit.org/show_bug.cgi?id=95553
+#if defined(SOCK_SEQPACKET) && !defined(Q_OS_MACX) && !OS(QNX)
 #define SOCKET_TYPE SOCK_SEQPACKET
 #else
 #define SOCKET_TYPE SOCK_DGRAM
@@ -102,13 +108,17 @@ void QtWebProcess::setupChildProcess()
 
 void ProcessLauncher::launchProcess()
 {
-    QString applicationPath = QLatin1String("%1 %2");
-
-    if (QFile::exists(QCoreApplication::applicationDirPath() + QLatin1String("/QtWebProcess"))) {
-        applicationPath = applicationPath.arg(QCoreApplication::applicationDirPath() + QLatin1String("/QtWebProcess"));
-    } else {
-        applicationPath = applicationPath.arg(QLatin1String("QtWebProcess"));
-    }
+    QString commandLine = QLatin1String("%1 %2 %3");
+    if (m_launchOptions.processType == WebProcess) {
+        QByteArray webProcessPrefix = qgetenv("QT_WEBKIT2_WP_CMD_PREFIX");
+        commandLine = commandLine.arg(QLatin1String(webProcessPrefix.constData())).arg(QString(executablePathOfWebProcess()));
+#if ENABLE(PLUGIN_PROCESS)
+    } else if (m_launchOptions.processType == PluginProcess) {
+        QByteArray pluginProcessPrefix = qgetenv("QT_WEBKIT2_PP_CMD_PREFIX");
+        commandLine = commandLine.arg(QLatin1String(pluginProcessPrefix.constData())).arg(QString(executablePathOfPluginProcess()));
+#endif
+    } else
+        ASSERT_NOT_REACHED();
 
 #if OS(DARWIN)
     // Create the listening port.
@@ -119,12 +129,21 @@ void ProcessLauncher::launchProcess()
     mach_port_insert_right(mach_task_self(), connector, connector, MACH_MSG_TYPE_MAKE_SEND);
 
     // Register port with a service name to the system.
-    QString serviceName = QString("com.nokia.Qt.WebKit.QtWebProcess-%1-%2");
+    QString serviceName = QStringLiteral("com.nokia.Qt.WebKit.QtWebProcess-%1-%2");
     serviceName = serviceName.arg(QString().setNum(getpid()), QString().setNum((size_t)this));
     kern_return_t kr = bootstrap_register2(bootstrap_port, const_cast<char*>(serviceName.toUtf8().data()), connector, 0);
     ASSERT_UNUSED(kr, kr == KERN_SUCCESS);
 
-    QString program(applicationPath.arg(serviceName));
+    commandLine = commandLine.arg(serviceName);
+#elif OS(WINDOWS)
+    CoreIPC::Connection::Identifier connector, clientIdentifier;
+    if (!CoreIPC::Connection::createServerAndClientIdentifiers(connector, clientIdentifier)) {
+        // FIXME: What should we do here?
+        ASSERT_NOT_REACHED();
+    }
+    commandLine = commandLine.arg(qulonglong(clientIdentifier));
+    // Ensure that the child process inherits the client identifier.
+    ::SetHandleInformation(clientIdentifier, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
 #else
     int sockets[2];
     if (socketpair(AF_UNIX, SOCKET_TYPE, 0, sockets) == -1) {
@@ -144,14 +163,14 @@ void ProcessLauncher::launchProcess()
     }
 
     int connector = sockets[1];
-    QString program(applicationPath.arg(sockets[0]));
+    commandLine = commandLine.arg(sockets[0]);
 #endif
 
     QProcess* webProcess = new QtWebProcess();
     webProcess->setProcessChannelMode(QProcess::ForwardedChannels);
-    webProcess->start(program);
+    webProcess->start(commandLine);
 
-#if !OS(DARWIN)
+#if OS(UNIX) && !OS(DARWIN)
     // Don't expose the web socket to possible future web processes
     while (fcntl(sockets[0], F_SETFD, FD_CLOEXEC) == -1) {
         if (errno != EINTR) {
@@ -163,7 +182,7 @@ void ProcessLauncher::launchProcess()
 #endif
 
     if (!webProcess->waitForStarted()) {
-        qDebug() << "Failed to start" << program;
+        qDebug() << "Failed to start" << commandLine;
         ASSERT_NOT_REACHED();
 #if OS(DARWIN)
         mach_port_deallocate(mach_task_self(), connector);
@@ -173,7 +192,9 @@ void ProcessLauncher::launchProcess()
         return;
     }
 
+#if OS(UNIX)
     setpriority(PRIO_PROCESS, webProcess->pid(), 10);
+#endif
 
     RunLoop::main()->dispatch(bind(&WebKit::ProcessLauncher::didFinishLaunchingProcess, this, webProcess, connector));
 }

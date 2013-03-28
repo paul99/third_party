@@ -41,7 +41,6 @@ class AnimationControllerPrivate;
 class AnimationController;
 class RenderObject;
 class RenderStyle;
-class WebKitAnimationList;
 
 // A CompositeAnimation represents a collection of animations that are running
 // on a single RenderObject, such as a number of properties transitioning at once.
@@ -70,23 +69,20 @@ public:
     bool hasAnimations() const  { return !m_transitions.isEmpty() || !m_keyframeAnimations.isEmpty(); }
 
     void setAnimating(bool);
-    bool isAnimatingProperty(int property, bool acceleratedOnly, bool isRunningNow) const;
+    bool isAnimatingProperty(CSSPropertyID, bool acceleratedOnly, bool isRunningNow) const;
 
-    PassRefPtr<KeyframeAnimation> getAnimationForProperty(int property) const;
+    PassRefPtr<KeyframeAnimation> getAnimationForProperty(CSSPropertyID) const;
 
-    void overrideImplicitAnimations(int property);
-    void resumeOverriddenImplicitAnimations(int property);
+    void overrideImplicitAnimations(CSSPropertyID);
+    void resumeOverriddenImplicitAnimations(CSSPropertyID);
 
     bool pauseAnimationAtTime(const AtomicString& name, double t);
-    bool pauseTransitionAtTime(int property, double t);
+    bool pauseTransitionAtTime(CSSPropertyID, double);
     unsigned numberOfActiveAnimations() const;
-
-    PassRefPtr<WebKitAnimationList> animations() const;
 
 private:
     CompositeAnimation(AnimationControllerPrivate* animationController)
         : m_animationController(animationController)
-        , m_numStyleAvailableWaiters(0)
         , m_suspended(false)
     {
     }
@@ -101,7 +97,6 @@ private:
     CSSPropertyTransitionsMap m_transitions;
     AnimationNameMap m_keyframeAnimations;
     Vector<AtomicStringImpl*> m_keyframeAnimationOrderMap;
-    unsigned m_numStyleAvailableWaiters;
     bool m_suspended;
 };
 

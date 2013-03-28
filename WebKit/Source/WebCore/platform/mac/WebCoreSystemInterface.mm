@@ -28,7 +28,14 @@
 #import <Foundation/Foundation.h>
 
 void (*wkAdvanceDefaultButtonPulseAnimation)(NSButtonCell *);
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
+void (*wkCALayerEnumerateRectsBeingDrawnWithBlock)(CALayer *, CGContextRef context, void (^block)(CGRect rect));
+#endif
 BOOL (*wkCGContextGetShouldSmoothFonts)(CGContextRef);
+void (*wkCGContextResetClip)(CGContextRef);
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
+bool (*wkCGContextDrawsWithCorrectShadowOffsets)(CGContextRef);
+#endif
 CGPatternRef (*wkCGPatternCreateWithImageAndTransform)(CGImageRef, CGAffineTransform, int);
 CFStringRef (*wkCopyCFLocalizationPreferredName)(CFStringRef);
 NSString* (*wkCopyNSURLResponseStatusLine)(NSURLResponse*);
@@ -78,8 +85,11 @@ NSArray *(*wkQTGetSitesInMediaDownloadCache)();
 void (*wkQTClearMediaDownloadCacheForSite)(NSString *site);
 void (*wkQTClearMediaDownloadCache)();
 
+#if PLATFORM(MAC)
+void (*wkSetCGFontRenderingMode)(CGContextRef, NSFont*, BOOL);
+#else
 void (*wkSetCGFontRenderingMode)(CGContextRef, NSFont*);
-void (*wkSetCookieStoragePrivateBrowsingEnabled)(BOOL);
+#endif
 void (*wkSetDragImage)(NSImage*, NSPoint offset);
 void (*wkSetBaseCTM)(CGContextRef, CGAffineTransform);
 void (*wkSetPatternPhaseInUserSpace)(CGContextRef, CGPoint point);
@@ -121,7 +131,7 @@ void (*wkSetRequestStorageSession)(CFURLStorageSessionRef, CFMutableURLRequestRe
 void (*wkGetGlyphsForCharacters)(CGFontRef, const UniChar[], CGGlyph[], size_t);
 bool (*wkGetVerticalGlyphsForCharacters)(CTFontRef, const UniChar[], CGGlyph[], size_t);
 
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
 void* wkGetHyphenationLocationBeforeIndex;
 #else
 CFIndex (*wkGetHyphenationLocationBeforeIndex)(CFStringRef string, CFIndex index);
@@ -129,7 +139,11 @@ int (*wkGetNSEventMomentumPhase)(NSEvent *);
 #endif
 
 CTLineRef (*wkCreateCTLineWithUniCharProvider)(const UniChar* (*provide)(CFIndex stringIndex, CFIndex* charCount, CFDictionaryRef* attributes, void*), void (*dispose)(const UniChar* chars, void*), void*);
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1090
+bool (*wkCTFontTransformGlyphs)(CTFontRef font, CGGlyph glyphs[], CGSize advances[], CFIndex count, wkCTFontTransformOptions options);
+#endif
+
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
 CTTypesetterRef (*wkCreateCTTypesetterWithUniCharProviderAndOptions)(const UniChar* (*provide)(CFIndex stringIndex, CFIndex* charCount, CFDictionaryRef* attributes, void*), void (*dispose)(const UniChar* chars, void*), void*, CFDictionaryRef options);
 
 CGContextRef (*wkIOSurfaceContextCreate)(IOSurfaceRef surface, unsigned width, unsigned height, CGColorSpaceRef colorSpace);
@@ -140,6 +154,7 @@ int (*wkRecommendedScrollerStyle)(void);
 bool (*wkExecutableWasLinkedOnOrBeforeSnowLeopard)(void);
 
 CFStringRef (*wkCopyDefaultSearchProviderDisplayName)(void);
+void (*wkSetCrashReportApplicationSpecificInformation)(CFStringRef);
 
 NSURL *(*wkAVAssetResolvedURL)(AVAsset*);
 
@@ -163,8 +178,10 @@ NSURLRequest* (*wkCopyRequestWithStorageSession)(CFURLStorageSessionRef, NSURLRe
 CFHTTPCookieStorageRef (*wkCopyHTTPCookieStorage)(CFURLStorageSessionRef);
 unsigned (*wkGetHTTPCookieAcceptPolicy)(CFHTTPCookieStorageRef);
 void (*wkSetHTTPCookieAcceptPolicy)(CFHTTPCookieStorageRef, unsigned);
+NSArray *(*wkHTTPCookies)(CFHTTPCookieStorageRef);
 NSArray *(*wkHTTPCookiesForURL)(CFHTTPCookieStorageRef, NSURL *);
 void (*wkSetHTTPCookiesForURL)(CFHTTPCookieStorageRef, NSArray *, NSURL *, NSURL *);
+void (*wkDeleteAllHTTPCookies)(CFHTTPCookieStorageRef);
 void (*wkDeleteHTTPCookie)(CFHTTPCookieStorageRef, NSHTTPCookie *);
 
 CFStringRef (*wkGetCFURLResponseMIMEType)(CFURLResponseRef);
@@ -172,12 +189,47 @@ CFURLRef (*wkGetCFURLResponseURL)(CFURLResponseRef);
 CFHTTPMessageRef (*wkGetCFURLResponseHTTPResponse)(CFURLResponseRef);
 CFStringRef (*wkCopyCFURLResponseSuggestedFilename)(CFURLResponseRef);
 void (*wkSetCFURLResponseMIMEType)(CFURLResponseRef, CFStringRef mimeType);
+void (*wkSetMetadataURL)(NSString *urlString, NSString *referrer, NSString *path);
 
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
 dispatch_source_t (*wkCreateVMPressureDispatchOnMainQueue)(void);
 #endif
 
-#if !defined(BUILDING_ON_SNOW_LEOPARD) && !defined(BUILDING_ON_LION)
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
 NSString *(*wkGetMacOSXVersionString)(void);
 bool (*wkExecutableWasLinkedOnOrBeforeLion)(void);
 #endif
+
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
+void (*wkCGPathAddRoundedRect)(CGMutablePathRef path, const CGAffineTransform* matrix, CGRect rect, CGFloat cornerWidth, CGFloat cornerHeight);
+#endif
+
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
+void (*wkCFURLRequestAllowAllPostCaching)(CFURLRequestRef);
+#endif
+
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080 && !PLATFORM(IOS)
+BOOL (*wkFilterIsManagedSession)(void);
+WebFilterEvaluator *(*wkFilterCreateInstance)(NSURLResponse *);
+void (*wkFilterRelease)(WebFilterEvaluator *);
+BOOL (*wkFilterWasBlocked)(WebFilterEvaluator *);
+const char* (*wkFilterAddData)(WebFilterEvaluator *, const char* data, int* length);
+const char* (*wkFilterDataComplete)(WebFilterEvaluator *, int* length);
+
+CGFloat (*wkNSElasticDeltaForTimeDelta)(CGFloat initialPosition, CGFloat initialVelocity, CGFloat elapsedTime);
+CGFloat (*wkNSElasticDeltaForReboundDelta)(CGFloat delta);
+CGFloat (*wkNSReboundDeltaForElasticDelta)(CGFloat delta);
+#endif
+
+bool (*wkCaptionAppearanceHasUserPreferences)(void);
+bool (*wkCaptionAppearanceShowCaptionsWhenAvailable)(void);
+CGColorRef(*wkCaptionAppearanceCopyForegroundColor)(void);
+CGColorRef(*wkCaptionAppearanceCopyBackgroundColor)(void);
+CGColorRef(*wkCaptionAppearanceCopyWindowColor)(void);
+bool(*wkCaptionAppearanceGetForegroundOpacity)(CGFloat*);
+bool(*wkCaptionAppearanceGetBackgroundOpacity)(CGFloat*);
+bool(*wkCaptionAppearanceGetWindowOpacity)(CGFloat*);
+CGFontRef(*wkCaptionAppearanceCopyFontForStyle)(int);
+bool(*wkCaptionAppearanceGetRelativeCharacterSize)(CGFloat*);
+int(*wkCaptionAppearanceGetTextEdgeStyle)(void);
+CFStringRef(*wkCaptionAppearanceGetSettingsChangedNotification)(void);

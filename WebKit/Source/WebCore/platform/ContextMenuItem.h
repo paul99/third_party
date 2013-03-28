@@ -27,9 +27,11 @@
 #ifndef ContextMenuItem_h
 #define ContextMenuItem_h
 
+#if ENABLE(CONTEXT_MENUS)
+
 #include "PlatformMenuDescription.h"
-#include "PlatformString.h"
 #include <wtf/OwnPtr.h>
+#include <wtf/text/WTFString.h>
 
 #if PLATFORM(MAC)
 #include <wtf/RetainPtr.h>
@@ -39,11 +41,10 @@ typedef struct tagMENUITEMINFOW MENUITEMINFO;
 #elif PLATFORM(GTK)
 typedef struct _GtkMenuItem GtkMenuItem;
 typedef struct _GtkAction GtkAction;
-#elif PLATFORM(QT)
-#include <QAction>
 #elif PLATFORM(WX)
 class wxMenuItem;
 #endif
+#endif // ENABLE(CONTEXT_MENUS)
 
 namespace WebCore {
 
@@ -79,6 +80,16 @@ namespace WebCore {
 #if PLATFORM(GTK)
         ContextMenuItemTagInputMethods,
         ContextMenuItemTagUnicode,
+        ContextMenuItemTagUnicodeInsertLRMMark,
+        ContextMenuItemTagUnicodeInsertRLMMark,
+        ContextMenuItemTagUnicodeInsertLREMark,
+        ContextMenuItemTagUnicodeInsertRLEMark,
+        ContextMenuItemTagUnicodeInsertLROMark,
+        ContextMenuItemTagUnicodeInsertRLOMark,
+        ContextMenuItemTagUnicodeInsertPDFMark,
+        ContextMenuItemTagUnicodeInsertZWSMark,
+        ContextMenuItemTagUnicodeInsertZWJMark,
+        ContextMenuItemTagUnicodeInsertZWNJMark,
 #endif
         ContextMenuItemTagSpellingGuess,
         ContextMenuItemTagNoGuessesFound,
@@ -152,6 +163,8 @@ namespace WebCore {
         ContextMenuItemTagEnterVideoFullscreen,
         ContextMenuItemTagMediaPlayPause,
         ContextMenuItemTagMediaMute,
+        ContextMenuItemTagDictationAlternative,
+        ContextMenuItemTagOpenLinkInThisWindow,
         ContextMenuItemBaseCustomTag = 5000,
         ContextMenuItemCustomTagNoAction = 5998,
         ContextMenuItemLastCustomTag = 5999,
@@ -165,6 +178,7 @@ namespace WebCore {
         SubmenuType
     };
 
+#if ENABLE(CONTEXT_MENUS)
 #if PLATFORM(MAC)
     typedef NSMenuItem* PlatformMenuItemDescription;
 #elif PLATFORM(QT)
@@ -211,6 +225,7 @@ namespace WebCore {
         ContextMenuItemType type;
         ContextMenuAction action;
         String title;
+        Vector<ContextMenuItem> subMenuItems;
         bool checked;
         bool enabled;
     };
@@ -263,8 +278,8 @@ namespace WebCore {
         const Vector<ContextMenuItem>& subMenuItems() const { return m_subMenuItems; }
 #else
     public:
-        ContextMenuItem(PlatformMenuItemDescription);
-        ContextMenuItem(ContextMenu* subMenu = 0);
+        explicit ContextMenuItem(PlatformMenuItemDescription);
+        explicit ContextMenuItem(ContextMenu* subMenu = 0);
         ContextMenuItem(ContextMenuAction, const String&, bool enabled, bool checked, Vector<ContextMenuItem>& submenuItems);
 
         PlatformMenuItemDescription releasePlatformDescription();
@@ -293,6 +308,7 @@ namespace WebCore {
 #endif // USE(CROSS_PLATFORM_CONTEXT_MENUS)
     };
 
+#endif // ENABLE(CONTEXT_MENUS)
 }
 
 #endif // ContextMenuItem_h

@@ -57,10 +57,7 @@ enum PaintBehaviorFlags {
     PaintBehaviorSelectionOnly = 1 << 0,
     PaintBehaviorForceBlackText = 1 << 1,
     PaintBehaviorFlattenCompositingLayers = 1 << 2,
-    PaintBehaviorRenderingSVGMask = 1 << 3,
-#if OS(ANDROID)
-    PaintBehaviorDontClipOverflow = 1 << 8
-#endif
+    PaintBehaviorRenderingSVGMask = 1 << 3
 };
 
 typedef unsigned PaintBehavior;

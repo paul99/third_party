@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010, 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,8 +31,11 @@
 namespace WebCore {
 
 class CookiesStrategy;
+class DatabaseStrategy;
+class LoaderStrategy;
+class PasteboardStrategy;
 class PluginStrategy;
-class LocalizationStrategy;
+class SharedWorkerStrategy;
 class VisitedLinkStrategy;
 
 class PlatformStrategies {
@@ -44,6 +47,27 @@ public:
         return m_cookiesStrategy;
     }
 
+    DatabaseStrategy* databaseStrategy()
+    {
+        if (!m_databaseStrategy)
+            m_databaseStrategy = createDatabaseStrategy();
+        return m_databaseStrategy;
+    }
+
+    LoaderStrategy* loaderStrategy()
+    {
+        if (!m_loaderStrategy)
+            m_loaderStrategy = createLoaderStrategy();
+        return m_loaderStrategy;
+    }
+    
+    PasteboardStrategy* pasteboardStrategy()
+    {
+        if (!m_pasteboardStrategy)
+            m_pasteboardStrategy = createPasteboardStrategy();
+        return m_pasteboardStrategy;
+    }
+
     PluginStrategy* pluginStrategy()
     {
         if (!m_pluginStrategy)
@@ -51,11 +75,11 @@ public:
         return m_pluginStrategy;
     }
 
-    LocalizationStrategy* localizationStrategy()
+    SharedWorkerStrategy* sharedWorkerStrategy()
     {
-        if (!m_localizationStrategy)
-            m_localizationStrategy = createLocalizationStrategy();
-        return m_localizationStrategy;
+        if (!m_sharedWorkerStrategy)
+            m_sharedWorkerStrategy = createSharedWorkerStrategy();
+        return m_sharedWorkerStrategy;
     }
 
     VisitedLinkStrategy* visitedLinkStrategy()
@@ -68,8 +92,11 @@ public:
 protected:
     PlatformStrategies()
         : m_cookiesStrategy(0)
+        , m_databaseStrategy(0)
+        , m_loaderStrategy(0)
+        , m_pasteboardStrategy(0)
         , m_pluginStrategy(0)
-        , m_localizationStrategy(0)
+        , m_sharedWorkerStrategy(0)
         , m_visitedLinkStrategy(0)
     {
     }
@@ -80,13 +107,19 @@ protected:
 
 private:
     virtual CookiesStrategy* createCookiesStrategy() = 0;
+    virtual DatabaseStrategy* createDatabaseStrategy() = 0;
+    virtual LoaderStrategy* createLoaderStrategy() = 0;
+    virtual PasteboardStrategy* createPasteboardStrategy() = 0;
     virtual PluginStrategy* createPluginStrategy() = 0;
-    virtual LocalizationStrategy* createLocalizationStrategy();
+    virtual SharedWorkerStrategy* createSharedWorkerStrategy() = 0;
     virtual VisitedLinkStrategy* createVisitedLinkStrategy() = 0;
 
     CookiesStrategy* m_cookiesStrategy;
+    DatabaseStrategy* m_databaseStrategy;
+    LoaderStrategy* m_loaderStrategy;
+    PasteboardStrategy* m_pasteboardStrategy;
     PluginStrategy* m_pluginStrategy;
-    LocalizationStrategy* m_localizationStrategy;
+    SharedWorkerStrategy* m_sharedWorkerStrategy;
     VisitedLinkStrategy* m_visitedLinkStrategy;
 };
 

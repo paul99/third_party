@@ -48,7 +48,8 @@ enum SandboxFlag {
     SandboxTopNavigation = 1 << 5,
     SandboxPopups = 1 << 6, // See https://www.w3.org/Bugs/Public/show_bug.cgi?id=12393
     SandboxAutomaticFeatures = 1 << 7,
-    // FIXME: Add http://www.whatwg.org/specs/web-apps/current-work/#sandboxed-seamless-iframes-flag when we implement seamless.
+    SandboxSeamlessIframes = 1 << 8,
+    SandboxPointerLock = 1 << 9,
     SandboxAll = -1 // Mask with all bits set to 1.
 };
 
@@ -62,29 +63,38 @@ public:
 
     bool isSecureTransitionTo(const KURL&) const;
 
-    void enforceSandboxFlags(SandboxFlags mask) { m_sandboxFlags |= mask; }
+    void enforceSandboxFlags(SandboxFlags mask);
     bool isSandboxed(SandboxFlags mask) const { return m_sandboxFlags & mask; }
-
-    static SandboxFlags parseSandboxPolicy(const String& policy);
-
-protected:
-    SecurityContext();
-    ~SecurityContext();
 
     // Explicitly override the security origin for this security context.
     // Note: It is dangerous to change the security origin of a script context
     //       that already contains content.
     void setSecurityOrigin(PassRefPtr<SecurityOrigin>);
-    void setContentSecurityPolicy(PassRefPtr<ContentSecurityPolicy>);
+
+    static SandboxFlags parseSandboxPolicy(const String& policy, String& invalidTokensErrorMessage);
+
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const;
+
+protected:
+    SecurityContext();
+    virtual ~SecurityContext();
+
+    virtual void didUpdateSecurityOrigin();
+
+    void setContentSecurityPolicy(PassOwnPtr<ContentSecurityPolicy>);
 
     void didFailToInitializeSecurityOrigin() { m_haveInitializedSecurityOrigin = false; }
     bool haveInitializedSecurityOrigin() const { return m_haveInitializedSecurityOrigin; }
+
+    // Set in Document::initSecurityContext() at Document creation, per:
+    // http://www.whatwg.org/specs/web-apps/current-work/#attr-iframe-seamless
+    bool m_mayDisplaySeamlessWithParent;
 
 private:
     bool m_haveInitializedSecurityOrigin;
     SandboxFlags m_sandboxFlags;
     RefPtr<SecurityOrigin> m_securityOrigin;
-    RefPtr<ContentSecurityPolicy> m_contentSecurityPolicy;
+    OwnPtr<ContentSecurityPolicy> m_contentSecurityPolicy;
 };
 
 } // namespace WebCore

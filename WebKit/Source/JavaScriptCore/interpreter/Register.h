@@ -40,7 +40,7 @@ namespace JSC {
     class JSActivation;
     class JSObject;
     class JSPropertyNameIterator;
-    class ScopeChainNode;
+    class JSScope;
 
     struct InlineCallFrame;
     struct Instruction;
@@ -59,7 +59,7 @@ namespace JSC {
         
         Register& operator=(CallFrame*);
         Register& operator=(CodeBlock*);
-        Register& operator=(ScopeChainNode*);
+        Register& operator=(JSScope*);
         Register& operator=(Instruction*);
         Register& operator=(InlineCallFrame*);
 
@@ -69,7 +69,7 @@ namespace JSC {
         CodeBlock* codeBlock() const;
         JSObject* function() const;
         JSPropertyNameIterator* propertyNameIterator() const;
-        ScopeChainNode* scopeChain() const;
+        JSScope* scope() const;
         Instruction* vPC() const;
         InlineCallFrame* asInlineCallFrame() const;
         int32_t unboxedInt32() const;
@@ -86,7 +86,7 @@ namespace JSC {
             return r;
         }
 
-        static inline Register withCallee(JSObject* callee);
+        static Register withCallee(JSObject* callee);
 
     private:
         union {

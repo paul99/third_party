@@ -28,18 +28,17 @@
 
 #if ENABLE(MATHML)
 
-#include "RenderMathMLBlock.h"
+#include "RenderMathMLRoot.h"
 
 namespace WebCore {
     
-class RenderMathMLSquareRoot : public RenderMathMLBlock {
+// Render sqrt(base), using radical notation.
+class RenderMathMLSquareRoot : public RenderMathMLRoot {
 public:
-    RenderMathMLSquareRoot(Node* fraction);
-    virtual void paint(PaintInfo&, const LayoutPoint&);
-protected:
-    virtual void layout();
-
+    RenderMathMLSquareRoot(Element*);
+    
 private:
+    virtual bool isRenderMathMLSquareRoot() const { return true; }
     virtual const char* renderName() const { return "RenderMathMLSquareRoot"; }
 };
     
@@ -48,6 +47,3 @@ private:
 #endif // ENABLE(MATHML)
 
 #endif // RenderMathMLSquareRoot_h
-
-
-

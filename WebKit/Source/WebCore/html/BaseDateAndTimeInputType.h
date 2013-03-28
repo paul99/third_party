@@ -31,6 +31,7 @@
 #ifndef BaseDateAndTimeInputType_h
 #define BaseDateAndTimeInputType_h
 
+#if ENABLE(DATE_AND_TIME_INPUT_TYPES)
 #include "DateComponents.h"
 #include "TextFieldInputType.h"
 #include <wtf/unicode/Unicode.h>
@@ -38,39 +39,36 @@
 namespace WebCore {
 
 // A super class of date, datetime, datetime-local, month, time, and week types.
+// FIXME: Don't inherit TextFieldInputType. webkit.org/b/100935
 class BaseDateAndTimeInputType : public TextFieldInputType {
 protected:
     BaseDateAndTimeInputType(HTMLInputElement* element) : TextFieldInputType(element) { }
-    virtual double parseToDouble(const String&, double) const OVERRIDE;
+    virtual void handleKeydownEvent(KeyboardEvent*) OVERRIDE;
+    virtual Decimal parseToNumber(const String&, const Decimal&) const OVERRIDE;
     virtual bool parseToDateComponents(const String&, DateComponents*) const OVERRIDE;
+    virtual String sanitizeValue(const String&) const OVERRIDE;
+    virtual String serialize(const Decimal&) const OVERRIDE;
     String serializeWithComponents(const DateComponents&) const;
+    virtual bool setMillisecondToDateComponents(double, DateComponents*) const = 0;
+    virtual String visibleValue() const OVERRIDE;
 
 private:
     virtual bool parseToDateComponentsInternal(const UChar*, unsigned length, DateComponents*) const = 0;
-    virtual bool setMillisecondToDateComponents(double, DateComponents*) const = 0;
     virtual DateComponents::Type dateType() const = 0;
     virtual double valueAsDate() const OVERRIDE;
     virtual void setValueAsDate(double, ExceptionCode&) const OVERRIDE;
-    virtual double valueAsNumber() const OVERRIDE;
-    virtual void setValueAsNumber(double, bool sendChangeEvent, ExceptionCode&) const OVERRIDE;
+    virtual double valueAsDouble() const OVERRIDE;
+    virtual void setValueAsDecimal(const Decimal&, TextFieldEventBehavior, ExceptionCode&) const OVERRIDE;
     virtual bool typeMismatchFor(const String&) const OVERRIDE;
     virtual bool typeMismatch() const OVERRIDE;
-    virtual bool rangeUnderflow(const String&) const OVERRIDE;
-    virtual bool rangeOverflow(const String&) const OVERRIDE;
-    virtual bool supportsRangeLimitation() const OVERRIDE;
-    virtual double defaultValueForStepUp() const OVERRIDE;
+    virtual Decimal defaultValueForStepUp() const OVERRIDE;
     virtual bool isSteppable() const OVERRIDE;
-    virtual bool stepMismatch(const String&, double) const OVERRIDE;
-    virtual double stepBase() const OVERRIDE;
-    virtual void handleKeydownEvent(KeyboardEvent*) OVERRIDE;
-    virtual void handleWheelEvent(WheelEvent*) OVERRIDE;
-    virtual String serialize(double) const OVERRIDE;
     virtual String serializeWithMilliseconds(double) const;
-    virtual String visibleValue() const OVERRIDE;
+    virtual String localizeValue(const String&) const OVERRIDE;
     virtual String convertFromVisibleValue(const String&) const OVERRIDE;
-    virtual String sanitizeValue(const String&) const OVERRIDE;
+    virtual bool supportsReadOnly() const OVERRIDE;
 };
 
 } // namespace WebCore
-
+#endif
 #endif // BaseDateAndTimeInputType_h

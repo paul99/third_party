@@ -1,5 +1,5 @@
 /*
- * Copyright 2011 Adobe Systems Incorporated. All Rights Reserved.
+ * Copyright (C) 2011 Adobe Systems Incorporated. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,14 +30,196 @@
 #include "config.h"
 #include "WebKitNamedFlow.h"
 
+#include "EventNames.h"
+#include "NamedFlowCollection.h"
+#include "RenderNamedFlowThread.h"
+#include "RenderRegion.h"
+#include "ScriptExecutionContext.h"
+#include "StaticNodeList.h"
+#include "UIEvent.h"
+
 namespace WebCore {
 
-WebKitNamedFlow::WebKitNamedFlow()
+WebKitNamedFlow::WebKitNamedFlow(PassRefPtr<NamedFlowCollection> manager, const AtomicString& flowThreadName)
+    : m_flowThreadName(flowThreadName)
+    , m_flowManager(manager)
+    , m_parentFlowThread(0)
 {
 }
 
 WebKitNamedFlow::~WebKitNamedFlow()
 {
+    // The named flow is not "strong" referenced from anywhere at this time so it shouldn't be reused if the named flow is recreated.
+    m_flowManager->discardNamedFlow(this);
+}
+
+PassRefPtr<WebKitNamedFlow> WebKitNamedFlow::create(PassRefPtr<NamedFlowCollection> manager, const AtomicString& flowThreadName)
+{
+    return adoptRef(new WebKitNamedFlow(manager, flowThreadName));
+}
+
+const AtomicString& WebKitNamedFlow::name() const
+{
+    return m_flowThreadName;
+}
+
+bool WebKitNamedFlow::overset() const
+{
+    if (m_flowManager->document())
+        m_flowManager->document()->updateLayoutIgnorePendingStylesheets();
+
+    // The renderer may be destroyed or created after the style update.
+    // Because this is called from JS, where the wrapper keeps a reference to the NamedFlow, no guard is necessary.
+    return m_parentFlowThread ? m_parentFlowThread->overset() : true;
+}
+
+static inline bool nodeInFlowThread(Node* contentNode, RenderNamedFlowThread* flowThread)
+{
+    return contentNode->renderer() && contentNode->renderer()->inRenderFlowThread() && flowThread == contentNode->renderer()->enclosingRenderFlowThread();
+}
+
+int WebKitNamedFlow::firstEmptyRegionIndex() const
+{
+    if (m_flowManager->document())
+        m_flowManager->document()->updateLayoutIgnorePendingStylesheets();
+
+    if (!m_parentFlowThread)
+        return -1;
+
+    const RenderRegionList& regionList = m_parentFlowThread->renderRegionList();
+    if (regionList.isEmpty())
+        return -1;
+    RenderRegionList::const_iterator iter = regionList.begin();
+    for (int index = 0; iter != regionList.end(); ++index, ++iter) {
+        const RenderRegion* renderRegion = *iter;
+        if (renderRegion->regionState() == RenderRegion::RegionEmpty)
+            return index;
+    }
+    return -1;
+}
+
+PassRefPtr<NodeList> WebKitNamedFlow::getRegionsByContent(Node* contentNode)
+{
+    Vector<RefPtr<Node> > regionNodes;
+
+    if (!contentNode)
+        return StaticNodeList::adopt(regionNodes);
+
+    if (m_flowManager->document())
+        m_flowManager->document()->updateLayoutIgnorePendingStylesheets();
+
+    // The renderer may be destroyed or created after the style update.
+    // Because this is called from JS, where the wrapper keeps a reference to the NamedFlow, no guard is necessary.
+    if (!m_parentFlowThread)
+        return StaticNodeList::adopt(regionNodes);
+
+    if (nodeInFlowThread(contentNode, m_parentFlowThread)) {
+        const RenderRegionList& regionList = m_parentFlowThread->renderRegionList();
+        for (RenderRegionList::const_iterator iter = regionList.begin(); iter != regionList.end(); ++iter) {
+            const RenderRegion* renderRegion = *iter;
+            // FIXME: Pseudo-elements are not included in the list.
+            if (!renderRegion->node())
+                continue;
+            if (m_parentFlowThread->objectInFlowRegion(contentNode->renderer(), renderRegion))
+                regionNodes.append(renderRegion->node());
+        }
+    }
+
+    return StaticNodeList::adopt(regionNodes);
+}
+
+PassRefPtr<NodeList> WebKitNamedFlow::getRegions()
+{
+    Vector<RefPtr<Node> > regionNodes;
+
+    if (m_flowManager->document())
+        m_flowManager->document()->updateLayoutIgnorePendingStylesheets();
+
+    // The renderer may be destroyed or created after the style update.
+    // Because this is called from JS, where the wrapper keeps a reference to the NamedFlow, no guard is necessary.
+    if (!m_parentFlowThread)
+        return StaticNodeList::adopt(regionNodes);
+
+    const RenderRegionList& regionList = m_parentFlowThread->renderRegionList();
+    for (RenderRegionList::const_iterator iter = regionList.begin(); iter != regionList.end(); ++iter) {
+        const RenderRegion* renderRegion = *iter;
+        // FIXME: Pseudo-elements are not included in the list.
+        if (!renderRegion->node())
+            continue;
+        regionNodes.append(renderRegion->node());
+    }
+
+    return StaticNodeList::adopt(regionNodes);
+}
+
+PassRefPtr<NodeList> WebKitNamedFlow::getContent()
+{
+    Vector<RefPtr<Node> > contentNodes;
+
+    if (m_flowManager->document())
+        m_flowManager->document()->updateLayoutIgnorePendingStylesheets();
+
+    // The renderer may be destroyed or created after the style update.
+    // Because this is called from JS, where the wrapper keeps a reference to the NamedFlow, no guard is necessary.
+    if (!m_parentFlowThread)
+        return StaticNodeList::adopt(contentNodes);
+
+    const NamedFlowContentNodes& contentNodesList = m_parentFlowThread->contentNodes();
+    for (NamedFlowContentNodes::const_iterator it = contentNodesList.begin(); it != contentNodesList.end(); ++it) {
+        Node* node = *it;
+        ASSERT(node->computedStyle()->flowThread() == m_parentFlowThread->flowThreadName());
+        contentNodes.append(node);
+    }
+
+    return StaticNodeList::adopt(contentNodes);
+}
+
+void WebKitNamedFlow::setRenderer(RenderNamedFlowThread* parentFlowThread)
+{
+    // The named flow can either go from a no_renderer->renderer or renderer->no_renderer state; anything else could indicate a bug.
+    ASSERT((!m_parentFlowThread && parentFlowThread) || (m_parentFlowThread && !parentFlowThread));
+
+    // If parentFlowThread is 0, the flow thread will move in the "NULL" state.
+    m_parentFlowThread = parentFlowThread;
+}
+
+EventTargetData* WebKitNamedFlow::eventTargetData()
+{
+    return &m_eventTargetData;
+}
+
+EventTargetData* WebKitNamedFlow::ensureEventTargetData()
+{
+    return &m_eventTargetData;
+}
+
+void WebKitNamedFlow::dispatchRegionLayoutUpdateEvent()
+{
+    ASSERT(!NoEventDispatchAssertion::isEventDispatchForbidden());
+
+    // If the flow is in the "NULL" state the event should not be dispatched any more.
+    if (flowState() == FlowStateNull)
+        return;
+
+    RefPtr<Event> event = UIEvent::create(eventNames().webkitregionlayoutupdateEvent, false, false, m_flowManager->document()->defaultView(), 0);
+
+    dispatchEvent(event);
+}
+
+const AtomicString& WebKitNamedFlow::interfaceName() const
+{
+    return eventNames().interfaceForWebKitNamedFlow;
+}
+
+ScriptExecutionContext* WebKitNamedFlow::scriptExecutionContext() const
+{
+    return m_flowManager->document();
+}
+
+Node* WebKitNamedFlow::ownerNode() const
+{
+    return m_flowManager->document();
 }
 
 } // namespace WebCore
+

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,6 +36,7 @@
 #import "DOMPrivate.h"
 #import "DOMRangeInternal.h"
 #import "Element.h"
+#import "Font.h"
 #import "Frame.h"
 #import "HTMLNames.h"
 #import "HTMLParserIdioms.h"
@@ -50,7 +51,7 @@ using namespace HTMLNames;
 static NSFileWrapper *fileWrapperForURL(DocumentLoader *, NSURL *);
 static NSFileWrapper *fileWrapperForElement(Element*);
 
-#ifndef BUILDING_ON_LEOPARD
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
 
 // Additional control Unicode characters
 const unichar WebNextLineCharacter = 0x0085;
@@ -100,7 +101,7 @@ static NSFont *WebDefaultFont()
 
 @implementation WebHTMLConverter
 
-#ifndef BUILDING_ON_LEOPARD
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
 
 static NSFont *_fontForNameAndSize(NSString *fontName, CGFloat size, NSMutableDictionary *cache)
 {
@@ -797,11 +798,15 @@ static inline NSShadow *_shadowForShadowStyle(NSString *shadowStyle)
     }
     if (!fileWrapper) {
         RefPtr<ArchiveResource> resource = dataSource->subresource(url);
-        if (!resource) resource = dataSource->subresource(url);
-        if (flag && resource && [@"text/html" isEqual:resource->mimeType()]) notFound = YES;
+        if (!resource)
+            resource = dataSource->subresource(url);
+
+        const String& mimeType = resource->mimeType();
+        if (flag && resource && mimeType == "text/html")
+            notFound = YES;
         if (resource && !notFound) {
             fileWrapper = [[[NSFileWrapper alloc] initRegularFileWithContents:[resource->data()->createNSData() autorelease]] autorelease];
-            [fileWrapper setPreferredFilename:suggestedFilenameWithMIMEType(url, resource->mimeType())];
+            [fileWrapper setPreferredFilename:suggestedFilenameWithMIMEType(url, mimeType)];
         }
     }
     if (!fileWrapper && !notFound) {
@@ -818,7 +823,7 @@ static inline NSShadow *_shadowForShadowStyle(NSString *shadowStyle)
         NSUInteger textLength = [_attrStr length];
         NSTextAttachment *attachment = [[NSTextAttachment alloc] initWithFileWrapper:fileWrapper];
         NSTextAttachmentCell *cell;
-        NSString *string = [[NSString alloc] initWithFormat:(needsParagraph ? @"%C\n" : @"%C"), NSAttachmentCharacter];
+        NSString *string = [[NSString alloc] initWithFormat:(needsParagraph ? @"%C\n" : @"%C"), static_cast<unichar>(NSAttachmentCharacter)];
         NSRange rangeToReplace = NSMakeRange(textLength, 0);
         NSDictionary *attrs;
         if (fileWrapper) {
@@ -1657,11 +1662,12 @@ static NSInteger _colCompare(id block1, id block2, void *)
     return (0 == _errorCode) ? [[_attrStr retain] autorelease] : nil;
 }
 
-#endif // !defined(BUILDING_ON_LEOPARD)
+#endif // PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
 
 // This function uses TextIterator, which makes offsets in its result compatible with HTML editing.
 + (NSAttributedString *)editingAttributedStringFromRange:(Range*)range
 {
+    NSFontManager *fontManager = [NSFontManager sharedFontManager];
     NSMutableAttributedString *string = [[NSMutableAttributedString alloc] init];
     NSUInteger stringLength = 0;
     RetainPtr<NSMutableDictionary> attrs(AdoptNS, [[NSMutableDictionary alloc] init]);
@@ -1695,8 +1701,10 @@ static NSInteger _colCompare(id block1, id block2, void *)
         RenderStyle* style = renderer->style();
         if (style->textDecorationsInEffect() & UNDERLINE)
             [attrs.get() setObject:[NSNumber numberWithInteger:NSUnderlineStyleSingle] forKey:NSUnderlineStyleAttributeName];
-        NSFont *font = style->font().primaryFont()->getNSFont();
-        [attrs.get() setObject:font forKey:NSFontAttributeName];
+        if (NSFont *font = style->font().primaryFont()->getNSFont())
+            [attrs.get() setObject:font forKey:NSFontAttributeName];
+        else
+            [attrs.get() setObject:[fontManager convertFont:WebDefaultFont() toSize:style->font().primaryFont()->platformData().size()] forKey:NSFontAttributeName];
         if (style->visitedDependentColor(CSSPropertyColor).alpha())
             [attrs.get() setObject:nsColor(style->visitedDependentColor(CSSPropertyColor)) forKey:NSForegroundColorAttributeName];
         else

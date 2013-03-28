@@ -24,8 +24,12 @@
  */
 
 #include "config.h"
+
+#if ENABLE(CONTEXT_MENUS)
+
 #include "WebContextMenuClient.h"
 
+#include "WebContextMenu.h"
 #include "WebContextMenuItemData.h"
 #include "WebPage.h"
 #include <WebCore/ContextMenu.h>
@@ -62,7 +66,7 @@ void WebContextMenuClient::contextMenuItemSelected(ContextMenuItem*, const Conte
     notImplemented();
 }
 
-void WebContextMenuClient::downloadURL(const KURL& url)
+void WebContextMenuClient::downloadURL(const KURL&)
 {
     // This is handled in the UI process.
     ASSERT_NOT_REACHED();
@@ -77,9 +81,7 @@ void WebContextMenuClient::searchWithGoogle(const Frame* frame)
     String encoded = encodeWithURLEscapeSequences(searchString);
     encoded.replace("%20", "+");
     
-    String url("http://www.google.com/search?q=");
-    url.append(encoded);
-    url.append("&ie=UTF-8&oe=UTF-8");
+    String url = "http://www.google.com/search?q=" + encoded + "&ie=UTF-8&oe=UTF-8";
 
     if (Page* page = frame->page()) {
         UserGestureIndicator indicator(DefinitelyProcessingUserGesture);
@@ -87,4 +89,12 @@ void WebContextMenuClient::searchWithGoogle(const Frame* frame)
     }
 }
 
+#if USE(ACCESSIBILITY_CONTEXT_MENUS)
+void WebContextMenuClient::showContextMenu()
+{
+    m_page->contextMenu()->show();
+}
+#endif
+
 } // namespace WebKit
+#endif // ENABLE(CONTEXT_MENUS)

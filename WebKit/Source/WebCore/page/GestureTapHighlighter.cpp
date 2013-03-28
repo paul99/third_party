@@ -46,17 +46,17 @@ namespace WebCore {
 
 namespace {
 
-inline LayoutSize ownerFrameToMainFrameOffset(const RenderObject* o)
+inline LayoutPoint ownerFrameToMainFrameOffset(const RenderObject* o)
 {
     ASSERT(o->node());
     Frame* containingFrame = o->frame();
     if (!containingFrame)
-        return LayoutSize();
+        return LayoutPoint();
 
     Frame* mainFrame = containingFrame->page()->mainFrame();
 
-    LayoutPoint mainFramePoint = mainFrame->view()->rootViewToContents(containingFrame->view()->contentsToRootView(LayoutPoint()));
-    return toLayoutSize(mainFramePoint);
+    LayoutPoint mainFramePoint = mainFrame->view()->windowToContents(containingFrame->view()->contentsToWindow(IntPoint()));
+    return mainFramePoint;
 }
 
 AffineTransform localToAbsoluteTransform(const RenderObject* o)
@@ -81,50 +81,172 @@ AffineTransform localToAbsoluteTransform(const RenderObject* o)
     return transform;
 }
 
-Path pathForRenderBox(RenderBox* o)
+inline bool contains(const LayoutRect& rect, int x)
+{
+    return !rect.isEmpty() && x >= rect.x() && x <= rect.maxX();
+}
+
+inline bool strikes(const LayoutRect& a, const LayoutRect& b)
+{
+    return !a.isEmpty() && !b.isEmpty()
+        && a.x() <= b.maxX() && b.x() <= a.maxX()
+        && a.y() <= b.maxY() && b.y() <= a.maxY();
+}
+
+inline void shiftXEdgesToContainIfStrikes(LayoutRect& rect, LayoutRect& other, bool isFirst)
+{
+    if (rect.isEmpty())
+        return;
+
+    if (other.isEmpty() || !strikes(rect, other))
+        return;
+
+    LayoutUnit leftSide = std::min(rect.x(), other.x());
+    LayoutUnit rightSide = std::max(rect.maxX(), other.maxX());
+
+    rect.shiftXEdgeTo(leftSide);
+    rect.shiftMaxXEdgeTo(rightSide);
+
+    if (isFirst)
+        other.shiftMaxXEdgeTo(rightSide);
+    else
+        other.shiftXEdgeTo(leftSide);
+}
+
+inline void addHighlightRect(Path& path, const LayoutRect& rect, const LayoutRect& prev, const LayoutRect& next)
+{
+    // The rounding check depends on the rects not intersecting eachother,
+    // or being contained for that matter.
+    ASSERT(!rect.intersects(prev));
+    ASSERT(!rect.intersects(next));
+
+    if (rect.isEmpty())
+        return;
+
+    const int rounding = 4;
+
+    FloatRect copy(rect);
+    copy.inflateX(rounding);
+    copy.inflateY(rounding / 2);
+
+    FloatSize rounded(rounding * 1.8, rounding * 1.8);
+    FloatSize squared(0, 0);
+
+    path.addBeziersForRoundedRect(copy,
+            contains(prev, rect.x()) ? squared : rounded,
+            contains(prev, rect.maxX()) ? squared : rounded,
+            contains(next, rect.x()) ? squared : rounded,
+            contains(next, rect.maxX()) ? squared : rounded);
+}
+
+Path absolutePathForRenderer(RenderObject* const o)
 {
     ASSERT(o);
 
-    LayoutRect contentBox;
-    LayoutRect paddingBox;
-    LayoutRect borderBox;
+    Vector<IntRect> rects;
+    LayoutPoint frameOffset = ownerFrameToMainFrameOffset(o);
+    o->addFocusRingRects(rects, frameOffset);
 
-    contentBox = o->contentBoxRect();
-    paddingBox = LayoutRect(
-            contentBox.x() - o->paddingLeft(),
-            contentBox.y() - o->paddingTop(),
-            contentBox.width() + o->paddingLeft() + o->paddingRight(),
-            contentBox.height() + o->paddingTop() + o->paddingBottom());
-    borderBox = LayoutRect(
-            paddingBox.x() - o->borderLeft(),
-            paddingBox.y() - o->borderTop(),
-            paddingBox.width() + o->borderLeft() + o->borderRight(),
-            paddingBox.height() + o->borderTop() + o->borderBottom());
+    if (rects.isEmpty())
+        return Path();
 
-    FloatRect rect(borderBox);
-    rect.inflate(5);
+    // The basic idea is to allow up to three different boxes in order to highlight
+    // text with line breaks more nicer than using a bounding box.
 
-    rect.move(ownerFrameToMainFrameOffset(o));
+    // Merge all center boxes (all but the first and the last).
+    LayoutRect mid;
+
+    // Set the end value to integer. It ensures that no unsigned int overflow occurs
+    // in the test expression, in case of empty rects vector.
+    int end = rects.size() - 1;
+    for (int i = 1; i < end; ++i)
+        mid.uniteIfNonZero(rects.at(i));
+
+    LayoutRect first;
+    LayoutRect last;
+
+    // Add the first box, but merge it with the center boxes if it intersects or if the center box is empty.
+    if (rects.size() && !rects.first().isEmpty()) {
+        // If the mid box is empty at this point, unite it with the first box. This allows the first box to be
+        // united with the last box if they intersect in the following check for last. Not uniting them would
+        // trigger in assert in addHighlighRect due to the first and the last box intersecting, but being passed
+        // as two separate boxes.
+        if (mid.isEmpty() || mid.intersects(rects.first()))
+            mid.unite(rects.first());
+        else {
+            first = rects.first();
+            shiftXEdgesToContainIfStrikes(mid, first, /* isFirst */ true);
+        }
+    }
+
+    // Add the last box, but merge it with the center boxes if it intersects.
+    if (rects.size() > 1 && !rects.last().isEmpty()) {
+        // Adjust center boxes to boundary of last
+        if (mid.intersects(rects.last()))
+            mid.unite(rects.last());
+        else {
+            last = rects.last();
+            shiftXEdgesToContainIfStrikes(mid, last, /* isFirst */ false);
+        }
+    }
+
+    Vector<LayoutRect> drawableRects;
+    if (!first.isEmpty())
+        drawableRects.append(first);
+    if (!mid.isEmpty())
+        drawableRects.append(mid);
+    if (!last.isEmpty())
+        drawableRects.append(last);
+
+    // Clip the overflow rects if needed, before the ring path is formed to
+    // ensure rounded highlight rects. This clipping has the problem with nested
+    // divs with transforms, which could be resolved by proper Path::intersecting.
+    for (int i = drawableRects.size() - 1; i >= 0; --i) {
+        LayoutRect& ringRect = drawableRects.at(i);
+        LayoutPoint ringRectLocation = ringRect.location();
+
+        ringRect.moveBy(-frameOffset);
+
+        RenderLayer* layer = o->enclosingLayer();
+        RenderObject* currentRenderer = o;
+
+        // Check ancestor layers for overflow clip and intersect them.
+        for (; layer; layer = layer->parent()) {
+            RenderLayerModelObject* layerRenderer = layer->renderer();
+
+            if (layerRenderer->hasOverflowClip() && layerRenderer != currentRenderer) {
+                bool containerSkipped = false;
+                // Skip ancestor layers that are not containers for the current renderer.
+                currentRenderer->container(layerRenderer, &containerSkipped);
+                if (containerSkipped)
+                    continue;
+                ringRect.move(currentRenderer->offsetFromAncestorContainer(layerRenderer));
+                currentRenderer = layerRenderer;
+
+                ASSERT(layerRenderer->isBox());
+                ringRect.intersect(toRenderBox(layerRenderer)->borderBoxRect());
+
+                if (ringRect.isEmpty())
+                    break;
+            }
+        }
+
+        if (ringRect.isEmpty()) {
+            drawableRects.remove(i);
+            continue;
+        }
+        // After clipping, reset the original position so that parents' transforms apply correctly.
+        ringRect.setLocation(ringRectLocation);
+    }
 
     Path path;
-    path.addRoundedRect(rect, FloatSize(10, 10));
+    for (size_t i = 0; i < drawableRects.size(); ++i) {
+        LayoutRect prev = i ? drawableRects.at(i - 1) : LayoutRect();
+        LayoutRect next = i < (drawableRects.size() - 1) ? drawableRects.at(i + 1) : LayoutRect();
+        addHighlightRect(path, drawableRects.at(i), prev, next);
+    }
 
-    return path;
-}
-
-Path pathForRenderInline(RenderInline* o)
-{
-    // FIXME: Adapt this to not just use the bounding box.
-    LayoutRect borderBox = o->linesBoundingBox();
-
-    FloatRect rect(borderBox);
-    rect.inflate(5);
-
-    rect.move(ownerFrameToMainFrameOffset(o));
-
-    Path path;
-    path.addRoundedRect(rect, FloatSize(10, 10));
-
+    path.transform(localToAbsoluteTransform(o));
     return path;
 }
 
@@ -136,17 +258,10 @@ Path pathForNodeHighlight(const Node* node)
 {
     RenderObject* renderer = node->renderer();
 
-    Path path;
     if (!renderer || (!renderer->isBox() && !renderer->isRenderInline()))
-        return path;
+        return Path();
 
-    if (renderer->isBox())
-        path = pathForRenderBox(toRenderBox(renderer));
-    else
-        path = pathForRenderInline(toRenderInline(renderer));
-
-    path.transform(localToAbsoluteTransform(renderer));
-    return path;
+    return absolutePathForRenderer(renderer);
 }
 
 } // namespace GestureTapHighlighter

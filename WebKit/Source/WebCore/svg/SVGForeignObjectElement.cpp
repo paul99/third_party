@@ -25,6 +25,7 @@
 
 #include "Attribute.h"
 #include "CSSPropertyNames.h"
+#include "NodeRenderingContext.h"
 #include "RenderSVGForeignObject.h"
 #include "RenderSVGResource.h"
 #include "SVGElementInstance.h"
@@ -84,28 +85,27 @@ bool SVGForeignObjectElement::isSupportedAttribute(const QualifiedName& attrName
     return supportedAttributes.contains<QualifiedName, SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGForeignObjectElement::parseMappedAttribute(Attribute* attr)
+void SVGForeignObjectElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
     SVGParsingError parseError = NoError;
-    const AtomicString& value = attr->value();
 
-    if (!isSupportedAttribute(attr->name()))
-        SVGStyledTransformableElement::parseMappedAttribute(attr);
-    else if (attr->name() == SVGNames::xAttr)
+    if (!isSupportedAttribute(name))
+        SVGStyledTransformableElement::parseAttribute(name, value);
+    else if (name == SVGNames::xAttr)
         setXBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
-    else if (attr->name() == SVGNames::yAttr)
+    else if (name == SVGNames::yAttr)
         setYBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
-    else if (attr->name() == SVGNames::widthAttr)
+    else if (name == SVGNames::widthAttr)
         setWidthBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
-    else if (attr->name() == SVGNames::heightAttr)
+    else if (name == SVGNames::heightAttr)
         setHeightBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
-    else if (SVGTests::parseMappedAttribute(attr)
-               || SVGLangSpace::parseMappedAttribute(attr)
-               || SVGExternalResourcesRequired::parseMappedAttribute(attr)) {
+    else if (SVGTests::parseAttribute(name, value)
+               || SVGLangSpace::parseAttribute(name, value)
+               || SVGExternalResourcesRequired::parseAttribute(name, value)) {
     } else
         ASSERT_NOT_REACHED();
 
-    reportAttributeParsingError(parseError, attr);
+    reportAttributeParsingError(parseError, name, value);
 }
 
 void SVGForeignObjectElement::svgAttributeChanged(const QualifiedName& attrName)
@@ -137,14 +137,32 @@ RenderObject* SVGForeignObjectElement::createRenderer(RenderArena* arena, Render
     return new (arena) RenderSVGForeignObject(this);
 }
 
-bool SVGForeignObjectElement::childShouldCreateRenderer(Node* child) const
+bool SVGForeignObjectElement::childShouldCreateRenderer(const NodeRenderingContext& childContext) const
 {
     // Disallow arbitary SVG content. Only allow proper <svg xmlns="svgNS"> subdocuments.
-    if (child->isSVGElement())
-        return child->hasTagName(SVGNames::svgTag);
+    if (childContext.node()->isSVGElement())
+        return childContext.node()->hasTagName(SVGNames::svgTag);
 
     // Skip over SVG rules which disallow non-SVG kids
-    return StyledElement::childShouldCreateRenderer(child);
+    return StyledElement::childShouldCreateRenderer(childContext);
+}
+
+bool SVGForeignObjectElement::rendererIsNeeded(const NodeRenderingContext& context)
+{
+    // Suppress foreignObject renderers in SVG hidden containers.
+    // (https://bugs.webkit.org/show_bug.cgi?id=87297)
+    // Note that we currently do not support foreignObject instantiation via <use>, hence it is safe
+    // to use parentElement() here. If that changes, this method should be updated to use
+    // parentOrHostElement() instead.
+    Element* ancestor = parentElement();
+    while (ancestor && ancestor->isSVGElement()) {
+        if (ancestor->renderer() && ancestor->renderer()->isSVGHiddenContainer())
+            return false;
+
+        ancestor = ancestor->parentElement();
+    }
+
+    return SVGStyledTransformableElement::rendererIsNeeded(context);
 }
 
 bool SVGForeignObjectElement::selfHasRelativeLengths() const

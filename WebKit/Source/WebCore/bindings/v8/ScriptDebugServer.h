@@ -33,8 +33,7 @@
 
 #if ENABLE(JAVASCRIPT_DEBUGGER)
 
-#include "OwnHandle.h"
-#include "PlatformString.h"
+#include "ScopedPersistent.h"
 #include "ScriptBreakpoint.h"
 #include "Timer.h"
 #include <v8-debug.h>
@@ -43,11 +42,13 @@
 #include <wtf/PassOwnPtr.h>
 #include <wtf/Vector.h>
 #include <wtf/text/StringHash.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 class ScriptDebugListener;
 class ScriptObject;
+class ScriptState;
 class ScriptValue;
 
 class ScriptDebugServer {
@@ -77,26 +78,36 @@ public:
 
     bool canSetScriptSource();
     bool setScriptSource(const String& sourceID, const String& newContent, bool preview, String* error, ScriptValue* newCallFrames, ScriptObject* result);
+    void updateCallStack(ScriptValue* callFrame);
 
     bool causesRecompilation() { return false; }
-    bool supportsNativeBreakpoints() { return true; }
+    bool supportsSeparateScriptCompilationAndExecution() { return true; }
 
     void recompileAllJSFunctionsSoon() { }
     void recompileAllJSFunctions(Timer<ScriptDebugServer>* = 0) { }
+
+    void setScriptPreprocessor(const String& preprocessorBody);
 
     class Task {
     public:
         virtual ~Task() { }
         virtual void run() = 0;
     };
-    static void interruptAndRun(PassOwnPtr<Task>);
+    static void interruptAndRun(PassOwnPtr<Task>, v8::Isolate* = 0);
     void runPendingTasks();
 
     bool isPaused();
 
+    v8::Local<v8::Value> functionScopes(v8::Handle<v8::Function>);
+    v8::Local<v8::Value> getInternalProperties(v8::Handle<v8::Object>&);
+
+    virtual void compileScript(ScriptState*, const String& expression, const String& sourceURL, String* scriptId, String* exceptionMessage);
+    virtual void clearCompiledScripts();
+    virtual void runScript(ScriptState*, const String& scriptId, ScriptValue* result, bool* wasThrown, String* exceptionMessage);
+
 protected:
     ScriptDebugServer();
-    ~ScriptDebugServer() { }
+    virtual ~ScriptDebugServer();
     
     ScriptValue currentCallFrame();
 
@@ -113,14 +124,22 @@ protected:
     void dispatchDidParseSource(ScriptDebugListener* listener, v8::Handle<v8::Object> sourceObject);
 
     void ensureDebuggerScriptCompiled();
-    
-    PauseOnExceptionsState m_pauseOnExceptionsState;
-    OwnHandle<v8::Object> m_debuggerScript;
-    OwnHandle<v8::Object> m_executionState;
-    v8::Local<v8::Context> m_pausedContext;
 
+    v8::Local<v8::Value> callDebuggerMethod(const char* functionName, int argc, v8::Handle<v8::Value> argv[]);
+
+    String preprocessSourceCode(const String& sourceCode);
+
+    PauseOnExceptionsState m_pauseOnExceptionsState;
+    ScopedPersistent<v8::Object> m_debuggerScript;
+    ScopedPersistent<v8::Object> m_executionState;
+    v8::Local<v8::Context> m_pausedContext;
     bool m_breakpointsActivated;
-    OwnHandle<v8::FunctionTemplate> m_breakProgramCallbackTemplate;
+    ScopedPersistent<v8::FunctionTemplate> m_breakProgramCallbackTemplate;
+    HashMap<String, OwnPtr<ScopedPersistent<v8::Script> > > m_compiledScripts;
+    
+private:
+    class ScriptPreprocessor;
+    OwnPtr<ScriptPreprocessor> m_scriptPreprocessor;
 };
 
 } // namespace WebCore

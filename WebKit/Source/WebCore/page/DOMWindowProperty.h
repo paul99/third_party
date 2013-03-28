@@ -28,12 +28,18 @@
 
 namespace WebCore {
 
+class DOMWindow;
 class Frame;
 
 class DOMWindowProperty {
 public:
     explicit DOMWindowProperty(Frame*);
-    virtual void disconnectFrame();
+
+    virtual void disconnectFrameForPageCache();
+    virtual void reconnectFrameFromPageCache(Frame*);
+    virtual void willDestroyGlobalObjectInCachedFrame();
+    virtual void willDestroyGlobalObjectInFrame();
+    virtual void willDetachGlobalObjectFromFrame();
 
     Frame* frame() const { return m_frame; }
 
@@ -41,6 +47,7 @@ protected:
     virtual ~DOMWindowProperty();
 
     Frame* m_frame;
+    DOMWindow* m_associatedDOMWindow;
 };
 
 }

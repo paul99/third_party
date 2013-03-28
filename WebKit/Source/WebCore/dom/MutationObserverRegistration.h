@@ -33,39 +33,39 @@
 
 #if ENABLE(MUTATION_OBSERVERS)
 
-#include "WebKitMutationObserver.h"
+#include "MutationObserver.h"
 #include <wtf/HashSet.h>
 #include <wtf/text/AtomicString.h>
 #include <wtf/text/AtomicStringHash.h>
 
 namespace WebCore {
 
+class QualifiedName;
+
 class MutationObserverRegistration {
 public:
-
-    static PassOwnPtr<MutationObserverRegistration> create(PassRefPtr<WebKitMutationObserver>, Node*);
-
+    static PassOwnPtr<MutationObserverRegistration> create(PassRefPtr<MutationObserver>, Node*, MutationObserverOptions, const HashSet<AtomicString>& attributeFilter);
     ~MutationObserverRegistration();
 
     void resetObservation(MutationObserverOptions, const HashSet<AtomicString>& attributeFilter);
-    void observedSubtreeNodeWillDetach(PassRefPtr<Node>);
+    void observedSubtreeNodeWillDetach(Node*);
     void clearTransientRegistrations();
-    bool hasTransientRegistrations() { return m_transientRegistrationNodes && !m_transientRegistrationNodes->isEmpty(); }
+    bool hasTransientRegistrations() const { return m_transientRegistrationNodes && !m_transientRegistrationNodes->isEmpty(); }
     void unregister();
 
-    bool shouldReceiveMutationFrom(Node*, WebKitMutationObserver::MutationType, const AtomicString& attributeName);
-    bool inline isSubtree() const { return m_options & WebKitMutationObserver::Subtree; }
+    bool shouldReceiveMutationFrom(Node*, MutationObserver::MutationType, const QualifiedName* attributeName) const;
+    bool isSubtree() const { return m_options & MutationObserver::Subtree; }
 
-    WebKitMutationObserver* observer() { return m_observer.get(); }
-    MutationRecordDeliveryOptions deliveryOptions() const { return m_options & (WebKitMutationObserver::AttributeOldValue | WebKitMutationObserver::CharacterDataOldValue); }
-    MutationObserverOptions mutationTypes() const { return m_options & WebKitMutationObserver::AllMutationTypes; }
+    MutationObserver* observer() const { return m_observer.get(); }
+    MutationRecordDeliveryOptions deliveryOptions() const { return m_options & (MutationObserver::AttributeOldValue | MutationObserver::CharacterDataOldValue); }
+    MutationObserverOptions mutationTypes() const { return m_options & MutationObserver::AllMutationTypes; }
+
+    void addRegistrationNodesToSet(HashSet<Node*>&) const;
 
 private:
-    MutationObserverRegistration(PassRefPtr<WebKitMutationObserver>, Node*);
+    MutationObserverRegistration(PassRefPtr<MutationObserver>, Node*, MutationObserverOptions, const HashSet<AtomicString>& attributeFilter);
 
-    const HashSet<AtomicString>& caseInsensitiveAttributeFilter();
-
-    RefPtr<WebKitMutationObserver> m_observer;
+    RefPtr<MutationObserver> m_observer;
     Node* m_registrationNode;
     RefPtr<Node> m_registrationNodeKeepAlive;
     typedef HashSet<RefPtr<Node> > NodeHashSet;
@@ -73,7 +73,6 @@ private:
 
     MutationObserverOptions m_options;
     HashSet<AtomicString> m_attributeFilter;
-    OwnPtr<HashSet<AtomicString> > m_caseInsensitiveAttributeFilter;
 };
 
 } // namespace WebCore

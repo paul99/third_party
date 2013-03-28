@@ -27,7 +27,7 @@
 #ifndef ClipboardGtk_h
 #define ClipboardGtk_h
 
-#include "CachedImage.h"
+#include "CachedImageClient.h"
 #include "Clipboard.h"
 #include "DataObjectGtk.h"
 
@@ -54,10 +54,10 @@ namespace WebCore {
 
         void clearData(const String&);
         void clearAllData();
-        String getData(const String&, bool&) const;
+        String getData(const String&) const;
         bool setData(const String&, const String&);
 
-        virtual HashSet<String> types() const;
+        virtual ListHashSet<String> types() const;
         virtual PassRefPtr<FileList> files() const;
 
         void setDragImage(CachedImage*, const IntPoint&);

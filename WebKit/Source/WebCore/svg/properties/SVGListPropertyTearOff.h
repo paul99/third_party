@@ -29,6 +29,7 @@ template<typename PropertyType>
 class SVGListPropertyTearOff : public SVGListProperty<PropertyType> {
 public:
     typedef SVGListProperty<PropertyType> Base;
+    typedef SVGListPropertyTearOff<PropertyType> Self;
 
     typedef typename SVGPropertyTraits<PropertyType>::ListItemType ListItemType;
     typedef SVGPropertyTearOff<ListItemType> ListItemTearOff;
@@ -36,52 +37,55 @@ public:
     typedef SVGAnimatedListPropertyTearOff<PropertyType> AnimatedListPropertyTearOff;
     typedef typename SVGAnimatedListPropertyTearOff<PropertyType>::ListWrapperCache ListWrapperCache;
 
-    static PassRefPtr<SVGListPropertyTearOff<PropertyType> > create(AnimatedListPropertyTearOff* animatedProperty, SVGPropertyRole role)
+    using Base::m_role;
+    using Base::m_values;
+    using Base::m_wrappers;
+
+    static PassRefPtr<Self> create(AnimatedListPropertyTearOff* animatedProperty, SVGPropertyRole role, PropertyType& values, ListWrapperCache& wrappers)
     {
         ASSERT(animatedProperty);
-        return adoptRef(new SVGListPropertyTearOff<PropertyType>(animatedProperty, role));
+        return adoptRef(new Self(animatedProperty, role, values, wrappers));
     }
 
-    int removeItemFromList(ListItemTearOff* removeItem, bool shouldSynchronizeWrappers)
+    int findItem(ListItemTearOff* item) const
     {
-        PropertyType& values = m_animatedProperty->values();
-        ListWrapperCache& wrappers = m_animatedProperty->wrappers();
+        ASSERT(m_values);
+        ASSERT(m_wrappers);
 
-        // Lookup item in cache and remove its corresponding wrapper.
-        unsigned size = wrappers.size();
-        ASSERT(size == values.size());
-        for (unsigned i = 0; i < size; ++i) {
-            RefPtr<ListItemTearOff>& item = wrappers.at(i);
-            if (item != removeItem)
-                continue;
-
-            item->detachWrapper();
-            wrappers.remove(i);
-            values.remove(i);
-
-            if (shouldSynchronizeWrappers)
-                commitChange();
-
-            return i;
+        unsigned size = m_wrappers->size();
+        ASSERT(size == m_values->size());
+        for (size_t i = 0; i < size; ++i) {
+            if (item == m_wrappers->at(i))
+                return i;
         }
 
         return -1;
     }
 
+    void removeItemFromList(size_t itemIndex, bool shouldSynchronizeWrappers)
+    {
+        ASSERT(m_values);
+        ASSERT(m_wrappers);
+        ASSERT(m_values->size() == m_wrappers->size());
+
+        RefPtr<ListItemTearOff>& item = m_wrappers->at(itemIndex);
+        item->detachWrapper();
+        m_wrappers->remove(itemIndex);
+        m_values->remove(itemIndex);
+
+        if (shouldSynchronizeWrappers)
+            commitChange();
+    }
+
     // SVGList API
     void clear(ExceptionCode& ec)
     {
-        Base::clearValuesAndWrappers(m_animatedProperty.get(), ec);
-    }
-
-    unsigned numberOfItems() const
-    {
-        return Base::numberOfItemsValuesAndWrappers(m_animatedProperty.get());
+        Base::clearValuesAndWrappers(ec);
     }
 
     PassListItemTearOff initialize(PassListItemTearOff passNewItem, ExceptionCode& ec)
     {
-        return Base::initializeValuesAndWrappers(m_animatedProperty.get(), passNewItem, ec);
+        return Base::initializeValuesAndWrappers(passNewItem, ec);
     }
 
     PassListItemTearOff getItem(unsigned index, ExceptionCode& ec)
@@ -91,12 +95,12 @@ public:
 
     PassListItemTearOff insertItemBefore(PassListItemTearOff passNewItem, unsigned index, ExceptionCode& ec)
     {
-        return Base::insertItemBeforeValuesAndWrappers(m_animatedProperty.get(), passNewItem, index, ec);
+        return Base::insertItemBeforeValuesAndWrappers(passNewItem, index, ec);
     }
 
     PassListItemTearOff replaceItem(PassListItemTearOff passNewItem, unsigned index, ExceptionCode& ec)
     {
-        return Base::replaceItemValuesAndWrappers(m_animatedProperty.get(), passNewItem, index, ec);
+        return Base::replaceItemValuesAndWrappers(passNewItem, index, ec);
     }
 
     PassListItemTearOff removeItem(unsigned index, ExceptionCode& ec)
@@ -106,48 +110,58 @@ public:
 
     PassListItemTearOff appendItem(PassListItemTearOff passNewItem, ExceptionCode& ec)
     {
-        return Base::appendItemValuesAndWrappers(m_animatedProperty.get(), passNewItem, ec);
+        return Base::appendItemValuesAndWrappers(passNewItem, ec);
     }
 
 protected:
-    SVGListPropertyTearOff(AnimatedListPropertyTearOff* animatedProperty, SVGPropertyRole role)
-        : SVGListProperty<PropertyType>(role)
+    SVGListPropertyTearOff(AnimatedListPropertyTearOff* animatedProperty, SVGPropertyRole role, PropertyType& values, ListWrapperCache& wrappers)
+        : SVGListProperty<PropertyType>(role, values, &wrappers)
         , m_animatedProperty(animatedProperty)
     {
     }
 
+    virtual bool isReadOnly() const
+    {
+        if (m_role == AnimValRole)
+            return true;
+        if (m_animatedProperty && m_animatedProperty->isReadOnly())
+            return true;
+        return false;
+    }
+
     virtual void commitChange()
     {
-        PropertyType& values = m_animatedProperty->values();
-        ListWrapperCache& wrappers = m_animatedProperty->wrappers();
+        ASSERT(m_values);
+        ASSERT(m_wrappers);
 
         // Update existing wrappers, as the index in the values list has changed.
-        unsigned size = wrappers.size();
-        ASSERT(size == values.size());
+        unsigned size = m_wrappers->size();
+        ASSERT(size == m_values->size());
         for (unsigned i = 0; i < size; ++i) {
-            RefPtr<ListItemTearOff>& item = wrappers.at(i);
+            ListItemTearOff* item = m_wrappers->at(i).get();
             if (!item)
                 continue;
             item->setAnimatedProperty(m_animatedProperty.get());
-            item->setValue(values.at(i));
+            item->setValue(m_values->at(i));
         }
 
         m_animatedProperty->commitChange();
     }
 
-    virtual void processIncomingListItemValue(const ListItemType&, unsigned*)
+    virtual bool processIncomingListItemValue(const ListItemType&, unsigned*)
     {
         ASSERT_NOT_REACHED();
+        return true;
     }
 
-    virtual void processIncomingListItemWrapper(RefPtr<ListItemTearOff>& newItem, unsigned* indexToModify)
+    virtual bool processIncomingListItemWrapper(RefPtr<ListItemTearOff>& newItem, unsigned* indexToModify)
     {
         SVGAnimatedProperty* animatedPropertyOfItem = newItem->animatedProperty();
 
         // newItem has been created manually, it doesn't belong to any SVGElement.
         // (for example: "textElement.x.baseVal.appendItem(svgsvgElement.createSVGLength())")
         if (!animatedPropertyOfItem)
-            return;
+            return true;
 
         // newItem belongs to a SVGElement, but its associated SVGAnimatedProperty is not an animated list tear off.
         // (for example: "textElement.x.baseVal.appendItem(rectElement.width.baseVal)")
@@ -158,25 +172,34 @@ protected:
             // that's inserted into SVGTextElements SVGAnimatedLengthList 'x'. textElement.x.baseVal.getItem(0).value += 150 would
             // mutate the rectElement width _and_ the textElement x list. That's obviously wrong, take care of that.
             newItem = ListItemTearOff::create(newItem->propertyReference());
-            return;
+            return true;
         }
 
         // Spec: If newItem is already in a list, it is removed from its previous list before it is inserted into this list.
         // 'newItem' is already living in another list. If it's not our list, synchronize the other lists wrappers after the removal.
         bool livesInOtherList = animatedPropertyOfItem != m_animatedProperty;
-        int removedIndex = static_cast<AnimatedListPropertyTearOff*>(animatedPropertyOfItem)->removeItemFromList(newItem.get(), livesInOtherList);
-        ASSERT(removedIndex != -1);
+        AnimatedListPropertyTearOff* propertyTearOff = static_cast<AnimatedListPropertyTearOff*>(animatedPropertyOfItem);
+        int indexToRemove = propertyTearOff->findItem(newItem.get());
+        ASSERT(indexToRemove != -1);
+
+        // Do not remove newItem if already in this list at the target index.
+        if (!livesInOtherList && indexToModify && static_cast<unsigned>(indexToRemove) == *indexToModify)
+            return false;
+
+        propertyTearOff->removeItemFromList(indexToRemove, livesInOtherList);
 
         if (!indexToModify)
-            return;
+            return true;
 
         // If the item lived in our list, adjust the insertion index.
         if (!livesInOtherList) {
             unsigned& index = *indexToModify;
             // Spec: If the item is already in this list, note that the index of the item to (replace|insert before) is before the removal of the item.
-            if (static_cast<unsigned>(removedIndex) < index)
+            if (static_cast<unsigned>(indexToRemove) < index)
                 --index;
         }
+
+        return true;
     }
 
     // Back pointer to the animated property that created us

@@ -31,6 +31,7 @@
 /**
  * @constructor
  * @extends {WebInspector.View}
+ * @param {!Array.<!WebInspector.AuditCategoryResult>} categoryResults
  */
 WebInspector.AuditResultView = function(categoryResults)
 {
@@ -43,24 +44,16 @@ WebInspector.AuditResultView = function(categoryResults)
     categoryResults.sort(categorySorter);
     for (var i = 0; i < categoryResults.length; ++i)
         this.element.appendChild(new WebInspector.AuditCategoryResultPane(categoryResults[i]).element);
-
-    this.element.addEventListener("contextmenu", this._contextMenuEventFired.bind(this), true);
 }
 
 WebInspector.AuditResultView.prototype = {
-    _contextMenuEventFired: function(event)
-    {
-        var contextMenu = new WebInspector.ContextMenu();
-        if (WebInspector.populateHrefContextMenu(contextMenu, null, event))
-            contextMenu.show(event);
-    }
+    __proto__: WebInspector.View.prototype
 }
-
-WebInspector.AuditResultView.prototype.__proto__ = WebInspector.View.prototype;
 
 /**
  * @constructor
  * @extends {WebInspector.SidebarPane}
+ * @param {!WebInspector.AuditCategoryResult} categoryResult
  */
 WebInspector.AuditCategoryResultPane = function(categoryResult)
 {
@@ -97,6 +90,10 @@ WebInspector.AuditCategoryResultPane = function(categoryResult)
 }
 
 WebInspector.AuditCategoryResultPane.prototype = {
+    /**
+     * @param {(TreeOutline|TreeElement)} parentTreeElement
+     * @param {!WebInspector.AuditCategoryResult} result
+     */
     _appendResult: function(parentTreeElement, result)
     {
         var title = "";
@@ -114,7 +111,7 @@ WebInspector.AuditCategoryResultPane.prototype = {
         if (result.className)
             treeElement.listItemElement.addStyleClass(result.className);
         if (typeof result.value !== "string")
-            treeElement.listItemElement.appendChild(WebInspector.applyFormatters(result.value));
+            treeElement.listItemElement.appendChild(WebInspector.auditFormatters.apply(result.value));
 
         if (result.children) {
             for (var i = 0; i < result.children.length; ++i)
@@ -126,7 +123,7 @@ WebInspector.AuditCategoryResultPane.prototype = {
             treeElement.expand();
         }
         return treeElement;
-    }
-}
+    },
 
-WebInspector.AuditCategoryResultPane.prototype.__proto__ = WebInspector.SidebarPane.prototype;
+    __proto__: WebInspector.SidebarPane.prototype
+}

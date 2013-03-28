@@ -66,8 +66,13 @@ public:
 
     FilterOperationType operationType() const { return m_type; }
 
+    PassRefPtr<WebKitCSSFilterValue> cloneForCSSOM() const;
+
+    void reportDescendantMemoryUsage(MemoryObjectInfo*) const;
+
 private:
     WebKitCSSFilterValue(FilterOperationType);
+    WebKitCSSFilterValue(const WebKitCSSFilterValue& cloneFrom);
 
     FilterOperationType m_type;
 };

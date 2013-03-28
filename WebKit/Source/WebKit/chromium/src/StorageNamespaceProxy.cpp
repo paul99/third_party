@@ -32,17 +32,17 @@
 #include "SecurityOrigin.h"
 #include "StorageAreaProxy.h"
 #include "WebKit.h"
-#include "platform/WebKitPlatformSupport.h"
 #include "WebStorageNamespace.h"
-#include "platform/WebString.h"
 #include "WebViewClient.h"
 #include "WebViewImpl.h"
+#include <public/Platform.h>
+#include <public/WebString.h>
 
 namespace WebCore {
 
 PassRefPtr<StorageNamespace> StorageNamespace::localStorageNamespace(const String& path, unsigned quota)
 {
-    return adoptRef(new StorageNamespaceProxy(WebKit::webKitPlatformSupport()->createLocalStorageNamespace(path, quota), LocalStorage));
+    return adoptRef(new StorageNamespaceProxy(WebKit::Platform::current()->createLocalStorageNamespace(path, quota), LocalStorage));
 }
 
 PassRefPtr<StorageNamespace> StorageNamespace::sessionStorageNamespace(Page* page, unsigned quota)
@@ -82,7 +82,7 @@ PassRefPtr<StorageArea> StorageNamespaceProxy::storageArea(PassRefPtr<SecurityOr
 
 void StorageNamespaceProxy::close()
 {
-    m_storageNamespace->close();
+    // N/A to the chromium port.
 }
 
 void StorageNamespaceProxy::clearOriginForDeletion(SecurityOrigin* origin)
@@ -98,6 +98,11 @@ void StorageNamespaceProxy::clearAllOriginsForDeletion()
 void StorageNamespaceProxy::sync()
 {
     ASSERT_NOT_REACHED();
+}
+
+bool StorageNamespaceProxy::isSameNamespace(const WebKit::WebStorageNamespace& sessionNamespace)
+{
+    return m_storageNamespace && m_storageNamespace->isSameNamespace(sessionNamespace);
 }
 
 } // namespace WebCore

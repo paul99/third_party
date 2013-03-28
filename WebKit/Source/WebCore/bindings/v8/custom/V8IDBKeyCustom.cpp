@@ -38,33 +38,36 @@
 
 namespace WebCore {
 
-v8::Handle<v8::Value> toV8(IDBKey* key)
+v8::Handle<v8::Value> toV8(IDBKey* key, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
 {
-    if (!key)
-        return v8::Null();
+    if (!key) {
+        // This should be undefined, not null.
+        // Spec: http://dvcs.w3.org/hg/IndexedDB/raw-file/tip/Overview.html#idl-def-IDBKeyRange
+        return v8Undefined();
+    }
 
     switch (key->type()) {
     case IDBKey::InvalidType:
     case IDBKey::MinType:
         ASSERT_NOT_REACHED();
-        return v8::Undefined();
+        return v8Undefined();
     case IDBKey::NumberType:
         return v8::Number::New(key->number());
     case IDBKey::StringType:
-        return v8String(key->string());
+        return v8String(key->string(), isolate);
     case IDBKey::DateType:
         return v8::Date::New(key->date());
     case IDBKey::ArrayType:
         {
             v8::Local<v8::Array> array = v8::Array::New(key->array().size());
             for (size_t i = 0; i < key->array().size(); ++i)
-                array->Set(i, toV8(key->array()[i].get()));
+                array->Set(i, toV8(key->array()[i].get(), creationContext, isolate));
             return array;
         }
     }
 
     ASSERT_NOT_REACHED();
-    return v8::Undefined();
+    return v8Undefined();
 }
 
 } // namespace WebCore

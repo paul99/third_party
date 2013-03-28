@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,59 +26,151 @@
 #include "config.h"
 #include "DFGDriver.h"
 
+#include "JSObject.h"
+#include "JSString.h"
+
+
 #if ENABLE(DFG_JIT)
 
+#include "DFGArgumentsSimplificationPhase.h"
 #include "DFGByteCodeParser.h"
+#include "DFGCFAPhase.h"
+#include "DFGCFGSimplificationPhase.h"
+#include "DFGCSEPhase.h"
+#include "DFGConstantFoldingPhase.h"
+#include "DFGFixupPhase.h"
 #include "DFGJITCompiler.h"
-#include "DFGPropagator.h"
+#include "DFGPredictionPropagationPhase.h"
+#include "DFGStructureCheckHoistingPhase.h"
+#include "DFGValidate.h"
+#include "DFGVirtualRegisterAllocationPhase.h"
+#include "Options.h"
 
 namespace JSC { namespace DFG {
 
+static unsigned numCompilations;
+
+unsigned getNumCompilations()
+{
+    return numCompilations;
+}
+
 enum CompileMode { CompileFunction, CompileOther };
-inline bool compile(CompileMode compileMode, JSGlobalData& globalData, CodeBlock* codeBlock, JITCode& jitCode, MacroAssemblerCodePtr* jitCodeWithArityCheck)
+inline bool compile(CompileMode compileMode, ExecState* exec, CodeBlock* codeBlock, JITCode& jitCode, MacroAssemblerCodePtr* jitCodeWithArityCheck, unsigned osrEntryBytecodeIndex)
 {
     SamplingRegion samplingRegion("DFG Compilation (Driver)");
+    
+    numCompilations++;
     
     ASSERT(codeBlock);
     ASSERT(codeBlock->alternative());
     ASSERT(codeBlock->alternative()->getJITType() == JITCode::BaselineJIT);
+    
+    ASSERT(osrEntryBytecodeIndex != UINT_MAX);
 
+    if (!Options::useDFGJIT())
+        return false;
+    
 #if DFG_ENABLE(DEBUG_VERBOSE)
-    fprintf(stderr, "DFG compiling code block %p(%p), number of instructions = %u.\n", codeBlock, codeBlock->alternative(), codeBlock->instructionCount());
+    dataLog("DFG compiling ", *codeBlock, ", number of instructions = ", codeBlock->instructionCount(), "\n");
 #endif
     
-    Graph dfg;
-    if (!parse(dfg, &globalData, codeBlock))
+    // Derive our set of must-handle values. The compilation must be at least conservative
+    // enough to allow for OSR entry with these values.
+    unsigned numVarsWithValues;
+    if (osrEntryBytecodeIndex)
+        numVarsWithValues = codeBlock->m_numVars;
+    else
+        numVarsWithValues = 0;
+    Operands<JSValue> mustHandleValues(codeBlock->numParameters(), numVarsWithValues);
+    for (size_t i = 0; i < mustHandleValues.size(); ++i) {
+        int operand = mustHandleValues.operandForIndex(i);
+        if (operandIsArgument(operand)
+            && !operandToArgument(operand)
+            && compileMode == CompileFunction
+            && codeBlock->specializationKind() == CodeForConstruct) {
+            // Ugh. If we're in a constructor, the 'this' argument may hold garbage. It will
+            // also never be used. It doesn't matter what we put into the value for this,
+            // but it has to be an actual value that can be grokked by subsequent DFG passes,
+            // so we sanitize it here by turning it into Undefined.
+            mustHandleValues[i] = jsUndefined();
+        } else
+            mustHandleValues[i] = exec->uncheckedR(operand).jsValue();
+    }
+    
+    Graph dfg(exec->globalData(), codeBlock, osrEntryBytecodeIndex, mustHandleValues);
+    if (!parse(exec, dfg))
         return false;
     
     if (compileMode == CompileFunction)
-        dfg.predictArgumentTypes(codeBlock);
+        dfg.predictArgumentTypes();
     
-    propagate(dfg, &globalData, codeBlock);
+    // By this point the DFG bytecode parser will have potentially mutated various tables
+    // in the CodeBlock. This is a good time to perform an early shrink, which is more
+    // powerful than a late one. It's safe to do so because we haven't generated any code
+    // that references any of the tables directly, yet.
+    codeBlock->shrinkToFit(CodeBlock::EarlyShrink);
+
+    validate(dfg);
+    performPredictionPropagation(dfg);
+    performFixup(dfg);
+    performStructureCheckHoisting(dfg);
+    unsigned cnt = 1;
+    dfg.m_fixpointState = FixpointNotConverged;
+    for (;; ++cnt) {
+#if DFG_ENABLE(DEBUG_VERBOSE)
+        dataLogF("DFG beginning optimization fixpoint iteration #%u.\n", cnt);
+#endif
+        bool changed = false;
+        performCFA(dfg);
+        changed |= performConstantFolding(dfg);
+        changed |= performArgumentsSimplification(dfg);
+        changed |= performCFGSimplification(dfg);
+        changed |= performCSE(dfg);
+        if (!changed)
+            break;
+        dfg.resetExitStates();
+        performFixup(dfg);
+    }
+    dfg.m_fixpointState = FixpointConverged;
+    performCSE(dfg);
+#if DFG_ENABLE(DEBUG_VERBOSE)
+    dataLogF("DFG optimization fixpoint converged in %u iterations.\n", cnt);
+#endif
+    performVirtualRegisterAllocation(dfg);
+
+    GraphDumpMode modeForFinalValidate = DumpGraph;
+#if DFG_ENABLE(DEBUG_VERBOSE)
+    dataLogF("Graph after optimization:\n");
+    dfg.dump();
+    modeForFinalValidate = DontDumpGraph;
+#endif
+    validate(dfg, modeForFinalValidate);
     
-    JITCompiler dataFlowJIT(&globalData, dfg, codeBlock);
+    JITCompiler dataFlowJIT(dfg);
+    bool result;
     if (compileMode == CompileFunction) {
         ASSERT(jitCodeWithArityCheck);
         
-        dataFlowJIT.compileFunction(jitCode, *jitCodeWithArityCheck);
+        result = dataFlowJIT.compileFunction(jitCode, *jitCodeWithArityCheck);
     } else {
         ASSERT(compileMode == CompileOther);
         ASSERT(!jitCodeWithArityCheck);
         
-        dataFlowJIT.compile(jitCode);
+        result = dataFlowJIT.compile(jitCode);
     }
     
-    return true;
+    return result;
 }
 
-bool tryCompile(JSGlobalData& globalData, CodeBlock* codeBlock, JITCode& jitCode)
+bool tryCompile(ExecState* exec, CodeBlock* codeBlock, JITCode& jitCode, unsigned bytecodeIndex)
 {
-    return compile(CompileOther, globalData, codeBlock, jitCode, 0);
+    return compile(CompileOther, exec, codeBlock, jitCode, 0, bytecodeIndex);
 }
 
-bool tryCompileFunction(JSGlobalData& globalData, CodeBlock* codeBlock, JITCode& jitCode, MacroAssemblerCodePtr& jitCodeWithArityCheck)
+bool tryCompileFunction(ExecState* exec, CodeBlock* codeBlock, JITCode& jitCode, MacroAssemblerCodePtr& jitCodeWithArityCheck, unsigned bytecodeIndex)
 {
-    return compile(CompileFunction, globalData, codeBlock, jitCode, &jitCodeWithArityCheck);
+    return compile(CompileFunction, exec, codeBlock, jitCode, &jitCodeWithArityCheck, bytecodeIndex);
 }
 
 } } // namespace JSC::DFG

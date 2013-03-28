@@ -276,13 +276,13 @@ bool WebEditorClient::shouldInsertText(const String& /*str*/, Range* /* replacin
 //bool WebEditorClient::shouldChangeSelectedRange(Range *currentRange, Range *toProposedRange, SelectionAffinity selectionAffinity, bool stillSelecting)
 //{ notImplemented(); return false; }
 
-bool WebEditorClient::shouldApplyStyle(CSSStyleDeclaration* /*style*/, Range* /*toElementsInDOMRange*/)
+bool WebEditorClient::shouldApplyStyle(StylePropertySet* /*style*/, Range* /*toElementsInDOMRange*/)
 { notImplemented(); return true; }
 
 bool WebEditorClient::shouldMoveRangeAfterDelete(Range* /*range*/, Range* /*rangeToBeReplaced*/)
 { notImplemented(); return true; }
 
-bool WebEditorClient::shouldChangeTypingStyle(CSSStyleDeclaration* /*currentStyle*/, CSSStyleDeclaration* /*toProposedStyle*/)
+bool WebEditorClient::shouldChangeTypingStyle(StylePropertySet* /*currentStyle*/, StylePropertySet* /*toProposedStyle*/)
 { notImplemented(); return false; }
 
 void WebEditorClient::webViewDidChangeTypingStyle(WebNotification* /*notification*/)
@@ -625,6 +625,11 @@ void WebEditorClient::handleInputMethodKeydown(KeyboardEvent* )
 {
 }
 
+bool WebEditorClient::shouldEraseMarkersAfterChangeSelection(TextCheckingType) const
+{
+    return true;
+}
+
 void WebEditorClient::ignoreWordInSpellDocument(const String& word)
 {
     COMPtr<IWebEditingDelegate> ed;
@@ -690,21 +695,19 @@ void WebEditorClient::checkGrammarOfString(const UChar* text, int length, Vector
             continue;
         if (FAILED(detailObj->location(&detail.location)))
             continue;
-        BSTR userDesc;
+        BString userDesc;
         if (FAILED(detailObj->userDescription(&userDesc)))
             continue;
         detail.userDescription = String(userDesc, SysStringLen(userDesc));
-        SysFreeString(userDesc);
 
         COMPtr<IEnumSpellingGuesses> enumGuessesObj;
         if (FAILED(detailObj->guesses(&enumGuessesObj)))
             continue;
         while (true) {
-            BSTR guess;
+            BString guess;
             if (enumGuessesObj->Next(1, &guess, &fetched) != S_OK)
                 break;
             detail.guesses.append(String(guess, SysStringLen(guess)));
-            SysFreeString(guess);
         }
 
         details.append(detail);
@@ -773,11 +776,10 @@ void WebEditorClient::getGuessesForWord(const String& word, const String& contex
 
     while (true) {
         ULONG fetched;
-        BSTR guess;
+        BString guess;
         if (enumGuessesObj->Next(1, &guess, &fetched) != S_OK)
             break;
         guesses.append(String(guess, SysStringLen(guess)));
-        SysFreeString(guess);
     }
 }
 

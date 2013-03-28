@@ -30,12 +30,11 @@
 #ifndef StorageEventDispatcher_h
 #define StorageEventDispatcher_h
 
-#include "PlatformString.h"
 #include "StorageArea.h"
+#include <wtf/Forward.h>
 
 namespace WebCore {
 
-    // This is in its own class since Chromium must override it.
     class StorageEventDispatcher {
     public:
         static void dispatch(const String& key, const String& oldValue, const String& newValue, StorageType, SecurityOrigin*, Frame* sourceFrame);

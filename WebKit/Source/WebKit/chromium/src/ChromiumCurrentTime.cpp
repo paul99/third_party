@@ -29,21 +29,20 @@
  */
 
 #include "config.h"
-#include <wtf/CurrentTime.h>
 
-#include "WebKit.h"
-#include "platform/WebKitPlatformSupport.h"
+#include <public/Platform.h>
+#include <wtf/CurrentTime.h>
 
 namespace WTF {
 
 double currentTime()
 {
-    return WebKit::webKitPlatformSupport()->currentTime();
+    return WebKit::Platform::current()->currentTime();
 }
 
 double monotonicallyIncreasingTime()
 {
-    return WebKit::webKitPlatformSupport()->monotonicallyIncreasingTime();
+    return WebKit::Platform::current()->monotonicallyIncreasingTime();
 }
 
 }  // namespace WTF

@@ -9,6 +9,8 @@ Index: source/common/unicode/ptypes.h
 -#include "unicode/platform.h"
 +#if defined(__APPLE__)
 +#   include "unicode/pmac.h"
++#elif defined(ANDROID)
++#   include "unicode/pandroid.h"
 +#elif defined(__linux__)
 +#   include "unicode/plinux.h"
 +#else

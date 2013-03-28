@@ -30,10 +30,11 @@
 #ifndef FileSystem_h
 #define FileSystem_h
 
-#include "PlatformString.h"
 #include <time.h>
 #include <wtf/Forward.h>
+#include <wtf/MathExtras.h>
 #include <wtf/Vector.h>
+#include <wtf/text/WTFString.h>
 
 #if USE(CF)
 #include <wtf/RetainPtr.h>
@@ -70,13 +71,19 @@ typedef struct _GFileIOStream GFileIOStream;
 typedef struct _GModule GModule;
 #endif
 
+#if PLATFORM(EFL)
+typedef struct _Eina_Module Eina_Module;
+#endif
+
 namespace WebCore {
 
 // PlatformModule
-#if PLATFORM(GTK)
-typedef GModule* PlatformModule;
-#elif OS(WINDOWS)
+#if OS(WINDOWS)
 typedef HMODULE PlatformModule;
+#elif PLATFORM(GTK)
+typedef GModule* PlatformModule;
+#elif PLATFORM(EFL)
+typedef Eina_Module* PlatformModule;
 #elif PLATFORM(QT)
 #if defined(Q_WS_MAC)
 typedef CFBundleRef PlatformModule;
@@ -151,12 +158,14 @@ static const char PlatformFilePathSeparator = '\\';
 static const char PlatformFilePathSeparator = '/';
 #endif
 
-void revealFolderInOS(const String&);
+struct FileMetadata;
+
 bool fileExists(const String&);
 bool deleteFile(const String&);
 bool deleteEmptyDirectory(const String&);
 bool getFileSize(const String&, long long& result);
 bool getFileModificationTime(const String&, time_t& result);
+bool getFileMetadata(const String&, FileMetadata&);
 String pathByAppendingComponent(const String& path, const String& component);
 bool makeAllDirectories(const String& path);
 String homeDirectoryPath();
@@ -171,6 +180,9 @@ Vector<String> listDirectory(const String& path, const String& filter = String()
 CString fileSystemRepresentation(const String&);
 
 inline bool isHandleValid(const PlatformFileHandle& handle) { return handle != invalidPlatformFileHandle; }
+
+inline double invalidFileTime() { return std::numeric_limits<double>::quiet_NaN(); }
+inline bool isValidFileTime(double time) { return isfinite(time); }
 
 // Prefix is what the filename should be prefixed with, not the full path.
 String openTemporaryFile(const String& prefix, PlatformFileHandle&);
@@ -194,16 +206,26 @@ String encodeForFileName(const String&);
 RetainPtr<CFURLRef> pathAsURL(const String&);
 #endif
 
+#if PLATFORM(MAC)
+void setMetadataURL(String& URLString, const String& referrer, const String& path);
+#endif
+
 #if PLATFORM(GTK)
 String filenameToString(const char*);
 String filenameForDisplay(const String&);
 CString applicationDirectoryPath();
+CString sharedResourcesPath();
+#endif
+#if USE(SOUP) || PLATFORM(QT)
 uint64_t getVolumeFreeSizeForPath(const char*);
 #endif
 
 #if PLATFORM(WIN) && !OS(WINCE)
 String localUserSpecificStorageDirectory();
 String roamingUserSpecificStorageDirectory();
+#endif
+
+#if PLATFORM(WIN) && USE(CF)
 bool safeCreateFile(const String&, CFDataRef);
 #endif
 

@@ -31,8 +31,9 @@
 #include "config.h"
 #include "DateExtension.h"
 
-#include "V8Proxy.h"
 #include "V8HiddenPropertyName.h"
+#include "V8Binding.h"
+#include "V8RecursionScope.h"
 
 namespace WebCore {
 
@@ -75,7 +76,7 @@ DateExtension* DateExtension::get()
 
 void DateExtension::setAllowSleep(bool allow)
 {
-    v8::Local<v8::Value> result = V8Proxy::currentContext()->Global()->Get(v8::String::New("Date"));
+    v8::Local<v8::Value> result = v8::Context::GetCurrent()->Global()->Get(v8::String::NewSymbol("Date"));
     if (result.IsEmpty() || !result->IsObject())
         return;
 
@@ -89,14 +90,15 @@ void DateExtension::setAllowSleep(bool allow)
 
     v8::Handle<v8::Value> argv[1];
     argv[0] = v8::Boolean::New(!allow);
+    V8RecursionScope::MicrotaskSuppression scope;
     v8::Handle<v8::Function>::Cast(sleepFunctionHandle)->Call(v8::Object::New(), 1, argv);
 }
 
 v8::Handle<v8::FunctionTemplate> DateExtension::GetNativeFunction(v8::Handle<v8::String> name)
 {
-    if (name->Equals(v8::String::New("Setup")))
+    if (name->Equals(v8::String::NewSymbol("Setup")))
         return v8::FunctionTemplate::New(Setup);
-    if (name->Equals(v8::String::New("OnSleepDetected")))
+    if (name->Equals(v8::String::NewSymbol("OnSleepDetected")))
         return v8::FunctionTemplate::New(OnSleepDetected);
 
     return v8::Handle<v8::FunctionTemplate>();
@@ -114,10 +116,9 @@ v8::Handle<v8::Value> DateExtension::Setup(const v8::Arguments& args)
     return v8::Undefined();
 }
 
-v8::Handle<v8::Value> DateExtension::OnSleepDetected(const v8::Arguments&)
+v8::Handle<v8::Value> DateExtension::OnSleepDetected(const v8::Arguments& args)
 {
-    V8Proxy::throwError(V8Proxy::GeneralError, "Too much time spent in unload handler.");
-    return v8::Undefined();
+    return throwError(v8GeneralError, "Too much time spent in unload handler.", args.GetIsolate());
 }
 
 }  // namespace WebCore

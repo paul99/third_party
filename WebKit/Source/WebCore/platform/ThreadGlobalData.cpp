@@ -27,8 +27,10 @@
 #include "config.h"
 #include "ThreadGlobalData.h"
 
+#include "CachedResourceRequestInitiators.h"
 #include "DOMImplementation.h"
 #include "EventNames.h"
+#include "InspectorCounters.h"
 #include "ThreadTimers.h"
 #include <wtf/MainThread.h>
 #include <wtf/UnusedParam.h>
@@ -58,7 +60,8 @@ ThreadGlobalData* ThreadGlobalData::staticData;
 #endif
 
 ThreadGlobalData::ThreadGlobalData()
-    : m_eventNames(adoptPtr(new EventNames))
+    : m_cachedResourceRequestInitiators(adoptPtr(new CachedResourceRequestInitiators))
+    , m_eventNames(adoptPtr(new EventNames))
     , m_threadTimers(adoptPtr(new ThreadTimers))
     , m_xmlTypeRegExp(adoptPtr(new XMLMIMETypeRegExp))
 #ifndef NDEBUG
@@ -69,6 +72,9 @@ ThreadGlobalData::ThreadGlobalData()
 #endif
 #if PLATFORM(MAC)
     , m_cachedConverterTEC(adoptPtr(new TECConverterWrapper))
+#endif
+#if ENABLE(INSPECTOR)
+    , m_inspectorCounters(adoptPtr(new ThreadLocalInspectorCounters()))
 #endif
 {
     // This constructor will have been called on the main thread before being called on
@@ -91,6 +97,10 @@ void ThreadGlobalData::destroy()
 
 #if USE(ICU_UNICODE)
     m_cachedConverterICU.clear();
+#endif
+
+#if ENABLE(INSPECTOR)
+    m_inspectorCounters.clear();
 #endif
 
     m_eventNames.clear();

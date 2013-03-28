@@ -43,21 +43,29 @@ void WebInspectorClient::inspectorDestroyed()
     delete this;
 }
 
-void WebInspectorClient::openInspectorFrontend(InspectorController*)
+WebCore::InspectorFrontendChannel* WebInspectorClient::openInspectorFrontend(InspectorController*)
 {
     WebPage* inspectorPage = m_page->inspector()->createInspectorPage();
     ASSERT_UNUSED(inspectorPage, inspectorPage);
+    return this;
 }
 
 void WebInspectorClient::closeInspectorFrontend()
 {
-    if (m_page->inspector())
+    if (m_page->inspector()) {
         m_page->inspector()->didClose();
+    }
 }
 
 void WebInspectorClient::bringFrontendToFront()
 {
     m_page->inspector()->bringToFront();
+}
+
+void WebInspectorClient::didResizeMainFrame(Frame*)
+{
+    if (m_page->inspector())
+        m_page->inspector()->updateDockingAvailability();
 }
 
 void WebInspectorClient::highlight()
@@ -81,10 +89,19 @@ bool WebInspectorClient::sendMessageToFrontend(const String& message)
     WebInspector* inspector = m_page->inspector();
     if (!inspector)
         return false;
+
+#if ENABLE(INSPECTOR_SERVER)
+    if (inspector->hasRemoteFrontendConnected()) {
+        inspector->sendMessageToRemoteFrontend(message);
+        return true;
+    }
+#endif
+
     WebPage* inspectorPage = inspector->inspectorPage();
-    if (!inspectorPage)
-        return false;
-    return doDispatchMessageOnFrontendPage(inspectorPage->corePage(), message);
+    if (inspectorPage)
+        return doDispatchMessageOnFrontendPage(inspectorPage->corePage(), message);
+
+    return false;
 }
 
 void WebInspectorClient::pageOverlayDestroyed(PageOverlay*)
@@ -105,7 +122,7 @@ void WebInspectorClient::didMoveToWebPage(PageOverlay*, WebPage*)
 {
 }
 
-void WebInspectorClient::drawRect(PageOverlay* overlay, WebCore::GraphicsContext& context, const WebCore::IntRect& dirtyRect)
+void WebInspectorClient::drawRect(PageOverlay*, WebCore::GraphicsContext& context, const WebCore::IntRect& /*dirtyRect*/)
 {
     m_page->corePage()->inspectorController()->drawHighlight(context);
 }

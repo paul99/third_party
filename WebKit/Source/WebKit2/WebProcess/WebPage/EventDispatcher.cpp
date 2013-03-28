@@ -37,6 +37,8 @@
 
 #if ENABLE(THREADED_SCROLLING)
 #include <WebCore/ScrollingCoordinator.h>
+#include <WebCore/ScrollingThread.h>
+#include <WebCore/ScrollingTree.h>
 #endif
 
 using namespace WebCore;
@@ -52,44 +54,55 @@ EventDispatcher::~EventDispatcher()
 }
 
 #if ENABLE(THREADED_SCROLLING)
-void EventDispatcher::addScrollingCoordinatorForPage(WebPage* webPage)
+void EventDispatcher::addScrollingTreeForPage(WebPage* webPage)
 {
-    MutexLocker locker(m_scrollingCoordinatorsMutex);
+    MutexLocker locker(m_scrollingTreesMutex);
 
     ASSERT(webPage->corePage()->scrollingCoordinator());
-    ASSERT(!m_scrollingCoordinators.contains(webPage->pageID()));
-    m_scrollingCoordinators.set(webPage->pageID(), webPage->corePage()->scrollingCoordinator());
+    ASSERT(!m_scrollingTrees.contains(webPage->pageID()));
+    m_scrollingTrees.set(webPage->pageID(), webPage->corePage()->scrollingCoordinator()->scrollingTree());
 }
 
-void EventDispatcher::removeScrollingCoordinatorForPage(WebPage* webPage)
+void EventDispatcher::removeScrollingTreeForPage(WebPage* webPage)
 {
-    MutexLocker locker(m_scrollingCoordinatorsMutex);
-    ASSERT(m_scrollingCoordinators.contains(webPage->pageID()));
+    MutexLocker locker(m_scrollingTreesMutex);
+    ASSERT(m_scrollingTrees.contains(webPage->pageID()));
 
-    m_scrollingCoordinators.remove(webPage->pageID());
+    m_scrollingTrees.remove(webPage->pageID());
 }
 #endif
 
-void EventDispatcher::didReceiveMessageOnConnectionWorkQueue(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::ArgumentDecoder* arguments, bool& didHandleMessage)
+void EventDispatcher::didReceiveMessageOnConnectionWorkQueue(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder, bool& didHandleMessage)
 {
     if (messageID.is<CoreIPC::MessageClassEventDispatcher>()) {
-        didReceiveEventDispatcherMessageOnConnectionWorkQueue(connection, messageID, arguments, didHandleMessage);
+        didReceiveEventDispatcherMessageOnConnectionWorkQueue(connection, messageID, decoder, didHandleMessage);
         return;
     }
 }
 
-void EventDispatcher::wheelEvent(CoreIPC::Connection*, uint64_t pageID, const WebWheelEvent& wheelEvent)
+void EventDispatcher::wheelEvent(CoreIPC::Connection*, uint64_t pageID, const WebWheelEvent& wheelEvent, bool canGoBack, bool canGoForward)
 {
 #if ENABLE(THREADED_SCROLLING)
-    MutexLocker locker(m_scrollingCoordinatorsMutex);
-    if (ScrollingCoordinator* scrollingCoordinator = m_scrollingCoordinators.get(pageID).get()) {
+    MutexLocker locker(m_scrollingTreesMutex);
+    if (ScrollingTree* scrollingTree = m_scrollingTrees.get(pageID).get()) {
         PlatformWheelEvent platformWheelEvent = platform(wheelEvent);
 
-        if (scrollingCoordinator->handleWheelEvent(platformWheelEvent)) {
-            sendDidHandleEvent(pageID, wheelEvent);
+        // FIXME: It's pretty horrible that we're updating the back/forward state here.
+        // WebCore should always know the current state and know when it changes so the
+        // scrolling tree can be notified.
+        // We only need to do this at the beginning of the gesture.
+        if (platformWheelEvent.phase() == PlatformWheelEventPhaseBegan)
+            ScrollingThread::dispatch(bind(&ScrollingTree::updateBackForwardState, scrollingTree, canGoBack, canGoForward));
+
+        ScrollingTree::EventResult result = scrollingTree->tryToHandleWheelEvent(platformWheelEvent);
+        if (result == ScrollingTree::DidHandleEvent || result == ScrollingTree::DidNotHandleEvent) {
+            sendDidReceiveEvent(pageID, wheelEvent, result == ScrollingTree::DidHandleEvent);
             return;
         }
     }
+#else
+    UNUSED_PARAM(canGoBack);
+    UNUSED_PARAM(canGoForward);
 #endif
 
     RunLoop::main()->dispatch(bind(&EventDispatcher::dispatchWheelEvent, this, pageID, wheelEvent));
@@ -98,18 +111,6 @@ void EventDispatcher::wheelEvent(CoreIPC::Connection*, uint64_t pageID, const We
 #if ENABLE(GESTURE_EVENTS)
 void EventDispatcher::gestureEvent(CoreIPC::Connection*, uint64_t pageID, const WebGestureEvent& gestureEvent)
 {
-#if ENABLE(THREADED_SCROLLING)
-    MutexLocker locker(m_scrollingCoordinatorsMutex);
-    if (ScrollingCoordinator* scrollingCoordinator = m_scrollingCoordinators.get(pageID).get()) {
-        PlatformGestureEvent platformGestureEvent = platform(gestureEvent);
-
-        if (scrollingCoordinator->handleGestureEvent(platformGestureEvent)) {
-            sendDidHandleEvent(pageID, gestureEvent);
-            return;
-        }
-    }
-#endif
-
     RunLoop::main()->dispatch(bind(&EventDispatcher::dispatchGestureEvent, this, pageID, gestureEvent));
 }
 #endif
@@ -139,9 +140,9 @@ void EventDispatcher::dispatchGestureEvent(uint64_t pageID, const WebGestureEven
 #endif
 
 #if ENABLE(THREADED_SCROLLING)
-void EventDispatcher::sendDidHandleEvent(uint64_t pageID, const WebEvent& event)
+void EventDispatcher::sendDidReceiveEvent(uint64_t pageID, const WebEvent& event, bool didHandleEvent)
 {
-    WebProcess::shared().connection()->send(Messages::WebPageProxy::DidReceiveEvent(static_cast<uint32_t>(event.type()), true), pageID);
+    WebProcess::shared().connection()->send(Messages::WebPageProxy::DidReceiveEvent(static_cast<uint32_t>(event.type()), didHandleEvent), pageID);
 }
 #endif
 

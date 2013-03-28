@@ -1,11 +1,14 @@
+#Animator is basically Skia's (much saner) version of Flash.
+#On top of Views it provides a declarative UI model which can be updated
+#based on events which trigger changes or scripts.
+
 {
-  'includes': [
-    'common.gypi',
-  ],
   'targets': [
     {
       'target_name': 'animator',
+      'product_name': 'skia_animator',
       'type': 'static_library',
+      'standalone_static_library': 1,
       'include_dirs': [
         '../include/config',
         '../include/core',
@@ -15,6 +18,7 @@
         '../include/xml',
         '../include/utils',
         '../include/images',
+        '../src/utils',
       ],
       'sources': [
         '../include/animator/SkAnimator.h',
@@ -36,8 +40,6 @@
         '../src/animator/SkAnimatorScript.h',
         #'../src/animator/SkAnimatorScript2.cpp', fails on windows
         #'../src/animator/SkAnimatorScript2.h',
-        '../src/animator/SkBase64.cpp',
-        '../src/animator/SkBase64.h',
         '../src/animator/SkBoundable.cpp',
         '../src/animator/SkBoundable.h',
         '../src/animator/SkBuildCondensedInfo.cpp',

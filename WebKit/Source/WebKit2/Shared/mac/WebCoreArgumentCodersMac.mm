@@ -38,10 +38,10 @@ using namespace WebKit;
 
 namespace CoreIPC {
 
-void ArgumentCoder<ResourceRequest>::encode(ArgumentEncoder* encoder, const ResourceRequest& resourceRequest)
+void ArgumentCoder<ResourceRequest>::encodePlatformData(ArgumentEncoder& encoder, const ResourceRequest& resourceRequest)
 {
     bool requestIsPresent = resourceRequest.nsURLRequest();
-    encoder->encode(requestIsPresent);
+    encoder << requestIsPresent;
 
     if (!requestIsPresent)
         return;
@@ -50,7 +50,7 @@ void ArgumentCoder<ResourceRequest>::encode(ArgumentEncoder* encoder, const Reso
     CoreIPC::encode(encoder, dictionary.get());
 }
 
-bool ArgumentCoder<ResourceRequest>::decode(ArgumentDecoder* decoder, ResourceRequest& resourceRequest)
+bool ArgumentCoder<ResourceRequest>::decodePlatformData(ArgumentDecoder* decoder, ResourceRequest& resourceRequest)
 {
     bool requestIsPresent;
     if (!decoder->decode(requestIsPresent))
@@ -73,10 +73,10 @@ bool ArgumentCoder<ResourceRequest>::decode(ArgumentDecoder* decoder, ResourceRe
     return true;
 }
 
-void ArgumentCoder<ResourceResponse>::encode(ArgumentEncoder* encoder, const ResourceResponse& resourceResponse)
+void ArgumentCoder<ResourceResponse>::encodePlatformData(ArgumentEncoder& encoder, const ResourceResponse& resourceResponse)
 {
     bool responseIsPresent = resourceResponse.nsURLResponse();
-    encoder->encode(responseIsPresent);
+    encoder << responseIsPresent;
 
     if (!responseIsPresent)
         return;
@@ -85,7 +85,7 @@ void ArgumentCoder<ResourceResponse>::encode(ArgumentEncoder* encoder, const Res
     CoreIPC::encode(encoder, dictionary.get());
 }
 
-bool ArgumentCoder<ResourceResponse>::decode(ArgumentDecoder* decoder, ResourceResponse& resourceResponse)
+bool ArgumentCoder<ResourceResponse>::decodePlatformData(ArgumentDecoder* decoder, ResourceResponse& resourceResponse)
 {
     bool responseIsPresent;
     if (!decoder->decode(responseIsPresent))
@@ -113,10 +113,10 @@ static NSString* nsString(const String& string)
     return string.impl() ? [NSString stringWithCharacters:reinterpret_cast<const UniChar*>(string.characters()) length:string.length()] : @"";
 }
 
-void ArgumentCoder<ResourceError>::encode(ArgumentEncoder* encoder, const ResourceError& resourceError)
+void ArgumentCoder<ResourceError>::encodePlatformData(ArgumentEncoder& encoder, const ResourceError& resourceError)
 {
     bool errorIsNull = resourceError.isNull();
-    encoder->encode(errorIsNull);
+    encoder << errorIsNull;
 
     if (errorIsNull)
         return;
@@ -124,10 +124,10 @@ void ArgumentCoder<ResourceError>::encode(ArgumentEncoder* encoder, const Resour
     NSError *nsError = resourceError.nsError();
 
     String domain = [nsError domain];
-    encoder->encode(domain);
-    
+    encoder << domain;
+
     int64_t code = [nsError code];
-    encoder->encode(code);
+    encoder << code;
 
     HashMap<String, String> stringUserInfoMap;
 
@@ -140,14 +140,14 @@ void ArgumentCoder<ResourceError>::encode(ArgumentEncoder* encoder, const Resour
         stringUserInfoMap.set(key, (NSString *)value);
         continue;
     }
-    encoder->encode(stringUserInfoMap);
+    encoder << stringUserInfoMap;
 
     id peerCertificateChain = [userInfo objectForKey:@"NSErrorPeerCertificateChainKey"];
     ASSERT(!peerCertificateChain || [peerCertificateChain isKindOfClass:[NSArray class]]);
-    encoder->encode(PlatformCertificateInfo((CFArrayRef)peerCertificateChain));
+    encoder << PlatformCertificateInfo((CFArrayRef)peerCertificateChain);
 }
 
-bool ArgumentCoder<ResourceError>::decode(ArgumentDecoder* decoder, ResourceError& resourceError)
+bool ArgumentCoder<ResourceError>::decodePlatformData(ArgumentDecoder* decoder, ResourceError& resourceError)
 {
     bool errorIsNull;
     if (!decoder->decode(errorIsNull))
@@ -183,7 +183,7 @@ bool ArgumentCoder<ResourceError>::decode(ArgumentDecoder* decoder, ResourceErro
     HashMap<String, String>::const_iterator it = stringUserInfoMap.begin();
     HashMap<String, String>::const_iterator end = stringUserInfoMap.end();
     for (; it != end; ++it)
-        [userInfo setObject:nsString(it->second) forKey:nsString(it->first)];
+        [userInfo setObject:nsString(it->value) forKey:nsString(it->key)];
 
     if (certificate.certificateChain())
         [userInfo setObject:(NSArray *)certificate.certificateChain() forKey:@"NSErrorPeerCertificateChainKey"];
@@ -194,10 +194,9 @@ bool ArgumentCoder<ResourceError>::decode(ArgumentDecoder* decoder, ResourceErro
     return true;
 }
 
-void ArgumentCoder<KeypressCommand>::encode(ArgumentEncoder* encoder, const KeypressCommand& keypressCommand)
+void ArgumentCoder<KeypressCommand>::encode(ArgumentEncoder& encoder, const KeypressCommand& keypressCommand)
 {
-    encoder->encode(keypressCommand.commandName);
-    encoder->encode(keypressCommand.text);
+    encoder << keypressCommand.commandName << keypressCommand.text;
 }
     
 bool ArgumentCoder<KeypressCommand>::decode(ArgumentDecoder* decoder, KeypressCommand& keypressCommand)

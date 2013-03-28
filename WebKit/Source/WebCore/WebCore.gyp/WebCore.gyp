@@ -51,16 +51,29 @@
     'webcore_include_dirs': [
       '../',
       '../..',
+      '../Modules/battery',
+      '../Modules/filesystem',
+      '../Modules/filesystem/chromium',
       '../Modules/gamepad',
+      '../Modules/geolocation',
       '../Modules/intents',
       '../Modules/indexeddb',
+      '../Modules/mediasource',
+      '../Modules/mediastream',
+      '../Modules/navigatorcontentutils',
+      '../Modules/notifications',
+      '../Modules/quota',
+      '../Modules/speech',
+      '../Modules/webaudio',
+      '../Modules/webdatabase',
+      '../Modules/webdatabase/chromium',
+      '../Modules/websockets',
       '../accessibility',
       '../accessibility/chromium',
       '../bindings',
       '../bindings/generic',
       '../bindings/v8',
       '../bindings/v8/custom',
-      '../bindings/v8/specialization',
       '../bridge',
       '../bridge/jni',
       '../bridge/jni/v8',
@@ -84,20 +97,24 @@
       '../loader/cache',
       '../loader/icon',
       '../mathml',
-      '../mediastream',
-      '../notifications',
       '../page',
       '../page/animation',
       '../page/chromium',
+      '../page/scrolling',
+      '../page/scrolling/chromium',
       '../platform',
       '../platform/animation',
       '../platform/audio',
       '../platform/audio/chromium',
       '../platform/chromium',
+      '../platform/chromium/support',
       '../platform/graphics',
       '../platform/graphics/chromium',
+      '../platform/graphics/chromium/cc',
+      '../platform/graphics/cpu/arm',
+      '../platform/graphics/cpu/arm/filters',
       '../platform/graphics/filters',
-      '../platform/graphics/filters/arm',
+      '../platform/graphics/filters/skia',
       '../platform/graphics/gpu',
       '../platform/graphics/opentype',
       '../platform/graphics/skia',
@@ -109,11 +126,11 @@
       '../platform/image-decoders/jpeg',
       '../platform/image-decoders/png',
       '../platform/image-decoders/skia',
-      '../platform/image-decoders/xbm',
       '../platform/image-decoders/webp',
       '../platform/image-encoders/skia',
       '../platform/leveldb',
       '../platform/mediastream',
+      '../platform/mediastream/chromium',
       '../platform/mock',
       '../platform/network',
       '../platform/network/chromium',
@@ -123,6 +140,7 @@
       '../plugins',
       '../plugins/chromium',
       '../rendering',
+      '../rendering/mathml',
       '../rendering/style',
       '../rendering/svg',
       '../storage',
@@ -133,8 +151,6 @@
       '../svg/graphics/filters',
       '../svg/properties',
       '../../ThirdParty/glu',
-      '../webaudio',
-      '../websockets',
       '../workers',
       '../xml',
       '../xml/parser',
@@ -147,8 +163,6 @@
     'bindings_idl_files!': [
       # Custom bindings in bindings/v8/custom exist for these.
       '../dom/EventListener.idl',
-      '../dom/EventTarget.idl',
-      '../html/VoidCallback.idl',
 
       # Bindings with custom Objective-C implementations.
       '../page/AbstractView.idl',
@@ -164,8 +178,6 @@
       '../svg/SVGStylable.idl',
       '../svg/SVGTests.idl',
       '../svg/SVGTransformable.idl',
-      '../svg/SVGViewSpec.idl',
-      '../svg/SVGZoomAndPan.idl',
 
       # FIXME: I don't know why these are excluded, either.
       # Someone (me?) should figure it out and add appropriate comments.
@@ -188,18 +200,6 @@
           '<@(webcore_svg_bindings_idl_files)',
         ],
       }],
-      ['OS=="mac" and use_skia==0', {
-        'webcore_include_dirs+': [
-          # platform/graphics/cg and cocoa need to come before
-          # platform/graphics/chromium so that the Mac build picks up the
-          # version of ImageBufferData.h in the cg directory and
-          # FontPlatformData.h in the cocoa directory.  The + prepends this
-          # directory to the list.
-          # FIXME: This shouldn't need to be prepended.
-          '../platform/graphics/cocoa',
-          '../platform/graphics/cg',
-        ],
-      }],
       ['OS=="mac"', {
         'webcore_include_dirs': [
           # FIXME: Eliminate dependency on platform/mac and related
@@ -209,15 +209,13 @@
           # platform/graphics/cg may need to stick around, though.
           '../platform/audio/mac',
           '../platform/cocoa',
+          '../platform/graphics/cg',
+          '../platform/graphics/cocoa',
           '../platform/graphics/mac',
           '../platform/mac',
           '../platform/text/mac',
-        ],
-      }],
-      ['OS=="mac" and use_skia==1', {
-        'webcore_include_dirs': [
-              '../platform/graphics/cocoa',
-              '../platform/graphics/cg',
+          '../platform/graphics/harfbuzz',
+          '../platform/graphics/harfbuzz/ng',
         ],
       }],
       ['OS=="win"', {
@@ -228,14 +226,32 @@
           '../platform/text/win',
           '../platform/win',
         ],
+        # Using native perl rather than cygwin perl cuts execution time of idl
+        # preprocessing rules by a bit more than 50%.
+        'perl_exe': '<(DEPTH)/third_party/perl/perl/bin/perl.exe',
+        'gperf_exe': '<(DEPTH)/third_party/gperf/bin/gperf.exe',
+        'bison_exe': '<(DEPTH)/third_party/bison/bin/bison.exe',
+        # Using cl instead of cygwin gcc cuts the processing time from
+        # 1m58s to 0m52s.
+        'preprocessor': '--preprocessor "cl.exe -nologo -EP -TP"',
       },{
         # enable -Wall and -Werror, just for Mac and Linux builds for now
         # FIXME: Also enable this for Windows after verifying no warnings
         'chromium_code': 1,
+        'perl_exe': 'perl',
+        'gperf_exe': 'gperf',
+        'bison_exe': 'bison',
+        # Without one specified, the scripts default to 'gcc'.
+        'preprocessor': '',
       }],
       ['use_x11==1 or OS=="android"', {
         'webcore_include_dirs': [
           '../platform/graphics/harfbuzz',
+        ],
+      }],
+      ['use_x11==1', {
+        'webcore_include_dirs': [
+          '../platform/graphics/harfbuzz/ng',
         ],
       }],
       ['OS=="win" and buildtype=="Official"', {
@@ -282,7 +298,7 @@
         'cflags!': ['-g'],
       },
     }],
-    ['os_posix==1 and OS!="mac" and OS!="android" and gcc_version==46', {
+    ['os_posix==1 and OS!="mac" and gcc_version>=46', {
       'target_defaults': {
         # Disable warnings about c++0x compatibility, as some names (such as nullptr) conflict
         # with upcoming c++0x types.
@@ -310,18 +326,11 @@
           # static library and rebuilds it with these global symbols
           # transformed to private_extern.
           'target_name': 'webkit_system_interface',
-          'type': 'static_library',
+          'type': 'none',
           'variables': {
             'adjusted_library_path':
                 '<(PRODUCT_DIR)/libWebKitSystemInterfaceLeopardPrivateExtern.a',
           },
-          'sources': [
-            # An empty source file is needed to convince Xcode to produce
-            # output for this target.  The resulting library won't actually
-            # contain anything.  The library at adjusted_library_path will,
-            # and that library is pushed to dependents of this target below.
-            'mac/Empty.cpp',
-          ],
           'actions': [
             {
               'action_name': 'Adjust Visibility',
@@ -342,6 +351,9 @@
           'link_settings': {
             'libraries': [
               '<(adjusted_library_path)',
+
+              # libWebKitSystemInterfaceLeopard.a references _kCIFormatRGBA8.
+              '$(SDKROOT)/System/Library/Frameworks/QuartzCore.framework',
             ],
           },  # link_settings
         },  # target webkit_system_interface
@@ -349,9 +361,9 @@
     }],  # condition OS == "mac"
     ['clang==1', {
       'target_defaults': {
-        'cflags': ['-Wglobal-constructors'],
+        'cflags': ['-Wglobal-constructors', '-Wunused-parameter'],
         'xcode_settings': {
-          'WARNING_CFLAGS': ['-Wglobal-constructors'],
+          'WARNING_CFLAGS': ['-Wglobal-constructors', '-Wunused-parameter'],
         },
       },
     }],
@@ -380,7 +392,7 @@
             '<(SHARED_INTERMEDIATE_DIR)/webkit/InspectorFrontend.h',
             '<(SHARED_INTERMEDIATE_DIR)/webcore/InspectorTypeBuilder.cpp',
             '<(SHARED_INTERMEDIATE_DIR)/webkit/InspectorTypeBuilder.h',
-            '<(SHARED_INTERMEDIATE_DIR)/webcore/InspectorBackendStub.js',
+            '<(SHARED_INTERMEDIATE_DIR)/webcore/InspectorBackendCommands.js',
           ],
           'variables': {
             'generator_include_dirs': [
@@ -425,6 +437,54 @@
       ]
     },
     {
+      'target_name': 'inspector_overlay_page',
+      'type': 'none',
+      'actions': [
+        {
+          'action_name': 'generateInspectorOverlayPage',
+          'inputs': [
+            '../inspector/InspectorOverlayPage.html',
+          ],
+          'outputs': [
+            '<(SHARED_INTERMEDIATE_DIR)/webkit/InspectorOverlayPage.h',
+          ],
+          'msvs_cygwin_shell': 0,
+          'action': [
+            '<(perl_exe)',
+            '../inspector/xxd.pl',
+            'InspectorOverlayPage_html',
+            '<@(_inputs)',
+            '<@(_outputs)'
+          ],
+          'message': 'Generating InspectorOverlayPage.h from InspectorOverlayPage.html',
+        },
+      ]
+    },
+    {
+      'target_name': 'injected_canvas_script_source',
+      'type': 'none',
+      'actions': [
+        {
+          'action_name': 'generateInjectedScriptCanvasModuleSource',
+          'inputs': [
+            '../inspector/InjectedScriptCanvasModuleSource.js',
+          ],
+          'outputs': [
+            '<(SHARED_INTERMEDIATE_DIR)/webkit/InjectedScriptCanvasModuleSource.h',
+          ],
+          'msvs_cygwin_shell': 0,
+          'action': [
+            '<(perl_exe)',
+            '../inspector/xxd.pl',
+            'InjectedScriptCanvasModuleSource_js',
+            '<@(_inputs)',
+            '<@(_outputs)'
+          ],
+          'message': 'Generating InjectedScriptCanvasModuleSource.h from InjectedScriptCanvasModuleSource.js',
+        },
+      ]
+    },
+    {
       'target_name': 'injected_script_source',
       'type': 'none',
       'actions': [
@@ -436,8 +496,9 @@
           'outputs': [
             '<(SHARED_INTERMEDIATE_DIR)/webkit/InjectedScriptSource.h',
           ],
+          'msvs_cygwin_shell': 0,
           'action': [
-            'perl',
+            '<(perl_exe)',
             '../inspector/xxd.pl',
             'InjectedScriptSource_js',
             '<@(_inputs)',
@@ -459,8 +520,9 @@
           'outputs': [
             '<(SHARED_INTERMEDIATE_DIR)/webkit/DebuggerScriptSource.h',
           ],
+          'msvs_cygwin_shell': 0,
           'action': [
-            'perl',
+            '<(perl_exe)',
             '../inspector/xxd.pl',
             'DebuggerScriptSource_js',
             '<@(_inputs)',
@@ -482,25 +544,30 @@
             'idl_files_list': '<|(idl_files_list.tmp <@(bindings_idl_files))',
           },
           'inputs': [
-            '../bindings/scripts/resolve-supplemental.pl',
+            '../bindings/scripts/preprocess-idls.pl',
             '../bindings/scripts/IDLParser.pm',
+            '../bindings/scripts/IDLAttributes.txt',
             '<(idl_files_list)',
             '<!@(cat <(idl_files_list))',
           ],
           'outputs': [
             '<(SHARED_INTERMEDIATE_DIR)/supplemental_dependency.tmp',
           ],
+          'msvs_cygwin_shell': 0,
           'action': [
-            'perl',
+            '<(perl_exe)',
             '-w',
             '-I../bindings/scripts',
-            '../bindings/scripts/resolve-supplemental.pl',
+            '../bindings/scripts/preprocess-idls.pl',
             '--defines',
             '<(feature_defines) LANGUAGE_JAVASCRIPT V8_BINDING',
             '--idlFilesList',
             '<(idl_files_list)',
             '--supplementalDependencyFile',
             '<(SHARED_INTERMEDIATE_DIR)/supplemental_dependency.tmp',
+            '--idlAttributesFile',
+            '../bindings/scripts/IDLAttributes.txt',
+            '<@(preprocessor)',
           ],
           'message': 'Resolving [Supplemental=XXX] dependencies in all IDL files',
         }
@@ -513,14 +580,9 @@
       'dependencies': [
         'generate_supplemental_dependency',
       ],
-      'variables': {
-        # Write sources into a file, so that the action command line won't
-        # exceed OS limits.
-        'additional_idl_files_list': '<|(additional_idl_files_list.tmp <@(webcore_test_support_idl_files))',
-      },
       'sources': [
         # bison rule
-        '../css/CSSGrammar.y',
+        '<(SHARED_INTERMEDIATE_DIR)/webkit/CSSGrammar.y',
         '../xml/XPathGrammar.y',
 
         # gperf rule
@@ -540,8 +602,9 @@
           'outputs': [
             '<(SHARED_INTERMEDIATE_DIR)/webkit/V8ArrayBufferViewCustomScript.h',
           ],
+          'msvs_cygwin_shell': 0,
           'action': [
-            'perl',
+            '<(perl_exe)',
             '../inspector/xxd.pl',
             'V8ArrayBufferViewCustomScript_js',
             '<@(_inputs)',
@@ -557,8 +620,9 @@
           'outputs': [
             '<(SHARED_INTERMEDIATE_DIR)/webkit/XMLViewerCSS.h',
           ],
+          'msvs_cygwin_shell': 0,
           'action': [
-            'perl',
+            '<(perl_exe)',
             '../inspector/xxd.pl',
             'XMLViewer_css',
             '<@(_inputs)',
@@ -573,8 +637,9 @@
           'outputs': [
             '<(SHARED_INTERMEDIATE_DIR)/webkit/XMLViewerJS.h',
           ],
+          'msvs_cygwin_shell': 0,
           'action': [
-            'perl',
+            '<(perl_exe)',
             '../inspector/xxd.pl',
             'XMLViewer_js',
             '<@(_inputs)',
@@ -584,6 +649,7 @@
         {
           'action_name': 'HTMLEntityTable',
           'inputs': [
+            '../html/parser/create-html-entity-table',
             '../html/parser/HTMLEntityNames.in',
           ],
           'outputs': [
@@ -730,7 +796,7 @@
           'action_name': 'EventFactory',
           'inputs': [
             '../dom/make_event_factory.pl',
-            '../dom/EventFactory.in',
+            '../dom/EventNames.in',
           ],
           'outputs': [
             '<(SHARED_INTERMEDIATE_DIR)/webkit/EventFactory.cpp',
@@ -808,6 +874,23 @@
           ],
         },
         {
+          'action_name': 'Settings',
+          'inputs': [
+            '../page/make_settings.pl',
+            '../page/Settings.in',
+          ],
+          'outputs': [
+            '<(SHARED_INTERMEDIATE_DIR)/webkit/SettingsMacros.h',
+          ],
+          'action': [
+            'python',
+            'scripts/action_makenames.py',
+            '<@(_outputs)',
+            '--',
+            '<@(_inputs)',
+          ],
+        },
+        {
           'action_name': 'UserAgentStyleSheets',
           'variables': {
             'scripts': [
@@ -829,6 +912,7 @@
               '../css/mathml.css',
               '../css/mediaControls.css',
               '../css/mediaControlsChromium.css',
+              '../css/mediaControlsChromiumAndroid.css',
               '../css/fullscreen.css',
               # Skip fullscreenQuickTime.
             ],
@@ -850,6 +934,67 @@
             '<@(scripts)',
             '--',
             '--defines', '<(feature_defines)',
+          ],
+        },
+        {
+          'action_name': 'PickerCommon',
+          'inputs': [
+            '../Resources/pagepopups/pickerCommon.css',
+            '../Resources/pagepopups/pickerCommon.js',
+          ],
+          'outputs': [
+            '<(SHARED_INTERMEDIATE_DIR)/webkit/PickerCommon.h',
+            '<(SHARED_INTERMEDIATE_DIR)/webkit/PickerCommon.cpp',
+          ],
+          'action': [
+            'python',
+            '../make-file-arrays.py',
+            '--condition=ENABLE(CALENDAR_PICKER) OR ENABLE(INPUT_TYPE_COLOR)',
+            '--out-h=<(SHARED_INTERMEDIATE_DIR)/webkit/PickerCommon.h',
+            '--out-cpp=<(SHARED_INTERMEDIATE_DIR)/webkit/PickerCommon.cpp',
+            '<@(_inputs)',
+          ],
+        },
+        {
+          'action_name': 'CalendarPicker',
+          'inputs': [
+            '../Resources/pagepopups/calendarPicker.css',
+            '../Resources/pagepopups/calendarPicker.js',
+            '../Resources/pagepopups/chromium/calendarPickerChromium.css',
+            '../Resources/pagepopups/chromium/pickerCommonChromium.css',
+            '../Resources/pagepopups/suggestionPicker.css',
+            '../Resources/pagepopups/suggestionPicker.js',
+          ],
+          'outputs': [
+            '<(SHARED_INTERMEDIATE_DIR)/webkit/CalendarPicker.h',
+            '<(SHARED_INTERMEDIATE_DIR)/webkit/CalendarPicker.cpp',
+          ],
+          'action': [
+            'python',
+            '../make-file-arrays.py',
+            '--condition=ENABLE(CALENDAR_PICKER)',
+            '--out-h=<(SHARED_INTERMEDIATE_DIR)/webkit/CalendarPicker.h',
+            '--out-cpp=<(SHARED_INTERMEDIATE_DIR)/webkit/CalendarPicker.cpp',
+            '<@(_inputs)',
+          ],
+        },
+        {
+          'action_name': 'ColorSuggestionPicker',
+          'inputs': [
+            '../Resources/pagepopups/colorSuggestionPicker.css',
+            '../Resources/pagepopups/colorSuggestionPicker.js',
+          ],
+          'outputs': [
+            '<(SHARED_INTERMEDIATE_DIR)/webkit/ColorSuggestionPicker.h',
+            '<(SHARED_INTERMEDIATE_DIR)/webkit/ColorSuggestionPicker.cpp',
+          ],
+          'action': [
+            'python',
+            '../make-file-arrays.py',
+            '--condition=ENABLE(INPUT_TYPE_COLOR)',
+            '--out-h=<(SHARED_INTERMEDIATE_DIR)/webkit/ColorSuggestionPicker.h',
+            '--out-cpp=<(SHARED_INTERMEDIATE_DIR)/webkit/ColorSuggestionPicker.cpp',
+            '<@(_inputs)',
           ],
         },
         {
@@ -929,6 +1074,29 @@
             '<@(derived_sources_aggregate_files)',
           ],
         },
+        {
+          'action_name': 'preprocess_grammar',
+          'inputs': [
+            '../css/CSSGrammar.y.in',
+            '../css/CSSGrammar.y.includes',
+          ],
+          'outputs': [
+            '<(SHARED_INTERMEDIATE_DIR)/webkit/CSSGrammar.y',
+          ],
+          'action': [
+            '<(perl_exe)',
+            '-I',
+            '../bindings/scripts',
+            '../css/makegrammar.pl',
+            '--outputDir',
+            '<(SHARED_INTERMEDIATE_DIR)/webkit/',
+            '--extraDefines',
+            '<(feature_defines)',
+            '--preprocessOnly',
+            '<@(preprocessor)',
+            '<@(_inputs)',
+          ],
+        },
       ],
       'rules': [
         # Rules to build derived sources.
@@ -943,7 +1111,8 @@
             'python',
             'scripts/rule_bison.py',
             '<(RULE_INPUT_PATH)',
-            '<(SHARED_INTERMEDIATE_DIR)/webkit'
+            '<(SHARED_INTERMEDIATE_DIR)/webkit',
+            '<(bison_exe)',
           ],
         },
         {
@@ -958,11 +1127,13 @@
           'inputs': [
             '../make-hash-tools.pl',
           ],
+          'msvs_cygwin_shell': 0,
           'action': [
-            'perl',
+            '<(perl_exe)',
             '../make-hash-tools.pl',
             '<(SHARED_INTERMEDIATE_DIR)/webkit',
             '<(RULE_INPUT_PATH)',
+            '<(gperf_exe)',
           ],
         },
         # Rule to build generated JavaScript (V8) bindings from .idl source.
@@ -975,11 +1146,9 @@
             '../bindings/scripts/CodeGenerator.pm',
             '../bindings/scripts/CodeGeneratorV8.pm',
             '../bindings/scripts/IDLParser.pm',
-            '../bindings/scripts/IDLStructure.pm',
             '../bindings/scripts/preprocessor.pm',
             '<(SHARED_INTERMEDIATE_DIR)/supplemental_dependency.tmp',
-            '<(additional_idl_files_list)',
-            '<!@(cat <(additional_idl_files_list))',
+            '<@(webcore_test_support_idl_files)',
           ],
           'outputs': [
             # FIXME:  The .cpp file should be in webkit/bindings once
@@ -989,30 +1158,36 @@
           ],
           'variables': {
             'generator_include_dirs': [
+              '--include', '../Modules/filesystem',
+              '--include', '../Modules/indexeddb',
+              '--include', '../Modules/intents',
+              '--include', '../Modules/mediasource',
+              '--include', '../Modules/mediastream',
+              '--include', '../Modules/navigatorcontentutils',
+              '--include', '../Modules/notifications',
+              '--include', '../Modules/webaudio',
+              '--include', '../Modules/webdatabase',
               '--include', '../css',
               '--include', '../dom',
               '--include', '../fileapi',
               '--include', '../html',
-              '--include', '../mediastream',
-              '--include', '../notifications',
               '--include', '../page',
               '--include', '../plugins',
               '--include', '../storage',
               '--include', '../svg',
               '--include', '../testing',
-              '--include', '../webaudio',
-              '--include', '../websockets',
               '--include', '../workers',
               '--include', '../xml',
             ],
           },
+          'msvs_cygwin_shell': 0,
           # FIXME:  Note that we put the .cpp files in webcore/bindings
           # but the .h files in webkit/bindings.  This is to work around
           # the unfortunate fact that GYP strips duplicate arguments
           # from lists.  When we have a better GYP way to suppress that
           # behavior, change the output location.
           'action': [
-            'perl',
+            '<(perl_exe)',
             '-w',
             '-I../bindings/scripts',
             '../bindings/scripts/generate-bindings.pl',
@@ -1027,9 +1202,10 @@
             '<@(generator_include_dirs)',
             '--supplementalDependencyFile',
             '<(SHARED_INTERMEDIATE_DIR)/supplemental_dependency.tmp',
-            '--additionalIdlFilesList',
-            '<(additional_idl_files_list)',
+            '--additionalIdlFiles',
+            '<(webcore_test_support_idl_files)',
             '<(RULE_INPUT_PATH)',
+            '<@(preprocessor)',
           ],
           'message': 'Generating binding from <(RULE_INPUT_PATH)',
         },
@@ -1041,12 +1217,13 @@
       'hard_dependency': 1,
       'dependencies': [
         'webcore_bindings_sources',
+        'inspector_overlay_page',
         'inspector_protocol_sources',
+        'injected_canvas_script_source',
         'injected_script_source',
         'debugger_script_source',
         '../../JavaScriptCore/JavaScriptCore.gyp/JavaScriptCore.gyp:yarr',
-        '../../JavaScriptCore/JavaScriptCore.gyp/JavaScriptCore.gyp:wtf',
-        '../../WTF/WTF.gyp/WTF.gyp:newwtf',
+        '../../WTF/WTF.gyp/WTF.gyp:wtf',
         '<(chromium_src_dir)/build/temp_gyp/googleurl.gyp:googleurl',
         '<(chromium_src_dir)/skia/skia.gyp:skia',
         '<(chromium_src_dir)/third_party/iccjpeg/iccjpeg.gyp:iccjpeg',
@@ -1055,6 +1232,7 @@
         '<(chromium_src_dir)/third_party/libxslt/libxslt.gyp:libxslt',
         '<(chromium_src_dir)/third_party/libwebp/libwebp.gyp:libwebp',
         '<(chromium_src_dir)/third_party/npapi/npapi.gyp:npapi',
+        '<(chromium_src_dir)/third_party/qcms/qcms.gyp:qcms',
         '<(chromium_src_dir)/third_party/sqlite/sqlite.gyp:sqlite',
         '<(chromium_src_dir)/v8/tools/gyp/v8.gyp:v8',
         '<(libjpeg_gyp_path):libjpeg',
@@ -1088,12 +1266,15 @@
         # Additional .cpp files from webcore_bindings_sources actions.
         '<(SHARED_INTERMEDIATE_DIR)/webkit/HTMLElementFactory.cpp',
         '<(SHARED_INTERMEDIATE_DIR)/webkit/HTMLNames.cpp',
+        '<(SHARED_INTERMEDIATE_DIR)/webkit/CalendarPicker.cpp',
+        '<(SHARED_INTERMEDIATE_DIR)/webkit/ColorSuggestionPicker.cpp',
         '<(SHARED_INTERMEDIATE_DIR)/webkit/EventFactory.cpp',
         '<(SHARED_INTERMEDIATE_DIR)/webkit/EventHeaders.h',
         '<(SHARED_INTERMEDIATE_DIR)/webkit/EventInterfaces.h',
         '<(SHARED_INTERMEDIATE_DIR)/webkit/EventTargetHeaders.h',
         '<(SHARED_INTERMEDIATE_DIR)/webkit/EventTargetInterfaces.h',
         '<(SHARED_INTERMEDIATE_DIR)/webkit/ExceptionCodeDescription.cpp',
+        '<(SHARED_INTERMEDIATE_DIR)/webkit/PickerCommon.cpp',
         '<(SHARED_INTERMEDIATE_DIR)/webkit/UserAgentStyleSheetsData.cpp',
         '<(SHARED_INTERMEDIATE_DIR)/webkit/V8HTMLElementWrapperFactory.cpp',
         '<(SHARED_INTERMEDIATE_DIR)/webkit/XLinkNames.cpp',
@@ -1135,9 +1316,6 @@
           ],
         }],
         ['OS=="win"', {
-          'dependencies': [
-            '<(chromium_src_dir)/build/win/system.gyp:cygwin'
-          ],
           'defines': [
             'WEBCORE_NAVIGATOR_PLATFORM="Win32"',
             '__PRETTY_FUNCTION__=__FUNCTION__',
@@ -1148,6 +1326,13 @@
           'direct_dependent_settings': {
             'include_dirs+++': ['../dom'],
           },
+          # In generated bindings code: 'switch contains default but no case'.
+          'msvs_disabled_warnings': [ 4065 ],
+        }],
+        ['OS in ("linux", "android") and "WTF_USE_WEBAUDIO_IPP=1" in feature_defines', {
+          'cflags': [
+            '<!@(pkg-config --cflags-only-I ipp)',
+          ],
         }],
       ],
     },
@@ -1158,13 +1343,14 @@
       'type': 'none',
       'dependencies': [
         'debugger_script_source',
+        'injected_canvas_script_source',
         'injected_script_source',
+        'inspector_overlay_page',
         'inspector_protocol_sources',
         'webcore_bindings_sources',
-#       '../../ThirdParty/glu/glu.gyp:libtess',  # Commented out in Clank
+        '../../ThirdParty/glu/glu.gyp:libtess',
         '../../JavaScriptCore/JavaScriptCore.gyp/JavaScriptCore.gyp:yarr',
-        '../../JavaScriptCore/JavaScriptCore.gyp/JavaScriptCore.gyp:wtf',
-        '../../WTF/WTF.gyp/WTF.gyp:newwtf',
+        '../../WTF/WTF.gyp/WTF.gyp:wtf',
         '<(chromium_src_dir)/build/temp_gyp/googleurl.gyp:googleurl',
         '<(chromium_src_dir)/skia/skia.gyp:skia',
         '<(chromium_src_dir)/third_party/iccjpeg/iccjpeg.gyp:iccjpeg',
@@ -1174,15 +1360,16 @@
         '<(chromium_src_dir)/third_party/libxslt/libxslt.gyp:libxslt',
         '<(chromium_src_dir)/third_party/npapi/npapi.gyp:npapi',
         '<(chromium_src_dir)/third_party/ots/ots.gyp:ots',
+        '<(chromium_src_dir)/third_party/qcms/qcms.gyp:qcms',
         '<(chromium_src_dir)/third_party/sqlite/sqlite.gyp:sqlite',
         '<(chromium_src_dir)/third_party/angle/src/build_angle.gyp:translator_glsl',
+        '<(chromium_src_dir)/third_party/zlib/zlib.gyp:zlib',
         '<(chromium_src_dir)/v8/tools/gyp/v8.gyp:v8',
         '<(libjpeg_gyp_path):libjpeg',
       ],
       'export_dependent_settings': [
         '../../JavaScriptCore/JavaScriptCore.gyp/JavaScriptCore.gyp:yarr',
-        '../../JavaScriptCore/JavaScriptCore.gyp/JavaScriptCore.gyp:wtf',
-        '../../WTF/WTF.gyp/WTF.gyp:newwtf',
+        '../../WTF/WTF.gyp/WTF.gyp:wtf',
         '<(chromium_src_dir)/build/temp_gyp/googleurl.gyp:googleurl',
         '<(chromium_src_dir)/skia/skia.gyp:skia',
         '<(chromium_src_dir)/third_party/iccjpeg/iccjpeg.gyp:iccjpeg',
@@ -1192,8 +1379,10 @@
         '<(chromium_src_dir)/third_party/libxslt/libxslt.gyp:libxslt',
         '<(chromium_src_dir)/third_party/npapi/npapi.gyp:npapi',
         '<(chromium_src_dir)/third_party/ots/ots.gyp:ots',
+        '<(chromium_src_dir)/third_party/qcms/qcms.gyp:qcms',
         '<(chromium_src_dir)/third_party/sqlite/sqlite.gyp:sqlite',
         '<(chromium_src_dir)/third_party/angle/src/build_angle.gyp:translator_glsl',
+        '<(chromium_src_dir)/third_party/zlib/zlib.gyp:zlib',
         '<(chromium_src_dir)/v8/tools/gyp/v8.gyp:v8',
         '<(libjpeg_gyp_path):libjpeg',
       ],
@@ -1203,17 +1392,16 @@
       'direct_dependent_settings': {
         'defines': [
           'WEBCORE_NAVIGATOR_VENDOR="Google Inc."',
+          'WEBKIT_IMPLEMENTATION=1',
         ],
         'include_dirs': [
+          '../../Platform/chromium',
           '<(INTERMEDIATE_DIR)',
           '<@(webcore_include_dirs)',
           '<(chromium_src_dir)/gpu',
           '<(chromium_src_dir)/third_party/angle/include/GLSLANG',
           '<(SHARED_INTERMEDIATE_DIR)/webkit',
           '<(SHARED_INTERMEDIATE_DIR)/webkit/bindings',
-        ],
-        'mac_framework_dirs': [
-          '$(SDKROOT)/System/Library/Frameworks/ApplicationServices.framework/Frameworks',
         ],
         'msvs_disabled_warnings': [
           4138, 4244, 4291, 4305, 4344, 4355, 4521, 4099,
@@ -1265,16 +1453,10 @@
             '<(chromium_src_dir)/build/linux/system.gyp:gtk',
           ],
         }],
-        ['OS=="linux"', {
-          'direct_dependent_settings': {
-            'defines': [
-              # Mozilla on Linux effectively uses uname -sm, but when running
-              # 32-bit x86 code on an x86_64 processor, it uses
-              # "Linux i686 (x86_64)".  Matching that would require making a
-              # run-time determination.
-              'WEBCORE_NAVIGATOR_PLATFORM="Linux i686"',
-            ],
-          },
+        ['OS=="android"', {
+          'sources/': [
+            ['exclude', 'accessibility/'],
+          ],
         }],
         ['OS=="mac"', {
           'dependencies': [
@@ -1308,6 +1490,8 @@
               # such as:
               # com.google.Chrome[] objc[]: Class ScrollbarPrefsObserver is implemented in both .../Google Chrome.app/Contents/Versions/.../Google Chrome Helper.app/Contents/MacOS/../../../Google Chrome Framework.framework/Google Chrome Framework and /System/Library/Frameworks/WebKit.framework/Versions/A/Frameworks/WebCore.framework/Versions/A/WebCore. One of the two will be used. Which one is undefined.
               'WebCascadeList=ChromiumWebCoreObjCWebCascadeList',
+              'WebCoreFlippedView=ChromiumWebCoreObjCWebCoreFlippedView',
+              'WebCoreTextFieldCell=ChromiumWebCoreObjCWebCoreTextFieldCell',
               'WebScrollbarPrefsObserver=ChromiumWebCoreObjCWebScrollbarPrefsObserver',
               'WebCoreRenderThemeNotificationObserver=ChromiumWebCoreObjCWebCoreRenderThemeNotificationObserver',
               'WebFontCache=ChromiumWebCoreObjCWebFontCache',
@@ -1340,12 +1524,6 @@
           },
         }],
         ['OS=="win"', {
-          'dependencies': [
-            '<(chromium_src_dir)/build/win/system.gyp:cygwin'
-          ],
-          'export_dependent_settings': [
-            '<(chromium_src_dir)/build/win/system.gyp:cygwin'
-          ],
           'direct_dependent_settings': {
             'defines': [
               # Match Safari and Mozilla on Windows.
@@ -1357,11 +1535,17 @@
             'include_dirs++': ['../dom'],
           },
         }],
-        ['OS != "android" and "WTF_USE_WEBAUDIO_FFMPEG=1" in feature_defines', {
+        ['OS in ("linux", "android") and "WTF_USE_WEBAUDIO_IPP=1" in feature_defines', {
+          'direct_dependent_settings': {
+            'cflags': [
+              '<!@(pkg-config --cflags-only-I ipp)',
+            ],
+          },
+        }],
+        ['"WTF_USE_WEBAUDIO_FFMPEG=1" in feature_defines', {
           # This directory needs to be on the include path for multiple sub-targets of webcore.
           'direct_dependent_settings': {
             'include_dirs': [
-              '<(chromium_src_dir)/third_party/ffmpeg/patched-ffmpeg',
               '<(chromium_src_dir)/third_party/ffmpeg',
             ],
           },
@@ -1392,7 +1576,6 @@
         'webcore_prerequisites',
       ],
       'sources': [
-        '<@(webcore_dom_privateheader_files)',
         '<@(webcore_dom_files)',
       ],
       'sources!': [
@@ -1401,8 +1584,8 @@
       ],
       'sources/': [
         # FIXME: Figure out how to store these patterns in a variable.
-        ['exclude', '(cairo|ca|cf|cg|curl|efl|freetype|gstreamer|gtk|linux|mac|opengl|openvg|opentype|pango|posix|qt|soup|svg|symbian|texmap|iphone|win|wince|wx)/'],
-        ['exclude', '(?<!Chromium)(Cairo|CF|CG|Curl|Gtk|JSC|Linux|Mac|OpenType|POSIX|Posix|Qt|Safari|Soup|Symbian|Win|WinCE|Wx)\\.(cpp|mm?)$'],
+        ['exclude', '(cairo|ca|cf|cg|curl|efl|freetype|gstreamer|gtk|linux|mac|opengl|openvg|opentype|pango|posix|qt|soup|svg|texmap|iphone|win|wince|wx)/'],
+        ['exclude', '(?<!Chromium)(Cairo|CF|CG|Curl|Gtk|JSC|Linux|Mac|OpenType|POSIX|Posix|Qt|Safari|Soup|Win|WinCE|Wx)\\.(cpp|mm?)$'],
 
         ['exclude', 'AllInOne\\.cpp$'],
       ],
@@ -1414,7 +1597,6 @@
         'webcore_prerequisites',
       ],
       'sources': [
-        '<@(webcore_html_privateheader_files)',
         '<@(webcore_html_files)',
       ],
       'sources/': [
@@ -1435,7 +1617,6 @@
         'webcore_prerequisites',
       ],
       'sources': [
-        '<@(webcore_svg_privateheader_files)',
         '<@(webcore_svg_files)',
       ],
       'sources/': [
@@ -1452,8 +1633,7 @@
       # if this hard dependency could be split off the rest.
       'hard_dependency': 1,
       'sources': [
-        '<@(webcore_privateheader_files)',
-        '<@(webcore_files)',
+        '<@(webcore_platform_files)',
 
         # For WebCoreSystemInterface, Mac-only.
         '../../WebKit/mac/WebCoreSupport/WebSystemInterface.mm',
@@ -1463,32 +1643,58 @@
         ['include', 'platform/'],
 
         # FIXME: Figure out how to store these patterns in a variable.
-        ['exclude', '(cairo|ca|cf|cg|curl|efl|freetype|gstreamer|gtk|harfbuzz|linux|mac|opengl|openvg|opentype|pango|posix|qt|soup|svg|symbian|texmap|iphone|win|wince|wx)/'],
-        ['exclude', '(?<!Chromium)(Cairo|CF|CG|Curl|Gtk|JSC|Linux|Mac|OpenType|POSIX|Posix|Qt|Safari|Soup|Symbian|Win|WinCE|Wx)\\.(cpp|mm?)$'],
+        ['exclude', '(cairo|ca|cf|cg|curl|efl|freetype|gstreamer|gtk|harfbuzz|linux|mac|opengl|openvg|opentype|pango|posix|qt|soup|svg|texmap|iphone|win|wince|wx)/'],
+        ['exclude', '(?<!Chromium)(Cairo|CF|CG|Curl|Gtk|JSC|Linux|Mac|OpenType|POSIX|Posix|Qt|Safari|Soup|Win|WinCE|Wx)\\.(cpp|mm?)$'],
 
         ['exclude', 'platform/LinkHash\\.cpp$'],
         ['exclude', 'platform/MIMETypeRegistry\\.cpp$'],
         ['exclude', 'platform/Theme\\.cpp$'],
-        ['exclude', 'platform/graphics/ANGLEWebKitBridge\\.(cpp|h)$'],
         # *NEON.cpp files need special compile options.
         # They are moved to the webcore_arm_neon target.
-        ['exclude', 'platform/graphics/filters/arm/.*NEON\\.(cpp|h)'],
+        ['exclude', 'platform/graphics/cpu/arm/filters/.*NEON\\.(cpp|h)'],
         ['exclude', 'platform/image-encoders/JPEGImageEncoder\\.(cpp|h)$'],
         ['exclude', 'platform/image-encoders/PNGImageEncoder\\.(cpp|h)$'],
         ['exclude', 'platform/network/ResourceHandle\\.cpp$'],
         ['exclude', 'platform/sql/SQLiteFileSystem\\.cpp$'],
         ['exclude', 'platform/text/LocaleToScriptMappingICU\\.cpp$'],
-        ['exclude', 'platform/text/LocalizedNumberNone\\.cpp$'],
         ['exclude', 'platform/text/TextEncodingDetectorNone\\.cpp$'],
       ],
       'conditions': [
+        ['inside_chromium_build==1', {
+            'conditions': [
+                ['component=="shared_library"', {
+                    'defines': [
+                        'WEBKIT_DLL',
+                    ],
+                }],
+            ],
+        }],
+        ['use_default_render_theme==1', {
+          'sources/': [
+            ['exclude', 'platform/chromium/PlatformThemeChromiumWin.h'],
+            ['exclude', 'platform/chromium/PlatformThemeChromiumWin.cpp'],
+            ['exclude', 'platform/chromium/ScrollbarThemeChromiumWin.cpp'],
+            ['exclude', 'platform/chromium/ScrollbarThemeChromiumWin.h'],
+          ],
+        }, { # use_default_render_theme==0
+          'sources/': [
+            ['exclude', 'platform/chromium/PlatformThemeChromiumDefault.cpp'],
+            ['exclude', 'platform/chromium/PlatformThemeChromiumDefault.h'],
+            ['exclude', 'platform/chromium/ScrollbarThemeChromiumDefault.cpp'],
+            ['exclude', 'platform/chromium/ScrollbarThemeChromiumDefault.h'],
+          ],
+        }],
         ['use_x11 == 1', {
           'sources/': [
             # Cherry-pick files excluded by the broader regular expressions above.
-            ['include', 'platform/graphics/harfbuzz/ComplexTextControllerHarfBuzz\\.cpp$'],
             ['include', 'platform/graphics/harfbuzz/FontHarfBuzz\\.cpp$'],
             ['include', 'platform/graphics/harfbuzz/FontPlatformDataHarfBuzz\\.cpp$'],
-            ['include', 'platform/graphics/harfbuzz/HarfBuzzSkia\\.cpp$'],
+            ['include', 'platform/graphics/harfbuzz/HarfBuzzShaperBase\\.(cpp|h)$'],
+            ['include', 'platform/graphics/harfbuzz/ng/HarfBuzzNGFace\\.(cpp|h)$'],
+            ['include', 'platform/graphics/harfbuzz/ng/HarfBuzzNGFaceSkia\\.cpp$'],
+            ['include', 'platform/graphics/harfbuzz/ng/HarfBuzzShaper\\.(cpp|h)$'],
+            ['include', 'platform/graphics/opentype/OpenTypeTypes\\.h$'],
+            ['include', 'platform/graphics/opentype/OpenTypeVerticalData\\.(cpp|h)$'],
             ['include', 'platform/graphics/skia/SimpleFontDataSkia\\.cpp$'],
           ],
         }, { # use_x11==0
@@ -1507,23 +1713,14 @@
             ['exclude', 'Gtk\\.cpp$'],
           ],
         }],
-        ['use_x11==1 or OS=="android"', {
+        ['use_x11==1', {
+          'dependencies': [
+            '<(chromium_src_dir)/third_party/harfbuzz-ng/harfbuzz.gyp:harfbuzz-ng',
+          ],
+        }],
+        ['OS=="android"', {
           'dependencies': [
             '<(chromium_src_dir)/third_party/harfbuzz/harfbuzz.gyp:harfbuzz',
-          ],
-        }],
-        ['OS!="win"', {
-          'sources/': [
-            ['include', 'platform/graphics/opentype/OpenTypeSanitizer\\.cpp$'],
-          ],
-        }],
-        ['OS=="mac" and use_skia==0', {
-          'sources/': [
-            # The Mac build is PLATFORM_CG too.  platform/graphics/cg is the
-            # only place that CG files we want to build are located, and not
-            # all of them even have a CG suffix, so just add them by a
-            # regexp matching their directory.
-            ['include', 'platform/graphics/cg/[^/]*(?<!Win)?\\.(cpp|mm?)$'],
           ],
         }],
         ['OS=="mac"', {
@@ -1533,6 +1730,7 @@
           ],
           'dependencies': [
             'webkit_system_interface',
+            '<(chromium_src_dir)/third_party/harfbuzz-ng/harfbuzz.gyp:harfbuzz-ng',
           ],
           'actions': [
             {
@@ -1547,6 +1745,10 @@
               ],
               'action': ['cp', '<@(_inputs)', '<@(_outputs)'],
             },
+          ],
+          'sources': [
+            '../editing/SmartReplaceCF.cpp',
+            '../../WebKit/mac/WebCoreSupport/WebSystemInterface.mm',
           ],
           'sources/': [
             # Additional files from the WebCore Mac build that are presently
@@ -1566,7 +1768,6 @@
             # Cherry-pick some files that can't be included by broader regexps.
             # Some of these are used instead of Chromium platform files, see
             # the specific exclusions in the "exclude" list below.
-            ['include', 'rendering/RenderThemeMac\\.mm$'],
             ['include', 'platform/graphics/mac/ColorMac\\.mm$'],
             ['include', 'platform/graphics/mac/ComplexTextControllerCoreText\\.mm$'],
             ['include', 'platform/graphics/mac/FloatPointMac\\.mm$'],
@@ -1583,6 +1784,8 @@
             ['include', 'platform/mac/ScrollbarThemeMac\\.mm$'],
             ['include', 'platform/mac/ScrollAnimatorMac\\.mm$'],
             ['include', 'platform/mac/ScrollElasticityController\\.mm$'],
+            ['include', 'platform/mac/ThemeMac\\.h$'],
+            ['include', 'platform/mac/ThemeMac\\.mm$'],
             ['include', 'platform/mac/WebCoreSystemInterface\\.mm$'],
             ['include', 'platform/mac/WebCoreTextRenderer\\.mm$'],
             ['include', 'platform/text/mac/ShapeArabic\\.c$'],
@@ -1591,6 +1794,12 @@
             ['include', 'platform/Theme\\.cpp$'],
 
             ['include', 'WebKit/mac/WebCoreSupport/WebSystemInterface\\.mm$'],
+
+            # We use LocaleMac.mm instead of LocaleICU.cpp in order to
+            # apply system locales.
+            ['exclude', 'platform/text/LocaleICU\\.cpp$'],
+            ['exclude', 'platform/text/LocaleICU\\.h$'],
+            ['include', 'platform/text/mac/LocaleMac\\.mm$'],
 
             # The Mac uses platform/mac/KillRingMac.mm instead of the dummy
             # implementation.
@@ -1613,93 +1822,48 @@
             ['exclude', 'platform/ScrollAnimatorNone\\.cpp$'],
             ['exclude', 'platform/ScrollAnimatorNone\\.h$'],
 
-            ['include', '/chrome/junk\\.txt$'],
-          ],
-        },{ # OS!="mac"
-          'sources/': [
-            # FIXME: We will eventually compile this too, but for now it's
-            # only used on mac.
-            ['exclude', 'platform/graphics/FontPlatformData\\.cpp$'],
-          ],
-        }],
-        ['OS=="mac" and use_skia==0', {
-          'sources/': [
-            # Cherry-pick some files that can't be included by broader regexps.
-            # Some of these are used instead of Chromium platform files, see
-            # the specific exclusions in the "exclude" list below.
-            ['include', 'platform/graphics/mac/GraphicsContextMac\\.mm$'],
-
-            # Chromium Mac does not use skia.
-            ['exclude', 'platform/graphics/skia/[^/]*Skia\\.(cpp|h)$'],
-
-            # The Mac currently uses ImageChromiumMac.mm from
-            # platform/graphics/chromium, included by regex above, instead.
-            ['exclude', 'platform/graphics/chromium/ImageChromium\\.cpp$'],
-
-            # ImageDecoderSkia is not used on mac.  ImageDecoderCG is used instead.
-            ['exclude', 'platform/image-decoders/skia/ImageDecoderSkia\\.cpp$'],
-            ['include', 'platform/image-decoders/cg/ImageDecoderCG\\.cpp$'],
-
-            # Again, Skia is not used on Mac.
-            ['exclude', 'platform/chromium/DragImageChromiumSkia\\.cpp$'],
-          ],
-        }],
-        ['OS=="mac" and use_skia==1', {
-          'sources/': [
             ['include', 'platform/graphics/cg/FloatPointCG\\.cpp$'],
             ['include', 'platform/graphics/cg/FloatRectCG\\.cpp$'],
             ['include', 'platform/graphics/cg/FloatSizeCG\\.cpp$'],
             ['include', 'platform/graphics/cg/IntPointCG\\.cpp$'],
             ['include', 'platform/graphics/cg/IntRectCG\\.cpp$'],
             ['include', 'platform/graphics/cg/IntSizeCG\\.cpp$'],
-            ['exclude', 'platform/graphics/chromium/ImageChromiumMac\\.mm$'],
             ['exclude', 'platform/graphics/mac/FontMac\\.mm$'],
             ['exclude', 'platform/graphics/skia/FontCacheSkia\\.cpp$'],
             ['exclude', 'platform/graphics/skia/GlyphPageTreeNodeSkia\\.cpp$'],
             ['exclude', 'platform/graphics/skia/SimpleFontDataSkia\\.cpp$'],
-            ['exclude', 'platform/chromium/DragImageChromiumMac\\.cpp$'],
+
+            # Mac uses Harfbuzz-ng.
+            ['include', 'platform/graphics/harfbuzz/HarfBuzzShaperBase\\.(cpp|h)$'],
+            ['include', 'platform/graphics/harfbuzz/ng/HarfBuzzNGFaceCoreText\\.cpp$'],
+            ['include', 'platform/graphics/harfbuzz/ng/HarfBuzzNGFace\\.(cpp|h)$'],
+            ['include', 'platform/graphics/harfbuzz/ng/HarfBuzzShaper\\.(cpp|h)$'],            
           ],
-        }],
-        ['OS!="android"', {
-          'sources/': [
-            ['exclude', 'Android\\.(cpp|h)$'],
-          ],
-        }],
-        ['OS=="android"', {
-          'sources/': [
-            ['exclude', 'platform/graphics/chromium/IconChromium\\.cpp$'],
-            ['exclude', 'platform/sql/chromium/SQLiteFileSystemChromiumPosix\\.cpp$'],
-          ],
-        }],
-        ['use_x11 == 0', {
-          'sources/': [
-            ['exclude', '(Gtk|Linux)\\.cpp$'],
-            ['exclude', 'Harfbuzz[^/]+\\.(cpp|h)$'],
-          ],
-        }],
-        ['use_x11 == 0 and (OS!="mac" or use_skia==0)', {
-          'sources/': [
-            ['exclude', 'VDMX[^/]+\\.(cpp|h)$'],
-          ],
-        }],
-        ['OS!="mac"', {
+        },{ # OS!="mac"
           'sources/': [
             ['exclude', 'Mac\\.(cpp|mm?)$'],
 
             # Linux uses FontLinux; Windows uses FontWin. Additionally, FontSkia
             # is excluded by a rule above if WebKit uses CG instead of Skia.
             ['exclude', 'platform/graphics/skia/FontSkia\\.cpp$'],
+
+            # FIXME: We will eventually compile this too, but for now it's
+            # only used on mac.
+            ['exclude', 'platform/graphics/FontPlatformData\\.cpp$'],
           ],
         }],
-        ['OS!="win"', {
+        ['use_x11 == 0 and OS != "mac"', {
           'sources/': [
-            ['exclude', 'Win\\.cpp$'],
-            ['exclude', '/(Windows|Uniscribe)[^/]*\\.cpp$']
+            ['exclude', 'VDMX[^/]+\\.(cpp|h)$'],
           ],
         }],
         ['OS=="win"', {
           'sources/': [
             ['exclude', 'Posix\\.cpp$'],
+
+            ['include', '/opentype/'],
+            ['include', '/SkiaFontWin\\.cpp$'],
+            ['include', '/TransparencyWin\\.cpp$'],
 
             # The Chromium Win currently uses GlyphPageTreeNodeChromiumWin.cpp from
             # platform/graphics/chromium, included by regex above, instead.
@@ -1709,6 +1873,17 @@
 
             # SystemInfo.cpp is useful and we don't want to copy it.
             ['include', 'platform/win/SystemInfo\\.cpp$'],
+
+            ['exclude', 'platform/text/LocaleICU\\.cpp$'],
+            ['exclude', 'platform/text/LocaleICU\\.h$'],
+            ['include', 'platform/text/win/LocaleWin\.cpp$'],
+            ['include', 'platform/text/win/LocaleWin\.h$'],
+          ],
+        },{ # OS!="win"
+          'sources/': [
+            ['exclude', 'Win\\.cpp$'],
+            ['exclude', '/(Windows|Uniscribe)[^/]*\\.cpp$'],
+            ['include', 'platform/graphics/opentype/OpenTypeSanitizer\\.cpp$'],
           ],
         }],
         ['OS=="android"', {
@@ -1722,8 +1897,11 @@
             ['include', 'platform/graphics/harfbuzz/FontHarfBuzz\\.cpp$'],
             ['include', 'platform/graphics/harfbuzz/FontPlatformDataHarfBuzz\\.cpp$'],
             ['include', 'platform/graphics/harfbuzz/HarfBuzzSkia\\.cpp$'],
-            ['include', 'platform/graphics/skia/SimpleFontDataSkia\\.cpp$'],
+            ['include', 'platform/graphics/harfbuzz/HarfBuzzShaperBase\\.cpp$'],
+            ['include', 'platform/graphics/opentype/OpenTypeTypes\\.h$'],
+            ['include', 'platform/graphics/opentype/OpenTypeVerticalData\\.(cpp|h)$'],
             ['exclude', 'platform/graphics/skia/FontCacheSkia\\.cpp$'],
+            ['include', 'platform/graphics/skia/SimpleFontDataSkia\\.cpp$'],
           ],
         }, { # OS!="android"
           'sources/': [
@@ -1732,33 +1910,43 @@
         }],
       ],
     },
+    {
+      'target_name': 'webcore_platform_geometry',
+      'type': 'static_library',
+      'dependencies': [
+        'webcore_prerequisites',
+      ],
+      'sources': [
+        '<@(webcore_platform_geometry_files)',
+      ],
+    },
     # The *NEON.cpp files fail to compile when -mthumb is passed. Force
     # them to build in ARM mode.
     # See https://bugs.webkit.org/show_bug.cgi?id=62916.
     {
       'target_name': 'webcore_arm_neon',
-      'type': 'static_library',
-      'dependencies': [
-        'webcore_prerequisites',
-      ],
-      'hard_dependency': 1,
-      'sources': [
-        '<@(webcore_files)',
-      ],
-      'sources/': [
-        ['exclude', '.*'],
-        ['include', 'platform/graphics/filters/arm/.*NEON\\.(cpp|h)'],
-      ],
       'conditions': [
-        ['OS=="android"', {
-          'cflags!': ['-mthumb'],
+        ['target_arch=="arm"', {
+          'type': 'static_library',
+          'dependencies': [
+            'webcore_prerequisites',
+          ],
+          'hard_dependency': 1,
+          'sources': [
+            '<@(webcore_files)',
+          ],
+          'sources/': [
+            ['exclude', '.*'],
+            ['include', 'platform/graphics/cpu/arm/filters/.*NEON\\.(cpp|h)'],
+          ],
           'cflags': ['-marm'],
-        }],
-        ['OS=="android" and target_arch=="ia32"', {
-          'cflags!': ['-marm'],
-        }],
-        ['OS=="linux" and target_arch=="arm"', {
-          'cflags': ['-marm'],
+          'conditions': [
+            ['OS=="android"', {
+              'cflags!': ['-mthumb'],
+            }],
+          ],
+        },{  # target_arch!="arm"
+          'type': 'none',
         }],
       ],
     },
@@ -1769,7 +1957,6 @@
         'webcore_prerequisites',
       ],
       'sources': [
-        '<@(webcore_privateheader_files)',
         '<@(webcore_files)',
       ],
       'sources/': [
@@ -1777,15 +1964,30 @@
         ['include', 'rendering/'],
 
         # FIXME: Figure out how to store these patterns in a variable.
-        ['exclude', '(cairo|ca|cf|cg|curl|efl|freetype|gstreamer|gtk|linux|mac|opengl|openvg|opentype|pango|posix|qt|soup|svg|symbian|texmap|iphone|win|wince|wx)/'],
-        ['exclude', '(?<!Chromium)(Cairo|CF|CG|Curl|Gtk|JSC|Linux|Mac|OpenType|POSIX|Posix|Qt|Safari|Soup|Symbian|Win|WinCE|Wx)\\.(cpp|mm?)$'],
-
+        ['exclude', '(cairo|ca|cf|cg|curl|efl|freetype|gstreamer|gtk|linux|mac|opengl|openvg|opentype|pango|posix|qt|soup|svg|texmap|iphone|win|wince|wx)/'],
+        ['exclude', '(?<!Chromium)(Cairo|CF|CG|Curl|Gtk|JSC|Linux|Mac|OpenType|POSIX|Posix|Qt|Safari|Soup|Win|WinCE|Wx)\\.(cpp|mm?)$'],
+        # Previous rule excludes things like ChromiumFooWin, include those.
+        ['include', 'rendering/.*Chromium.*\\.(cpp|mm?)$'],
         ['exclude', 'AllInOne\\.cpp$'],
       ],
       'conditions': [
+        ['use_default_render_theme==0', {
+          'sources/': [
+            ['exclude', 'rendering/RenderThemeChromiumDefault.*'],
+          ],
+        }],
+        ['use_default_render_theme==1', {
+          'sources/': [
+            ['exclude', 'RenderThemeChromiumWin.*'],
+          ],
+        }],
         ['OS=="win"', {
           'sources/': [
             ['exclude', 'Posix\\.cpp$'],
+          ],
+        },{ # OS!="win"
+          'sources/': [
+            ['exclude', 'Win\\.cpp$'],
           ],
         }],
         ['OS=="mac"', {
@@ -1793,11 +1995,20 @@
             # RenderThemeChromiumSkia is not used on mac since RenderThemeChromiumMac
             # does not reference the Skia code that is used by Windows, Linux and Android.
             ['exclude', 'rendering/RenderThemeChromiumSkia\\.cpp$'],
+            # RenderThemeChromiumFontProvider is used by RenderThemeChromiumSkia.
+            ['exclude', 'rendering/RenderThemeChromiumFontProvider\\.cpp'],
+            ['exclude', 'rendering/RenderThemeChromiumFontProvider\\.h'],
           ],
+        },{ # OS!="mac"
+          'sources/': [['exclude', 'Mac\\.(cpp|mm?)$']]
         }],
-        ['os_posix == 1 and OS != "mac" and OS != "android" and gcc_version == 42', {
+        ['os_posix == 1 and OS != "mac" and gcc_version == 42', {
           # Due to a bug in gcc 4.2.1 (the current version on hardy), we get
           # warnings about uninitialized this.
+          'cflags': ['-Wno-uninitialized'],
+        }],
+        ['OS == "android" and target_arch == "ia32" and gcc_version == 46', {
+          # Due to a bug in gcc 4.6 in android NDK, we get warnings about uninitialized variable.
           'cflags': ['-Wno-uninitialized'],
         }],
         ['use_x11 == 0', {
@@ -1805,29 +2016,17 @@
             ['exclude', 'Linux\\.cpp$'],
           ],
         }],
-        ['OS!="android"', {
-          'sources/': [
-            ['exclude', 'Android\\.(cpp|h)$'],
-          ],
-        }],
         ['toolkit_uses_gtk == 0', {
           'sources/': [
             ['exclude', 'Gtk\\.cpp$'],
           ],
         }],
-        ['OS!="mac"', {
-          'sources/': [['exclude', 'Mac\\.(cpp|mm?)$']]
-        }],
-        ['OS!="win"', {
-          'sources/': [
-            ['exclude', 'Win\\.cpp$'],
-          ],
-        }],
         ['OS=="android"', {
           'sources/': [
-            ['include', 'rendering/RenderThemeChromiumLinux\\.cpp$'],
+            ['include', 'rendering/RenderThemeChromiumFontProviderLinux\\.cpp$'],
+            ['include', 'rendering/RenderThemeChromiumDefault\\.cpp$'],
           ],
-        }, {
+        },{ # OS!="android"
           'sources/': [
             ['exclude', 'Android\\.cpp$'],
           ],
@@ -1838,13 +2037,13 @@
       'target_name': 'webcore_remaining',
       'type': 'static_library',
       'dependencies': [
+        '<(chromium_src_dir)/third_party/v8-i18n/build/all.gyp:v8-i18n',
         'webcore_prerequisites',
       ],
       # This is needed for mac because of webkit_system_interface. It'd be nice
       # if this hard dependency could be split off the rest.
       'hard_dependency': 1,
       'sources': [
-        '<@(webcore_privateheader_files)',
         '<@(webcore_files)',
       ],
       'sources/': [
@@ -1864,12 +2063,18 @@
         ['exclude', 'bridge/jni/jsc/'],
 
         # FIXME: Figure out how to store these patterns in a variable.
-        ['exclude', '(cairo|ca|cf|cg|curl|efl|freetype|gstreamer|gtk|linux|mac|opengl|openvg|opentype|pango|posix|qt|soup|svg|symbian|texmap|iphone|win|wince|wx)/'],
-        ['exclude', '(?<!Chromium)(Cairo|CF|CG|Curl|Gtk|JSC|Linux|Mac|OpenType|POSIX|Posix|Qt|Safari|Soup|Symbian|Win|WinCE|Wx)\\.(cpp|mm?)$'],
+        ['exclude', '(atk|cairo|ca|cf|cg|curl|efl|freetype|gstreamer|gtk|linux|mac|opengl|openvg|opentype|pango|posix|qt|soup|svg|texmap|iphone|win|wince|wx)/'],
+        ['exclude', '(?<!Chromium)(Cairo|CF|CG|Curl|Gtk|JSC|Linux|Mac|OpenType|POSIX|Posix|Qt|Safari|Soup|Win|WinCE|Wx)\\.(cpp|mm?)$'],
 
         ['exclude', 'AllInOne\\.cpp$'],
 
-        ['exclude', 'fileapi/LocalFileSystem\\.cpp$'],
+        ['exclude', 'Modules/filesystem/LocalFileSystem\\.cpp$'],
+        ['exclude', 'Modules/indexeddb/IDBFactoryBackendInterface\\.cpp$'],
+        ['exclude', 'Modules/webdatabase/DatabaseManagerClient\\.h$'],
+        ['exclude', 'Modules/webdatabase/DatabaseTracker\\.cpp$'],
+        ['exclude', 'Modules/webdatabase/OriginQuotaManager\\.(cpp|h)$'],
+        ['exclude', 'Modules/webdatabase/OriginUsageRecord\\.(cpp|h)$'],
+        ['exclude', 'Modules/webdatabase/SQLTransactionClient\\.cpp$'],
         ['exclude', 'inspector/InspectorFrontendClientLocal\\.cpp$'],
         ['exclude', 'inspector/JavaScript[^/]*\\.cpp$'],
         ['exclude', 'loader/UserStyleSheetLoader\\.cpp$'],
@@ -1885,66 +2090,29 @@
         ['exclude', 'plugins/PluginStream\\.cpp$'],
         ['exclude', 'plugins/PluginView\\.cpp$'],
         ['exclude', 'plugins/npapi\\.cpp$'],
-        ['exclude', 'storage/DatabaseTrackerClient\\.h$'],
-        ['exclude', 'storage/DatabaseTracker\\.cpp$'],
-        ['exclude', 'storage/IDBFactoryBackendInterface\\.cpp$'],
-        ['exclude', 'storage/IDBKeyPathBackendImpl\\.cpp$'],
-        ['exclude', 'storage/OriginQuotaManager\\.(cpp|h)$'],
-        ['exclude', 'storage/OriginUsageRecord\\.(cpp|h)$'],
-        ['exclude', 'storage/SQLTransactionClient\\.cpp$'],
-        ['exclude', 'storage/StorageEventDispatcher\\.cpp$'],
+        ['exclude', 'storage/StorageAreaImpl\\.(cpp|h)$'],
+        ['exclude', 'storage/StorageAreaSync\\.(cpp|h)$'],
+        ['exclude', 'storage/StorageEventDispatcher\\.(cpp|h)$'],
+        ['exclude', 'storage/StorageMap\\.(cpp|h)$'],
         ['exclude', 'storage/StorageNamespace\\.cpp$'],
+        ['exclude', 'storage/StorageNamespaceImpl\\.(cpp|h)$'],
+        ['exclude', 'storage/StorageSyncManager\\.(cpp|h)$'],
+        ['exclude', 'storage/StorageTask\\.(cpp|h)$'],
+        ['exclude', 'storage/StorageThread\\.(cpp|h)$'],
+        ['exclude', 'storage/StorageTracker\\.(cpp|h)$'],
+        ['exclude', 'storage/StorageTrackerClient\\.h$'],
         ['exclude', 'workers/DefaultSharedWorkerRepository\\.(cpp|h)$'],
 
         ['include', 'loader/appcache/ApplicationCacheHost\.h$'],
         ['include', 'loader/appcache/DOMApplicationCache\.(cpp|h)$'],
       ],
-      'link_settings': {
-        'mac_bundle_resources': [
-          '../Resources/aliasCursor.png',
-          '../Resources/cellCursor.png',
-          '../Resources/contextMenuCursor.png',
-          '../Resources/copyCursor.png',
-          '../Resources/eastResizeCursor.png',
-          '../Resources/eastWestResizeCursor.png',
-          '../Resources/helpCursor.png',
-          '../Resources/linkCursor.png',
-          '../Resources/missingImage.png',
-          '../Resources/moveCursor.png',
-          '../Resources/noDropCursor.png',
-          '../Resources/noneCursor.png',
-          '../Resources/northEastResizeCursor.png',
-          '../Resources/northEastSouthWestResizeCursor.png',
-          '../Resources/northResizeCursor.png',
-          '../Resources/northSouthResizeCursor.png',
-          '../Resources/northWestResizeCursor.png',
-          '../Resources/northWestSouthEastResizeCursor.png',
-          '../Resources/progressCursor.png',
-          '../Resources/southEastResizeCursor.png',
-          '../Resources/southResizeCursor.png',
-          '../Resources/southWestResizeCursor.png',
-          '../Resources/verticalTextCursor.png',
-          '../Resources/waitCursor.png',
-          '../Resources/westResizeCursor.png',
-          '../Resources/zoomInCursor.png',
-          '../Resources/zoomOutCursor.png',
-        ],
-      },
       'conditions': [
         # Shard this taret into ten parts to work around linker limitations.
         # on link time code generation builds.
         ['OS=="win" and buildtype=="Official"', {
           'msvs_shard': 10,
         }],
-        ['OS=="win"', {
-          'sources/': [
-            ['exclude', 'Posix\\.cpp$'],
-            ['include', '/opentype/'],
-            ['include', '/SkiaFontWin\\.cpp$'],
-            ['include', '/TransparencyWin\\.cpp$'],
-          ],
-        }],
-        ['os_posix == 1 and OS != "mac" and OS != "android" and gcc_version == 42', {
+        ['os_posix == 1 and OS != "mac" and gcc_version == 42', {
           # Due to a bug in gcc 4.2.1 (the current version on hardy), we get
           # warnings about uninitialized this.
           'cflags': ['-Wno-uninitialized'],
@@ -1960,32 +2128,16 @@
           ],
         }],
         ['OS=="android"', {
-          'sources/': [
-            ['exclude', 'accessibility/'],
-            ['include', 'accessibility/AXObjectCacheAndroid\\.cpp$'],
-          ],
           'cflags': [
             # WebCore does not work with strict aliasing enabled.
             # https://bugs.webkit.org/show_bug.cgi?id=25864
             '-fno-strict-aliasing',
           ],
-        }],
-        ['OS!="android"', {
-          'dependencies': [
-            # Android doesn't have this third party repository, so can't
-            # include it. It's not used by Android in any case.
-            '<(chromium_src_dir)/third_party/v8-i18n/build/all.gyp:v8-i18n',
-          ],
+        }, { # OS!="android"
           'sources/': [['exclude', 'Android\\.cpp$']]
         }],
         ['OS!="mac"', {
           'sources/': [['exclude', 'Mac\\.(cpp|mm?)$']]
-        }],
-        ['OS!="win"', {
-          'sources/': [
-            ['exclude', 'Win\\.cpp$'],
-            ['exclude', '/(Windows|Uniscribe)[^/]*\\.cpp$']
-          ],
         }],
       ],
     },
@@ -1993,46 +2145,41 @@
       'target_name': 'webcore',
       'type': 'none',
       'dependencies': [
-        'webcore_arm_neon',
         'webcore_dom',
         'webcore_html',
         'webcore_platform',
+        'webcore_platform_geometry',
         'webcore_remaining',
         'webcore_rendering',
         # Exported.
         'webcore_bindings',
-        '../../JavaScriptCore/JavaScriptCore.gyp/JavaScriptCore.gyp:wtf',
-        '../../WTF/WTF.gyp/WTF.gyp:newwtf',
+        '../../WTF/WTF.gyp/WTF.gyp:wtf',
         '<(chromium_src_dir)/build/temp_gyp/googleurl.gyp:googleurl',
         '<(chromium_src_dir)/skia/skia.gyp:skia',
         '<(chromium_src_dir)/third_party/npapi/npapi.gyp:npapi',
+        '<(chromium_src_dir)/third_party/qcms/qcms.gyp:qcms',
         '<(chromium_src_dir)/v8/tools/gyp/v8.gyp:v8',
       ],
       'export_dependent_settings': [
         'webcore_bindings',
-        '../../JavaScriptCore/JavaScriptCore.gyp/JavaScriptCore.gyp:wtf',
-        '../../WTF/WTF.gyp/WTF.gyp:newwtf',
+        '../../WTF/WTF.gyp/WTF.gyp:wtf',
         '<(chromium_src_dir)/build/temp_gyp/googleurl.gyp:googleurl',
         '<(chromium_src_dir)/skia/skia.gyp:skia',
         '<(chromium_src_dir)/third_party/npapi/npapi.gyp:npapi',
+        '<(chromium_src_dir)/third_party/qcms/qcms.gyp:qcms',
         '<(chromium_src_dir)/v8/tools/gyp/v8.gyp:v8',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
           '<@(webcore_include_dirs)',
         ],
-        'mac_framework_dirs': [
-          '$(SDKROOT)/System/Library/Frameworks/ApplicationServices.framework/Frameworks',
-          '$(SDKROOT)/System/Library/Frameworks/Accelerate.framework',
-          '$(SDKROOT)/System/Library/Frameworks/CoreServices.framework',
-          '$(SDKROOT)/System/Library/Frameworks/Foundation.framework',
-          '$(SDKROOT)/System/Library/Frameworks/CoreFoundation.framework',
-          '$(SDKROOT)/System/Library/Frameworks/AudioToolbox.framework',
-          '$(SDKROOT)/System/Library/Frameworks/AudioUnit.framework',
-          '$(SDKROOT)/System/Library/Frameworks/CoreAudio.framework',
-        ],
       },
       'conditions': [
+        ['target_arch=="arm"', {
+          'dependencies': [
+            'webcore_arm_neon',
+          ],
+        }],
         ['OS=="mac"', {
           'direct_dependent_settings': {
             'include_dirs': [
@@ -2044,6 +2191,25 @@
         ['OS=="win"', {
           'direct_dependent_settings': {
             'include_dirs+++': ['../dom'],
+          },
+        }],
+        ['OS=="linux" and "WTF_USE_WEBAUDIO_IPP=1" in feature_defines', {
+          'link_settings': {
+            'ldflags': [
+              '<!@(pkg-config --libs-only-L ipp)',
+            ],
+            'libraries': [
+              '-lipps -lippcore',
+            ],
+          },
+        }],
+        # Use IPP static libraries for x86 Android.
+        ['OS=="android" and "WTF_USE_WEBAUDIO_IPP=1" in feature_defines', {
+          'link_settings': {
+            'libraries': [
+               '<!@(pkg-config --libs ipp|sed s/-L//)/libipps_l.a',
+               '<!@(pkg-config --libs ipp|sed s/-L//)/libippcore_l.a',
+            ]
           },
         }],
         ['enable_svg!=0', {
@@ -2067,9 +2233,12 @@
         '<@(webcore_include_dirs)',
         '../testing',
         '../testing/v8',
+        '../../Platform/chromium',
       ],
       'sources': [
         '<@(webcore_test_support_files)',
+        '<(SHARED_INTERMEDIATE_DIR)/webcore/bindings/V8MallocStatistics.cpp',
+        '<(SHARED_INTERMEDIATE_DIR)/webkit/bindings/V8MallocStatistics.h',
         '<(SHARED_INTERMEDIATE_DIR)/webcore/bindings/V8Internals.cpp',
         '<(SHARED_INTERMEDIATE_DIR)/webkit/bindings/V8Internals.h',
         '<(SHARED_INTERMEDIATE_DIR)/webcore/bindings/V8InternalSettings.cpp',

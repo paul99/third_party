@@ -55,18 +55,21 @@ static uint64_t generatePluginInstanceID()
     return ++uniquePluginInstanceID;
 }
 
-PassRefPtr<PluginProxy> PluginProxy::create(const String& pluginPath)
+PassRefPtr<PluginProxy> PluginProxy::create(const String& pluginPath, PluginProcess::Type processType)
 {
-    return adoptRef(new PluginProxy(pluginPath));
+    return adoptRef(new PluginProxy(pluginPath, processType));
 }
 
-PluginProxy::PluginProxy(const String& pluginPath)
+PluginProxy::PluginProxy(const String& pluginPath, PluginProcess::Type processType)
     : m_pluginPath(pluginPath)
     , m_pluginInstanceID(generatePluginInstanceID())
     , m_pluginBackingStoreContainsValidData(false)
     , m_isStarted(false)
     , m_waitingForPaintInResponseToUpdate(false)
+    , m_wantsWheelEvents(false)
     , m_remoteLayerClientID(0)
+    , m_waitingOnAsynchronousInitialization(false)
+    , m_processType(processType)
 {
 }
 
@@ -82,7 +85,7 @@ void PluginProxy::pluginProcessCrashed()
 bool PluginProxy::initialize(const Parameters& parameters)
 {
     ASSERT(!m_connection);
-    m_connection = WebProcess::shared().pluginProcessConnectionManager().getPluginProcessConnection(m_pluginPath);
+    m_connection = WebProcess::shared().pluginProcessConnectionManager().getPluginProcessConnection(m_pluginPath, m_processType);
     
     if (!m_connection)
         return false;
@@ -92,39 +95,109 @@ bool PluginProxy::initialize(const Parameters& parameters)
     m_connection->addPluginProxy(this);
 
     // Ask the plug-in process to create a plug-in.
-    PluginCreationParameters creationParameters;
-    creationParameters.pluginInstanceID = m_pluginInstanceID;
-    creationParameters.windowNPObjectID = windowNPObjectID();
-    creationParameters.parameters = parameters;
-    creationParameters.userAgent = controller()->userAgent();
-    creationParameters.contentsScaleFactor = contentsScaleFactor();
-    creationParameters.isPrivateBrowsingEnabled = controller()->isPrivateBrowsingEnabled();
+    m_pendingPluginCreationParameters = adoptPtr(new PluginCreationParameters);
+
+    m_pendingPluginCreationParameters->pluginInstanceID = m_pluginInstanceID;
+    m_pendingPluginCreationParameters->windowNPObjectID = windowNPObjectID();
+    m_pendingPluginCreationParameters->parameters = parameters;
+    m_pendingPluginCreationParameters->userAgent = controller()->userAgent();
+    m_pendingPluginCreationParameters->contentsScaleFactor = contentsScaleFactor();
+    m_pendingPluginCreationParameters->isPrivateBrowsingEnabled = controller()->isPrivateBrowsingEnabled();
+    m_pendingPluginCreationParameters->artificialPluginInitializationDelayEnabled = controller()->artificialPluginInitializationDelayEnabled();
+
 #if USE(ACCELERATED_COMPOSITING)
-    creationParameters.isAcceleratedCompositingEnabled = controller()->isAcceleratedCompositingEnabled();
+    m_pendingPluginCreationParameters->isAcceleratedCompositingEnabled = controller()->isAcceleratedCompositingEnabled();
 #endif
 
+    if (!canInitializeAsynchronously())
+        return initializeSynchronously();
+
+    // Remember that we tried to create this plug-in asynchronously in case we need to create it synchronously later.
+    m_waitingOnAsynchronousInitialization = true;
+    PluginCreationParameters creationParameters(*m_pendingPluginCreationParameters.get());
+    m_connection->connection()->send(Messages::WebProcessConnection::CreatePluginAsynchronously(creationParameters), m_pluginInstanceID);
+    return true;
+}
+
+bool PluginProxy::canInitializeAsynchronously() const
+{
+    return controller()->asynchronousPluginInitializationEnabled() && (m_connection->supportsAsynchronousPluginInitialization() || controller()->asynchronousPluginInitializationEnabledForAllPlugins());
+}
+
+bool PluginProxy::initializeSynchronously()
+{
+    ASSERT(m_pendingPluginCreationParameters);
+
+    m_pendingPluginCreationParameters->asynchronousCreationIncomplete = m_waitingOnAsynchronousInitialization;
     bool result = false;
+    bool wantsWheelEvents = false;
     uint32_t remoteLayerClientID = 0;
+    
+    PluginCreationParameters parameters(*m_pendingPluginCreationParameters.get());
 
-    if (!m_connection->connection()->sendSync(Messages::WebProcessConnection::CreatePlugin(creationParameters), Messages::WebProcessConnection::CreatePlugin::Reply(result, remoteLayerClientID), 0) || !result) {
-        m_connection->removePluginProxy(this);
-        return false;
-    }
+    if (!m_connection->connection()->sendSync(Messages::WebProcessConnection::CreatePlugin(parameters), Messages::WebProcessConnection::CreatePlugin::Reply(result, wantsWheelEvents, remoteLayerClientID), 0) || !result)
+        didFailToCreatePluginInternal();
+    else
+        didCreatePluginInternal(wantsWheelEvents, remoteLayerClientID);
+    
+    return result;
+}
 
+void PluginProxy::didCreatePlugin(bool wantsWheelEvents, uint32_t remoteLayerClientID)
+{
+    // We might have tried to create the plug-in sychronously while waiting on the asynchronous reply,
+    // in which case we should ignore this message.
+    if (!m_waitingOnAsynchronousInitialization)
+        return;
+
+    didCreatePluginInternal(wantsWheelEvents, remoteLayerClientID);
+}
+
+void PluginProxy::didFailToCreatePlugin()
+{
+    // We might have tried to create the plug-in sychronously while waiting on the asynchronous reply,
+    // in which case we should ignore this message.
+    if (!m_waitingOnAsynchronousInitialization)
+        return;
+
+    didFailToCreatePluginInternal();
+}
+
+void PluginProxy::didCreatePluginInternal(bool wantsWheelEvents, uint32_t remoteLayerClientID)
+{
+    m_wantsWheelEvents = wantsWheelEvents;
     m_remoteLayerClientID = remoteLayerClientID;
     m_isStarted = true;
+    controller()->didInitializePlugin();
 
-    return true;
+    // Whether synchronously or asynchronously, this plug-in was created and we shouldn't need to remember
+    // anything about how.
+    m_pendingPluginCreationParameters.clear();
+    m_waitingOnAsynchronousInitialization = false;
+}
+
+void PluginProxy::didFailToCreatePluginInternal()
+{
+    // Calling out to the connection and the controller could potentially cause the plug-in proxy to go away, so protect it here.
+    RefPtr<PluginProxy> protect(this);
+
+    m_connection->removePluginProxy(this);
+    controller()->didFailToInitializePlugin();
+
+    // Whether synchronously or asynchronously, this plug-in failed to create and we shouldn't need to remember
+    // anything about how.
+    m_pendingPluginCreationParameters.clear();
+    m_waitingOnAsynchronousInitialization = false;
 }
 
 void PluginProxy::destroy()
 {
-    ASSERT(m_isStarted);
-
-    m_connection->connection()->sendSync(Messages::WebProcessConnection::DestroyPlugin(m_pluginInstanceID), Messages::WebProcessConnection::DestroyPlugin::Reply(), 0);
-
     m_isStarted = false;
 
+    if (!m_connection)
+        return;
+
+    m_connection->connection()->sendSync(Messages::WebProcessConnection::DestroyPlugin(m_pluginInstanceID, m_waitingOnAsynchronousInitialization), Messages::WebProcessConnection::DestroyPlugin::Reply(), 0);
     m_connection->removePluginProxy(this);
 }
 
@@ -160,6 +233,9 @@ PassRefPtr<ShareableBitmap> PluginProxy::snapshot()
     ShareableBitmap::Handle snapshotStoreHandle;
     m_connection->connection()->sendSync(Messages::PluginControllerProxy::Snapshot(), Messages::PluginControllerProxy::Snapshot::Reply(snapshotStoreHandle), m_pluginInstanceID);
 
+    if (snapshotStoreHandle.isNull())
+        return 0;
+
     RefPtr<ShareableBitmap> snapshotBuffer = ShareableBitmap::create(snapshotStoreHandle);
     return snapshotBuffer.release();
 }
@@ -169,6 +245,11 @@ bool PluginProxy::isTransparent()
     // This should never be called from the web process.
     ASSERT_NOT_REACHED();
     return false;
+}
+
+bool PluginProxy::wantsWheelEvents()
+{
+    return m_wantsWheelEvents;
 }
 
 void PluginProxy::geometryDidChange()
@@ -326,6 +407,33 @@ void PluginProxy::setFocus(bool hasFocus)
     m_connection->connection()->send(Messages::PluginControllerProxy::SetFocus(hasFocus), m_pluginInstanceID);
 }
 
+bool PluginProxy::handleEditingCommand(const String& commandName, const String& argument)
+{
+    bool handled = false;
+    if (!m_connection->connection()->sendSync(Messages::PluginControllerProxy::HandleEditingCommand(commandName, argument), Messages::PluginControllerProxy::HandleEditingCommand::Reply(handled), m_pluginInstanceID))
+        return false;
+    
+    return handled;
+}
+    
+bool PluginProxy::isEditingCommandEnabled(const String& commandName)
+{
+    bool enabled = false;
+    if (!m_connection->connection()->sendSync(Messages::PluginControllerProxy::IsEditingCommandEnabled(commandName), Messages::PluginControllerProxy::IsEditingCommandEnabled::Reply(enabled), m_pluginInstanceID))
+        return false;
+    
+    return enabled;
+}
+    
+bool PluginProxy::handlesPageScaleFactor()
+{
+    bool handled = false;
+    if (!m_connection->connection()->sendSync(Messages::PluginControllerProxy::HandlesPageScaleFactor(), Messages::PluginControllerProxy::HandlesPageScaleFactor::Reply(handled), m_pluginInstanceID))
+        return false;
+    
+    return handled;
+}
+
 NPObject* PluginProxy::pluginScriptableNPObject()
 {
     // Sending the synchronous Messages::PluginControllerProxy::GetPluginScriptableNPObject message can cause us to dispatch an
@@ -370,9 +478,14 @@ void PluginProxy::sendComplexTextInput(const String& textInput)
 }
 #endif
 
-void PluginProxy::contentsScaleFactorChanged(float scaleFactor)
+void PluginProxy::contentsScaleFactorChanged(float)
 {
     geometryDidChange();
+}
+
+void PluginProxy::storageBlockingStateChanged(bool isStorageBlockingEnabled)
+{
+    m_connection->connection()->send(Messages::PluginControllerProxy::StorageBlockingStateChanged(isStorageBlockingEnabled), m_pluginInstanceID);
 }
 
 void PluginProxy::privateBrowsingStateChanged(bool isPrivateBrowsingEnabled)
@@ -523,6 +636,18 @@ void PluginProxy::setStatusbarText(const String& statusbarText)
     controller()->setStatusbarText(statusbarText);
 }
 
+#if PLUGIN_ARCHITECTURE(X11)
+void PluginProxy::createPluginContainer(uint64_t& windowID)
+{
+    windowID = controller()->createPluginContainer();
+}
+
+void PluginProxy::windowedPluginGeometryDidChange(const WebCore::IntRect& frameRect, const WebCore::IntRect& clipRect, uint64_t windowID)
+{
+    controller()->windowedPluginGeometryDidChange(frameRect, clipRect, windowID);
+}
+#endif
+
 void PluginProxy::update(const IntRect& paintedRect)
 {
     if (paintedRect == pluginBounds())
@@ -539,6 +664,11 @@ void PluginProxy::update(const IntRect& paintedRect)
     // Ask the controller to invalidate the rect for us.
     m_waitingForPaintInResponseToUpdate = true;
     controller()->invalidate(paintedRect);
+}
+
+IntPoint PluginProxy::convertToRootView(const IntPoint& point) const
+{
+    return m_pluginToRootViewTransform.mapPoint(point);
 }
 
 } // namespace WebKit

@@ -172,19 +172,11 @@ PassRefPtr<Frame> FrameLoaderClientWinCE::createFrame(const KURL& url, const Str
     return m_webView->createFrame(url, name, ownerElement, referrer, allowsScrolling, marginWidth, marginHeight);
 }
 
-void FrameLoaderClientWinCE::didTransferChildFrameToNewDocument(Page*)
-{
-}
-
-void FrameLoaderClientWinCE::transferLoadingResourceFromPage(ResourceLoader*, const WebCore::ResourceRequest&, Page*)
-{
-}
-
 void FrameLoaderClientWinCE::redirectDataToPlugin(Widget* pluginWidget)
 {
-    ASSERT(!m_pluginView);
     m_pluginView = static_cast<PluginView*>(pluginWidget);
-    m_hasSentResponseToPlugin = false;
+    if (pluginWidget)
+        m_hasSentResponseToPlugin = false;
 }
 
 PassRefPtr<Widget> FrameLoaderClientWinCE::createJavaAppletWidget(const IntSize&, HTMLAppletElement*, const KURL&, const Vector<String>&, const Vector<String>&)
@@ -384,12 +376,7 @@ void FrameLoaderClientWinCE::dispatchDidFinishDocumentLoad()
     notImplemented();
 }
 
-void FrameLoaderClientWinCE::dispatchDidFirstLayout()
-{
-    notImplemented();
-}
-
-void FrameLoaderClientWinCE::dispatchDidFirstVisuallyNonEmptyLayout()
+void FrameLoaderClientWinCE::dispatchDidLayout(LayoutMilestones)
 {
     notImplemented();
 }
@@ -400,11 +387,6 @@ void FrameLoaderClientWinCE::dispatchShow()
 }
 
 void FrameLoaderClientWinCE::cancelPolicyCheck()
-{
-    notImplemented();
-}
-
-void FrameLoaderClientWinCE::dispatchDidLoadMainResource(DocumentLoader*)
 {
     notImplemented();
 }
@@ -432,9 +414,7 @@ bool FrameLoaderClientWinCE::canHandleRequest(const WebCore::ResourceRequest&) c
 
 bool FrameLoaderClientWinCE::canShowMIMEType(const String& type) const
 {
-    return (MIMETypeRegistry::isSupportedImageMIMEType(type)
-            || MIMETypeRegistry::isSupportedNonImageMIMEType(type)
-            || MIMETypeRegistry::isSupportedMediaMIMEType(type)
+    return (MIMETypeRegistry::canShowMIMEType(type)
             || PluginDatabase::installedPlugins()->isMIMETypeRegistered(type));
 }
 
@@ -456,12 +436,10 @@ String FrameLoaderClientWinCE::generatedMIMETypeForURLScheme(const String&) cons
     return String();
 }
 
-void FrameLoaderClientWinCE::finishedLoading(DocumentLoader* documentLoader)
+void FrameLoaderClientWinCE::finishedLoading(DocumentLoader*)
 {
-    if (!m_pluginView) {
-        documentLoader->writer()->setEncoding(m_response.textEncodingName(), false);
+    if (!m_pluginView)
         return;
-    }
 
     m_pluginView->didFinishLoading();
     m_pluginView = 0;
@@ -519,7 +497,7 @@ void FrameLoaderClientWinCE::dispatchDidFailLoad(const ResourceError&)
     notImplemented();
 }
 
-void FrameLoaderClientWinCE::download(ResourceHandle*, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&)
+void FrameLoaderClientWinCE::convertMainResourceLoadToDownload(WebCore::MainResourceLoader*, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&)
 {
     notImplemented();
 }

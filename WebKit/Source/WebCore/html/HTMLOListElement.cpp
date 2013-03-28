@@ -54,46 +54,49 @@ PassRefPtr<HTMLOListElement> HTMLOListElement::create(const QualifiedName& tagNa
     return adoptRef(new HTMLOListElement(tagName, document));
 }
 
-bool HTMLOListElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+bool HTMLOListElement::isPresentationAttribute(const QualifiedName& name) const
 {
-    if (attrName == typeAttr) {
-        result = eListItem; // Share with <li>
-        return false;
-    }
-    
-    return HTMLElement::mapToEntry(attrName, result);
+    if (name == typeAttr)
+        return true;
+    return HTMLElement::isPresentationAttribute(name);
 }
 
-void HTMLOListElement::parseMappedAttribute(Attribute* attr)
+void HTMLOListElement::collectStyleForPresentationAttribute(const Attribute& attribute, StylePropertySet* style)
 {
-    if (attr->name() == typeAttr) {
-        if (attr->value() == "a")
-            addCSSProperty(attr, CSSPropertyListStyleType, CSSValueLowerAlpha);
-        else if (attr->value() == "A")
-            addCSSProperty(attr, CSSPropertyListStyleType, CSSValueUpperAlpha);
-        else if (attr->value() == "i")
-            addCSSProperty(attr, CSSPropertyListStyleType, CSSValueLowerRoman);
-        else if (attr->value() == "I")
-            addCSSProperty(attr, CSSPropertyListStyleType, CSSValueUpperRoman);
-        else if (attr->value() == "1")
-            addCSSProperty(attr, CSSPropertyListStyleType, CSSValueDecimal);
-    } else if (attr->name() == startAttr) {
+    if (attribute.name() == typeAttr) {
+        if (attribute.value() == "a")
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType, CSSValueLowerAlpha);
+        else if (attribute.value() == "A")
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType, CSSValueUpperAlpha);
+        else if (attribute.value() == "i")
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType, CSSValueLowerRoman);
+        else if (attribute.value() == "I")
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType, CSSValueUpperRoman);
+        else if (attribute.value() == "1")
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType, CSSValueDecimal);
+    } else
+        HTMLElement::collectStyleForPresentationAttribute(attribute, style);
+}
+
+void HTMLOListElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+{
+    if (name == startAttr) {
         int oldStart = start();
         bool canParse;
-        int parsedStart = attr->value().toInt(&canParse);
+        int parsedStart = value.toInt(&canParse);
         m_hasExplicitStart = canParse;
         m_start = canParse ? parsedStart : 0xBADBEEF;
         if (oldStart == start())
             return;
         updateItemValues();
-    } else if (attr->name() == reversedAttr) {
-        bool reversed = !attr->isNull();
+    } else if (name == reversedAttr) {
+        bool reversed = !value.isNull();
         if (reversed == m_isReversed)
             return;
         m_isReversed = reversed;
         updateItemValues();
     } else
-        HTMLElement::parseMappedAttribute(attr);
+        HTMLElement::parseAttribute(name, value);
 }
 
 void HTMLOListElement::setStart(int start)

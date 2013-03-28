@@ -53,7 +53,6 @@ namespace WebCore {
             TargetIsWorker,
             TargetIsSharedWorker,
             TargetIsPrefetch,
-            TargetIsPrerender,
             TargetIsFavicon,
             TargetIsXHR,
             TargetIsTextTrack,
@@ -140,6 +139,8 @@ namespace WebCore {
         // What this request is for.
         TargetType targetType() const { return m_targetType; }
         void setTargetType(TargetType type) { m_targetType = type; }
+
+        void reportMemoryUsage(MemoryObjectInfo*) const;
 
     private:
         friend class ResourceRequestBase;

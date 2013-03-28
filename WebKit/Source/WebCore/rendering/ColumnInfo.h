@@ -26,7 +26,7 @@
 #ifndef ColumnInfo_h
 #define ColumnInfo_h
 
-#include "LayoutTypes.h"
+#include "LayoutUnit.h"
 #include <wtf/Vector.h>
 
 namespace WebCore {
@@ -38,12 +38,14 @@ public:
         : m_desiredColumnWidth(0)
         , m_desiredColumnCount(1)
         , m_progressionAxis(InlineAxis)
+        , m_progressionIsReversed(false)
         , m_columnCount(1)
         , m_columnHeight(0)
         , m_minimumColumnHeight(0)
         , m_forcedBreaks(0)
         , m_maximumDistanceBetweenForcedBreaks(0)
         , m_forcedBreakOffset(0)
+        , m_paginationUnit(Column)
     {
     }
 
@@ -57,6 +59,9 @@ public:
 
     Axis progressionAxis() const { return m_progressionAxis; }
     void setProgressionAxis(Axis progressionAxis) { m_progressionAxis = progressionAxis; }
+
+    bool progressionIsReversed() const { return m_progressionIsReversed; }
+    void setProgressionIsReversed(bool reversed) { m_progressionIsReversed = reversed; }
 
     unsigned columnCount() const { return m_columnCount; }
     LayoutUnit columnHeight() const { return m_columnHeight; }
@@ -74,18 +79,18 @@ public:
     LayoutUnit minimumColumnHeight() const { return m_minimumColumnHeight; }
 
     int forcedBreaks() const { return m_forcedBreaks; }
-    int forcedBreakOffset() const { return m_forcedBreakOffset; }
-    int maximumDistanceBetweenForcedBreaks() const { return m_maximumDistanceBetweenForcedBreaks; }
+    LayoutUnit forcedBreakOffset() const { return m_forcedBreakOffset; }
+    LayoutUnit maximumDistanceBetweenForcedBreaks() const { return m_maximumDistanceBetweenForcedBreaks; }
     void clearForcedBreaks()
     { 
         m_forcedBreaks = 0;
         m_maximumDistanceBetweenForcedBreaks = 0;
         m_forcedBreakOffset = 0;
     }
-    void addForcedBreak(int offsetFromFirstPage)
+    void addForcedBreak(LayoutUnit offsetFromFirstPage)
     { 
         ASSERT(!m_columnHeight);
-        int distanceFromLastBreak = offsetFromFirstPage - m_forcedBreakOffset;
+        LayoutUnit distanceFromLastBreak = offsetFromFirstPage - m_forcedBreakOffset;
         if (!distanceFromLastBreak)
             return;
         m_forcedBreaks++;
@@ -93,17 +98,23 @@ public:
         m_forcedBreakOffset = offsetFromFirstPage;
     }
 
+    enum PaginationUnit { Column, Page };
+    PaginationUnit paginationUnit() const { return m_paginationUnit; }
+    void setPaginationUnit(PaginationUnit paginationUnit) { m_paginationUnit = paginationUnit; }
+
 private:
     LayoutUnit m_desiredColumnWidth;
     unsigned m_desiredColumnCount;
     Axis m_progressionAxis;
+    bool m_progressionIsReversed;
 
     unsigned m_columnCount;
     LayoutUnit m_columnHeight;
     LayoutUnit m_minimumColumnHeight;
     int m_forcedBreaks; // FIXME: We will ultimately need to cache more information to balance around forced breaks properly.
-    int m_maximumDistanceBetweenForcedBreaks;
-    int m_forcedBreakOffset;
+    LayoutUnit m_maximumDistanceBetweenForcedBreaks;
+    LayoutUnit m_forcedBreakOffset;
+    PaginationUnit m_paginationUnit;
 };
 
 }

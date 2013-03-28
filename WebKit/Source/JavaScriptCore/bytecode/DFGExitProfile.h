@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,53 +26,12 @@
 #ifndef DFGExitProfile_h
 #define DFGExitProfile_h
 
+#include "ExitKind.h"
 #include <wtf/HashSet.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/Vector.h>
 
 namespace JSC { namespace DFG {
-
-enum ExitKind {
-    ExitKindUnset,
-    BadType, // We exited because a type prediction was wrong.
-    BadCache, // We exited because an inline cache was wrong.
-    Overflow, // We exited because of overflow.
-    NegativeZero, // We exited because we encountered negative zero.
-    Uncountable, // We exited for none of the above reasons, and we should not count it. Most uses of this should be viewed as a FIXME.
-};
-
-#ifndef NDEBUG
-inline const char* exitKindToString(ExitKind kind)
-{
-    switch (kind) {
-    case ExitKindUnset:
-        return "Unset";
-    case BadType:
-        return "BadType";
-    case BadCache:
-        return "BadCache";
-    case Overflow:
-        return "Overflow";
-    case NegativeZero:
-        return "NegativeZero";
-    default:
-        return "Unknown";
-    }
-}
-#endif
-
-inline bool exitKindIsCountable(ExitKind kind)
-{
-    switch (kind) {
-    case ExitKindUnset:
-        ASSERT_NOT_REACHED();
-    case BadType:
-    case Uncountable:
-        return false;
-    default:
-        return true;
-    }
-}
 
 class FrequentExitSite {
 public:
@@ -90,6 +49,15 @@ public:
     
     explicit FrequentExitSite(unsigned bytecodeOffset, ExitKind kind)
         : m_bytecodeOffset(bytecodeOffset)
+        , m_kind(kind)
+    {
+        ASSERT(exitKindIsCountable(kind));
+    }
+    
+    // Use this constructor if you wish for the exit site to be counted globally within its
+    // code block.
+    explicit FrequentExitSite(ExitKind kind)
+        : m_bytecodeOffset(0)
         , m_kind(kind)
     {
         ASSERT(exitKindIsCountable(kind));
@@ -175,6 +143,11 @@ public:
     bool hasExitSite(const FrequentExitSite& site) const
     {
         return m_frequentExitSites.find(site) != m_frequentExitSites.end();
+    }
+    
+    bool hasExitSite(ExitKind kind) const
+    {
+        return hasExitSite(FrequentExitSite(kind));
     }
     
     bool hasExitSite(unsigned bytecodeIndex, ExitKind kind) const

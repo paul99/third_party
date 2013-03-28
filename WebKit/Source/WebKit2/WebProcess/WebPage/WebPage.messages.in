@@ -40,40 +40,50 @@ messages -> WebPage {
 #if ENABLE(TOUCH_EVENTS)
     TouchEvent(WebKit::WebTouchEvent event)
     TouchEventSyncForTesting(WebKit::WebTouchEvent event) -> (bool handled)
-#if PLATFORM(QT)
-    HighlightPotentialActivation(WebCore::IntPoint point)
 #endif
+#if ENABLE(TOUCH_EVENTS) && PLATFORM(QT)
+    HighlightPotentialActivation(WebCore::IntPoint point, WebCore::IntSize area)
 #endif
 
+#if ENABLE(INPUT_TYPE_COLOR)
+    DidEndColorChooser()
+    DidChooseColor(WebCore::Color color)
+#endif
+
+#if ENABLE(CONTEXT_MENUS)
     ContextMenuHidden()
+#endif
 
     ScrollBy(uint32_t scrollDirection, uint32_t scrollGranularity)
     CenterSelectionInVisibleArea()
 
-    GoBack(uint64_t backForwardItemID, WebKit::SandboxExtension::Handle sandboxExtensionHandle)
-    GoForward(uint64_t backForwardItemID, WebKit::SandboxExtension::Handle sandboxExtensionHandle)
-    GoToBackForwardItem(uint64_t backForwardItemID, WebKit::SandboxExtension::Handle sandboxExtensionHandle)
+    GoBack(uint64_t backForwardItemID)
+    GoForward(uint64_t backForwardItemID)
+    GoToBackForwardItem(uint64_t backForwardItemID)
     TryRestoreScrollPosition()
     LoadHTMLString(WTF::String htmlString, WTF::String baseURL)
-    LoadAlternateHTMLString(WTF::String htmlString, WTF::String baseURL, WTF::String unreachableURL); 
+    LoadAlternateHTMLString(WTF::String htmlString, WTF::String baseURL, WTF::String unreachableURL)
     LoadPlainTextString(WTF::String string)
+    LoadWebArchiveData(CoreIPC::DataReference webArchiveData)
     LoadURL(WTF::String url, WebKit::SandboxExtension::Handle sandboxExtensionHandle)
     LoadURLRequest(WebCore::ResourceRequest request, WebKit::SandboxExtension::Handle sandboxExtensionHandle)
     LinkClicked(WTF::String url, WebKit::WebMouseEvent event)
-    Reload(bool reloadFromOrigin)
+    Reload(bool reloadFromOrigin, WebKit::SandboxExtension::Handle sandboxExtensionHandle)
     StopLoading()
 
 #if PLATFORM(QT)
     ApplicationSchemeReply(WebKit::QtNetworkReplyData reply)
     RegisterApplicationScheme(WTF::String scheme)
+    SetUserScripts(WTF::Vector<WTF::String> script)
 #endif
 
     StopLoadingFrame(uint64_t frameID)
     
     RestoreSession(WebKit::SessionState state)
-    RestoreSessionAndNavigateToCurrentItem(WebKit::SessionState state, WebKit::SandboxExtension::Handle sandboxExtensionHandle)
+    RestoreSessionAndNavigateToCurrentItem(WebKit::SessionState state)
 
     DidRemoveBackForwardItem(uint64_t backForwardItemID)
+    SetWillGoToBackForwardItemCallbackEnabled(bool willGoToBackForwardItemEnabled)
 
     DidReceivePolicyDecision(uint64_t frameID, uint64_t listenerID, uint32_t policyAction, uint64_t downloadID)
 
@@ -81,6 +91,9 @@ messages -> WebPage {
 
     # Callbacks.
     GetContentsAsString(uint64_t callbackID)
+#if ENABLE(MHTML)
+    GetContentsAsMHTMLData(uint64_t callbackID, bool useBinaryEncoding)
+#endif
     GetMainResourceDataOfFrame(uint64_t frameID, uint64_t callbackID)
     GetResourceDataFromFrame(uint64_t frameID, WTF::String resourceURL, uint64_t callbackID)
     GetRenderTreeExternalRepresentation(uint64_t callbackID)
@@ -100,8 +113,10 @@ messages -> WebPage {
     SetUserAgent(WTF::String userAgent)
     SetCustomTextEncodingName(WTF::String encodingName)
 
+    SuspendActiveDOMObjectsAndAnimations()
+    ResumeActiveDOMObjectsAndAnimations()
+
 #if USE(TILED_BACKING_STORE)
-    SetFixedVisibleContentRect(WebCore::IntRect rect)
     SetViewportSize(WebCore::IntSize size)
 #endif
 
@@ -124,10 +139,15 @@ messages -> WebPage {
 
     SetUseFixedLayout(bool fixed)
     SetFixedLayoutSize(WebCore::IntSize size)
+    ListenForLayoutMilestones(uint32_t milestones)
+    SetSuppressScrollbarAnimations(bool suppressAnimations)
 
-    SetPaginationMode(uint32_t mode);
-    SetPageLength(double pageLength);
-    SetGapBetweenPages(double gap);
+    SetPaginationMode(uint32_t mode)
+    SetPaginationBehavesLikeColumns(bool behavesLikeColumns)
+    SetPageLength(double pageLength)
+    SetGapBetweenPages(double gap)
+
+    PostInjectedBundleMessage(WTF::String messageName, WebKit::WebContextUserMessageEncoder messageBody) Variadic
 
     # Find.
     FindString(WTF::String string, uint32_t findOptions, unsigned maxMatchCount)
@@ -135,26 +155,34 @@ messages -> WebPage {
     CountStringMatches(WTF::String string, uint32_t findOptions, unsigned maxMatchCount)
 
     # Drag and drop.
-#if PLATFORM(WIN)
+#if PLATFORM(WIN) && ENABLE(DRAG_SUPPORT)
     PerformDragControllerAction(uint64_t action, WebCore::IntPoint clientPosition, WebCore::IntPoint globalPosition, uint64_t draggingSourceOperationMask, HashMap<UINT,Vector<String>> dataMap, uint32_t flags)
 #endif
-#if PLATFORM(QT) || PLATFORM(GTK)
+#if (PLATFORM(QT) || PLATFORM(GTK)) && ENABLE(DRAG_SUPPORT)
     PerformDragControllerAction(uint64_t action, WebCore::DragData dragData)
 #endif
-#if !PLATFORM(WIN) && !PLATFORM(QT) && !PLATFORM(GTK)
-    PerformDragControllerAction(uint64_t action, WebCore::IntPoint clientPosition, WebCore::IntPoint globalPosition, uint64_t draggingSourceOperationMask, WTF::String dragStorageName, uint32_t flags, WebKit::SandboxExtension::Handle sandboxExtensionHandle)
+#if !PLATFORM(WIN) && !PLATFORM(QT) && !PLATFORM(GTK) && ENABLE(DRAG_SUPPORT)
+    PerformDragControllerAction(uint64_t action, WebCore::IntPoint clientPosition, WebCore::IntPoint globalPosition, uint64_t draggingSourceOperationMask, WTF::String dragStorageName, uint32_t flags, WebKit::SandboxExtension::Handle sandboxExtensionHandle, WebKit::SandboxExtension::HandleArray sandboxExtensionsForUpload)
 #endif
+#if ENABLE(DRAG_SUPPORT)
     DragEnded(WebCore::IntPoint clientPosition, WebCore::IntPoint globalPosition, uint64_t operation)
+#endif
 
     # Popup menu.
-    DidChangeSelectedIndexForActivePopupMenu(int32_t newIndex);
-    SetTextForActivePopupMenu(int32_t index);
-#if PLATFORM(GTK)    
-    FailedToShowPopupMenu();
-#endif    
+    DidChangeSelectedIndexForActivePopupMenu(int32_t newIndex)
+    SetTextForActivePopupMenu(int32_t index)
+#if PLATFORM(GTK)
+    FailedToShowPopupMenu()
+#endif
+#if PLATFORM(QT)
+    HidePopupMenu()
+    SelectedIndex(int32_t newIndex)
+#endif
     
+#if ENABLE(CONTEXT_MENUS)
     # Context menu.
-    DidSelectItemFromActiveContextMenu(WebKit::WebContextMenuItemData menuItem);
+    DidSelectItemFromActiveContextMenu(WebKit::WebContextMenuItemData menuItem)
+#endif
 
     # Open panel.
     DidChooseFilesForOpenPanel(Vector<WTF::String> fileURLs)
@@ -166,17 +194,19 @@ messages -> WebPage {
     # Spelling and grammar.
     AdvanceToNextMisspelling(bool startBeforeSelection)
     ChangeSpellingToWord(WTF::String word)
-#if PLATFORM(MAC)
-    UppercaseWord();
-    LowercaseWord();
-    CapitalizeWord();
+#if USE(APPKIT)
+    UppercaseWord()
+    LowercaseWord()
+    CapitalizeWord()
 
-    SetSmartInsertDeleteEnabled(bool isSmartInsertDeleteEnabled);
+    SetSmartInsertDeleteEnabled(bool isSmartInsertDeleteEnabled)
 #endif
 
+#if ENABLE(GEOLOCATION)
     # Geolocation
     DidReceiveGeolocationPermissionDecision(uint64_t geolocationID, bool allowed)
-    
+#endif
+
     # Notification
     DidReceiveNotificationPermissionDecision(uint64_t notificationID, bool allowed)
 
@@ -184,10 +214,10 @@ messages -> WebPage {
 
     # Printing.
     BeginPrinting(uint64_t frameID, WebKit::PrintInfo printInfo)
-    EndPrinting();
+    EndPrinting()
     ComputePagesForPrinting(uint64_t frameID, WebKit::PrintInfo printInfo, uint64_t callbackID)
 #if PLATFORM(MAC) || PLATFORM(WIN)
-    DrawRectToPDF(uint64_t frameID, WebKit::PrintInfo printInfo, WebCore::IntRect rect, uint64_t callbackID)
+    DrawRectToImage(uint64_t frameID, WebKit::PrintInfo printInfo, WebCore::IntRect rect, uint64_t callbackID)
     DrawPagesToPDF(uint64_t frameID, WebKit::PrintInfo printInfo, uint32_t first, uint32_t count, uint64_t callbackID)
 #endif
 #if PLATFORM(GTK)
@@ -196,6 +226,7 @@ messages -> WebPage {
 
     # Media
     SetMediaVolume(float volume)
+    SetMayStartMediaWhenInWindow(bool mayStartMedia)
 
     SetMemoryCacheMessagesEnabled(bool memoryCacheMessagesEnabled)
 
@@ -205,6 +236,19 @@ messages -> WebPage {
 
     SetCanRunBeforeUnloadConfirmPanel(bool canRunBeforeUnloadConfirmPanel)
     SetCanRunModal(bool canRunModal)
+
+    # Web Intents
+#if ENABLE(WEB_INTENTS)
+    DeliverIntentToFrame(uint64_t frameID, WebKit::IntentData intentData)
+#endif
+
+#if PLATFORM(EFL)
+    SetThemePath(WTF::String themePath)
+#endif
+
+#if USE(TILED_BACKING_STORE)
+    CommitPageTransitionViewport()
+#endif
 
 #if PLATFORM(QT)
     SetComposition(WTF::String text, WTF::Vector<WebCore::CompositionUnderline> underlines, uint64_t selectionStart, uint64_t selectionEnd, uint64_t replacementRangeStart, uint64_t replacementRangeEnd)
@@ -219,7 +263,8 @@ messages -> WebPage {
     SetWindowIsVisible(bool windowIsVisible)
     WindowAndViewFramesChanged(WebCore::IntRect windowFrameInScreenCoordinates, WebCore::IntRect viewFrameInWindowCoordinates, WebCore::IntPoint accessibilityViewCoordinates)
     RegisterUIProcessAccessibilityTokens(CoreIPC::DataReference elemenToken, CoreIPC::DataReference windowToken)
-    WriteSelectionToPasteboard(WTF::String pasteboardName, WTF::Vector<WTF::String> pasteboardTypes) -> (bool result)
+    GetStringSelectionForPasteboard() -> (WTF::String stringValue)
+    GetDataSelectionForPasteboard(WTF::String pasteboardType) -> (WebKit::SharedMemory::Handle handle, uint64_t size)
     ReadSelectionFromPasteboard(WTF::String pasteboardName) -> (bool result)
 
     # Text input.
@@ -235,6 +280,7 @@ messages -> WebPage {
     ExecuteKeypressCommands(Vector<WebCore::KeypressCommand> savedCommands) -> (bool handled, WebKit::EditorState newState)
     ShouldDelayWindowOrderingEvent(WebKit::WebMouseEvent event) -> (bool result)
     AcceptsFirstMouse(int eventNumber, WebKit::WebMouseEvent event) -> (bool result)
+    InsertDictatedText(WTF::String text, uint64_t replacementRangeStart, uint64_t replacementRangeEnd, WTF::Vector<WebCore::DictationAlternative> dictationAlternatives) -> (bool handled, WebKit::EditorState newState)
 #endif
 #if PLATFORM(WIN)
     // FIXME: Unify with Mac counterparts.
@@ -247,11 +293,24 @@ messages -> WebPage {
     GestureDidScroll(WebCore::IntSize size)
     GestureDidEnd()
 #endif
+#if PLATFORM(EFL)
+    ConfirmComposition(WTF::String compositionString)
+    SetComposition(WTF::String compositionString, WTF::Vector<WebCore::CompositionUnderline> underlines, uint64_t cursorPosition)
+    CancelComposition()
+#endif
 #if PLATFORM(QT)
-    FindZoomableAreaForPoint(WebCore::IntPoint point)
+    FindZoomableAreaForPoint(WebCore::IntPoint point, WebCore::IntSize area)
 #endif
 
-#if PLATFORM(MAC) && !defined(BUILDING_ON_SNOW_LEOPARD)
-    HandleCorrectionPanelResult(String result)
+#if PLATFORM(MAC)
+    HandleAlternativeTextUIResult(String result)
+#endif
+
+#if ENABLE(PAGE_VISIBILITY_API) || ENABLE(HIDDEN_PAGE_DOM_TIMER_THROTTLING)
+    SetVisibilityState(int visibilityState, bool isInitialState)
+#endif
+
+#if PLATFORM(GTK) && USE(TEXTURE_MAPPER_GL)
+    SetAcceleratedCompositingWindowId(int64_t id)
 #endif
 }

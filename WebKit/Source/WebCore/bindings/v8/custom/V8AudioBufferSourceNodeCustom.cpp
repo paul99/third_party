@@ -33,7 +33,6 @@
 #include "ExceptionCode.h"
 #include "V8AudioBuffer.h"
 #include "V8Binding.h"
-#include "V8Proxy.h"
 
 namespace WebCore {
 
@@ -47,13 +46,13 @@ void V8AudioBufferSourceNode::bufferAccessorSetter(v8::Local<v8::String> name, v
     if (V8AudioBuffer::HasInstance(value)) {
         buffer = V8AudioBuffer::toNative(value->ToObject());
         if (buffer && !imp->setBuffer(buffer)) {
-            throwError("AudioBuffer unsupported number of channels");
+            throwTypeError("AudioBuffer unsupported number of channels", info.GetIsolate());
             return;
         }
     }
     
     if (!buffer) {
-        throwError("Value is not of type AudioBuffer");
+        throwTypeError("Value is not of type AudioBuffer", info.GetIsolate());
         return;
     }
 }

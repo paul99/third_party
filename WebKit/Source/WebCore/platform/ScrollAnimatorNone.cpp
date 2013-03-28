@@ -36,8 +36,7 @@
 
 #include "FloatPoint.h"
 #include "NotImplemented.h"
-#include "OwnArrayPtr.h"
-#include "PlatformGestureEvent.h"
+#include <wtf/OwnArrayPtr.h>
 #include "ScrollableArea.h"
 #include "ScrollbarTheme.h"
 #include <algorithm>
@@ -46,6 +45,10 @@
 
 #if PLATFORM(CHROMIUM)
 #include "TraceEvent.h"
+#endif
+
+#if ENABLE(GESTURE_EVENTS)
+#include "PlatformGestureEvent.h"
 #endif
 
 using namespace std;
@@ -57,12 +60,14 @@ const double kTickTime = 1 / kFrameRate;
 const double kMinimumTimerInterval = .001;
 const double kZoomTicks = 11;
 
+#if !(PLATFORM(BLACKBERRY))
 PassOwnPtr<ScrollAnimator> ScrollAnimator::create(ScrollableArea* scrollableArea)
 {
     if (scrollableArea && scrollableArea->scrollAnimatorEnabled())
         return adoptPtr(new ScrollAnimatorNone(scrollableArea));
     return adoptPtr(new ScrollAnimator(scrollableArea));
 }
+#endif
 
 ScrollAnimatorNone::Parameters::Parameters()
     : m_isEnabled(false)
@@ -235,9 +240,12 @@ void ScrollAnimatorNone::PerAxisData::reset()
 
 bool ScrollAnimatorNone::PerAxisData::updateDataFromParameters(float step, float multiplier, float scrollableSize, double currentTime, Parameters* parameters)
 {
-    if (!m_startTime)
+    float delta = step * multiplier;
+    if (!m_startTime || !delta || (delta < 0) != (m_desiredPosition - *m_currentPosition < 0)) {
         m_desiredPosition = *m_currentPosition;
-    float newPosition = m_desiredPosition + (step * multiplier);
+        m_startTime = 0;
+    }
+    float newPosition = m_desiredPosition + delta;
 
     if (newPosition < 0 || newPosition > scrollableSize)
         newPosition = max(min(newPosition, scrollableSize), 0.0f);
@@ -288,9 +296,9 @@ bool ScrollAnimatorNone::PerAxisData::updateDataFromParameters(float step, float
         // This needs to be as minimal as possible while not being intrusive to page up/down.
         double minCoastDelta = m_visibleLength;
 
-        if (abs(remainingDelta) > minCoastDelta) {
+        if (fabs(remainingDelta) > minCoastDelta) {
             double maxCoastDelta = parameters->m_maximumCoastTime * targetMaxCoastVelocity;
-            double coastFactor = min(1., (abs(remainingDelta) - minCoastDelta) / (maxCoastDelta - minCoastDelta));
+            double coastFactor = min(1., (fabs(remainingDelta) - minCoastDelta) / (maxCoastDelta - minCoastDelta));
 
             // We could play with the curve here - linear seems a little soft. Initial testing makes me want to feed into the sustain time more aggressively.
             double coastMinTimeLeft = min(parameters->m_maximumCoastTime, minTimeLeft + coastCurve(parameters->m_coastTimeCurve, coastFactor) * (parameters->m_maximumCoastTime - minTimeLeft));
@@ -371,37 +379,16 @@ void ScrollAnimatorNone::PerAxisData::updateVisibleLength(int visibleLength)
     m_visibleLength = visibleLength;
 }
 
-ScrollAnimatorNone::ZoomData::ZoomData(WebCore::ScrollAnimatorNone* parent)
-    : m_parent(parent)
-    , m_isAnimating(false)
-{
-}
-
-bool ScrollAnimatorNone::ZoomData::animateZoom(double currentTime)
-{
-    m_lastAnimationTime = currentTime;
-    double deltaTime = currentTime - m_startTime;
-
-    if (deltaTime > m_animationTime) {
-        m_parent->m_currentZoomScale = m_desiredScale;
-        m_parent->m_currentZoomTransX = m_desiredTransX;
-        m_parent->m_currentZoomTransY = m_desiredTransY;
-        return false;
-    }
-
-    double elapsedTimeFraction = deltaTime / m_animationTime;
-    m_parent->m_currentZoomScale = elapsedTimeFraction * (m_desiredScale - m_startScale) + m_startScale;
-    m_parent->m_currentZoomTransX = elapsedTimeFraction * m_desiredTransX;
-    m_parent->m_currentZoomTransY = elapsedTimeFraction * m_desiredTransY;
-    return true;
-}
-
 ScrollAnimatorNone::ScrollAnimatorNone(ScrollableArea* scrollableArea)
     : ScrollAnimator(scrollableArea)
     , m_horizontalData(this, &m_currentPosX, scrollableArea->visibleWidth())
     , m_verticalData(this, &m_currentPosY, scrollableArea->visibleHeight())
-    , m_zoomData(this)
+    , m_startTime(0)
+#if USE(REQUEST_ANIMATION_FRAME_TIMER)
     , m_animationTimer(this, &ScrollAnimatorNone::animationTimerFired)
+#else
+    , m_animationActive(false)
+#endif
 {
 }
 
@@ -410,13 +397,47 @@ ScrollAnimatorNone::~ScrollAnimatorNone()
     stopAnimationTimerIfNeeded();
 }
 
+ScrollAnimatorNone::Parameters ScrollAnimatorNone::parametersForScrollGranularity(ScrollGranularity granularity) const
+{
+#if !PLATFORM(QT)
+    switch (granularity) {
+    case ScrollByDocument:
+        return Parameters(true, 20 * kTickTime, 10 * kTickTime, Cubic, 10 * kTickTime, Cubic, 10 * kTickTime, Linear, 1);
+    case ScrollByLine:
+        return Parameters(true, 10 * kTickTime, 7 * kTickTime, Cubic, 3 * kTickTime, Cubic, 3 * kTickTime, Linear, 1);
+    case ScrollByPage:
+        return Parameters(true, 15 * kTickTime, 10 * kTickTime, Cubic, 5 * kTickTime, Cubic, 5 * kTickTime, Linear, 1);
+    case ScrollByPixel:
+        return Parameters(true, 11 * kTickTime, 2 * kTickTime, Cubic, 3 * kTickTime, Cubic, 3 * kTickTime, Quadratic, 1.25);
+    default:
+        ASSERT_NOT_REACHED();
+    }
+#else
+    // This is a slightly different strategy for the animation with a steep attack curve and natural release curve.
+    // The fast acceleration makes the animation look more responsive to user input.
+    switch (granularity) {
+    case ScrollByDocument:
+        return Parameters(true, 20 * kTickTime, 10 * kTickTime, Cubic, 6 * kTickTime, Quadratic, 10 * kTickTime, Quadratic, 22 * kTickTime);
+    case ScrollByLine:
+        return Parameters(true, 6 * kTickTime, 5 * kTickTime, Cubic, 1 * kTickTime, Quadratic, 4 * kTickTime, Linear, 1);
+    case ScrollByPage:
+        return Parameters(true, 12 * kTickTime, 10 * kTickTime, Cubic, 3 * kTickTime, Quadratic, 6 * kTickTime, Linear, 1);
+    case ScrollByPixel:
+        return Parameters(true, 8 * kTickTime, 3 * kTickTime, Cubic, 2 * kTickTime, Quadratic, 5 * kTickTime, Quadratic, 1.25);
+    default:
+        ASSERT_NOT_REACHED();
+    }
+#endif
+    return Parameters();
+}
+
 bool ScrollAnimatorNone::scroll(ScrollbarOrientation orientation, ScrollGranularity granularity, float step, float multiplier)
 {
     if (!m_scrollableArea->scrollAnimatorEnabled())
         return ScrollAnimator::scroll(orientation, granularity, step, multiplier);
 
 #if PLATFORM(CHROMIUM)
-    TRACE_EVENT("ScrollAnimatorNone::scroll", this, 0);
+    TRACE_EVENT0("webkit", "ScrollAnimatorNone::scroll");
 #endif
 
     // FIXME: get the type passed in. MouseWheel could also be by line, but should still have different
@@ -424,19 +445,13 @@ bool ScrollAnimatorNone::scroll(ScrollbarOrientation orientation, ScrollGranular
     Parameters parameters;
     switch (granularity) {
     case ScrollByDocument:
-        parameters = Parameters(true, 20 * kTickTime, 10 * kTickTime, Cubic, 10 * kTickTime, Cubic, 10 * kTickTime, Linear, 1);
-        break;
     case ScrollByLine:
-        parameters = Parameters(true, 10 * kTickTime, 7 * kTickTime, Cubic, 3 * kTickTime, Cubic, 3 * kTickTime, Linear, 1);
-        break;
     case ScrollByPage:
-        parameters = Parameters(true, 15 * kTickTime, 10 * kTickTime, Cubic, 5 * kTickTime, Cubic, 5 * kTickTime, Linear, 1);
-        break;
     case ScrollByPixel:
-        parameters = Parameters(true, 11 * kTickTime, 2 * kTickTime, Cubic, 3 * kTickTime, Cubic, 3 * kTickTime, Quadratic, 1.25);
+        parameters = parametersForScrollGranularity(granularity);
         break;
-    default:
-        break;
+    case ScrollByPrecisePixel:
+        return ScrollAnimator::scroll(orientation, granularity, step, multiplier);
     }
 
     // If the individual input setting is disabled, bail.
@@ -448,9 +463,10 @@ bool ScrollAnimatorNone::scroll(ScrollbarOrientation orientation, ScrollGranular
 
     PerAxisData& data = (orientation == VerticalScrollbar) ? m_verticalData : m_horizontalData;
     bool needToScroll = data.updateDataFromParameters(step, multiplier, scrollableSize, WTF::monotonicallyIncreasingTime(), &parameters);
-    if (needToScroll && !m_animationTimer.isActive()) {
+    if (needToScroll && !animationTimerActive()) {
         m_startTime = data.m_startTime;
-        animationTimerFired(&m_animationTimer);
+        animationWillStart();
+        animationTimerFired();
     }
     return needToScroll;
 }
@@ -470,60 +486,16 @@ void ScrollAnimatorNone::scrollToOffsetWithoutAnimation(const FloatPoint& offset
     notifyPositionChanged();
 }
 
-#if ENABLE(GESTURE_EVENTS)
-void ScrollAnimatorNone::zoom(const PlatformGestureEvent& pge)
+#if !USE(REQUEST_ANIMATION_FRAME_TIMER)
+void ScrollAnimatorNone::cancelAnimations()
 {
-    ASSERT(pge.type() == PlatformEvent::GestureDoubleTap);
-    // FIXME: modify this so we can start even if the timer is active.
-    if (!m_animationTimer.isActive()) {
-        m_currentZoomScale = 1;
-        m_currentZoomTransX = 0;
-        m_currentZoomTransY = 0;
-
-        double currentTime = WTF::monotonicallyIncreasingTime();
-        float scale = pge.deltaX();
-
-        m_zoomData.m_startTime = currentTime - kTickTime / 2;
-        m_zoomData.m_startScale = m_currentZoomScale;
-        m_zoomData.m_desiredScale = scale;
-        // FIXME: Document then simplify the following equations.
-        m_zoomData.m_desiredTransX = (1 - scale) * pge.globalPosition().x();
-        m_zoomData.m_desiredTransY = (1 - scale) * pge.globalPosition().y();
-#if ENABLE(DOUBLE_TAP_CENTERS)
-        if (pge.type() == PlatformEvent::GestureDoubleTap) {
-            // Zoom to centre of display. Pinch-to-zoom may not want this behaviour.
-            m_zoomData.m_desiredTransX += m_scrollableArea->visibleWidth() / 2 - pge.globalPosition().x();
-            m_zoomData.m_desiredTransY += m_scrollableArea->visibleHeight() / 2 - pge.globalPosition().y();
-        }
-#endif
-        m_zoomData.m_lastAnimationTime = currentTime;
-        m_zoomData.m_animationTime = kZoomTicks * kTickTime;
-
-        bool isContinuing = m_zoomData.animateZoom(currentTime);
-
-        double deltaToNextFrame = ceil((currentTime - m_startTime) * kFrameRate) / kFrameRate - (currentTime - m_startTime);
-        double nextTimerInterval = max(kMinimumTimerInterval, deltaToNextFrame);
-        if (isContinuing) {
-            m_animationTimer.startOneShot(nextTimerInterval);
-            m_zoomData.m_isAnimating = true;
-            notifyZoomChanged(ZoomAnimationContinuing);
-        } else
-            notifyZoomChanged(ZoomAnimationFinishing);
-    }
+    m_animationActive = false;
 }
 
-void ScrollAnimatorNone::handleGestureEvent(const PlatformGestureEvent& pge)
+void ScrollAnimatorNone::serviceScrollAnimations()
 {
-    TRACE_EVENT("ScrollAnimatorNone::handleGestureEvent", this, 0);
-    switch (pge.type()) {
-    case PlatformEvent::GestureDoubleTap:
-        zoom(pge);
-        break;
-
-    default:
-        // TODO: add any other event types we should handle
-        { }
-    }
+    if (m_animationActive)
+        animationTimerFired();
 }
 #endif
 
@@ -548,49 +520,77 @@ void ScrollAnimatorNone::updateVisibleLengths()
     m_verticalData.updateVisibleLength(scrollableArea()->visibleHeight());
 }
 
+#if USE(REQUEST_ANIMATION_FRAME_TIMER)
 void ScrollAnimatorNone::animationTimerFired(Timer<ScrollAnimatorNone>* timer)
 {
+    animationTimerFired();
+}
+#endif
+
+void ScrollAnimatorNone::animationTimerFired()
+{
 #if PLATFORM(CHROMIUM)
-    TRACE_EVENT("ScrollAnimatorNone::animationTimerFired", this, 0);
+    TRACE_EVENT0("webkit", "ScrollAnimatorNone::animationTimerFired");
 #endif
 
     double currentTime = WTF::monotonicallyIncreasingTime();
     double deltaToNextFrame = ceil((currentTime - m_startTime) * kFrameRate) / kFrameRate - (currentTime - m_startTime);
+    currentTime += deltaToNextFrame;
 
     bool continueAnimation = false;
-    if (m_horizontalData.m_startTime && m_horizontalData.animateScroll(currentTime + deltaToNextFrame))
+    if (m_horizontalData.m_startTime && m_horizontalData.animateScroll(currentTime))
         continueAnimation = true;
-    if (m_verticalData.m_startTime && m_verticalData.animateScroll(currentTime + deltaToNextFrame))
+    if (m_verticalData.m_startTime && m_verticalData.animateScroll(currentTime))
         continueAnimation = true;
 
-    if (m_zoomData.m_isAnimating) {
-#if PLATFORM(CHROMIUM)
-        TRACE_EVENT("ScrollAnimatorNone::notifyZoomChanged", this, 0);
+    if (continueAnimation)
+#if USE(REQUEST_ANIMATION_FRAME_TIMER)
+        startNextTimer(max(kMinimumTimerInterval, deltaToNextFrame));
+#else
+        startNextTimer();
+    else
+        m_animationActive = false;
 #endif
-        if (m_zoomData.m_startTime && m_zoomData.animateZoom(currentTime + deltaToNextFrame)) {
-            continueAnimation = true;
-            notifyZoomChanged(ZoomAnimationContinuing);
-        } else {
-            notifyZoomChanged(ZoomAnimationFinishing);
-            m_zoomData.m_isAnimating = false;
-        }
-    }
-
-    if (continueAnimation) {
-        double nextTimerInterval = max(kMinimumTimerInterval, deltaToNextFrame);
-        timer->startOneShot(nextTimerInterval);
-    }
 
 #if PLATFORM(CHROMIUM)
-    TRACE_EVENT("ScrollAnimatorNone::notifyPositionChanged", this, 0);
+    TRACE_EVENT0("webkit", "ScrollAnimatorNone::notifyPositionChanged");
 #endif
     notifyPositionChanged();
+
+    if (!continueAnimation)
+        animationDidFinish();
+}
+
+#if USE(REQUEST_ANIMATION_FRAME_TIMER)
+void ScrollAnimatorNone::startNextTimer(double delay)
+{
+    m_animationTimer.startOneShot(delay);
+}
+#else
+void ScrollAnimatorNone::startNextTimer()
+{
+    if (scrollableArea()->scheduleAnimation())
+        m_animationActive = true;
+}
+#endif
+
+bool ScrollAnimatorNone::animationTimerActive()
+{
+#if USE(REQUEST_ANIMATION_FRAME_TIMER)
+    return m_animationTimer.isActive();
+#else
+    return m_animationActive;
+#endif
 }
 
 void ScrollAnimatorNone::stopAnimationTimerIfNeeded()
 {
-    if (m_animationTimer.isActive())
+    if (animationTimerActive())
+#if USE(REQUEST_ANIMATION_FRAME_TIMER)
         m_animationTimer.stop();
+#else
+        m_animationActive = false;
+#endif
 }
 
 } // namespace WebCore

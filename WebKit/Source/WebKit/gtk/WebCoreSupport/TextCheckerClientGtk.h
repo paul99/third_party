@@ -31,8 +31,8 @@
 #ifndef TextCheckerClientGtk_h
 #define TextCheckerClientGtk_h
 
-#include "GRefPtr.h"
 #include "TextCheckerClient.h"
+#include <wtf/gobject/GRefPtr.h>
 
 typedef struct _WebKitSpellChecker WebKitSpellChecker;
 
@@ -42,13 +42,14 @@ class TextCheckerClientGtk : public WebCore::TextCheckerClient {
     public:
         TextCheckerClientGtk(WebKitSpellChecker*);
         ~TextCheckerClientGtk();
+        virtual bool shouldEraseMarkersAfterChangeSelection(WebCore::TextCheckingType) const;
         virtual void ignoreWordInSpellDocument(const WTF::String&);
         virtual void learnWord(const WTF::String&);
         virtual void checkSpellingOfString(const UChar*, int length, int* misspellingLocation, int* misspellingLength);
         virtual WTF::String getAutoCorrectSuggestionForMisspelledWord(const WTF::String&);
         virtual void checkGrammarOfString(const UChar*, int length, WTF::Vector<WebCore::GrammarDetail>&, int* badGrammarLocation, int* badGrammarLength);
         virtual void getGuessesForWord(const WTF::String& word, const WTF::String& context, WTF::Vector<WTF::String>& guesses);
-        virtual void requestCheckingOfString(WebCore::SpellChecker*, int, WebCore::TextCheckingTypeMask, const WTF::String&) {}
+    virtual void requestCheckingOfString(WTF::PassRefPtr<WebCore::TextCheckingRequest>) { }
 
         void updateSpellCheckingLanguage(const char*);
     private:

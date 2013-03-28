@@ -112,22 +112,20 @@ void XMLDocumentParser::insert(const SegmentedString&)
     ASSERT_NOT_REACHED();
 }
 
-void XMLDocumentParser::append(const SegmentedString& s)
+void XMLDocumentParser::append(const SegmentedString& source)
 {
-    String parseString = s.toString();
-
     if (m_sawXSLTransform || !m_sawFirstElement)
-        m_originalSourceForTransform += parseString;
+        m_originalSourceForTransform.append(source);
 
     if (isStopped() || m_sawXSLTransform)
         return;
 
     if (m_parserPaused) {
-        m_pendingSrc.append(s);
+        m_pendingSrc.append(source);
         return;
     }
 
-    doWrite(s.toString());
+    doWrite(source.toString());
 
     // After parsing, go ahead and dispatch image beforeload events.
     ImageLoader::dispatchPendingBeforeLoadEvents();
@@ -149,7 +147,7 @@ void XMLDocumentParser::enterText()
 #endif
     ASSERT(!m_leafTextNode);
     m_leafTextNode = Text::create(document(), "");
-    m_currentNode->parserAddChild(m_leafTextNode.get());
+    m_currentNode->parserAppendChild(m_leafTextNode.get());
 }
 
 #if !USE(QXMLSTREAM)
@@ -196,6 +194,11 @@ void XMLDocumentParser::end()
 
     doEnd();
 
+    // doEnd() call above can detach the parser and null out its document.
+    // In that case, we just bail out.
+    if (isDetached())
+        return;
+
     // doEnd() could process a script tag, thus pausing parsing.
     if (m_parserPaused)
         return;
@@ -204,7 +207,7 @@ void XMLDocumentParser::end()
         insertErrorMessageBlock();
     else {
         exitText();
-        document()->styleSelectorChanged(RecalcStyleImmediately);
+        document()->styleResolverChanged(RecalcStyleImmediately);
     }
 
     if (isParsing())
@@ -297,7 +300,7 @@ bool XMLDocumentParser::parseDocumentFragment(const String& chunk, DocumentFragm
     // http://www.whatwg.org/specs/web-apps/current-work/multipage/the-xhtml-syntax.html#xml-fragment-parsing-algorithm
     // For now we have a hack for script/style innerHTML support:
     if (contextElement && (contextElement->hasLocalName(HTMLNames::scriptTag) || contextElement->hasLocalName(HTMLNames::styleTag))) {
-        fragment->parserAddChild(fragment->document()->createTextNode(chunk));
+        fragment->parserAppendChild(fragment->document()->createTextNode(chunk));
         return true;
     }
 

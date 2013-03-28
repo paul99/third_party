@@ -254,14 +254,14 @@ TestSuite.prototype.testScriptsTabIsPopulatedOnInspectedPageRefresh = function()
     var test = this;
     this.assertEquals(WebInspector.panels.elements, WebInspector.inspectorView.currentPanel(), "Elements panel should be current one.");
 
-    WebInspector.debuggerPresentationModel.addEventListener(WebInspector.DebuggerPresentationModel.Events.DebuggerReset, waitUntilScriptIsParsed);
+    WebInspector.debuggerModel.addEventListener(WebInspector.DebuggerModel.Events.GlobalObjectCleared, waitUntilScriptIsParsed);
 
     // Reload inspected page. It will reset the debugger agent.
     test.evaluateInConsole_("window.location.reload(true);", function(resultText) {});
 
     function waitUntilScriptIsParsed()
     {
-        WebInspector.debuggerPresentationModel.removeEventListener(WebInspector.DebuggerPresentationModel.Events.DebuggerReset, waitUntilScriptIsParsed);
+        WebInspector.debuggerModel.removeEventListener(WebInspector.DebuggerModel.Events.GlobalObjectCleared, waitUntilScriptIsParsed);
         test.showPanel("scripts");
         test._waitUntilScriptsAreParsed(["debugger_test_page.html"],
             function() {
@@ -308,7 +308,6 @@ TestSuite.prototype.testNoScriptDuplicatesOnPanelSwitch = function()
 
     this.showPanel("scripts");
 
-
     function switchToElementsTab() {
         test.showPanel("elements");
         setTimeout(switchToScriptsTab, 0);
@@ -320,19 +319,17 @@ TestSuite.prototype.testNoScriptDuplicatesOnPanelSwitch = function()
     }
 
     function checkScriptsPanel() {
-        test.assertTrue(!!WebInspector.panels.scripts.visibleView, "No visible script view.");
         test.assertTrue(test._scriptsAreParsed(["debugger_test_page.html"]), "Some scripts are missing.");
         checkNoDuplicates();
         test.releaseControl();
     }
 
     function checkNoDuplicates() {
-        var scriptSelect = document.getElementById("scripts-files");
-        var options = scriptSelect.options;
-        for (var i = 0; i < options.length; i++) {
-            var scriptName = options[i].text;
-            for (var j = i + 1; j < options.length; j++)
-                test.assertTrue(scriptName !== options[j].text, "Found script duplicates: " + test.optionsToString_(options));
+        var uiSourceCodes = test.nonAnonymousUISourceCodes_();
+        for (var i = 0; i < uiSourceCodes.length; i++) {
+            var scriptName = uiSourceCodes[i].fileName;
+            for (var j = i + 1; j < uiSourceCodes.length; j++)
+                test.assertTrue(scriptName !== uiSourceCodes[j].fileName, "Found script duplicates: " + test.uiSourceCodesToString_(uiSourceCodes));
         }
     }
 
@@ -407,7 +404,7 @@ TestSuite.prototype.testNetworkSize = function()
         test.releaseControl();
     }
     
-    this.addSniffer(WebInspector.NetworkDispatcher.prototype, "_finishResource", finishResource);
+    this.addSniffer(WebInspector.NetworkDispatcher.prototype, "_finishNetworkRequest", finishResource);
 
     // Reload inspected page to sniff network events
     test.evaluateInConsole_("window.location.reload(true);", function(resultText) {});
@@ -430,7 +427,7 @@ TestSuite.prototype.testNetworkSyncSize = function()
         test.releaseControl();
     }
     
-    this.addSniffer(WebInspector.NetworkDispatcher.prototype, "_finishResource", finishResource);
+    this.addSniffer(WebInspector.NetworkDispatcher.prototype, "_finishNetworkRequest", finishResource);
 
     // Send synchronous XHR to sniff network events
     test.evaluateInConsole_("var xhr = new XMLHttpRequest(); xhr.open(\"GET\", \"chunked\", false); xhr.send(null);", function() {});
@@ -454,7 +451,7 @@ TestSuite.prototype.testNetworkRawHeadersText = function()
         test.releaseControl();
     }
     
-    this.addSniffer(WebInspector.NetworkDispatcher.prototype, "_finishResource", finishResource);
+    this.addSniffer(WebInspector.NetworkDispatcher.prototype, "_finishNetworkRequest", finishResource);
 
     // Reload inspected page to sniff network events
     test.evaluateInConsole_("window.location.reload(true);", function(resultText) {});
@@ -488,7 +485,7 @@ TestSuite.prototype.testNetworkTiming = function()
         test.releaseControl();
     }
     
-    this.addSniffer(WebInspector.NetworkDispatcher.prototype, "_finishResource", finishResource);
+    this.addSniffer(WebInspector.NetworkDispatcher.prototype, "_finishNetworkRequest", finishResource);
     
     // Reload inspected page to sniff network events
     test.evaluateInConsole_("window.location.reload(true);", function(resultText) {});
@@ -558,6 +555,90 @@ TestSuite.prototype.testPauseInSharedWorkerInitialization = function()
 };
 
 
+// Regression test for http://webk.it/97466
+TestSuite.prototype.testPageOverlayUpdate = function()
+{
+    var test = this;
+    var records = [];
+    var dispatchOnRecordType = {}
+
+    function addRecord(event)
+    {
+        innerAddRecord(event.data);
+    }
+
+    function innerAddRecord(record)
+    {
+        records.push(record);
+        if (typeof dispatchOnRecordType[record.type] === "function")
+            dispatchOnRecordType[record.type](record);
+
+        if (record.children)
+            record.children.forEach(innerAddRecord);
+    }
+
+    function populatePage()
+    {
+        var div1 = document.createElement("div");
+        div1.id = "div1";
+        // Force accelerated compositing.
+        div1.style.webkitTransform = "translateZ(0)";
+        document.body.appendChild(div1);
+        var div2 = document.createElement("div");
+        div2.id = "div2";
+        document.body.appendChild(div2);
+    }
+
+    function step1()
+    {
+        WebInspector.timelineManager.addEventListener(WebInspector.TimelineManager.EventTypes.TimelineEventRecorded, addRecord);
+        WebInspector.timelineManager.start();
+
+        test.evaluateInConsole_(populatePage.toString() + "; populatePage();" +
+                                "inspect(document.getElementById('div1'))", function() {});
+        WebInspector.notifications.addEventListener(WebInspector.ElementsTreeOutline.Events.SelectedNodeChanged, step2);
+    }
+
+    function step2()
+    {
+        WebInspector.notifications.removeEventListener(WebInspector.ElementsTreeOutline.Events.SelectedNodeChanged, step2);
+        setTimeout(step3, 500);
+    }
+
+    function step3()
+    {
+        test.evaluateInConsole_("inspect(document.getElementById('div2'))", function() {});
+        WebInspector.notifications.addEventListener(WebInspector.ElementsTreeOutline.Events.SelectedNodeChanged, step4);
+    }
+
+    function step4()
+    {
+        WebInspector.notifications.removeEventListener(WebInspector.ElementsTreeOutline.Events.SelectedNodeChanged, step4);
+        dispatchOnRecordType.TimeStamp = step5;
+        test.evaluateInConsole_("console.timeStamp('ready')", function() {});
+    }
+
+    function step5()
+    {
+        var types = {};
+        WebInspector.timelineManager.stop();
+        WebInspector.timelineManager.removeEventListener(WebInspector.TimelineManager.EventTypes.TimelineEventRecorded, addRecord);
+        for (var i = 0; i < records.length; ++i)
+            types[records[i].type] = (types[records[i].type] || 0) + 1;
+
+        var frameCount = types["BeginFrame"];
+        // There should be at least two updates caused by selection of nodes.
+        test.assertTrue(frameCount >= 2, "Not enough DevTools overlay updates");
+        // We normally expect up to 3 frames, but allow for a bit more in case
+        // of some unexpected invalidations.
+        test.assertTrue(frameCount < 6, "Too many updates caused by DevTools overlay");
+        test.releaseControl();
+    }
+
+    step1();
+    this.takeControl();
+}
+
 TestSuite.prototype.waitForTestResultsInConsole = function()
 {
     var messages = WebInspector.console.messages;
@@ -582,72 +663,78 @@ TestSuite.prototype.waitForTestResultsInConsole = function()
     this.takeControl();
 };
 
+TestSuite.prototype.checkLogAndErrorMessages = function()
+{
+    var messages = WebInspector.console.messages;
+
+    var matchesCount = 0;
+    function validMessage(message)
+    {
+        if (message.text === "log" && message.level === WebInspector.ConsoleMessage.MessageLevel.Log) {
+            ++matchesCount;
+            return true;
+        }
+
+        if (message.text === "error" && message.level === WebInspector.ConsoleMessage.MessageLevel.Error) {
+            ++matchesCount;
+            return true;
+        }
+        return false;
+    }
+
+    for (var i = 0; i < messages.length; ++i) {
+        if (validMessage(messages[i]))
+            continue;
+        this.fail(messages[i].text + ":" + messages[i].level); // This will throw.
+    }
+
+    if (matchesCount === 2)
+        return;
+
+    // Wait for more messages.
+    function onConsoleMessage(event)
+    {
+        var message = event.data;
+        if (validMessage(message)) {
+            if (matchesCount === 2) {
+                this.releaseControl();
+                return;
+            }
+        } else
+            this.fail(message.text + ":" + messages[i].level);
+    }
+
+    WebInspector.console.addEventListener(WebInspector.ConsoleModel.Events.MessageAdded, onConsoleMessage, this);
+    this.takeControl();
+};
 
 /**
- * Serializes options collection to string.
- * @param {HTMLOptionsCollection} options
+ * Serializes array of uiSourceCodes to string.
+ * @param {Array.<WebInspectorUISourceCode>} uiSourceCodes
  * @return {string}
  */
-TestSuite.prototype.optionsToString_ = function(options)
+TestSuite.prototype.uiSourceCodesToString_ = function(uiSourceCodes)
 {
     var names = [];
-    for (var i = 0; i < options.length; i++)
-        names.push('"' + options[i].text + '"');
+    for (var i = 0; i < uiSourceCodes.length; i++)
+        names.push('"' + uiSourceCodes[i].fileName + '"');
     return names.join(",");
 };
 
 
 /**
- * Ensures that main HTML resource is selected in Scripts panel and that its
- * source frame is setup. Invokes the callback when the condition is satisfied.
- * @param {HTMLOptionsCollection} options
- * @param {function(WebInspector.SourceView,string)} callback
+ * Returns all loaded non anonymous uiSourceCodes.
+ * @return {Array.<WebInspectorUISourceCode>}
  */
-TestSuite.prototype.showMainPageScriptSource_ = function(scriptName, callback)
+TestSuite.prototype.nonAnonymousUISourceCodes_ = function()
 {
-    var test = this;
-
-    var scriptSelect = document.getElementById("scripts-files");
-    var options = scriptSelect.options;
-
-    test.assertTrue(options.length, "Scripts list is empty");
-
-    // Select page's script if it's not current option.
-    var scriptResource;
-    if (options[scriptSelect.selectedIndex].text === scriptName)
-        scriptResource = options[scriptSelect.selectedIndex].representedObject;
-    else {
-        var pageScriptIndex = -1;
-        for (var i = 0; i < options.length; i++) {
-            if (options[i].text === scriptName) {
-                pageScriptIndex = i;
-                break;
-            }
-        }
-        test.assertTrue(-1 !== pageScriptIndex, "Script with url " + scriptName + " not found among " + test.optionsToString_(options));
-        scriptResource = options[pageScriptIndex].representedObject;
-
-        // Current panel is "Scripts".
-        WebInspector.inspectorView.currentPanel()._showScriptOrResource(scriptResource);
-        test.assertEquals(pageScriptIndex, scriptSelect.selectedIndex, "Unexpected selected option index.");
+    function filterOutAnonymous(uiSourceCode)
+    {
+        return !!uiSourceCode.url;
     }
 
-    test.assertTrue(scriptResource instanceof WebInspector.Resource,
-                    "Unexpected resource class.");
-    test.assertTrue(!!scriptResource.url, "Resource URL is null.");
-    test.assertTrue(scriptResource.url.search(scriptName + "$") !== -1, "Main HTML resource should be selected.");
-
-    var scriptsPanel = WebInspector.panels.scripts;
-
-    var view = scriptsPanel.visibleView;
-    test.assertTrue(view instanceof WebInspector.SourceView);
-
-    if (!view.sourceFrame._loaded) {
-        test.addSniffer(view, "_sourceFrameSetupFinished", function(event) {
-            callback(view, scriptResource.url);
-        });
-    } else
-        callback(view, scriptResource.url);
+    var uiSourceCodes = WebInspector.workspace.uiSourceCodes();
+    return uiSourceCodes.filter(filterOutAnonymous);
 };
 
 
@@ -680,14 +767,12 @@ TestSuite.prototype.evaluateInConsole_ = function(code, callback)
  */
 TestSuite.prototype._scriptsAreParsed = function(expected)
 {
-    var scriptSelect = document.getElementById("scripts-files");
-    var options = scriptSelect.options;
-
+    var uiSourceCodes = this.nonAnonymousUISourceCodes_();
     // Check that at least all the expected scripts are present.
     var missing = expected.slice(0);
-    for (var i = 0 ; i < options.length; i++) {
-        for (var j = 0; j < missing.length; j++) {
-            if (options[i].text.search(missing[j]) !== -1) {
+    for (var i = 0; i < uiSourceCodes.length; ++i) {
+        for (var j = 0; j < missing.length; ++j) {
+            if (uiSourceCodes[i].parsedURL.lastPathComponent.search(missing[j]) !== -1) {
                 missing.splice(j, 1);
                 break;
             }
@@ -744,7 +829,7 @@ TestSuite.prototype._waitUntilScriptsAreParsed = function(expectedScripts, callb
         if (test._scriptsAreParsed(expectedScripts))
             callback();
         else
-            test.addSniffer(WebInspector.panels.scripts, "_uiSourceCodeAdded", waitForAllScripts);
+            test.addSniffer(WebInspector.panels.scripts, "_addUISourceCode", waitForAllScripts);
     }
 
     waitForAllScripts();

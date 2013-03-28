@@ -35,8 +35,8 @@ SuspendableTimer::SuspendableTimer(ScriptExecutionContext* context)
     : ActiveDOMObject(context, this)
     , m_nextFireInterval(0)
     , m_repeatInterval(0)
-#if !ASSERT_DISABLED
     , m_active(false)
+#if !ASSERT_DISABLED
     , m_suspended(false)
 #endif
 {
@@ -64,7 +64,7 @@ void SuspendableTimer::suspend(ReasonForSuspension)
 #endif
     m_active = isActive();
     if (m_active) {
-        m_nextFireInterval = nextFireInterval();
+        m_nextFireInterval = nextUnalignedFireInterval();
         m_repeatInterval = repeatInterval();
         TimerBase::stop();
     }

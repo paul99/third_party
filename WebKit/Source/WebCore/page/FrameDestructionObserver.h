@@ -26,19 +26,24 @@
 #ifndef FrameDestructionObserver_h
 #define FrameDestructionObserver_h
 
+#include "PlatformExportMacros.h"
+
 namespace WebCore {
 
 class Frame;
 
 class FrameDestructionObserver {
 public:
-    explicit FrameDestructionObserver(Frame*);
-    virtual void frameDestroyed();
+    WEBCORE_TESTING explicit FrameDestructionObserver(Frame*);
+
+    WEBCORE_TESTING virtual void frameDestroyed();
+    WEBCORE_TESTING virtual void willDetachPage();
+
     Frame* frame() const { return m_frame; }
 
 protected:
-    virtual ~FrameDestructionObserver();
-    void observeFrame(Frame*);
+    WEBCORE_TESTING virtual ~FrameDestructionObserver();
+    WEBCORE_TESTING void observeFrame(Frame*);
 
     Frame* m_frame;
 };

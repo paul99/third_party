@@ -44,6 +44,7 @@
 #include "PopupMenuChromium.h"
 #include "PopupMenuClient.h"
 #include "RenderTheme.h"
+#include "RuntimeEnabledFeatures.h"
 #include "ScrollbarTheme.h"
 #include "StringTruncator.h"
 #include "TextRun.h"
@@ -154,9 +155,7 @@ bool PopupListBox::handleWheelEvent(const PlatformWheelEvent& event)
         return true;
     }
 
-    // Pass it off to the scroll view.
-    // Sadly, WebCore devs don't understand the whole "const" thing.
-    wheelEvent(const_cast<PlatformWheelEvent&>(event));
+    ScrollableArea::handleWheelEvent(event);
     return true;
 }
 
@@ -186,7 +185,7 @@ bool PopupListBox::handleTouchEvent(const PlatformTouchEvent&)
 }
 #endif
 
-#if ENABLE(GESTURE_RECOGNIZER)
+#if ENABLE(GESTURE_EVENTS)
 bool PopupListBox::handleGestureEvent(const PlatformGestureEvent&)
 {
     return false;
@@ -290,16 +289,15 @@ HostWindow* PopupListBox::hostWindow() const
     return parent() ? parent()->hostWindow() : 0;
 }
 
-// From SelectElement.cpp
+// From HTMLSelectElement.cpp
 static String stripLeadingWhiteSpace(const String& string)
 {
     int length = string.length();
-
     int i;
-    for (i = 0; i < length; ++i) {
-        if (string[i] != noBreakSpace && (string[i] <= 0x7F ? !isASCIISpace(string[i]) : (direction(string[i]) != WhiteSpaceNeutral)))
+    for (i = 0; i < length; ++i)
+        if (string[i] != noBreakSpace
+            && (string[i] <= 0x7F ? !isspace(string[i]) : (direction(string[i]) != WhiteSpaceNeutral)))
             break;
-    }
 
     return string.substring(i, length - i);
 }
@@ -439,9 +437,9 @@ void PopupListBox::paintRow(GraphicsContext* gc, const IntRect& rect, int rowInd
     int textX = 0;
     int maxWidth = 0;
     if (rightAligned)
-        maxWidth = rowRect.width() - max(0, m_popupClient->clientPaddingRight() - m_popupClient->clientInsetRight());
+        maxWidth = rowRect.width() - max<int>(0, m_popupClient->clientPaddingRight() - m_popupClient->clientInsetRight());
     else {
-        textX = max(0, m_popupClient->clientPaddingLeft() - m_popupClient->clientInsetLeft());
+        textX = max<int>(0, m_popupClient->clientPaddingLeft() - m_popupClient->clientInsetLeft());
         maxWidth = rowRect.width() - textX;
     }
     // Prepare text to be drawn.
@@ -465,7 +463,7 @@ void PopupListBox::paintRow(GraphicsContext* gc, const IntRect& rect, int rowInd
     }
 
     // Prepare the directionality to draw text.
-    TextRun textRun(itemText.characters(), itemText.length(), false, 0, 0, TextRun::AllowTrailingExpansion, style.textDirection(), style.hasTextDirectionOverride());
+    TextRun textRun(itemText, 0, 0, TextRun::AllowTrailingExpansion, style.textDirection(), style.hasTextDirectionOverride());
     // If the text is right-to-left, make it right-aligned by adjusting its
     // beginning position.
     if (rightAligned)
@@ -477,7 +475,7 @@ void PopupListBox::paintRow(GraphicsContext* gc, const IntRect& rect, int rowInd
 
     // We are using the left padding as the right padding includes room for the scroll-bar which
     // does not show in this case.
-    int rightPadding = max(0, m_popupClient->clientPaddingLeft() - m_popupClient->clientInsetLeft());
+    int rightPadding = max<int>(0, m_popupClient->clientPaddingLeft() - m_popupClient->clientInsetLeft());
     int remainingWidth = rowRect.width() - rightPadding;
 
     // Draw the icon if applicable.
@@ -503,9 +501,9 @@ void PopupListBox::paintRow(GraphicsContext* gc, const IntRect& rect, int rowInd
         itemFont.update(0);
     }
 
-    TextRun labelTextRun(itemLabel.characters(), itemLabel.length(), false, 0, 0, TextRun::AllowTrailingExpansion, style.textDirection(), style.hasTextDirectionOverride());
+    TextRun labelTextRun(itemLabel, 0, 0, TextRun::AllowTrailingExpansion, style.textDirection(), style.hasTextDirectionOverride());
     if (rightAligned)
-        textX = max(0, m_popupClient->clientPaddingLeft() - m_popupClient->clientInsetLeft());
+        textX = max<int>(0, m_popupClient->clientPaddingLeft() - m_popupClient->clientInsetLeft());
     else
         textX = remainingWidth - itemFont.width(labelTextRun);
 
@@ -616,15 +614,16 @@ void PopupListBox::setOriginalIndex(int index)
 
 int PopupListBox::getRowHeight(int index)
 {
-    if (index < 0)
-        return PopupMenuChromium::minimumRowHeight();
+    int minimumHeight = PopupMenuChromium::minimumRowHeight();
+    if (m_settings.deviceSupportsTouch)
+        minimumHeight = max(minimumHeight, PopupMenuChromium::optionRowHeightForTouch());
 
-    if (m_popupClient->itemStyle(index).isDisplayNone())
-        return PopupMenuChromium::minimumRowHeight();
+    if (index < 0 || m_popupClient->itemStyle(index).isDisplayNone())
+        return minimumHeight;
 
     // Separator row height is the same size as itself.
     if (m_popupClient->itemIsSeparator(index))
-        return max(separatorHeight, PopupMenuChromium::minimumRowHeight());
+        return max(separatorHeight, minimumHeight);
 
     String icon = m_popupClient->itemIcon(index);
     RefPtr<Image> image(Image::loadPlatformResource(icon.utf8().data()));
@@ -634,7 +633,7 @@ int PopupListBox::getRowHeight(int index)
 
     int linePaddingHeight = m_popupClient->menuStyle().menuType() == PopupMenuStyle::AutofillPopup ? kLinePaddingHeight : 0;
     int calculatedRowHeight = max(fontHeight, iconHeight) + linePaddingHeight * 2;
-    return max(calculatedRowHeight, PopupMenuChromium::minimumRowHeight());
+    return max(calculatedRowHeight, minimumHeight);
 }
 
 IntRect PopupListBox::getRowBounds(int index)
@@ -833,9 +832,9 @@ void PopupListBox::layout()
 
         baseWidth = max(baseWidth, width);
         // FIXME: http://b/1210481 We should get the padding of individual option elements.
-        paddingWidth = max(paddingWidth,
+        paddingWidth = max<int>(paddingWidth,
             m_popupClient->clientPaddingLeft() + m_popupClient->clientPaddingRight());
-        lineEndPaddingWidth = max(lineEndPaddingWidth,
+        lineEndPaddingWidth = max<int>(lineEndPaddingWidth,
             isRightAligned ? m_popupClient->clientPaddingLeft() : m_popupClient->clientPaddingRight());
     }
 
@@ -908,6 +907,11 @@ void PopupListBox::clear()
 bool PopupListBox::isPointInBounds(const IntPoint& point)
 {
     return numItems() && IntRect(0, 0, width(), height()).contains(point);
+}
+
+int PopupListBox::popupContentHeight() const
+{
+    return height();
 }
 
 } // namespace WebCore

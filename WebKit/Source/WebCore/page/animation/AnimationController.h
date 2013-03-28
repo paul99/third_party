@@ -43,7 +43,6 @@ class Frame;
 class Node;
 class RenderObject;
 class RenderStyle;
-class WebKitAnimationList;
 
 class AnimationController {
 public:
@@ -66,6 +65,9 @@ public:
 
     void suspendAnimations();
     void resumeAnimations();
+#if ENABLE(REQUEST_ANIMATION_FRAME)
+    void serviceAnimations();
+#endif
 
     void suspendAnimationsForDocument(Document*);
     void resumeAnimationsForDocument(Document*);
@@ -75,10 +77,27 @@ public:
     
     static bool supportsAcceleratedAnimationOfProperty(CSSPropertyID);
 
-    PassRefPtr<WebKitAnimationList> animationsForRenderer(RenderObject*) const;
-
 private:
     OwnPtr<AnimationControllerPrivate> m_data;
+    int m_beginAnimationUpdateCount;
+};
+
+class AnimationUpdateBlock {
+public:
+    AnimationUpdateBlock(AnimationController* animationController)
+        : m_animationController(animationController)
+    {
+        if (m_animationController)
+            m_animationController->beginAnimationUpdate();
+    }
+    
+    ~AnimationUpdateBlock()
+    {
+        if (m_animationController)
+            m_animationController->endAnimationUpdate();
+    }
+    
+    AnimationController* m_animationController;
 };
 
 } // namespace WebCore

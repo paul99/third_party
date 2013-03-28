@@ -50,10 +50,6 @@
 #include "RenderWidget.h"
 #include "Scrollbar.h"
 
-QT_BEGIN_NAMESPACE
-Q_GUI_EXPORT extern bool qt_tab_all_widgets; // from qapplication.cpp
-QT_END_NAMESPACE
-
 namespace WebCore {
 
 #if defined(Q_WS_MAC)
@@ -64,7 +60,7 @@ const double EventHandler::TextDragDelay = 0.0;
 
 bool EventHandler::tabsToAllFormControls(KeyboardEvent* event) const
 {
-    return (isKeyboardOptionTab(event) ? !qt_tab_all_widgets : qt_tab_all_widgets);
+    return !isKeyboardOptionTab(event);
 }
 
 void EventHandler::focusDocumentView()

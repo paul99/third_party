@@ -27,7 +27,6 @@
 #define SpellChecker_h
 
 #include "Element.h"
-#include "PlatformString.h"
 #include "Range.h"
 #include "TextChecking.h"
 #include "Timer.h"
@@ -36,41 +35,45 @@
 #include <wtf/RefPtr.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/Vector.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 class Frame;
 class Node;
 class TextCheckerClient;
-struct TextCheckingResult;
+class SpellChecker;
 
-class SpellCheckRequest : public RefCounted<SpellCheckRequest> {
+class SpellCheckRequest : public TextCheckingRequest {
 public:
-    SpellCheckRequest(int sequence, PassRefPtr<Range> checkingRange, PassRefPtr<Range> paragraphRange, const String&, TextCheckingTypeMask);
-    ~SpellCheckRequest();
+    SpellCheckRequest(PassRefPtr<Range> checkingRange, PassRefPtr<Range> paragraphRange, const String&, TextCheckingTypeMask, TextCheckingProcessType);
+    virtual ~SpellCheckRequest();
 
-    static PassRefPtr<SpellCheckRequest> create(TextCheckingTypeMask, PassRefPtr<Range> checkingRange, PassRefPtr<Range> paragraphRange);
+    static PassRefPtr<SpellCheckRequest> create(TextCheckingTypeMask, TextCheckingProcessType, PassRefPtr<Range> checkingRange, PassRefPtr<Range> paragraphRange);
 
-    void setSequence(int sequence) { m_sequence = sequence; }
-    int sequence() const { return m_sequence; }
     PassRefPtr<Range> checkingRange() const { return m_checkingRange; }
     PassRefPtr<Range> paragraphRange() const { return m_paragraphRange; }
-    const String& text() const { return m_text; }
-    TextCheckingTypeMask mask() const { return m_mask; }
     PassRefPtr<Element> rootEditableElement() const { return m_rootEditableElement; }
-private:
 
-    int m_sequence;
+    void setCheckerAndSequence(SpellChecker*, int sequence);
+    void requesterDestroyed();
+    bool isStarted() const { return m_checker; }
+
+    virtual void didSucceed(const Vector<TextCheckingResult>&) OVERRIDE;
+    virtual void didCancel() OVERRIDE;
+
+private:
+    SpellChecker* m_checker;
     RefPtr<Range> m_checkingRange;
     RefPtr<Range> m_paragraphRange;
-    String m_text;
-    TextCheckingTypeMask m_mask;
     RefPtr<Element> m_rootEditableElement;
 };
 
 class SpellChecker {
-    WTF_MAKE_NONCOPYABLE(SpellChecker);
+    WTF_MAKE_NONCOPYABLE(SpellChecker); WTF_MAKE_FAST_ALLOCATED;
 public:
+    friend class SpellCheckRequest;
+
     explicit SpellChecker(Frame*);
     ~SpellChecker();
 
@@ -78,7 +81,6 @@ public:
     bool isCheckable(Range*) const;
 
     void requestCheckingFor(PassRefPtr<SpellCheckRequest>);
-    void didCheck(int sequence, const Vector<TextCheckingResult>&);
 
     int lastRequestSequence() const
     {
@@ -98,6 +100,9 @@ private:
     void timerFiredToProcessQueuedRequest(Timer<SpellChecker>*);
     void invokeRequest(PassRefPtr<SpellCheckRequest>);
     void enqueueRequest(PassRefPtr<SpellCheckRequest>);
+    void didCheckSucceed(int sequence, const Vector<TextCheckingResult>&);
+    void didCheckCancel(int sequence);
+    void didCheck(int sequence, const Vector<TextCheckingResult>&);
 
     Frame* m_frame;
     int m_lastRequestSequence;

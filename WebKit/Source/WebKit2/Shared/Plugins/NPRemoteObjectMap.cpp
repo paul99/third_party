@@ -88,6 +88,18 @@ void NPRemoteObjectMap::unregisterNPObject(uint64_t npObjectID)
     m_registeredNPObjects.remove(npObjectID);
 }
 
+static uint64_t remoteNPObjectID(Plugin* plugin, NPObject* npObject)
+{
+    if (!NPObjectProxy::isNPObjectProxy(npObject))
+        return 0;
+
+    NPObjectProxy* npObjectProxy = NPObjectProxy::toNPObjectProxy(npObject);
+    if (npObjectProxy->plugin() != plugin)
+        return 0;
+
+    return npObjectProxy->npObjectID();
+}
+
 NPVariantData NPRemoteObjectMap::npVariantToNPVariantData(const NPVariant& variant, Plugin* plugin)
 {
     switch (variant.type) {
@@ -111,14 +123,11 @@ NPVariantData NPRemoteObjectMap::npVariantToNPVariantData(const NPVariant& varia
 
     case NPVariantType_Object: {
         NPObject* npObject = variant.value.objectValue;
-        if (NPObjectProxy::isNPObjectProxy(npObject)) {
-            NPObjectProxy* npObjectProxy = NPObjectProxy::toNPObjectProxy(npObject);
 
-            uint64_t npObjectID = npObjectProxy->npObjectID();
-
+        if (uint64_t npObjectID = remoteNPObjectID(plugin, npObject)) {
             // FIXME: Under some circumstances, this might leak the NPObjectProxy object. 
             // Figure out how to avoid that.
-            retainNPObject(npObjectProxy);
+            retainNPObject(npObject);
             return NPVariantData::makeRemoteNPObjectID(npObjectID);
         }
 
@@ -191,7 +200,7 @@ void NPRemoteObjectMap::pluginDestroyed(Plugin* plugin)
 
     // Gather the receivers associated with this plug-in.
     for (HashMap<uint64_t, NPObjectMessageReceiver*>::const_iterator it = m_registeredNPObjects.begin(), end = m_registeredNPObjects.end(); it != end; ++it) {
-        NPObjectMessageReceiver* npObjectMessageReceiver = it->second;
+        NPObjectMessageReceiver* npObjectMessageReceiver = it->value;
         if (npObjectMessageReceiver->plugin() == plugin)
             messageReceivers.append(npObjectMessageReceiver);
     }
@@ -218,13 +227,13 @@ void NPRemoteObjectMap::pluginDestroyed(Plugin* plugin)
     }
 }
 
-void NPRemoteObjectMap::didReceiveSyncMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::ArgumentDecoder* arguments, OwnPtr<CoreIPC::ArgumentEncoder>& reply)
+void NPRemoteObjectMap::didReceiveSyncMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder, OwnPtr<CoreIPC::MessageEncoder>& replyEncoder)
 {
-    NPObjectMessageReceiver* messageReceiver = m_registeredNPObjects.get(arguments->destinationID());
+    NPObjectMessageReceiver* messageReceiver = m_registeredNPObjects.get(decoder.destinationID());
     if (!messageReceiver)
         return;
 
-    messageReceiver->didReceiveSyncNPObjectMessageReceiverMessage(connection, messageID, arguments, reply);
+    messageReceiver->didReceiveSyncNPObjectMessageReceiverMessage(connection, messageID, decoder, replyEncoder);
 }
 
 } // namespace WebKit

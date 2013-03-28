@@ -20,6 +20,9 @@
 #include "KURL.h"
 
 #include "FileSystem.h"
+#include <gio/gio.h>
+#include <wtf/gobject/GOwnPtr.h>
+#include <wtf/gobject/GRefPtr.h>
 #include <wtf/text/CString.h>
 
 #include <glib.h>
@@ -28,13 +31,12 @@ namespace WebCore {
 
 String KURL::fileSystemPath() const
 {
-    gchar* filename = g_filename_from_uri(m_string.utf8().data(), 0, 0);
-    if (!filename)
+    if (!isValid() || !isLocalFile())
         return String();
 
-    String path = filenameToString(filename);
-    g_free(filename);
-    return path;
+    GRefPtr<GFile> file = adoptGRef(g_file_new_for_path(path().utf8().data()));
+    GOwnPtr<char> filename(g_file_get_path(file.get()));
+    return filenameToString(filename.get());
 }
 
 } // namespace WebCore

@@ -69,6 +69,8 @@ public:
     WEBKIT_EXPORT bool equals(const WebAccessibilityObject&) const;
 
     bool isNull() const { return m_private.isNull(); }
+    // isDetached also checks for null, so it's safe to just call isDetached.
+    WEBKIT_EXPORT bool isDetached() const;
 
     // Static methods for enabling accessibility.
     WEBKIT_EXPORT static void enableAccessibility();
@@ -76,12 +78,14 @@ public:
 
     WEBKIT_EXPORT int axID() const;
 
-    WEBKIT_EXPORT WebString accessibilityDescription() const;
-    WEBKIT_EXPORT WebString actionVerb() const;
-    WEBKIT_EXPORT bool canSetFocusAttribute() const;
-    WEBKIT_EXPORT bool canSetValueAttribute() const;
-    WEBKIT_EXPORT bool isValid() const;
+    // Update the underlying tree, and return true if this object is
+    // still valid (not detached). Note that calling this method
+    // can cause other WebAccessibilityObjects to become invalid, too,
+    // so always call isDetached if updateBackingStoreAndCheckValidity
+    // has been called on any object, or if any other WebCore code has run.
+    WEBKIT_EXPORT bool updateBackingStoreAndCheckValidity();
 
+    WEBKIT_EXPORT WebString accessibilityDescription() const;
     WEBKIT_EXPORT unsigned childCount() const;
 
     WEBKIT_EXPORT WebAccessibilityObject childAt(unsigned) const;
@@ -91,8 +95,6 @@ public:
     WEBKIT_EXPORT WebAccessibilityObject nextSibling() const;
     WEBKIT_EXPORT WebAccessibilityObject parentObject() const;
     WEBKIT_EXPORT WebAccessibilityObject previousSibling() const;
-
-    WEBKIT_EXPORT bool canSetSelectedAttribute() const;
 
     WEBKIT_EXPORT bool isAnchor() const;
     WEBKIT_EXPORT bool isAriaReadOnly() const;
@@ -125,22 +127,24 @@ public:
     WEBKIT_EXPORT WebString ariaLiveRegionRelevant() const;
     WEBKIT_EXPORT WebString ariaLiveRegionStatus() const;
     WEBKIT_EXPORT WebRect boundingBoxRect() const;
+    WEBKIT_EXPORT bool canvasHasFallbackContent() const;
     WEBKIT_EXPORT double estimatedLoadingProgress() const;
     WEBKIT_EXPORT WebString helpText() const;
     WEBKIT_EXPORT int headingLevel() const;
     WEBKIT_EXPORT int hierarchicalLevel() const;
     WEBKIT_EXPORT WebAccessibilityObject hitTest(const WebPoint&) const;
     WEBKIT_EXPORT WebString keyboardShortcut() const;
-    WEBKIT_EXPORT bool performDefaultAction() const;
     WEBKIT_EXPORT WebAccessibilityRole roleValue() const;
     WEBKIT_EXPORT unsigned selectionEnd() const;
+    WEBKIT_EXPORT unsigned selectionEndLineNumber() const;
     WEBKIT_EXPORT unsigned selectionStart() const;
-    WEBKIT_EXPORT void setFocused(bool) const;
+    WEBKIT_EXPORT unsigned selectionStartLineNumber() const;
     WEBKIT_EXPORT WebString stringValue() const;
     WEBKIT_EXPORT WebString title() const;
     WEBKIT_EXPORT WebAccessibilityObject titleUIElement() const;
     WEBKIT_EXPORT WebURL url() const;
 
+    WEBKIT_EXPORT bool supportsRangeValue() const;
     WEBKIT_EXPORT WebString valueDescription() const;
     WEBKIT_EXPORT float valueForRange() const;
     WEBKIT_EXPORT float maxValueForRange() const;
@@ -152,6 +156,21 @@ public:
     WEBKIT_EXPORT WebString computedStyleDisplay() const;
     WEBKIT_EXPORT bool accessibilityIsIgnored() const;
     WEBKIT_EXPORT bool lineBreaks(WebVector<int>&) const;
+
+    // Actions
+    WEBKIT_EXPORT WebString actionVerb() const; // The verb corresponding to performDefaultAction.
+    WEBKIT_EXPORT bool canDecrement() const;
+    WEBKIT_EXPORT bool canIncrement() const;
+    WEBKIT_EXPORT bool canPress() const;
+    WEBKIT_EXPORT bool canSetFocusAttribute() const;
+    WEBKIT_EXPORT bool canSetSelectedAttribute() const;
+    WEBKIT_EXPORT bool canSetValueAttribute() const;
+    WEBKIT_EXPORT bool performDefaultAction() const;
+    WEBKIT_EXPORT bool press() const;
+    WEBKIT_EXPORT bool increment() const;
+    WEBKIT_EXPORT bool decrement() const;
+    WEBKIT_EXPORT void setFocused(bool) const;
+    WEBKIT_EXPORT void setSelectedTextRange(int selectionStart, int selectionEnd) const;
 
     // For a table
     WEBKIT_EXPORT unsigned columnCount() const;

@@ -55,17 +55,19 @@
 #import <WebCore/AXObjectCache.h>
 #import <WebCore/AccessibilityObject.h>
 #import <WebCore/AnimationController.h>
-#import <WebCore/CSSMutableStyleDeclaration.h>
+#import <WebCore/CSSStyleDeclaration.h>
 #import <WebCore/CachedResourceLoader.h>
 #import <WebCore/Chrome.h>
 #import <WebCore/ColorMac.h>
 #import <WebCore/DOMImplementation.h>
+#import <WebCore/DatabaseManager.h>
 #import <WebCore/DocumentFragment.h>
 #import <WebCore/DocumentLoader.h>
 #import <WebCore/DocumentMarkerController.h>
 #import <WebCore/EventHandler.h>
 #import <WebCore/EventNames.h>
 #import <WebCore/Frame.h>
+#import <WebCore/FrameLoadRequest.h>
 #import <WebCore/FrameLoader.h>
 #import <WebCore/FrameLoaderStateMachine.h>
 #import <WebCore/FrameTree.h>
@@ -79,19 +81,14 @@
 #import <WebCore/PlatformEventFactoryMac.h>
 #import <WebCore/PluginData.h>
 #import <WebCore/PrintContext.h>
-#import <WebCore/RenderLayer.h>
 #import <WebCore/RenderPart.h>
 #import <WebCore/RenderView.h>
-#import <WebCore/ReplaceSelectionCommand.h>
 #import <WebCore/RuntimeApplicationChecks.h>
 #import <WebCore/ScriptValue.h>
 #import <WebCore/SecurityOrigin.h>
 #import <WebCore/SmartReplace.h>
-#import <WebCore/SVGDocumentExtensions.h>
-#import <WebCore/SVGSMILElement.h>
 #import <WebCore/TextIterator.h>
 #import <WebCore/ThreadCheck.h>
-#import <WebCore/TypingCommand.h>
 #import <WebCore/htmlediting.h>
 #import <WebCore/markup.h>
 #import <WebCore/visible_units.h>
@@ -108,7 +105,6 @@ using namespace HTMLNames;
 using JSC::JSGlobalObject;
 using JSC::JSLock;
 using JSC::JSValue;
-using JSC::SilenceAssertionsOnly;
 
 /*
 Here is the current behavior matrix for four types of navigations:
@@ -200,20 +196,6 @@ EditableLinkBehavior core(WebKitEditableLinkBehavior editableLinkBehavior)
     }
     ASSERT_NOT_REACHED();
     return EditableLinkDefaultBehavior;
-}
-
-WebCore::EditingBehaviorType core(WebKitEditingBehavior behavior)
-{
-    switch (behavior) {
-        case WebKitEditingMacBehavior:
-            return WebCore::EditingMacBehavior;
-        case WebKitEditingWinBehavior:
-            return WebCore::EditingWindowsBehavior;
-        case WebKitEditingUnixBehavior:
-            return WebCore::EditingUnixBehavior;
-    }
-    ASSERT_NOT_REACHED();
-    return WebCore::EditingMacBehavior;
 }
 
 TextDirectionSubmenuInclusionBehavior core(WebTextDirectionSubmenuInclusionBehavior behavior)
@@ -516,15 +498,7 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
 
 - (NSString *)_stringForRange:(DOMRange *)range
 {
-    // This will give a system malloc'd buffer that can be turned directly into an NSString
-    unsigned length;
-    UChar* buf = plainTextToMallocAllocatedBuffer(core(range), length, true);
-    
-    if (!buf)
-        return [NSString string];
-
-    // Transfer buffer ownership to NSString
-    return [[[NSString alloc] initWithCharactersNoCopy:buf length:length freeWhenDone:YES] autorelease];
+    return plainText(core(range), TextIteratorDefaultBehavior, true);
 }
 
 - (BOOL)_shouldFlattenCompositingLayers:(CGContextRef)context
@@ -584,7 +558,7 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     if (RenderPart* ownerRenderer = _private->coreFrame->ownerRenderer()) {
         if (ownerRenderer->needsLayout())
             return NO;
-        *rect = ownerRenderer->absoluteClippedOverflowRect();
+        *rect = ownerRenderer->pixelSnappedAbsoluteClippedOverflowRect();
         return YES;
     }
 
@@ -598,6 +572,9 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
 
 - (NSString *)_stringByEvaluatingJavaScriptFromString:(NSString *)string forceUserGesture:(BOOL)forceUserGesture
 {
+    if (!string)
+        return @"";
+
     ASSERT(_private->coreFrame->document());
     RetainPtr<WebFrame> protect(self); // Executing arbitrary JavaScript can destroy the frame.
     
@@ -612,9 +589,9 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     if (!result || (!result.isBoolean() && !result.isString() && !result.isNumber()))
         return @"";
 
-    JSLock lock(SilenceAssertionsOnly);
     JSC::ExecState* exec = _private->coreFrame->script()->globalObject(mainThreadNormalWorld())->globalExec();
-    return ustringToString(result.toString(exec)->value(exec));
+    JSC::JSLockHolder lock(exec);
+    return result.toWTFString(exec);
 }
 
 - (NSRect)_caretRectAtPosition:(const Position&)pos affinity:(NSSelectionAffinity)affinity
@@ -633,11 +610,8 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     NSRect rangeRect = [self _firstRectForDOMRange:range];    
     Node *startNode = core([range startContainer]);
         
-    if (startNode && startNode->renderer()) {
-        RenderLayer *layer = startNode->renderer()->enclosingLayer();
-        if (layer)
-            layer->scrollRectToVisible(enclosingIntRect(rangeRect), ScrollAlignment::alignToEdgeIfNeeded, ScrollAlignment::alignToEdgeIfNeeded);
-    }
+    if (startNode && startNode->renderer())
+        startNode->renderer()->scrollRectToVisible(enclosingIntRect(rangeRect), ScrollAlignment::alignToEdgeIfNeeded, ScrollAlignment::alignToEdgeIfNeeded);
 }
 
 - (BOOL)_needsLayout
@@ -743,7 +717,7 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     if (!_private->coreFrame || !_private->coreFrame->document())
         return nil;
 
-    return kit(createFragmentFromMarkup(_private->coreFrame->document(), markupString, baseURLString, FragmentScriptingNotAllowed).get());
+    return kit(createFragmentFromMarkup(_private->coreFrame->document(), markupString, baseURLString, DisallowScriptingContent).get());
 }
 
 - (DOMDocumentFragment *)_documentFragmentWithNodesAsParagraphs:(NSArray *)nodes
@@ -771,9 +745,8 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
 {
     if (_private->coreFrame->selection()->isNone())
         return;
-    
-    TypingCommand::insertParagraphSeparatorInQuotedContent(_private->coreFrame->document());
-    _private->coreFrame->selection()->revealSelection(ScrollAlignment::alignToEdgeIfNeeded);
+
+    _private->coreFrame->editor()->insertParagraphSeparatorInQuotedContent();
 }
 
 - (VisiblePosition)_visiblePositionForPoint:(NSPoint)point
@@ -791,19 +764,21 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
 {
     if (!_private->coreFrame)
         return nil;
-    RefPtr<CSSMutableStyleDeclaration> typingStyle = _private->coreFrame->selection()->copyTypingStyle();
+    RefPtr<StylePropertySet> typingStyle = _private->coreFrame->selection()->copyTypingStyle();
     if (!typingStyle)
         return nil;
-    return kit(typingStyle.get());
+    return kit(typingStyle->ensureCSSStyleDeclaration());
 }
 
 - (void)_setTypingStyle:(DOMCSSStyleDeclaration *)style withUndoAction:(EditAction)undoAction
 {
-    if (!_private->coreFrame)
+    if (!_private->coreFrame || !style)
         return;
-    _private->coreFrame->editor()->computeAndSetTypingStyle(core(style), undoAction);
+    // FIXME: We shouldn't have to create a copy here.
+    _private->coreFrame->editor()->computeAndSetTypingStyle(core(style)->copy().get(), undoAction);
 }
 
+#if ENABLE(DRAG_SUPPORT)
 - (void)_dragSourceEndedAt:(NSPoint)windowLoc operation:(NSDragOperation)operation
 {
     if (!_private->coreFrame)
@@ -816,6 +791,7 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
         LeftButton, PlatformEvent::MouseMoved, 0, false, false, false, false, currentTime());
     _private->coreFrame->eventHandler()->dragSourceEndedAt(event, (DragOperation)operation);
 }
+#endif
 
 - (BOOL)_canProvideDocumentSource
 {
@@ -923,17 +899,7 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
 
 - (unsigned)_pendingFrameUnloadEventCount
 {
-    return _private->coreFrame->domWindow()->pendingUnloadEventListeners();
-}
-
-- (void)_setIsDisconnected:(bool)isDisconnected
-{
-    _private->coreFrame->setIsDisconnected(isDisconnected);
-}
-
-- (void)_setExcludeFromTextSearch:(bool)exclude
-{
-    _private->coreFrame->setExcludeFromTextSearch(exclude);
+    return _private->coreFrame->document()->domWindow()->pendingUnloadEventListeners();
 }
 
 #if ENABLE(NETSCAPE_PLUGIN_API)
@@ -992,29 +958,6 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     return controller->pauseTransitionAtTime(coreNode->renderer(), name, time);
 }
 
-// Pause a given SVG animation on the target node at a specific time.
-// This method is only intended to be used for testing the SVG animation system.
-- (BOOL)_pauseSVGAnimation:(NSString*)elementId onSMILNode:(DOMNode *)node atTime:(NSTimeInterval)time
-{
-#if ENABLE(SVG)
-    Frame* frame = core(self);
-    if (!frame)
-        return false;
- 
-    Document* document = frame->document();
-    if (!document || !document->svgExtensions())
-        return false;
-
-    Node* coreNode = core(node);
-    if (!coreNode || !SVGSMILElement::isSMILElement(coreNode))
-        return false;
-
-    return document->accessSVGExtensions()->sampleAnimationAtTime(elementId, static_cast<SVGSMILElement*>(coreNode), time);
-#else
-    return false;
-#endif
-}
-
 - (unsigned) _numberOfActiveAnimations
 {
     Frame* frame = core(self);
@@ -1026,24 +969,6 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
         return false;
 
     return controller->numberOfActiveAnimations(frame->document());
-}
-
-- (void) _suspendAnimations
-{
-    Frame* frame = core(self);
-    if (!frame)
-        return;
-        
-    frame->animation()->suspendAnimations();
-}
-
-- (void) _resumeAnimations
-{
-    Frame* frame = core(self);
-    if (!frame)
-        return;
-
-    frame->animation()->resumeAnimations();
 }
 
 - (void)_replaceSelectionWithFragment:(DOMDocumentFragment *)fragment selectReplacement:(BOOL)selectReplacement smartReplace:(BOOL)smartReplace matchStyle:(BOOL)matchStyle
@@ -1135,7 +1060,7 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     if (frameLoader->subframeLoader()->containsPlugins())
         [result setObject:[NSNumber numberWithBool:YES] forKey:WebFrameHasPlugins];
     
-    if (DOMWindow* domWindow = _private->coreFrame->domWindow()) {
+    if (DOMWindow* domWindow = _private->coreFrame->document()->domWindow()) {
         if (domWindow->hasEventListeners(eventNames().unloadEvent))
             [result setObject:[NSNumber numberWithBool:YES] forKey:WebFrameHasUnloadListener];
         if (domWindow->optionalApplicationCache())
@@ -1144,13 +1069,9 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     
     if (Document* document = _private->coreFrame->document()) {
 #if ENABLE(SQL_DATABASE)
-        if (document->hasOpenDatabases())
+        if (DatabaseManager::manager().hasOpenDatabases(document))
             [result setObject:[NSNumber numberWithBool:YES] forKey:WebFrameUsesDatabases];
 #endif
-            
-        if (document->usingGeolocation())
-            [result setObject:[NSNumber numberWithBool:YES] forKey:WebFrameUsesGeolocation];
-            
         if (!document->canSuspendActiveDOMObjects())
             [result setObject:[NSNumber numberWithBool:YES] forKey:WebFrameCanSuspendActiveDOMObjects];
     }
@@ -1167,6 +1088,9 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
 
 - (NSString *)_stringByEvaluatingJavaScriptFromString:(NSString *)string withGlobalObject:(JSObjectRef)globalObjectRef inScriptWorld:(WebScriptWorld *)world
 {
+    if (!string)
+        return @"";
+
     // Start off with some guess at a frame and a global object, we'll try to do better...!
     JSDOMWindow* anyWorldGlobalObject = _private->coreFrame->script()->globalObject(mainThreadNormalWorld());
 
@@ -1191,9 +1115,9 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     if (!result || (!result.isBoolean() && !result.isString() && !result.isNumber()))
         return @"";
 
-    JSLock lock(SilenceAssertionsOnly);
     JSC::ExecState* exec = anyWorldGlobalObject->globalExec();
-    return ustringToString(result.toString(exec)->value(exec));
+    JSC::JSLockHolder lock(exec);
+    return result.toWTFString(exec);
 }
 
 - (JSGlobalContextRef)_globalContextForScriptWorld:(WebScriptWorld *)world
@@ -1250,22 +1174,6 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     return coreFrame->layerTreeAsText();
 }
 
-- (BOOL)hasSpellingMarker:(int)from length:(int)length
-{
-    Frame* coreFrame = core(self);
-    if (!coreFrame)
-        return NO;
-    return coreFrame->editor()->selectionStartHasMarkerFor(DocumentMarker::Spelling, from, length);
-}
-
-- (BOOL)hasGrammarMarker:(int)from length:(int)length
-{
-    Frame* coreFrame = core(self);
-    if (!coreFrame)
-        return NO;
-    return coreFrame->editor()->selectionStartHasMarkerFor(DocumentMarker::Grammar, from, length);
-}
-
 - (id)accessibilityRoot
 {
 #if HAVE(ACCESSIBILITY)
@@ -1320,9 +1228,9 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     if (!root)
         return [NSArray array];
 
-    const IntRect& documentRect = root->documentRect();
-    float printWidth = root->style()->isHorizontalWritingMode() ? documentRect.width() / printScaleFactor : pageSize.width;
-    float printHeight = root->style()->isHorizontalWritingMode() ? pageSize.height : documentRect.height() / printScaleFactor;
+    const LayoutRect& documentRect = root->documentRect();
+    float printWidth = root->style()->isHorizontalWritingMode() ? static_cast<float>(documentRect.width()) / printScaleFactor : pageSize.width;
+    float printHeight = root->style()->isHorizontalWritingMode() ? pageSize.height : static_cast<float>(documentRect.height()) / printScaleFactor;
 
     PrintContext printContext(_private->coreFrame);
     printContext.computePageRectsWithPageSize(FloatSize(printWidth, printHeight), true);
@@ -1443,7 +1351,18 @@ static bool needsMicrosoftMessengerDOMDocumentWorkaround()
     Frame* coreFrame = _private->coreFrame;
     if (!coreFrame)
         return;
-    coreFrame->loader()->load(request, false);
+
+    ResourceRequest resourceRequest(request);
+    
+    // Some users of WebKit API incorrectly use "file path as URL" style requests which are invalid.
+    // By re-writing those URLs here we technically break the -[WebDataSource initialRequest] API
+    // but that is necessary to implement this quirk only at the API boundary.
+    // Note that other users of WebKit API use nil requests or requests with nil URLs or empty URLs, so we
+    // only implement this workaround when the request had a non-nil or non-empty URL.
+    if (!resourceRequest.url().isValid() && !resourceRequest.url().isEmpty())
+        resourceRequest.setURL([NSURL URLWithString:[@"file:" stringByAppendingString:[[request URL] absoluteString]]]);
+
+    coreFrame->loader()->load(FrameLoadRequest(coreFrame, resourceRequest));
 }
 
 static NSURL *createUniqueWebDataURL()
@@ -1474,7 +1393,7 @@ static NSURL *createUniqueWebDataURL()
 
     SubstituteData substituteData(WebCore::SharedBuffer::wrapNSData(data), MIMEType, encodingName, [unreachableURL absoluteURL], responseURL);
 
-    _private->coreFrame->loader()->load(request, substituteData, false);
+    _private->coreFrame->loader()->load(FrameLoadRequest(_private->coreFrame, request, substituteData));
 }
 
 
@@ -1484,7 +1403,7 @@ static NSURL *createUniqueWebDataURL()
     
     if (!MIMEType)
         MIMEType = @"text/html";
-    [self _loadData:data MIMEType:MIMEType textEncodingName:encodingName baseURL:baseURL unreachableURL:nil];
+    [self _loadData:data MIMEType:MIMEType textEncodingName:encodingName baseURL:[baseURL _webkit_URLFromURLOrSchemelessFileURL] unreachableURL:nil];
 }
 
 - (void)_loadHTMLString:(NSString *)string baseURL:(NSURL *)baseURL unreachableURL:(NSURL *)unreachableURL
@@ -1497,14 +1416,14 @@ static NSURL *createUniqueWebDataURL()
 {
     WebCoreThreadViolationCheckRoundTwo();
 
-    [self _loadHTMLString:string baseURL:baseURL unreachableURL:nil];
+    [self _loadHTMLString:string baseURL:[baseURL _webkit_URLFromURLOrSchemelessFileURL] unreachableURL:nil];
 }
 
 - (void)loadAlternateHTMLString:(NSString *)string baseURL:(NSURL *)baseURL forUnreachableURL:(NSURL *)unreachableURL
 {
     WebCoreThreadViolationCheckRoundTwo();
 
-    [self _loadHTMLString:string baseURL:baseURL unreachableURL:unreachableURL];
+    [self _loadHTMLString:string baseURL:[baseURL _webkit_URLFromURLOrSchemelessFileURL] unreachableURL:[unreachableURL _webkit_URLFromURLOrSchemelessFileURL]];
 }
 
 - (void)loadArchive:(WebArchive *)archive

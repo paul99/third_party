@@ -29,6 +29,7 @@
 #include "CachedResourceClient.h"
 #include "CachedResourceHandle.h"
 #include "CachedScript.h"
+#include "FragmentScriptingPermission.h"
 #include "ScriptableDocumentParser.h"
 #include "XMLToken.h"
 #include "XMLTokenizer.h"
@@ -39,6 +40,7 @@ namespace WebCore {
 
 class ContainerNode;
 class Document;
+class DocumentFragment;
 class ScriptElement;
 class XMLTreeBuilder;
 
@@ -55,7 +57,7 @@ public:
         return adoptRef(new NewXMLDocumentParser(fragment, parent, scriptingPermission));
     }
 
-    static bool parseDocumentFragment(const String&, DocumentFragment*, Element* parent = 0, FragmentScriptingPermission = FragmentScriptingAllowed);
+    static bool parseDocumentFragment(const String&, DocumentFragment*, Element* parent = 0, FragmentScriptingPermission = AllowScriptingContent);
 
     void pauseParsing() { m_parserPaused = true; }
     void resumeParsing();

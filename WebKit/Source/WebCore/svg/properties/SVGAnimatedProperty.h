@@ -34,19 +34,23 @@ class SVGAnimatedProperty : public RefCounted<SVGAnimatedProperty> {
 public:
     SVGElement* contextElement() const { return m_contextElement.get(); }
     const QualifiedName& attributeName() const { return m_attributeName; }
+    AnimatedPropertyType animatedPropertyType() const { return m_animatedPropertyType; }
+    bool isAnimating() const { return m_isAnimating; }
+    bool isReadOnly() const { return m_isReadOnly; }
+    void setIsReadOnly() { m_isReadOnly = true; }
 
     void commitChange()
     {
         ASSERT(m_contextElement);
+        ASSERT(!m_contextElement->m_deletionHasBegun);
         m_contextElement->invalidateSVGAttributes();
         m_contextElement->svgAttributeChanged(m_attributeName);
     }
 
     virtual bool isAnimatedListTearOff() const { return false; }
-    virtual void updateAnimVal(void*) { ASSERT_NOT_REACHED(); }
 
     // Caching facilities.
-    typedef HashMap<SVGAnimatedPropertyDescription, RefPtr<SVGAnimatedProperty>, SVGAnimatedPropertyDescriptionHash, SVGAnimatedPropertyDescriptionHashTraits> Cache;
+    typedef HashMap<SVGAnimatedPropertyDescription, SVGAnimatedProperty*, SVGAnimatedPropertyDescriptionHash, SVGAnimatedPropertyDescriptionHashTraits> Cache;
 
     virtual ~SVGAnimatedProperty()
     {
@@ -54,79 +58,52 @@ public:
         Cache* cache = animatedPropertyCache();
         const Cache::const_iterator end = cache->end();
         for (Cache::const_iterator it = cache->begin(); it != end; ++it) {
-            if (it->second == this) {
-                cache->remove(it->first);
+            if (it->value == this) {
+                cache->remove(it->key);
                 break;
             }
         }
+
+        // Assure that animationEnded() was called, if animationStarted() was called before.
+        ASSERT(!m_isAnimating);
     }
 
-    // lookupOrCreateWrapper & helper methods.
-    template<typename TearOffType, typename PropertyType, bool isDerivedFromSVGElement>
-    struct LookupOrCreateHelper;
-
-    template<typename TearOffType, typename PropertyType>
-    struct LookupOrCreateHelper<TearOffType, PropertyType, false> {
-        static PassRefPtr<TearOffType> lookupOrCreateWrapper(void*, const SVGPropertyInfo*, PropertyType&)
-        {
-            ASSERT_NOT_REACHED();
-            return PassRefPtr<TearOffType>();
-        }
-    };
-
-    template<typename TearOffType, typename PropertyType>
-    struct LookupOrCreateHelper<TearOffType, PropertyType, true> {
-        static PassRefPtr<TearOffType> lookupOrCreateWrapper(SVGElement* element, const SVGPropertyInfo* info, PropertyType& property)
-        {
-            ASSERT(info);
-            SVGAnimatedPropertyDescription key(element, info->propertyIdentifier);
-            RefPtr<SVGAnimatedProperty> wrapper = animatedPropertyCache()->get(key);
-            if (!wrapper) {
-                wrapper = TearOffType::create(element, info->attributeName, property);
-                animatedPropertyCache()->set(key, wrapper);
-            }
-            return static_pointer_cast<TearOffType>(wrapper).release();
-        }
-    };
-
-    template<typename OwnerType, typename TearOffType, typename PropertyType, bool isDerivedFromSVGElement>
+    template<typename OwnerType, typename TearOffType, typename PropertyType>
     static PassRefPtr<TearOffType> lookupOrCreateWrapper(OwnerType* element, const SVGPropertyInfo* info, PropertyType& property)
     {
-        return LookupOrCreateHelper<TearOffType, PropertyType, isDerivedFromSVGElement>::lookupOrCreateWrapper(element, info, property);
+        ASSERT(info);
+        SVGAnimatedPropertyDescription key(element, info->propertyIdentifier);
+        RefPtr<SVGAnimatedProperty> wrapper = animatedPropertyCache()->get(key);
+        if (!wrapper) {
+            wrapper = TearOffType::create(element, info->attributeName, info->animatedPropertyType, property);
+            if (info->animatedPropertyState == PropertyIsReadOnly)
+                wrapper->setIsReadOnly();
+            animatedPropertyCache()->set(key, wrapper.get());
+        }
+        return static_pointer_cast<TearOffType>(wrapper);
     }
 
-    // lookupWrapper & helper methods.
-    template<typename TearOffType, bool isDerivedFromSVGElement>
-    struct LookupHelper;
+    template<typename OwnerType, typename TearOffType>
+    static TearOffType* lookupWrapper(OwnerType* element, const SVGPropertyInfo* info)
+    {
+        ASSERT(info);
+        SVGAnimatedPropertyDescription key(element, info->propertyIdentifier);
+        return static_cast<TearOffType*>(animatedPropertyCache()->get(key));
+    }
 
-    template<typename TearOffType>
-    struct LookupHelper<TearOffType, false> {
-        static TearOffType* lookupWrapper(const void*, const SVGPropertyInfo*)
-        {
-            return 0;
-        }
-    };
-
-    template<typename TearOffType>
-    struct LookupHelper<TearOffType, true> {
-        static TearOffType* lookupWrapper(const SVGElement* element, const SVGPropertyInfo* info)
-        {
-            ASSERT(info);
-            SVGAnimatedPropertyDescription key(const_cast<SVGElement*>(element), info->propertyIdentifier);
-            return static_pointer_cast<TearOffType>(animatedPropertyCache()->get(key)).get();
-        }
-    };
-
-    template<typename OwnerType, typename TearOffType, bool isDerivedFromSVGElement>
+    template<typename OwnerType, typename TearOffType>
     static TearOffType* lookupWrapper(const OwnerType* element, const SVGPropertyInfo* info)
     {
-        return LookupHelper<TearOffType, isDerivedFromSVGElement>::lookupWrapper(element, info);
+        return lookupWrapper<OwnerType, TearOffType>(const_cast<OwnerType*>(element), info);
     }
 
 protected:
-    SVGAnimatedProperty(SVGElement* contextElement, const QualifiedName& attributeName)
+    SVGAnimatedProperty(SVGElement* contextElement, const QualifiedName& attributeName, AnimatedPropertyType animatedPropertyType)
         : m_contextElement(contextElement)
         , m_attributeName(attributeName)
+        , m_animatedPropertyType(animatedPropertyType)
+        , m_isAnimating(false)
+        , m_isReadOnly(false)
     {
     }
 
@@ -139,6 +116,11 @@ private:
 
     RefPtr<SVGElement> m_contextElement;
     const QualifiedName& m_attributeName;
+    AnimatedPropertyType m_animatedPropertyType;
+
+protected:
+    bool m_isAnimating;
+    bool m_isReadOnly;
 };
 
 }

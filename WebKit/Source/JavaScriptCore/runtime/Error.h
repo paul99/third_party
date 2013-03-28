@@ -24,6 +24,7 @@
 #define Error_h
 
 #include "InternalFunction.h"
+#include "Interpreter.h"
 #include "JSObject.h"
 #include <stdint.h>
 
@@ -35,28 +36,28 @@ namespace JSC {
     class JSObject;
     class SourceCode;
     class Structure;
-    class UString;
 
     // Methods to create a range of internal errors.
-    JSObject* createError(JSGlobalObject*, const UString&);
-    JSObject* createEvalError(JSGlobalObject*, const UString&);
-    JSObject* createRangeError(JSGlobalObject*, const UString&);
-    JSObject* createReferenceError(JSGlobalObject*, const UString&);
-    JSObject* createSyntaxError(JSGlobalObject*, const UString&);
-    JSObject* createTypeError(JSGlobalObject*, const UString&);
-    JSObject* createURIError(JSGlobalObject*, const UString&);
+    JSObject* createError(JSGlobalObject*, const String&);
+    JSObject* createEvalError(JSGlobalObject*, const String&);
+    JSObject* createRangeError(JSGlobalObject*, const String&);
+    JSObject* createReferenceError(JSGlobalObject*, const String&);
+    JSObject* createSyntaxError(JSGlobalObject*, const String&);
+    JSObject* createTypeError(JSGlobalObject*, const String&);
+    JSObject* createNotEnoughArgumentsError(JSGlobalObject*);
+    JSObject* createURIError(JSGlobalObject*, const String&);
     // ExecState wrappers.
-    JS_EXPORT_PRIVATE JSObject* createError(ExecState*, const UString&);
-    JSObject* createEvalError(ExecState*, const UString&);
-    JS_EXPORT_PRIVATE JSObject* createRangeError(ExecState*, const UString&);
-    JS_EXPORT_PRIVATE JSObject* createReferenceError(ExecState*, const UString&);
-    JS_EXPORT_PRIVATE JSObject* createSyntaxError(ExecState*, const UString&);
-    JS_EXPORT_PRIVATE JSObject* createTypeError(ExecState*, const UString&);
-    JSObject* createURIError(ExecState*, const UString&);
+    JS_EXPORT_PRIVATE JSObject* createError(ExecState*, const String&);
+    JSObject* createEvalError(ExecState*, const String&);
+    JS_EXPORT_PRIVATE JSObject* createRangeError(ExecState*, const String&);
+    JS_EXPORT_PRIVATE JSObject* createReferenceError(ExecState*, const String&);
+    JS_EXPORT_PRIVATE JSObject* createSyntaxError(ExecState*, const String&);
+    JS_EXPORT_PRIVATE JSObject* createTypeError(ExecState*, const String&);
+    JS_EXPORT_PRIVATE JSObject* createNotEnoughArgumentsError(ExecState*);
+    JSObject* createURIError(ExecState*, const String&);
 
     // Methods to add 
     bool hasErrorInfo(ExecState*, JSObject* error);
-    JSObject* addErrorInfo(JSGlobalData*, JSObject* error, int line, const SourceCode&);
     // ExecState wrappers.
     JSObject* addErrorInfo(ExecState*, JSObject* error, int line, const SourceCode&);
 
@@ -74,7 +75,7 @@ namespace JSC {
 
     class StrictModeTypeErrorFunction : public InternalFunction {
     private:
-        StrictModeTypeErrorFunction(JSGlobalObject* globalObject, Structure* structure, const UString& message)
+        StrictModeTypeErrorFunction(JSGlobalObject* globalObject, Structure* structure, const String& message)
             : InternalFunction(globalObject, structure)
             , m_message(message)
         {
@@ -85,10 +86,10 @@ namespace JSC {
     public:
         typedef InternalFunction Base;
 
-        static StrictModeTypeErrorFunction* create(ExecState* exec, JSGlobalObject* globalObject, Structure* structure, const UString& message)
+        static StrictModeTypeErrorFunction* create(ExecState* exec, JSGlobalObject* globalObject, Structure* structure, const String& message)
         {
             StrictModeTypeErrorFunction* function = new (NotNull, allocateCell<StrictModeTypeErrorFunction>(*exec->heap())) StrictModeTypeErrorFunction(globalObject, structure, message);
-            function->finishCreation(exec->globalData(), exec->globalData().propertyNames->emptyIdentifier);
+            function->finishCreation(exec->globalData(), String());
             return function;
         }
     
@@ -124,7 +125,7 @@ namespace JSC {
         }
 
     private:
-        UString m_message;
+        String m_message;
     };
 
 } // namespace JSC

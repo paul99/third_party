@@ -26,26 +26,36 @@
 #include "config.h"
 #include "JSDictionary.h"
 
+#include "ArrayValue.h"
+#include "Dictionary.h"
 #include "JSDOMWindow.h"
 #include "JSEventTarget.h"
 #include "JSMessagePortCustom.h"
 #include "JSNode.h"
 #include "JSStorage.h"
 #include "JSTrackCustom.h"
-#include "SerializedScriptValue.h"
+#include "JSUint8Array.h"
 #include "ScriptValue.h"
+#include "SerializedScriptValue.h"
+#include <wtf/HashMap.h>
 #include <wtf/MathExtras.h>
+#include <wtf/text/AtomicString.h>
+
+#if ENABLE(ENCRYPTED_MEDIA)
+#include "JSMediaKeyError.h"
+#endif
 
 using namespace JSC;
 
 namespace WebCore {
 
-JSDictionary::GetPropertyResult JSDictionary::tryGetProperty(const char* propertyName, JSValue& finalResult)
+JSDictionary::GetPropertyResult JSDictionary::tryGetProperty(const char* propertyName, JSValue& finalResult) const
 {
+    ASSERT(isValid());
     Identifier identifier(m_exec, propertyName);
-    PropertySlot slot(m_initializerObject);
+    PropertySlot slot(m_initializerObject.get());
 
-    if (!m_initializerObject->getPropertySlot(m_exec, identifier, slot))
+    if (!m_initializerObject.get()->getPropertySlot(m_exec, identifier, slot))
         return NoPropertyFound;
 
     if (m_exec->hadException())
@@ -78,6 +88,11 @@ void JSDictionary::convertValue(ExecState* exec, JSValue value, unsigned short& 
     result = static_cast<unsigned short>(value.toUInt32(exec));
 }
 
+void JSDictionary::convertValue(ExecState* exec, JSValue value, unsigned long& result)
+{
+    result = static_cast<unsigned long>(value.toUInt32(exec));
+}
+
 void JSDictionary::convertValue(ExecState* exec, JSValue value, unsigned long long& result)
 {
     double d = value.toNumber(exec);
@@ -89,9 +104,32 @@ void JSDictionary::convertValue(ExecState* exec, JSValue value, double& result)
     result = value.toNumber(exec);
 }
 
+void JSDictionary::convertValue(JSC::ExecState* exec, JSC::JSValue value, Dictionary& result)
+{
+    result = Dictionary(exec, value);
+}
+
 void JSDictionary::convertValue(ExecState* exec, JSValue value, String& result)
 {
-    result = ustringToString(value.toString(exec)->value(exec));
+    result = value.toString(exec)->value(exec);
+}
+
+void JSDictionary::convertValue(ExecState* exec, JSValue value, Vector<String>& result)
+{
+    if (value.isUndefinedOrNull())
+        return;
+
+    unsigned length = 0;
+    JSObject* object = toJSSequence(exec, value, length);
+    if (exec->hadException())
+        return;
+
+    for (unsigned i = 0 ; i < length; ++i) {
+        JSValue itemValue = object->get(exec, i);
+        if (exec->hadException())
+            return;
+        result.append(itemValue.toString(exec)->value(exec));
+    }
 }
 
 void JSDictionary::convertValue(ExecState* exec, JSValue value, ScriptValue& result)
@@ -101,7 +139,7 @@ void JSDictionary::convertValue(ExecState* exec, JSValue value, ScriptValue& res
 
 void JSDictionary::convertValue(ExecState* exec, JSValue value, RefPtr<SerializedScriptValue>& result)
 {
-    result = SerializedScriptValue::create(exec, value, 0);
+    result = SerializedScriptValue::create(exec, value, 0, 0);
 }
 
 void JSDictionary::convertValue(ExecState*, JSValue value, RefPtr<DOMWindow>& result)
@@ -126,7 +164,8 @@ void JSDictionary::convertValue(ExecState*, JSValue value, RefPtr<Storage>& resu
 
 void JSDictionary::convertValue(ExecState* exec, JSValue value, MessagePortArray& result)
 {
-    fillMessagePortArray(exec, value, result);
+    ArrayBufferArray arrayBuffers;
+    fillMessagePortArray(exec, value, result, arrayBuffers);
 }
 
 #if ENABLE(VIDEO_TRACK)
@@ -135,5 +174,58 @@ void JSDictionary::convertValue(ExecState*, JSValue value, RefPtr<TrackBase>& re
     result = toTrack(value);
 }
 #endif
+
+#if ENABLE(MUTATION_OBSERVERS) || ENABLE(WEB_INTENTS)
+void JSDictionary::convertValue(ExecState* exec, JSValue value, HashSet<AtomicString>& result)
+{
+    result.clear();
+
+    if (value.isUndefinedOrNull())
+        return;
+
+    unsigned length = 0;
+    JSObject* object = toJSSequence(exec, value, length);
+    if (exec->hadException())
+        return;
+
+    for (unsigned i = 0 ; i < length; ++i) {
+        JSValue itemValue = object->get(exec, i);
+        if (exec->hadException())
+            return;
+        result.add(itemValue.toString(exec)->value(exec));
+    }
+}
+#endif
+
+void JSDictionary::convertValue(ExecState* exec, JSValue value, ArrayValue& result)
+{
+    if (value.isUndefinedOrNull())
+        return;
+
+    result = ArrayValue(exec, value);
+}
+
+void JSDictionary::convertValue(JSC::ExecState*, JSC::JSValue value, RefPtr<Uint8Array>& result)
+{
+    result = toUint8Array(value);
+}
+
+#if ENABLE(ENCRYPTED_MEDIA)
+void JSDictionary::convertValue(JSC::ExecState*, JSC::JSValue value, RefPtr<MediaKeyError>& result)
+{
+    result = toMediaKeyError(value);
+}
+#endif
+
+bool JSDictionary::getWithUndefinedOrNullCheck(const String& propertyName, String& result) const
+{
+    ASSERT(isValid());
+    JSValue value;
+    if (tryGetProperty(propertyName.utf8().data(), value) != PropertyFound || value.isUndefinedOrNull())
+        return false;
+
+    result = value.toWTFString(m_exec);
+    return true;
+}
 
 } // namespace WebCore

@@ -24,122 +24,190 @@
 
 #include "ClassList.h"
 #include "DatasetDOMStringMap.h"
-#include "Element.h"
-#include "HTMLCollection.h"
+#include "ElementShadow.h"
+#include "NamedNodeMap.h"
 #include "NodeRareData.h"
+#include "PseudoElement.h"
+#include "StyleInheritedData.h"
 #include <wtf/OwnPtr.h>
 
 namespace WebCore {
 
-class ShadowRoot;
-
 class ElementRareData : public NodeRareData {
 public:
-    ElementRareData();
+    ElementRareData(Document*);
     virtual ~ElementRareData();
 
+    void setPseudoElement(PseudoId, PassRefPtr<PseudoElement>);
+    PseudoElement* pseudoElement(PseudoId) const;
+    bool hasPseudoElements() const { return m_generatedBefore || m_generatedAfter; }
+
     void resetComputedStyle();
+    void resetDynamicRestyleObservations();
 
-#if ENABLE(STYLE_SCOPED)
-    void registerScopedHTMLStyleChild();
-    void unregisterScopedHTMLStyleChild();
-    bool hasScopedHTMLStyleChild() const;
-    size_t numberOfScopedHTMLStyleChildren() const;
-#endif
+    bool needsFocusAppearanceUpdateSoonAfterAttach() const { return m_needsFocusAppearanceUpdateSoonAfterAttach; }
+    void setNeedsFocusAppearanceUpdateSoonAfterAttach(bool needs) { m_needsFocusAppearanceUpdateSoonAfterAttach = needs; }
 
-    using NodeRareData::needsFocusAppearanceUpdateSoonAfterAttach;
-    using NodeRareData::setNeedsFocusAppearanceUpdateSoonAfterAttach;
+    bool styleAffectedByEmpty() const { return m_styleAffectedByEmpty; }
+    void setStyleAffectedByEmpty(bool value) { m_styleAffectedByEmpty = value; }
 
-    typedef FixedArray<OwnPtr<HTMLCollection>, NumNodeCollectionTypes> CachedHTMLCollectionArray;
-
-    bool hasCachedHTMLCollections() const
-    {
-        return m_cachedCollections;
-    }
-
-    HTMLCollection* ensureCachedHTMLCollection(Element* element, CollectionType type)
-    {
-        if (!m_cachedCollections)
-            m_cachedCollections = adoptPtr(new CachedHTMLCollectionArray);
-
-        OwnPtr<HTMLCollection>& collection = (*m_cachedCollections)[type - FirstNodeCollectionType];
-        if (!collection)
-            collection = HTMLCollection::create(element, type);
-        return collection.get();
-    }
-
-    OwnPtr<CachedHTMLCollectionArray> m_cachedCollections;
-
-    LayoutSize m_minimumSizeForResizing;
-    RefPtr<RenderStyle> m_computedStyle;
-    ShadowRoot* m_shadowRoot;
-    AtomicString m_shadowPseudoId;
-
-#if ENABLE(STYLE_SCOPED)
-    size_t m_numberOfScopedHTMLStyleChildren;
-#endif
-
-    OwnPtr<DatasetDOMStringMap> m_datasetDOMStringMap;
-    OwnPtr<ClassList> m_classList;
-
-    bool m_styleAffectedByEmpty;
+    bool isInCanvasSubtree() const { return m_isInCanvasSubtree; }
+    void setIsInCanvasSubtree(bool value) { m_isInCanvasSubtree = value; }
 
 #if ENABLE(FULLSCREEN_API)
-    bool m_containsFullScreenElement;
+    bool containsFullScreenElement() { return m_containsFullScreenElement; }
+    void setContainsFullScreenElement(bool value) { m_containsFullScreenElement = value; }
 #endif
+
+#if ENABLE(DIALOG_ELEMENT)
+    bool isInTopLayer() const { return m_isInTopLayer; }
+    void setIsInTopLayer(bool value) { m_isInTopLayer = value; }
+#endif
+
+    bool childrenAffectedByHover() const { return m_childrenAffectedByHover; }
+    void setChildrenAffectedByHover(bool value) { m_childrenAffectedByHover = value; }
+    bool childrenAffectedByActive() const { return m_childrenAffectedByActive; }
+    void setChildrenAffectedByActive(bool value) { m_childrenAffectedByActive = value; }
+    bool childrenAffectedByDrag() const { return m_childrenAffectedByDrag; }
+    void setChildrenAffectedByDrag(bool value) { m_childrenAffectedByDrag = value; }
+
+    bool childrenAffectedByFirstChildRules() const { return m_childrenAffectedByFirstChildRules; }
+    void setChildrenAffectedByFirstChildRules(bool value) { m_childrenAffectedByFirstChildRules = value; }
+    bool childrenAffectedByLastChildRules() const { return m_childrenAffectedByLastChildRules; }
+    void setChildrenAffectedByLastChildRules(bool value) { m_childrenAffectedByLastChildRules = value; }
+    bool childrenAffectedByDirectAdjacentRules() const { return m_childrenAffectedByDirectAdjacentRules; }
+    void setChildrenAffectedByDirectAdjacentRules(bool value) { m_childrenAffectedByDirectAdjacentRules = value; }
+    bool childrenAffectedByForwardPositionalRules() const { return m_childrenAffectedByForwardPositionalRules; }
+    void setChildrenAffectedByForwardPositionalRules(bool value) { m_childrenAffectedByForwardPositionalRules = value; }
+    bool childrenAffectedByBackwardPositionalRules() const { return m_childrenAffectedByBackwardPositionalRules; }
+    void setChildrenAffectedByBackwardPositionalRules(bool value) { m_childrenAffectedByBackwardPositionalRules = value; }
+    unsigned childIndex() const { return m_childIndex; }
+    void setChildIndex(unsigned index) { m_childIndex = index; }
+
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
+
+    ElementShadow* shadow() const { return m_shadow.get(); }
+    void setShadow(PassOwnPtr<ElementShadow> shadow) { m_shadow = shadow; }
+
+    NamedNodeMap* attributeMap() const { return m_attributeMap.get(); }
+    void setAttributeMap(PassOwnPtr<NamedNodeMap> attributeMap) { m_attributeMap = attributeMap; }
+
+    RenderStyle* computedStyle() const { return m_computedStyle.get(); }
+    void setComputedStyle(PassRefPtr<RenderStyle> computedStyle) { m_computedStyle = computedStyle; }
+
+    ClassList* classList() const { return m_classList.get(); }
+    void setClassList(PassOwnPtr<ClassList> classList) { m_classList = classList; }
+
+    DatasetDOMStringMap* dataset() const { return m_dataset.get(); }
+    void setDataset(PassOwnPtr<DatasetDOMStringMap> dataset) { m_dataset = dataset; }
+
+    LayoutSize minimumSizeForResizing() const { return m_minimumSizeForResizing; }
+    void setMinimumSizeForResizing(LayoutSize size) { m_minimumSizeForResizing = size; }
+
+    IntSize savedLayerScrollOffset() const { return m_savedLayerScrollOffset; }
+    void setSavedLayerScrollOffset(IntSize size) { m_savedLayerScrollOffset = size; }
+
+private:
+    // Many fields are in NodeRareData for better packing.
+    LayoutSize m_minimumSizeForResizing;
+    RefPtr<RenderStyle> m_computedStyle;
+
+    OwnPtr<DatasetDOMStringMap> m_dataset;
+    OwnPtr<ClassList> m_classList;
+    OwnPtr<ElementShadow> m_shadow;
+    OwnPtr<NamedNodeMap> m_attributeMap;
+
+    RefPtr<PseudoElement> m_generatedBefore;
+    RefPtr<PseudoElement> m_generatedAfter;
+
+    IntSize m_savedLayerScrollOffset;
+
+private:
+    void releasePseudoElement(PseudoElement*);
 };
 
 inline IntSize defaultMinimumSizeForResizing()
 {
-    return IntSize(INT_MAX, INT_MAX);
+    return IntSize(LayoutUnit::max(), LayoutUnit::max());
 }
 
-inline ElementRareData::ElementRareData()
-    : m_minimumSizeForResizing(defaultMinimumSizeForResizing())
-    , m_shadowRoot(0)
-#if ENABLE(STYLE_SCOPED)
-    , m_numberOfScopedHTMLStyleChildren(0)
-#endif
-    , m_styleAffectedByEmpty(false)
-#if ENABLE(FULLSCREEN_API)
-    , m_containsFullScreenElement(false)
-#endif
+inline ElementRareData::ElementRareData(Document* document)
+    : NodeRareData(document)
+    , m_minimumSizeForResizing(defaultMinimumSizeForResizing())
+    , m_generatedBefore(0)
+    , m_generatedAfter(0)
 {
 }
 
 inline ElementRareData::~ElementRareData()
 {
-    ASSERT(!m_shadowRoot);
+    ASSERT(!m_shadow);
+    ASSERT(!m_generatedBefore);
+    ASSERT(!m_generatedAfter);
+}
+
+inline void ElementRareData::setPseudoElement(PseudoId pseudoId, PassRefPtr<PseudoElement> element)
+{
+    switch (pseudoId) {
+    case BEFORE:
+        releasePseudoElement(m_generatedBefore.get());
+        m_generatedBefore = element;
+        break;
+    case AFTER:
+        releasePseudoElement(m_generatedAfter.get());
+        m_generatedAfter = element;
+        break;
+    default:
+        ASSERT_NOT_REACHED();
+    }
+}
+
+inline PseudoElement* ElementRareData::pseudoElement(PseudoId pseudoId) const
+{
+    switch (pseudoId) {
+    case BEFORE:
+        return m_generatedBefore.get();
+    case AFTER:
+        return m_generatedAfter.get();
+    default:
+        ASSERT_NOT_REACHED();
+        return 0;
+    }
+}
+
+inline void ElementRareData::releasePseudoElement(PseudoElement* element)
+{
+    if (!element)
+        return;
+
+    if (element->attached())
+        element->detach();
+
+    ASSERT(!element->nextSibling());
+    ASSERT(!element->previousSibling());
+
+    element->setParentOrHostNode(0);
 }
 
 inline void ElementRareData::resetComputedStyle()
 {
-    m_computedStyle.clear();
+    setComputedStyle(0);
+    setStyleAffectedByEmpty(false);
+    setChildIndex(0);
 }
 
-#if ENABLE(STYLE_SCOPED)
-inline void ElementRareData::registerScopedHTMLStyleChild()
+inline void ElementRareData::resetDynamicRestyleObservations()
 {
-    ++m_numberOfScopedHTMLStyleChildren;
+    setChildrenAffectedByHover(false);
+    setChildrenAffectedByActive(false);
+    setChildrenAffectedByDrag(false);
+    setChildrenAffectedByFirstChildRules(false);
+    setChildrenAffectedByLastChildRules(false);
+    setChildrenAffectedByDirectAdjacentRules(false);
+    setChildrenAffectedByForwardPositionalRules(false);
+    setChildrenAffectedByBackwardPositionalRules(false);
 }
 
-inline void ElementRareData::unregisterScopedHTMLStyleChild()
-{
-    ASSERT(m_numberOfScopedHTMLStyleChildren > 0);
-    if (m_numberOfScopedHTMLStyleChildren > 0)
-        --m_numberOfScopedHTMLStyleChildren;
-}
+} // namespace
 
-inline bool ElementRareData::hasScopedHTMLStyleChild() const
-{
-    return m_numberOfScopedHTMLStyleChildren;
-}
-
-inline size_t ElementRareData::numberOfScopedHTMLStyleChildren() const
-{
-    return m_numberOfScopedHTMLStyleChildren;
-}
-#endif
-
-}
 #endif // ElementRareData_h

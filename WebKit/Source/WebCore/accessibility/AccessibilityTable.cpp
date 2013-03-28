@@ -51,6 +51,15 @@ AccessibilityTable::AccessibilityTable(RenderObject* renderer)
     : AccessibilityRenderObject(renderer),
     m_headerContainer(0)
 {
+}
+
+AccessibilityTable::~AccessibilityTable()
+{
+}
+
+void AccessibilityTable::init()
+{
+    AccessibilityRenderObject::init();
 #if ACCESSIBILITY_TABLES
     m_isAccessibilityTable = isTableExposableThroughAccessibility();
 #else
@@ -58,13 +67,11 @@ AccessibilityTable::AccessibilityTable(RenderObject* renderer)
 #endif
 }
 
-AccessibilityTable::~AccessibilityTable()
-{
-}
-
 PassRefPtr<AccessibilityTable> AccessibilityTable::create(RenderObject* renderer)
 {
-    return adoptRef(new AccessibilityTable(renderer));
+    AccessibilityTable* obj = new AccessibilityTable(renderer);
+    obj->init();
+    return adoptRef(obj);
 }
 
 bool AccessibilityTable::hasARIARole() const
@@ -96,6 +103,12 @@ bool AccessibilityTable::isDataTable() const
     if (hasARIARole())
         return false;
 
+    // When a section of the document is contentEditable, all tables should be
+    // treated as data tables, otherwise users may not be able to work with rich
+    // text editors that allow creating and editing tables.
+    if (node() && node()->rendererIsEditable())
+        return true;
+
     // This employs a heuristic to determine if this table should appear.
     // Only "data" tables should be exposed as tables.
     // Unfortunately, there is no good way to determine the difference
@@ -117,6 +130,7 @@ bool AccessibilityTable::isDataTable() const
     
     // go through the cell's and check for tell-tale signs of "data" table status
     // cells have borders, or use attributes like headers, abbr, scope or axis
+    table->recalcSectionsIfNeeded();
     RenderTableSection* firstBody = table->firstBody();
     if (!firstBody)
         return false;
@@ -170,7 +184,7 @@ bool AccessibilityTable::isDataTable() const
             if (!row && isTHCell)
                 headersInFirstRowCount++;
 
-            // If the first column is comprised of all <tg> tags, assume it is a data table.
+            // If the first column is comprised of all <th> tags, assume it is a data table.
             if (!col && isTHCell)
                 headersInFirstColumnCount++;
             
@@ -500,8 +514,8 @@ AccessibilityTableCell* AccessibilityTable::cellForColumnAndRow(unsigned column,
                 for (int testRow = sectionSpecificRow - 1; testRow >= 0; --testRow) {
                     cell = tableSection->primaryCellAt(testRow, column);
                     // cell overlapped. use this one
-                    ASSERT(cell->rowSpan() >= 1);
-                    if (cell && ((cell->row() + (cell->rowSpan() - 1)) >= sectionSpecificRow))
+                    ASSERT(!cell || cell->rowSpan() >= 1);
+                    if (cell && ((cell->rowIndex() + (cell->rowSpan() - 1)) >= sectionSpecificRow))
                         break;
                     cell = 0;
                 }
@@ -511,7 +525,7 @@ AccessibilityTableCell* AccessibilityTable::cellForColumnAndRow(unsigned column,
                     for (int testCol = column - 1; testCol >= 0; --testCol) {
                         cell = tableSection->primaryCellAt(sectionSpecificRow, testCol);
                         // cell overlapped. use this one
-                        ASSERT(cell->rowSpan() >= 1);
+                        ASSERT(!cell || cell->rowSpan() >= 1);
                         if (cell && ((cell->col() + (cell->colSpan() - 1)) >= column))
                             break;
                         cell = 0;

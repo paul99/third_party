@@ -21,12 +21,11 @@
 #include "config.h"
 #include "RenderDetailsMarker.h"
 
-#if ENABLE(DETAILS)
-
+#if ENABLE(DETAILS_ELEMENT) || ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+#include "Element.h"
 #include "GraphicsContext.h"
 #include "HTMLNames.h"
 #include "PaintInfo.h"
-#include "RenderDetails.h"
 
 namespace WebCore {
 
@@ -35,13 +34,6 @@ using namespace HTMLNames;
 RenderDetailsMarker::RenderDetailsMarker(Node* node)
     : RenderBlock(node)
 {
-}
-
-bool RenderDetailsMarker::isOpen() const
-{
-    if (RenderDetails* owner = details())
-        return owner->isOpen();
-    return false;
 }
 
 static Path createPath(const FloatPoint* path)
@@ -112,10 +104,10 @@ Path RenderDetailsMarker::getCanonicalPath() const
     return Path();
 }
 
-Path RenderDetailsMarker::getPath(const IntPoint& origin) const
+Path RenderDetailsMarker::getPath(const LayoutPoint& origin) const
 {
     Path result = getCanonicalPath();
-    result.transform(AffineTransform().scale(logicalHeight()));
+    result.transform(AffineTransform().scale(contentWidth(), contentHeight()));
     result.translate(FloatSize(origin.x(), origin.y()));
     return result;
 }
@@ -132,7 +124,7 @@ void RenderDetailsMarker::paint(PaintInfo& paintInfo, const LayoutPoint& paintOf
     overflowRect.moveBy(boxOrigin);
     overflowRect.inflate(maximalOutlineSize(paintInfo.phase));
 
-    if (!paintInfo.rect.intersects(overflowRect))
+    if (!paintInfo.rect.intersects(pixelSnappedIntRect(overflowRect)))
         return;
 
     const Color color(style()->visitedDependentColor(CSSPropertyColor));
@@ -141,17 +133,22 @@ void RenderDetailsMarker::paint(PaintInfo& paintInfo, const LayoutPoint& paintOf
     paintInfo.context->setStrokeThickness(1.0f);
     paintInfo.context->setFillColor(color, style()->colorSpace());
 
+    boxOrigin.move(borderLeft() + paddingLeft(), borderTop() + paddingTop());
     paintInfo.context->fillPath(getPath(boxOrigin));
 }
 
-RenderDetails* RenderDetailsMarker::details() const
+bool RenderDetailsMarker::isOpen() const
 {
     for (RenderObject* renderer = parent(); renderer; renderer = renderer->parent()) {
-        if (renderer->isDetails())
-            return toRenderDetails(renderer);
+        if (!renderer->node())
+            continue;
+        if (renderer->node()->hasTagName(detailsTag))
+            return !toElement(renderer->node())->getAttribute(openAttr).isNull();
+        if (renderer->node()->hasTagName(inputTag))
+            return true;
     }
 
-    return 0;
+    return false;
 }
 
 }

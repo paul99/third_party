@@ -1,19 +1,9 @@
-/* libs/graphics/ports/FontHostConfiguration_android.cpp
-**
-** Copyright 2011, The Android Open Source Project
-**
-** Licensed under the Apache License, Version 2.0 (the "License");
-** you may not use this file except in compliance with the License.
-** You may obtain a copy of the License at
-**
-**     http://www.apache.org/licenses/LICENSE-2.0
-**
-** Unless required by applicable law or agreed to in writing, software
-** distributed under the License is distributed on an "AS IS" BASIS,
-** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-** See the License for the specific language governing permissions and
-** limitations under the License.
-*/
+/*
+ * Copyright 2011 The Android Open Source Project
+ *
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
+ */
 
 #include "FontHostConfiguration_android.h"
 #include "SkString.h"
@@ -286,6 +276,20 @@ void getFontFamilies(SkTDArray<FontFamily*> &fontFamilies) {
 
     getSystemFontFamilies(fontFamilies);
     getFallbackFontFamilies(fallbackFonts);
+
+    // Append all fallback fonts to system fonts
+    for (int i = 0; i < fallbackFonts.count(); ++i) {
+        *fontFamilies.append() = fallbackFonts[i];
+    }
+}
+
+void getTestFontFamilies(SkTDArray<FontFamily*> &fontFamilies,
+                         const char* testMainConfigFile,
+                         const char* testFallbackConfigFile) {
+    parseConfigFile(testMainConfigFile, fontFamilies);
+
+    SkTDArray<FontFamily*> fallbackFonts;
+    parseConfigFile(testFallbackConfigFile, fallbackFonts);
 
     // Append all fallback fonts to system fonts
     for (int i = 0; i < fallbackFonts.count(); ++i) {

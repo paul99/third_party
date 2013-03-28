@@ -29,14 +29,14 @@
 #include "Event.h"
 #include "HTMLFormControlElementWithState.h"
 #include "HTMLOptionsCollection.h"
+#include "TypeAhead.h"
 #include <wtf/Vector.h>
 
 namespace WebCore {
 
 class HTMLOptionElement;
-class HTMLOptionsCollection;
 
-class HTMLSelectElement : public HTMLFormControlElementWithState {
+class HTMLSelectElement : public HTMLFormControlElementWithState, public TypeAheadDataSource {
 public:
     static PassRefPtr<HTMLSelectElement> create(const QualifiedName&, Document*, HTMLFormElement*);
 
@@ -46,7 +46,8 @@ public:
     void optionSelectedByUser(int index, bool dispatchChangeEvent, bool allowMultipleSelection = false);
 
     // For ValidityState
-    bool valueMissing() const;
+    virtual String validationMessage() const OVERRIDE;
+    virtual bool valueMissing() const OVERRIDE;
 
     unsigned length() const;
 
@@ -62,11 +63,13 @@ public:
     String value() const;
     void setValue(const String&);
 
-    HTMLOptionsCollection* options();
+    PassRefPtr<HTMLOptionsCollection> options();
+    PassRefPtr<HTMLCollection> selectedOptions();
 
     void optionElementChildrenChanged();
 
     void setRecalcListItems();
+    void invalidateSelectedItems();
     void updateListItemSelectedStates();
 
     const Vector<HTMLElement*>& listItems() const;
@@ -101,7 +104,7 @@ public:
     
     // For use in the implementation of HTMLOptionElement.
     void optionSelectionStateChanged(HTMLOptionElement*, bool optionIsSelected);
-    
+
 protected:
     HTMLSelectElement(const QualifiedName&, Document*, HTMLFormElement*);
 
@@ -117,12 +120,15 @@ private:
     virtual bool canStartSelection() const { return false; }
 
     virtual bool isEnumeratable() const { return true; }
+    virtual bool supportLabels() const OVERRIDE { return true; }
 
-    virtual bool saveFormControlState(String& value) const;
-    virtual void restoreFormControlState(const String&);
+    virtual FormControlState saveFormControlState() const OVERRIDE;
+    virtual void restoreFormControlState(const FormControlState&) OVERRIDE;
 
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
 
+    virtual bool childShouldCreateRenderer(const NodeRenderingContext&) const OVERRIDE;
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle *);
     virtual bool appendFormData(FormDataList&, bool);
 
@@ -138,7 +144,7 @@ private:
     void typeAheadFind(KeyboardEvent*);
     void saveLastSelection();
 
-    virtual void insertedIntoTree(bool);
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
 
     virtual bool isOptionalFormControl() const { return !isRequiredFormControl(); }
     virtual bool isRequiredFormControl() const;
@@ -153,13 +159,14 @@ private:
     typedef unsigned SelectOptionFlags;
     void selectOption(int optionIndex, SelectOptionFlags = 0);
     void deselectItemsWithoutValidation(HTMLElement* elementToExclude = 0);
-    void parseMultipleAttribute(const Attribute*);
+    void parseMultipleAttribute(const AtomicString&);
     int lastSelectedListIndex() const;
     void updateSelectedState(int listIndex, bool multi, bool shift);
     void menuListDefaultEventHandler(Event*);
     bool platformHandleKeydownEvent(KeyboardEvent*);
     void listBoxDefaultEventHandler(Event*);
     void setOptionsChangedOnRenderer();
+    size_t searchOptionsForValue(const String&, size_t listIndexStart, size_t listIndexEnd) const;
 
     enum SkipDirection {
         SkipBackwards = -1,
@@ -173,45 +180,46 @@ private:
     int nextSelectableListIndexPageAway(int startIndex, SkipDirection) const;
 
     virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
+    virtual bool areAuthorShadowsAllowed() const OVERRIDE { return false; }
 
-    OwnPtr<HTMLOptionsCollection> m_optionsCollection;
+    // TypeAheadDataSource functions.
+    virtual int indexOfSelectedOption() const OVERRIDE;
+    virtual int optionCount() const OVERRIDE;
+    virtual String optionAtIndex(int index) const OVERRIDE;
 
     // m_listItems contains HTMLOptionElement, HTMLOptGroupElement, and HTMLHRElement objects.
     mutable Vector<HTMLElement*> m_listItems;
     Vector<bool> m_lastOnChangeSelection;
     Vector<bool> m_cachedStateForActiveSelection;
-    DOMTimeStamp m_lastCharTime;
-    String m_typedString;
+    TypeAhead m_typeAhead;
     int m_size;
     int m_lastOnChangeIndex;
     int m_activeSelectionAnchorIndex;
     int m_activeSelectionEndIndex;
-    UChar m_repeatingChar;
     bool m_isProcessingUserDrivenChange;
     bool m_multiple;
     bool m_activeSelectionState;
     mutable bool m_shouldRecalcListItems;
 };
 
-HTMLSelectElement* toHTMLSelectElement(Node*);
-const HTMLSelectElement* toHTMLSelectElement(const Node*);
-void toHTMLSelectElement(const HTMLSelectElement*); // This overload will catch anyone doing an unnecessary cast.
-
-#ifdef NDEBUG
-
-// The debug versions of these, with assertions, are not inlined.
+inline bool isHTMLSelectElement(const Node* node)
+{
+    return node->hasTagName(HTMLNames::selectTag);
+}
 
 inline HTMLSelectElement* toHTMLSelectElement(Node* node)
 {
+    ASSERT(!node || isHTMLSelectElement(node));
     return static_cast<HTMLSelectElement*>(node);
 }
 
 inline const HTMLSelectElement* toHTMLSelectElement(const Node* node)
 {
+    ASSERT(!node || isHTMLSelectElement(node));
     return static_cast<const HTMLSelectElement*>(node);
 }
 
-#endif
+void toHTMLSelectElement(const HTMLSelectElement*); // This overload will catch anyone doing an unnecessary cast.
 
 } // namespace
 

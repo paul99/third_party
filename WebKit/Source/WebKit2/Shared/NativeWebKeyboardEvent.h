@@ -46,7 +46,7 @@ namespace WebKit {
 
 class NativeWebKeyboardEvent : public WebKeyboardEvent {
 public:
-#if PLATFORM(MAC)
+#if USE(APPKIT)
     NativeWebKeyboardEvent(NSEvent *, NSView *);
 #elif PLATFORM(WIN)
     NativeWebKeyboardEvent(HWND, UINT message, WPARAM, LPARAM);
@@ -56,11 +56,11 @@ public:
     NativeWebKeyboardEvent(const NativeWebKeyboardEvent&);
     NativeWebKeyboardEvent(GdkEvent*);
 #elif PLATFORM(EFL)
-    NativeWebKeyboardEvent(const Evas_Event_Key_Down*);
+    NativeWebKeyboardEvent(const Evas_Event_Key_Down*, bool);
     NativeWebKeyboardEvent(const Evas_Event_Key_Up*);
 #endif
 
-#if PLATFORM(MAC)
+#if USE(APPKIT)
     NSEvent *nativeEvent() const { return m_nativeEvent.get(); }
 #elif PLATFORM(WIN)
     const MSG* nativeEvent() const { return &m_nativeEvent; }
@@ -70,10 +70,11 @@ public:
     GdkEvent* nativeEvent() const { return m_nativeEvent.get(); }
 #elif PLATFORM(EFL)
     const void* nativeEvent() const { return m_nativeEvent; }
+    bool isFiltered() const { return m_isFiltered; }
 #endif
 
 private:
-#if PLATFORM(MAC)
+#if USE(APPKIT)
     RetainPtr<NSEvent> m_nativeEvent;
 #elif PLATFORM(WIN)
     MSG m_nativeEvent;
@@ -83,6 +84,7 @@ private:
     GOwnPtr<GdkEvent> m_nativeEvent;
 #elif PLATFORM(EFL)
     const void* m_nativeEvent;
+    bool m_isFiltered;
 #endif
 };
 

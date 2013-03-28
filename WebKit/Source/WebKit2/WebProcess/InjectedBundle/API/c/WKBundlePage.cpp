@@ -30,10 +30,19 @@
 #include "InjectedBundleBackForwardList.h"
 #include "InjectedBundleNodeHandle.h"
 #include "WKAPICast.h"
+#include "WKArray.h"
 #include "WKBundleAPICast.h"
+#include "WKRetainPtr.h"
+#include "WKString.h"
+#include "WebContextMenu.h"
+#include "WebContextMenuItem.h"
+#include "WebFrame.h"
 #include "WebFullScreenManager.h"
 #include "WebImage.h"
 #include "WebPage.h"
+#include "WebRenderLayer.h"
+#include "WebRenderObject.h"
+#include "WebString.h"
 #include "WebURL.h"
 #include "WebURLRequest.h"
 
@@ -41,7 +50,12 @@
 #include <WebCore/AccessibilityObject.h>
 #include <WebCore/Frame.h>
 #include <WebCore/KURL.h>
+#include <WebCore/MIMETypeRegistry.h>
 #include <WebCore/Page.h>
+
+#if ENABLE(WEB_INTENTS)
+#include "InjectedBundleIntent.h"
+#endif
 
 using namespace WebKit;
 
@@ -52,7 +66,9 @@ WKTypeID WKBundlePageGetTypeID()
 
 void WKBundlePageSetContextMenuClient(WKBundlePageRef pageRef, WKBundlePageContextMenuClient* wkClient)
 {
+#if ENABLE(CONTEXT_MENUS)
     toImpl(pageRef)->initializeInjectedBundleContextMenuClient(wkClient);
+#endif
 }
 
 void WKBundlePageSetEditorClient(WKBundlePageRef pageRef, WKBundlePageEditorClient* wkClient)
@@ -120,6 +136,11 @@ void WKBundlePageDidExitFullScreen(WKBundlePageRef pageRef)
 #endif
 }
 
+void WKBundlePageSetDiagnosticLoggingClient(WKBundlePageRef pageRef, WKBundlePageDiagnosticLoggingClient* client)
+{
+    toImpl(pageRef)->initializeInjectedBundleDiagnosticLoggingClient(client);
+}
+
 WKBundlePageGroupRef WKBundlePageGetPageGroup(WKBundlePageRef pageRef)
 {
     return toAPI(toImpl(pageRef)->pageGroup());
@@ -128,6 +149,22 @@ WKBundlePageGroupRef WKBundlePageGetPageGroup(WKBundlePageRef pageRef)
 WKBundleFrameRef WKBundlePageGetMainFrame(WKBundlePageRef pageRef)
 {
     return toAPI(toImpl(pageRef)->mainWebFrame());
+}
+
+WKArrayRef WKBundlePageCopyContextMenuItemTitles(WKBundlePageRef pageRef)
+{
+#if ENABLE(CONTEXT_MENUS)
+    WebContextMenu* contextMenu = toImpl(pageRef)->contextMenu();
+    const Vector<WebContextMenuItemData> &items = contextMenu->items();
+    size_t arrayLength = items.size();
+    OwnArrayPtr<WKTypeRef> itemNames = adoptArrayPtr(new WKTypeRef[arrayLength]);
+    for (size_t i = 0; i < arrayLength; ++i)
+        itemNames[i] = WKStringCreateWithUTF8CString(items[i].title().utf8().data());
+
+    return WKArrayCreateAdoptingValues(itemNames.get(), arrayLength);
+#else
+    return 0;
+#endif
 }
 
 void* WKAccessibilityRootObject(WKBundlePageRef pageRef)
@@ -152,6 +189,7 @@ void* WKAccessibilityRootObject(WKBundlePageRef pageRef)
     
     return root->wrapper();
 #else
+    UNUSED_PARAM(pageRef);
     return 0;
 #endif
 }
@@ -174,6 +212,7 @@ void* WKAccessibilityFocusedObject(WKBundlePageRef pageRef)
     
     return focusedObject->wrapper();
 #else
+    UNUSED_PARAM(pageRef);
     return 0;
 #endif
 }
@@ -195,12 +234,12 @@ WKStringRef WKBundlePageCopyRenderTreeExternalRepresentation(WKBundlePageRef pag
 
 void WKBundlePageExecuteEditingCommand(WKBundlePageRef pageRef, WKStringRef name, WKStringRef argument)
 {
-    toImpl(pageRef)->executeEditingCommand(toImpl(name)->string(), toImpl(argument)->string());
+    toImpl(pageRef)->executeEditingCommand(toWTFString(name), toWTFString(argument));
 }
 
 bool WKBundlePageIsEditingCommandEnabled(WKBundlePageRef pageRef, WKStringRef name)
 {
-    return toImpl(pageRef)->isEditingCommandEnabled(toImpl(name)->string());
+    return toImpl(pageRef)->isEditingCommandEnabled(toWTFString(name));
 }
 
 void WKBundlePageClearMainFrameName(WKBundlePageRef pageRef)
@@ -260,7 +299,7 @@ void WKBundlePageUninstallPageOverlay(WKBundlePageRef pageRef, WKBundlePageOverl
 
 bool WKBundlePageHasLocalDataForURL(WKBundlePageRef pageRef, WKURLRef urlRef)
 {
-    return toImpl(pageRef)->hasLocalDataForURL(WebCore::KURL(WebCore::KURL(), toImpl(urlRef)->string()));
+    return toImpl(pageRef)->hasLocalDataForURL(WebCore::KURL(WebCore::KURL(), toWTFString(urlRef)));
 }
 
 bool WKBundlePageCanHandleRequest(WKURLRequestRef requestRef)
@@ -270,30 +309,50 @@ bool WKBundlePageCanHandleRequest(WKURLRequestRef requestRef)
 
 bool WKBundlePageFindString(WKBundlePageRef pageRef, WKStringRef target, WKFindOptions findOptions)
 {
-    return toImpl(pageRef)->findStringFromInjectedBundle(toImpl(target)->string(), toFindOptions(findOptions));
+    return toImpl(pageRef)->findStringFromInjectedBundle(toWTFString(target), toFindOptions(findOptions));
+}
+
+WKImageRef WKBundlePageCreateSnapshotWithOptions(WKBundlePageRef pageRef, WKRect rect, WKSnapshotOptions options)
+{
+    RefPtr<WebImage> webImage = toImpl(pageRef)->scaledSnapshotWithOptions(toIntRect(rect), 1, toSnapshotOptions(options));
+    return toAPI(webImage.release().leakRef());
 }
 
 WKImageRef WKBundlePageCreateSnapshotInViewCoordinates(WKBundlePageRef pageRef, WKRect rect, WKImageOptions options)
 {
-    RefPtr<WebImage> webImage = toImpl(pageRef)->snapshotInViewCoordinates(toIntRect(rect), toImageOptions(options));
+    SnapshotOptions snapshotOptions = snapshotOptionsFromImageOptions(options);
+    snapshotOptions |= SnapshotOptionsInViewCoordinates;
+    RefPtr<WebImage> webImage = toImpl(pageRef)->scaledSnapshotWithOptions(toIntRect(rect), 1, snapshotOptions);
     return toAPI(webImage.release().leakRef());
 }
 
 WKImageRef WKBundlePageCreateSnapshotInDocumentCoordinates(WKBundlePageRef pageRef, WKRect rect, WKImageOptions options)
 {
-    RefPtr<WebImage> webImage = toImpl(pageRef)->snapshotInDocumentCoordinates(toIntRect(rect), toImageOptions(options));
+    RefPtr<WebImage> webImage = toImpl(pageRef)->scaledSnapshotWithOptions(toIntRect(rect), 1, snapshotOptionsFromImageOptions(options));
     return toAPI(webImage.release().leakRef());
 }
 
 WKImageRef WKBundlePageCreateScaledSnapshotInDocumentCoordinates(WKBundlePageRef pageRef, WKRect rect, double scaleFactor, WKImageOptions options)
 {
-    RefPtr<WebImage> webImage = toImpl(pageRef)->scaledSnapshotInDocumentCoordinates(toIntRect(rect), scaleFactor, toImageOptions(options));
+    RefPtr<WebImage> webImage = toImpl(pageRef)->scaledSnapshotWithOptions(toIntRect(rect), scaleFactor, snapshotOptionsFromImageOptions(options));
     return toAPI(webImage.release().leakRef());
 }
 
 double WKBundlePageGetBackingScaleFactor(WKBundlePageRef pageRef)
 {
     return toImpl(pageRef)->deviceScaleFactor();
+}
+
+void WKBundlePageListenForLayoutMilestones(WKBundlePageRef pageRef, WKLayoutMilestones milestones)
+{
+    toImpl(pageRef)->listenForLayoutMilestones(toLayoutMilestones(milestones));
+}
+
+void WKBundlePageDeliverIntentToFrame(WKBundlePageRef pageRef, WKBundleFrameRef frameRef, WKBundleIntentRef intentRef)
+{
+#if ENABLE(WEB_INTENTS)
+    toImpl(pageRef)->deliverCoreIntentToFrame(toImpl(frameRef)->frameID(), toImpl(intentRef)->coreIntent());
+#endif
 }
 
 #if defined(ENABLE_INSPECTOR) && ENABLE_INSPECTOR
@@ -328,6 +387,22 @@ uint64_t WKBundlePageGetRenderTreeSize(WKBundlePageRef pageRef)
     return toImpl(pageRef)->renderTreeSize();
 }
 
+WKRenderObjectRef WKBundlePageCopyRenderTree(WKBundlePageRef pageRef)
+{
+    return toAPI(WebRenderObject::create(toImpl(pageRef)).leakRef());
+}
+
+WKRenderLayerRef WKBundlePageCopyRenderLayerTree(WKBundlePageRef pageRef)
+{
+    return toAPI(WebRenderLayer::create(toImpl(pageRef)).leakRef());
+}
+
+void WKBundlePageSetPaintedObjectsCounterThreshold(WKBundlePageRef, uint64_t)
+{
+    // FIXME: This function is only still here to keep open source Mac builds building.
+    // We should remove it as soon as we can.
+}
+
 void WKBundlePageSetTracksRepaints(WKBundlePageRef pageRef, bool trackRepaints)
 {
     toImpl(pageRef)->setTracksRepaints(trackRepaints);
@@ -348,14 +423,9 @@ WKArrayRef WKBundlePageCopyTrackedRepaintRects(WKBundlePageRef pageRef)
     return toAPI(toImpl(pageRef)->trackedRepaintRects().leakRef());
 }
 
-WKStringRef WKBundlePageViewportConfigurationAsText(WKBundlePageRef pageRef, int deviceDPI, int deviceWidth, int deviceHeight, int availableWidth, int availableHeight)
-{
-    return toCopiedAPI(toImpl(pageRef)->viewportConfigurationAsText(deviceDPI, deviceWidth, deviceHeight, availableWidth, availableHeight));
-}
-
 void WKBundlePageSetComposition(WKBundlePageRef pageRef, WKStringRef text, int from, int length)
 {
-    toImpl(pageRef)->setCompositionForTesting(toImpl(text)->string(), from, length);
+    toImpl(pageRef)->setCompositionForTesting(toWTFString(text), from, length);
 }
 
 bool WKBundlePageHasComposition(WKBundlePageRef pageRef)
@@ -370,5 +440,29 @@ void WKBundlePageConfirmComposition(WKBundlePageRef pageRef)
 
 void WKBundlePageConfirmCompositionWithText(WKBundlePageRef pageRef, WKStringRef text)
 {
-    toImpl(pageRef)->confirmCompositionForTesting(toImpl(text)->string());
+    toImpl(pageRef)->confirmCompositionForTesting(toWTFString(text));
+}
+
+bool WKBundlePageCanShowMIMEType(WKBundlePageRef, WKStringRef mimeTypeRef)
+{
+    const String mimeType = toWTFString(mimeTypeRef);
+
+    return WebCore::MIMETypeRegistry::canShowMIMEType(mimeType);
+}
+
+void WKBundlePageSetViewMode(WKBundlePageRef pageRef, WKStringRef mode)
+{
+    String modeWTF = toWTFString(mode);
+    if (modeWTF == "windowed")
+        toImpl(pageRef)->setViewMode(WebCore::Page::ViewModeWindowed);
+    else if (modeWTF == "floating")
+        toImpl(pageRef)->setViewMode(WebCore::Page::ViewModeFloating);
+    else if (modeWTF == "fullscreen")
+        toImpl(pageRef)->setViewMode(WebCore::Page::ViewModeFullscreen);
+    else if (modeWTF == "maximized")
+        toImpl(pageRef)->setViewMode(WebCore::Page::ViewModeMaximized);
+    else if (modeWTF == "minimized")
+        toImpl(pageRef)->setViewMode(WebCore::Page::ViewModeMinimized);
+    else
+        ASSERT_NOT_REACHED();
 }

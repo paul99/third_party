@@ -31,23 +31,39 @@
 #include "config.h"
 #include "V8XMLHttpRequest.h"
 
-#include "ArrayBuffer.h"
+#include <wtf/ArrayBuffer.h>
 #include "Document.h"
 #include "Frame.h"
 #include "InspectorInstrumentation.h"
 #include "V8ArrayBuffer.h"
+#include "V8ArrayBufferView.h"
 #include "V8Binding.h"
 #include "V8Blob.h"
 #include "V8DOMFormData.h"
 #include "V8Document.h"
 #include "V8HTMLDocument.h"
-#include "V8Proxy.h"
 #include "V8Utilities.h"
 #include "WorkerContext.h"
-#include "WorkerContextExecutionProxy.h"
 #include "XMLHttpRequest.h"
 
 namespace WebCore {
+
+v8::Handle<v8::Value> V8XMLHttpRequest::constructorCallbackCustom(const v8::Arguments& args)
+{
+    ScriptExecutionContext* context = getScriptExecutionContext();
+
+    RefPtr<SecurityOrigin> securityOrigin;
+    if (context->isDocument()) {
+        if (DOMWrapperWorld* world = worldForEnteredContextIfIsolated())
+            securityOrigin = world->isolatedWorldSecurityOrigin();
+    }
+
+    RefPtr<XMLHttpRequest> xmlHttpRequest = XMLHttpRequest::create(context, securityOrigin);
+
+    v8::Handle<v8::Object> wrapper = args.Holder();
+    V8DOMWrapper::associateObjectWithWrapper(xmlHttpRequest.release(), &info, wrapper);
+    return wrapper;
+}
 
 v8::Handle<v8::Value> V8XMLHttpRequest::responseTextAccessorGetter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
 {
@@ -56,8 +72,8 @@ v8::Handle<v8::Value> V8XMLHttpRequest::responseTextAccessorGetter(v8::Local<v8:
     ExceptionCode ec = 0;
     const String& text = xmlHttpRequest->responseText(ec);
     if (ec)
-        return throwError(ec);
-    return v8String(text);
+        return setDOMException(ec, info.GetIsolate());
+    return v8String(text, info.GetIsolate());
 }
 
 v8::Handle<v8::Value> V8XMLHttpRequest::responseAccessorGetter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
@@ -74,37 +90,27 @@ v8::Handle<v8::Value> V8XMLHttpRequest::responseAccessorGetter(v8::Local<v8::Str
         {
             ExceptionCode ec = 0;
             Document* document = xmlHttpRequest->responseXML(ec);
-            if (ec) {
-                V8Proxy::setDOMException(ec);
-                return v8::Undefined();
-            }
-            return toV8(document);
+            if (ec)
+                return setDOMException(ec, info.GetIsolate());
+            return toV8(document, info.Holder(), info.GetIsolate());
         }
 
     case XMLHttpRequest::ResponseTypeBlob:
-#if ENABLE(XHR_RESPONSE_BLOB)
         {
             ExceptionCode ec = 0;
             Blob* blob = xmlHttpRequest->responseBlob(ec);
-            if (ec) {
-                V8Proxy::setDOMException(ec);
-                return v8::Undefined();
-            }
-            return toV8(blob);
+            if (ec)
+                return setDOMException(ec, info.GetIsolate());
+            return toV8(blob, info.Holder(), info.GetIsolate());
         }
-#else
-        return v8::Undefined();
-#endif
 
     case XMLHttpRequest::ResponseTypeArrayBuffer:
         {
             ExceptionCode ec = 0;
             ArrayBuffer* arrayBuffer = xmlHttpRequest->responseArrayBuffer(ec);
-            if (ec) {
-                V8Proxy::setDOMException(ec);
-                return v8::Undefined();
-            }
-            return toV8(arrayBuffer);
+            if (ec)
+                return setDOMException(ec, info.GetIsolate());
+            return toV8(arrayBuffer, info.Holder(), info.GetIsolate());
         }
     }
 
@@ -121,16 +127,14 @@ v8::Handle<v8::Value> V8XMLHttpRequest::openCallback(const v8::Arguments& args)
     // open(method, url, async, user, passwd)
 
     if (args.Length() < 2)
-        return throwError("Not enough arguments", V8Proxy::SyntaxError);
+        return throwNotEnoughArgumentsError(args.GetIsolate());
 
     XMLHttpRequest* xmlHttpRequest = V8XMLHttpRequest::toNative(args.Holder());
 
     String method = toWebCoreString(args[0]);
     String urlstring = toWebCoreString(args[1]);
-    ScriptExecutionContext* context = getScriptExecutionContext();
-    if (!context)
-        return v8::Undefined();
 
+    ScriptExecutionContext* context = getScriptExecutionContext();
     KURL url = context->completeURL(urlstring);
 
     ExceptionCode ec = 0;
@@ -152,7 +156,7 @@ v8::Handle<v8::Value> V8XMLHttpRequest::openCallback(const v8::Arguments& args)
         xmlHttpRequest->open(method, url, ec);
 
     if (ec)
-        return throwError(ec);
+        return setDOMException(ec, args.GetIsolate());
 
     return v8::Undefined();
 }
@@ -198,13 +202,18 @@ v8::Handle<v8::Value> V8XMLHttpRequest::sendCallback(const v8::Arguments& args)
             ArrayBuffer* arrayBuffer = V8ArrayBuffer::toNative(object);
             ASSERT(arrayBuffer);
             xmlHttpRequest->send(arrayBuffer, ec);
+        } else if (V8ArrayBufferView::HasInstance(arg)) {
+            v8::Handle<v8::Object> object = v8::Handle<v8::Object>::Cast(arg);
+            ArrayBufferView* arrayBufferView = V8ArrayBufferView::toNative(object);
+            ASSERT(arrayBufferView);
+            xmlHttpRequest->send(arrayBufferView, ec);
 #endif
         } else
             xmlHttpRequest->send(toWebCoreStringWithNullCheck(arg), ec);
     }
 
     if (ec)
-        return throwError(ec);
+        return setDOMException(ec, args.GetIsolate());
 
     return v8::Undefined();
 }

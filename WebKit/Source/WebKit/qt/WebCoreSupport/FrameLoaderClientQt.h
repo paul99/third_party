@@ -30,25 +30,27 @@
 #ifndef FrameLoaderClientQt_h
 #define FrameLoaderClientQt_h
 
-
+#include "FormState.h"
 #include "Frame.h"
 #include "FrameLoader.h"
 #include "FrameLoaderClient.h"
+#include "HTMLFormElement.h"
 #include "KURL.h"
-#include <wtf/OwnPtr.h>
-#include "WebCore/plugins/PluginView.h"
-#include "RefCounted.h"
 #include "ResourceError.h"
 #include "ResourceResponse.h"
+#include "WebCore/plugins/PluginView.h"
 #include <QUrl>
 #include <qobject.h>
 #include <wtf/Forward.h>
+#include <wtf/OwnPtr.h>
+#include <wtf/RefCounted.h>
 
 QT_BEGIN_NAMESPACE
 class QNetworkReply;
 QT_END_NAMESPACE
 
 class QWebFrame;
+class QWebFrameAdapter;
 
 namespace WebCore {
 
@@ -65,11 +67,11 @@ struct LoadErrorResetToken;
 class FrameLoaderClientQt : public QObject, public FrameLoaderClient {
     Q_OBJECT
 
-    friend class ::QWebFrame;
-    void callPolicyFunction(FramePolicyFunction function, PolicyAction action);
+    friend class ::QWebFrameAdapter;
+    void callPolicyFunction(FramePolicyFunction, PolicyAction);
     bool callErrorPageExtension(const ResourceError&);
 
-signals:
+Q_SIGNALS:
     void loadProgress(int d);
     void titleChanged(const QString& title);
     void unsupportedContent(QNetworkReply*);
@@ -79,11 +81,11 @@ public:
     ~FrameLoaderClientQt();
     virtual void frameLoaderDestroyed();
 
-    void setFrame(QWebFrame* webFrame, Frame* frame);
+    void setFrame(QWebFrameAdapter*, Frame*);
 
     virtual bool hasWebView() const; // mainly for assertions
 
-    virtual void makeRepresentation(DocumentLoader*);
+    virtual void makeRepresentation(DocumentLoader*) { }
     virtual void forceLayout();
     virtual void forceLayoutForNonHTML();
 
@@ -108,6 +110,7 @@ public:
     virtual void dispatchDidReceiveServerRedirectForProvisionalLoad();
     virtual void dispatchDidCancelClientRedirect();
     virtual void dispatchWillPerformClientRedirect(const KURL&, double interval, double fireDate);
+    virtual void dispatchDidNavigateWithinPage() OVERRIDE;
     virtual void dispatchDidChangeLocationWithinPage();
     virtual void dispatchDidPushStateWithinPage();
     virtual void dispatchDidReplaceStateWithinPage();
@@ -122,24 +125,22 @@ public:
     virtual void dispatchDidFailLoad(const WebCore::ResourceError&);
     virtual void dispatchDidFinishDocumentLoad();
     virtual void dispatchDidFinishLoad();
-    virtual void dispatchDidFirstLayout();
-    virtual void dispatchDidFirstVisuallyNonEmptyLayout();
+    virtual void dispatchDidLayout(WebCore::LayoutMilestones);
 
     virtual WebCore::Frame* dispatchCreatePage(const WebCore::NavigationAction&);
     virtual void dispatchShow();
 
-    virtual void dispatchDecidePolicyForResponse(FramePolicyFunction function, const WebCore::ResourceResponse&, const WebCore::ResourceRequest&);
-    virtual void dispatchDecidePolicyForNewWindowAction(FramePolicyFunction function, const WebCore::NavigationAction&, const WebCore::ResourceRequest&, PassRefPtr<FormState>, const WTF::String&);
-    virtual void dispatchDecidePolicyForNavigationAction(FramePolicyFunction function, const WebCore::NavigationAction&, const WebCore::ResourceRequest&, PassRefPtr<FormState>);
+    virtual void dispatchDecidePolicyForResponse(FramePolicyFunction, const WebCore::ResourceResponse&, const WebCore::ResourceRequest&);
+    virtual void dispatchDecidePolicyForNewWindowAction(FramePolicyFunction, const WebCore::NavigationAction&, const WebCore::ResourceRequest&, PassRefPtr<FormState>, const WTF::String&);
+    virtual void dispatchDecidePolicyForNavigationAction(FramePolicyFunction, const WebCore::NavigationAction&, const WebCore::ResourceRequest&, PassRefPtr<FormState>);
     virtual void cancelPolicyCheck();
 
     virtual void dispatchUnableToImplementPolicy(const WebCore::ResourceError&);
 
-    virtual void dispatchWillSendSubmitEvent(HTMLFormElement*) { }
+    virtual void dispatchWillSendSubmitEvent(PassRefPtr<FormState>) { }
     virtual void dispatchWillSubmitForm(FramePolicyFunction, PassRefPtr<FormState>);
 
-    virtual void dispatchDidLoadMainResource(DocumentLoader*);
-    virtual void revertToProvisionalState(DocumentLoader*);
+    virtual void revertToProvisionalState(DocumentLoader*) { }
     virtual void setMainDocumentError(DocumentLoader*, const ResourceError&);
 
     virtual void postProgressStartedNotification();
@@ -203,13 +204,11 @@ public:
     virtual void dispatchDidBecomeFrameset(bool);
 
     virtual bool canCachePage() const;
-    virtual void download(WebCore::ResourceHandle*, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&);
+    virtual void convertMainResourceLoadToDownload(WebCore::MainResourceLoader*, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&);
 
-    virtual PassRefPtr<Frame> createFrame(const KURL& url, const String& name, HTMLFrameOwnerElement* ownerElement,
-                               const String& referrer, bool allowsScrolling, int marginWidth, int marginHeight);
-    virtual void didTransferChildFrameToNewDocument(WebCore::Page*);
-    virtual void transferLoadingResourceFromPage(WebCore::ResourceLoader*, const WebCore::ResourceRequest&, WebCore::Page*);
+    virtual PassRefPtr<Frame> createFrame(const KURL&, const String& name, HTMLFrameOwnerElement*, const String& referrer, bool allowsScrolling, int marginWidth, int marginHeight);
     virtual PassRefPtr<Widget> createPlugin(const IntSize&, HTMLPlugInElement*, const KURL&, const Vector<String>&, const Vector<String>&, const String&, bool);
+    virtual void recreatePlugin(Widget*) { }
     virtual void redirectDataToPlugin(Widget* pluginWidget);
 
     virtual PassRefPtr<Widget> createJavaAppletWidget(const IntSize&, HTMLAppletElement*, const KURL& baseURL, const Vector<String>& paramNames, const Vector<String>& paramValues);
@@ -221,21 +220,6 @@ public:
     virtual void documentElementAvailable();
     virtual void didPerformFirstNavigation() const;
 
-#if USE(V8)
-    // A frame's V8 context was created or destroyed.
-    virtual void didCreateScriptContext(v8::Handle<v8::Context>, int);
-    virtual void willReleaseScriptContext(v8::Handle<v8::Context>, int);
-
-    // A context untied to a frame was created (through evaluateInIsolatedWorld).
-    // This context is not tied to the lifetime of its frame, and is destroyed
-    // in garbage collection.
-    virtual void didCreateIsolatedScriptContext();
-
-    // Returns true if we should allow the given V8 extension to be added to
-    // the script context at the currently loading page and given extension group.
-    virtual bool allowScriptExtension(const String& extensionName, int extensionGroup) { return false; }
-#endif
-
     virtual void registerForIconNotification(bool);
 
     QString chooseFile(const QString& oldFile);
@@ -243,6 +227,8 @@ public:
     virtual PassRefPtr<FrameNetworkingContext> createNetworkingContext();
 
     const KURL& lastRequestedUrl() const { return m_lastRequestedUrl; }
+
+    QWebFrameAdapter* webFrame() const;
 
     static bool dumpFrameLoaderCallbacks;
     static bool dumpProgressFinishedCallback;
@@ -260,7 +246,7 @@ public:
     static bool dumpHistoryCallbacks;
     static QMap<QString, QString> URLsToRedirect;
 
-private slots:
+private Q_SLOTS:
     void onIconLoadedForPageURL(const QString&);
 
 private:
@@ -268,17 +254,12 @@ private:
     void emitLoadFinished(bool ok);
 
     Frame *m_frame;
-    QWebFrame *m_webFrame;
+    QWebFrameAdapter *m_webFrame;
     ResourceResponse m_response;
 
     // Plugin view to redirect data to
     WebCore::PluginView* m_pluginView;
     bool m_hasSentResponseToPlugin;
-
-    // True if makeRepresentation was called.  We don't actually have a concept
-    // of a "representation", but we need to know when we're expected to have one.
-    // See finishedLoading().
-    bool m_hasRepresentation;
 
     KURL m_lastRequestedUrl;
     bool m_isOriginatingLoad;

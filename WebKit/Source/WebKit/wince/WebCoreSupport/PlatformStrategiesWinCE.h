@@ -26,12 +26,14 @@
 #define PlatformStrategiesWinCE_h
 
 #include "CookiesStrategy.h"
-#include "LocalizationStrategy.h"
+#include "DatabaseStrategy.h"
+#include "LoaderStrategy.h"
 #include "PlatformStrategies.h"
 #include "PluginStrategy.h"
+#include "SharedWorkerStrategy.h"
 #include "VisitedLinkStrategy.h"
 
-class PlatformStrategiesWinCE : public WebCore::PlatformStrategies, private WebCore::CookiesStrategy, private WebCore::PluginStrategy, private WebCore::VisitedLinkStrategy {
+class PlatformStrategiesWinCE : public WebCore::PlatformStrategies, private WebCore::CookiesStrategy, private WebCore::DatabaseStrategy, private WebCore::LoaderStrategy, private WebCore::PluginStrategy, private WebCore::SharedWorkerStrategy, private WebCore::VisitedLinkStrategy {
 public:
     static void initialize();
 
@@ -40,11 +42,27 @@ private:
 
     // WebCore::PlatformStrategies
     virtual WebCore::CookiesStrategy* createCookiesStrategy();
+    virtual WebCore::DatabaseStrategy* createDatabaseStrategy();
+    virtual WebCore::LoaderStrategy* createLoaderStrategy();
+    virtual WebCore::PasteboardStrategy* createPasteboardStrategy();
     virtual WebCore::PluginStrategy* createPluginStrategy();
+    virtual WebCore::SharedWorkerStrategy* createSharedWorkerStrategy();
     virtual WebCore::VisitedLinkStrategy* createVisitedLinkStrategy();
 
     // WebCore::CookiesStrategy
     virtual void notifyCookiesChanged();
+    virtual String cookiesForDOM(WebCore::NetworkingContext*, const WebCore::KURL& firstParty, const WebCore::KURL&);
+    virtual void setCookiesFromDOM(WebCore::NetworkingContext*, const WebCore::KURL& firstParty, const WebCore::KURL&, const String&);
+    virtual bool cookiesEnabled(WebCore::NetworkingContext*, const WebCore::KURL& firstParty, const WebCore::KURL&);
+    virtual String cookieRequestHeaderFieldValue(WebCore::NetworkingContext*, const WebCore::KURL& firstParty, const WebCore::KURL&);
+    virtual bool getRawCookies(WebCore::NetworkingContext*, const WebCore::KURL& firstParty, const WebCore::KURL&, Vector<WebCore::Cookie>&);
+    virtual void deleteCookie(WebCore::NetworkingContext*, const WebCore::KURL&, const String&);
+    virtual void getHostnamesWithCookies(WebCore::NetworkingContext*, HashSet<String>& hostnames);
+    virtual void deleteCookiesForHostname(WebCore::NetworkingContext*, const String& hostname);
+    virtual void deleteAllCookies(WebCore::NetworkingContext*);
+
+    // WebCore::DatabaseStrategy
+    // - Using default implementation.
 
     // WebCore::PluginStrategy
     virtual void refreshPlugins();

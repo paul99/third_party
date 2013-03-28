@@ -36,8 +36,8 @@
 #include "WebProcessProxy.h"
 #include <WebCore/Region.h>
 
-#if USE(ACCELERATED_COMPOSITING) && USE(TEXTURE_MAPPER)
-#include "LayerTreeHostProxy.h"
+#if USE(COORDINATED_GRAPHICS)
+#include "CoordinatedLayerTreeHostProxy.h"
 #endif
 
 using namespace WebCore;
@@ -58,10 +58,10 @@ DrawingAreaProxyImpl::DrawingAreaProxyImpl(WebPageProxy* webPageProxy)
     , m_isBackingStoreDiscardable(true)
     , m_discardBackingStoreTimer(RunLoop::current(), this, &DrawingAreaProxyImpl::discardBackingStore)
 {
-#if USE(TEXTURE_MAPPER)
+#if USE(COORDINATED_GRAPHICS)
     // Construct the proxy early to allow messages to be sent to the web process while AC is entered there.
     if (webPageProxy->pageGroup()->preferences()->forceCompositingMode())
-        m_layerTreeHostProxy = adoptPtr(new LayerTreeHostProxy(this));
+        m_coordinatedLayerTreeHostProxy = adoptPtr(new CoordinatedLayerTreeHostProxy(this));
 #endif
 }
 
@@ -127,16 +127,23 @@ void DrawingAreaProxyImpl::deviceScaleFactorDidChange()
     backingStoreStateDidChange(RespondImmediately);
 }
 
+void DrawingAreaProxyImpl::layerHostingModeDidChange()
+{
+    m_webPageProxy->process()->send(Messages::DrawingArea::SetLayerHostingMode(m_webPageProxy->layerHostingMode()), m_webPageProxy->pageID());
+}
+
 void DrawingAreaProxyImpl::visibilityDidChange()
 {
-    if (!m_webPageProxy->isViewVisible()) {
-        // Suspend painting.
-        m_webPageProxy->process()->send(Messages::DrawingArea::SuspendPainting(), m_webPageProxy->pageID());
-        return;
-    }
+    if (!m_webPageProxy->suppressVisibilityUpdates()) {
+        if (!m_webPageProxy->isViewVisible()) {
+            // Suspend painting.
+            m_webPageProxy->process()->send(Messages::DrawingArea::SuspendPainting(), m_webPageProxy->pageID());
+            return;
+        }
 
-    // Resume painting.
-    m_webPageProxy->process()->send(Messages::DrawingArea::ResumePainting(), m_webPageProxy->pageID());
+        // Resume painting.
+        m_webPageProxy->process()->send(Messages::DrawingArea::ResumePainting(), m_webPageProxy->pageID());
+    }
 
 #if USE(ACCELERATED_COMPOSITING)
     // If we don't have a backing store, go ahead and mark the backing store as being changed so
@@ -208,6 +215,8 @@ void DrawingAreaProxyImpl::didUpdateBackingStoreState(uint64_t backingStoreState
         ASSERT(!m_backingStore);
         return;
     }
+#else
+    UNUSED_PARAM(layerTreeContext);
 #endif
 
     // If we have a backing store the right size, reuse it.
@@ -224,6 +233,8 @@ void DrawingAreaProxyImpl::enterAcceleratedCompositingMode(uint64_t backingStore
 
 #if USE(ACCELERATED_COMPOSITING)
     enterAcceleratedCompositingMode(layerTreeContext);
+#else
+    UNUSED_PARAM(layerTreeContext);
 #endif
 }
 
@@ -238,6 +249,19 @@ void DrawingAreaProxyImpl::exitAcceleratedCompositingMode(uint64_t backingStoreS
 #endif
 
     incorporateUpdate(updateInfo);
+}
+
+void DrawingAreaProxyImpl::updateAcceleratedCompositingMode(uint64_t backingStoreStateID, const LayerTreeContext& layerTreeContext)
+{
+    ASSERT_ARG(backingStoreStateID, backingStoreStateID <= m_currentBackingStoreStateID);
+    if (backingStoreStateID < m_currentBackingStoreStateID)
+        return;
+
+#if USE(ACCELERATED_COMPOSITING)
+    updateAcceleratedCompositingMode(layerTreeContext);
+#else
+    UNUSED_PARAM(layerTreeContext);
+#endif
 }
 
 void DrawingAreaProxyImpl::incorporateUpdate(const UpdateInfo& updateInfo)
@@ -283,7 +307,7 @@ void DrawingAreaProxyImpl::sendUpdateBackingStoreState(RespondImmediatelyOrNot r
     if (m_isWaitingForDidUpdateBackingStoreState)
         return;
 
-    if (m_webPageProxy->viewSize().isEmpty())
+    if (m_webPageProxy->viewSize().isEmpty() && !m_webPageProxy->useFixedLayout())
         return;
 
     m_isWaitingForDidUpdateBackingStoreState = respondImmediatelyOrNot == RespondImmediately;
@@ -335,42 +359,25 @@ void DrawingAreaProxyImpl::enterAcceleratedCompositingMode(const LayerTreeContex
     m_backingStore = nullptr;
     m_layerTreeContext = layerTreeContext;
     m_webPageProxy->enterAcceleratedCompositingMode(layerTreeContext);
-#if USE(TEXTURE_MAPPER)
-    if (!m_layerTreeHostProxy)
-        m_layerTreeHostProxy = adoptPtr(new LayerTreeHostProxy(this));
+#if USE(COORDINATED_GRAPHICS)
+    if (!m_coordinatedLayerTreeHostProxy)
+        m_coordinatedLayerTreeHostProxy = adoptPtr(new CoordinatedLayerTreeHostProxy(this));
 #endif
 }
 
-#if USE(TILED_BACKING_STORE)
-void DrawingAreaProxyImpl::didReceiveLayerTreeHostProxyMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::ArgumentDecoder* arguments)
+#if USE(COORDINATED_GRAPHICS)
+void DrawingAreaProxyImpl::didReceiveCoordinatedLayerTreeHostProxyMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
 {
-    if (m_layerTreeHostProxy)
-        m_layerTreeHostProxy->didReceiveLayerTreeHostProxyMessage(connection, messageID, arguments);
+    if (m_coordinatedLayerTreeHostProxy)
+        m_coordinatedLayerTreeHostProxy->didReceiveCoordinatedLayerTreeHostProxyMessage(connection, messageID, decoder);
 }
 
-void DrawingAreaProxyImpl::setVisibleContentsRectAndScale(const WebCore::IntRect& visibleContentsRect, float scale)
+void DrawingAreaProxyImpl::setVisibleContentsRect(const WebCore::FloatRect& visibleContentsRect, float scale, const WebCore::FloatPoint& trajectoryVector)
 {
-    if (m_layerTreeHostProxy)
-        m_layerTreeHostProxy->setVisibleContentsRectAndScale(visibleContentsRect, scale);
+    if (m_coordinatedLayerTreeHostProxy)
+        m_coordinatedLayerTreeHostProxy->setVisibleContentsRect(visibleContentsRect, scale, trajectoryVector);
 }
 
-void DrawingAreaProxyImpl::setVisibleContentRectTrajectoryVector(const WebCore::FloatPoint& trajectoryVector)
-{
-    if (m_layerTreeHostProxy)
-        m_layerTreeHostProxy->setVisibleContentRectTrajectoryVector(trajectoryVector);
-}
-
-void DrawingAreaProxyImpl::paintLayerTree(BackingStore::PlatformGraphicsContext context)
-{
-    if (m_layerTreeHostProxy)
-        m_layerTreeHostProxy->paintToGraphicsContext(context);
-}
-
-void DrawingAreaProxyImpl::paintToCurrentGLContext(const TransformationMatrix& matrix, float opacity)
-{
-    if (m_layerTreeHostProxy)
-        m_layerTreeHostProxy->paintToCurrentGLContext(matrix, opacity);
-}
 #endif
 
 void DrawingAreaProxyImpl::exitAcceleratedCompositingMode()
@@ -379,6 +386,14 @@ void DrawingAreaProxyImpl::exitAcceleratedCompositingMode()
 
     m_layerTreeContext = LayerTreeContext();    
     m_webPageProxy->exitAcceleratedCompositingMode();
+}
+
+void DrawingAreaProxyImpl::updateAcceleratedCompositingMode(const LayerTreeContext& layerTreeContext)
+{
+    ASSERT(isInAcceleratedCompositingMode());
+
+    m_layerTreeContext = layerTreeContext;
+    m_webPageProxy->updateAcceleratedCompositingMode(layerTreeContext);
 }
 #endif
 

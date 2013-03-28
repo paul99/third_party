@@ -21,6 +21,12 @@
 /**
  * @file    ewk_cookies.h
  * @brief   The Ewk cookies API.
+ *
+ * @note If the libsoup network backend is being used the functions here will
+ * only work with the @b default SoupSession, which can be retrieved with
+ * ewk_network_defaul_soup_session_get(). If a different SoupSession is used
+ * and associated with a view with ewk_view_soup_session_set(), all cookie
+ * management will have to be done manually.
  */
 
 #ifndef ewk_cookies_h
@@ -36,22 +42,25 @@ extern "C" {
  * \struct  _Ewk_Cookie
  *
  * @brief   Describes properties of an HTTP cookie.
+ *
+ * All the strings are guaranteed to be stringshared, so use eina_stringshare_ref()
+ * instead of eina_stringshare_add() or strdup().
  */
 struct _Ewk_Cookie {
     /// the cookie name
-    char *name;
+    const char *name;
     /// the cookie value
-    char *value;
+    const char *value;
     /// the "domain" attribute, or else the hostname that the cookie came from
-    char *domain;
-    /// the "path" attribute, or @c 0
-    char *path;
+    const char *domain;
+    /// the "path" attribute, or @c NULL
+    const char *path;
     /// the cookie expiration time, or @c 0 for a session cookie
     time_t expires;
     /// @c EINA_TRUE if the cookie should only be tranferred over SSL
     Eina_Bool secure;
     /// @c EINA_TRUE if the cookie should not be exposed to scripts
-    Eina_Bool http_only;    
+    Eina_Bool http_only;
 };
 /// Creates a type name for the _Ewk_Cookie.
 typedef struct _Ewk_Cookie Ewk_Cookie;
@@ -73,11 +82,11 @@ enum _Ewk_Cookie_Policy {
 typedef enum _Ewk_Cookie_Policy Ewk_Cookie_Policy;
 
 /************************** Exported functions ***********************/
-
+ 
 /**
  * Sets the path where the cookies are going to be stored. 
  *
- * @param filename path to the cookies.txt file, use @c 0 for keep
+ * @param filename path to the cookies.txt file, use @c NULL for keep
  *        cookies just in memory.
  *
  * @return @c EINA_FALSE if it wasn't possible to create the cookie jar,
@@ -95,7 +104,7 @@ EAPI void               ewk_cookies_clear(void);
  *
  * @return an @c Eina_List with all the cookies in the cookie jar
  */
-EAPI Eina_List*         ewk_cookies_get_all(void);
+EAPI Eina_List          *ewk_cookies_get_all(void);
 
 /**
  * Deletes a cookie from the cookie jar.

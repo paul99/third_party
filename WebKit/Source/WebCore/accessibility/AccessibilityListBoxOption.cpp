@@ -68,6 +68,12 @@ bool AccessibilityListBoxOption::isEnabled() const
     
     if (m_optionElement->hasTagName(optgroupTag))
         return false;
+
+    if (equalIgnoringCase(getAttribute(aria_disabledAttr), "true"))
+        return false;
+
+    if (m_optionElement->hasAttribute(disabledAttr))
+        return false;
     
     return true;
 }
@@ -172,7 +178,7 @@ AccessibilityObject* AccessibilityListBoxOption::parentObject() const
     if (!parentNode)
         return 0;
     
-    return m_optionElement->document()->axObjectCache()->getOrCreate(parentNode->renderer());
+    return m_optionElement->document()->axObjectCache()->getOrCreate(parentNode);
 }
 
 void AccessibilityListBoxOption::setSelected(bool selected)

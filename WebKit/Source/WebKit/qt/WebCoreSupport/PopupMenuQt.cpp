@@ -29,12 +29,11 @@
 #include "ChromeClientQt.h"
 #include "FrameView.h"
 #include "PopupMenuClient.h"
-
 #include "qwebkitplatformplugin.h"
 
 class SelectData : public QWebSelectData {
 public:
-    SelectData(WebCore::PopupMenuClient*& data) : d(data) {}
+    SelectData(WebCore::PopupMenuClient*& data) : d(data) { }
 
     virtual ItemType itemType(int) const;
     virtual QString itemText(int idx) const { return QString(d ? d->itemText(idx) : ""); }
@@ -103,7 +102,7 @@ void PopupMenuQt::show(const IntRect& rect, FrameView* view, int index)
     QRect geometry(rect);
     geometry.moveTopLeft(view->contentsToWindow(rect.location()));
     m_popup->setGeometry(geometry);
-    m_popup->setFont(m_popupClient->menuStyle().font().font());
+    m_popup->setFont(m_popupClient->menuStyle().font().syntheticFont());
 
     m_selectData = adoptPtr(new SelectData(m_popupClient));
     m_popup->show(*m_selectData.get());

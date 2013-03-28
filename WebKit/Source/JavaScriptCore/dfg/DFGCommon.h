@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@
 #if ENABLE(DFG_JIT)
 
 #include "CodeOrigin.h"
+#include "Options.h"
 #include "VirtualRegister.h"
 
 /* DFG_ENABLE() - turn on a specific features in the DFG JIT */
@@ -49,11 +50,19 @@
 #else
 #define DFG_ENABLE_JIT_ASSERT 0
 #endif
+// Enable validation of the graph.
+#if !ASSERT_DISABLED
+#define DFG_ENABLE_VALIDATION 1
+#else
+#define DFG_ENABLE_VALIDATION 0
+#endif
+// Enable validation on completion of each phase.
+#define DFG_ENABLE_PER_PHASE_VALIDATION 0
 // Consistency check contents compiler data structures.
 #define DFG_ENABLE_CONSISTENCY_CHECK 0
 // Emit a breakpoint into the head of every generated function, to aid debugging in GDB.
 #define DFG_ENABLE_JIT_BREAK_ON_EVERY_FUNCTION 0
-// Emit a breakpoint into the head of every generated node, to aid debugging in GDB.
+// Emit a breakpoint into the head of every generated block, to aid debugging in GDB.
 #define DFG_ENABLE_JIT_BREAK_ON_EVERY_BLOCK 0
 // Emit a breakpoint into the head of every generated node, to aid debugging in GDB.
 #define DFG_ENABLE_JIT_BREAK_ON_EVERY_NODE 0
@@ -69,8 +78,8 @@
 #define DFG_ENABLE_OSR_ENTRY ENABLE(DFG_JIT)
 // Generate stats on how successful we were in making use of the DFG jit, and remaining on the hot path.
 #define DFG_ENABLE_SUCCESS_STATS 0
-// Used to enable conditionally supported opcodes that currently result in performance regressions.
-#define DFG_ENABLE_RESTRICTIONS 1
+// Enable verification that the DFG is able to insert code for control flow edges.
+#define DFG_ENABLE_EDGE_CODE_VERIFICATION 0
 
 namespace JSC { namespace DFG {
 
@@ -83,18 +92,70 @@ static const BlockIndex NoBlock = UINT_MAX;
 
 struct NodeIndexTraits {
     static NodeIndex defaultValue() { return NoNode; }
-    static void dump(NodeIndex value, FILE* out)
+    static void dump(NodeIndex value, PrintStream& out)
     {
         if (value == NoNode)
-            fprintf(out, "-");
+            out.printf("-");
         else
-            fprintf(out, "@%u", value);
+            out.printf("@%u", value);
     }
 };
+
+enum UseKind {
+    UntypedUse,
+    DoubleUse,
+    LastUseKind // Must always be the last entry in the enum, as it is used to denote the number of enum elements.
+};
+
+inline const char* useKindToString(UseKind useKind)
+{
+    switch (useKind) {
+    case UntypedUse:
+        return "";
+    case DoubleUse:
+        return "d";
+    default:
+        ASSERT_NOT_REACHED();
+        return 0;
+    }
+}
+
+inline bool isX86()
+{
+#if CPU(X86_64) || CPU(X86)
+    return true;
+#else
+    return false;
+#endif
+}
+
+enum SpillRegistersMode { NeedToSpill, DontSpill };
+
+enum NoResultTag { NoResult };
+
+enum OptimizationFixpointState { BeforeFixpoint, FixpointNotConverged, FixpointConverged };
 
 } } // namespace JSC::DFG
 
 #endif // ENABLE(DFG_JIT)
+
+namespace JSC { namespace DFG {
+
+// Put things here that must be defined even if ENABLE(DFG_JIT) is false.
+
+enum CapabilityLevel { CannotCompile, ShouldProfile, CanCompile, CapabilityLevelNotSet };
+
+// Unconditionally disable DFG disassembly support if the DFG is not compiled in.
+inline bool shouldShowDisassembly()
+{
+#if ENABLE(DFG_JIT)
+    return Options::showDisassembly() || Options::showDFGDisassembly();
+#else
+    return false;
+#endif
+}
+
+} } // namespace JSC::DFG
 
 #endif // DFGCommon_h
 

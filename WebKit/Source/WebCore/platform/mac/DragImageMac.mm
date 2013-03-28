@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2009, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
 #import "DragImage.h"
 
 #if ENABLE(DRAG_SUPPORT)
+#import "BitmapImage.h"
 #import "CachedImage.h"
 #import "Font.h"
 #import "FontCache.h"
@@ -84,10 +85,50 @@ RetainPtr<NSImage> dissolveDragImageToFraction(RetainPtr<NSImage> image, float d
     return image;
 }
         
-RetainPtr<NSImage> createDragImageFromImage(Image* image)
+RetainPtr<NSImage> createDragImageFromImage(Image* image, RespectImageOrientationEnum shouldRespectImageOrientation)
 {
+    IntSize size = image->size();
+
+    if (image->isBitmapImage()) {
+        ImageOrientation orientation = DefaultImageOrientation;
+        BitmapImage* bitmapImage = static_cast<BitmapImage *>(image);
+        IntSize sizeRespectingOrientation = bitmapImage->sizeRespectingOrientation();
+
+        if (shouldRespectImageOrientation == RespectImageOrientation)
+            orientation = bitmapImage->currentFrameOrientation();
+
+        if (orientation != DefaultImageOrientation) {
+            // Construct a correctly-rotated copy of the image to use as the drag image.
+            FloatRect destRect(FloatPoint(), sizeRespectingOrientation);
+
+            RetainPtr<NSImage> rotatedDragImage(AdoptNS, [[NSImage alloc] initWithSize:(NSSize)(sizeRespectingOrientation)]);
+            [rotatedDragImage.get() lockFocus];
+
+            // ImageOrientation uses top-left coordinates, need to flip to bottom-left, apply...
+            CGAffineTransform transform = CGAffineTransformMakeTranslation(0, destRect.height());
+            transform = CGAffineTransformScale(transform, 1, -1);
+            transform = CGAffineTransformConcat(orientation.transformFromDefault(sizeRespectingOrientation), transform);
+
+            if (orientation.usesWidthAsHeight())
+                destRect = FloatRect(destRect.x(), destRect.y(), destRect.height(), destRect.width());
+
+            // ...and flip back.
+            transform = CGAffineTransformTranslate(transform, 0, destRect.height());
+            transform = CGAffineTransformScale(transform, 1, -1);
+
+            RetainPtr<NSAffineTransform> cocoaTransform(AdoptNS, [[NSAffineTransform alloc] init]);
+            [cocoaTransform.get() setTransformStruct:*(NSAffineTransformStruct*)&transform];
+            [cocoaTransform.get() concat];
+
+            [image->getNSImage() drawInRect:destRect fromRect:NSMakeRect(0, 0, size.width(), size.height()) operation:NSCompositeSourceOver fraction:1.0];
+            [rotatedDragImage.get() unlockFocus];
+
+            return rotatedDragImage;
+        }
+    }
+
     RetainPtr<NSImage> dragImage(AdoptNS, [image->getNSImage() copy]);
-    [dragImage.get() setSize:(NSSize)(image->size())];
+    [dragImage.get() setSize:(NSSize)size];
     return dragImage;
 }
     
@@ -239,9 +280,7 @@ DragImageRef createDragImageForLink(KURL& url, const String& title, Frame* frame
 {
     if (!frame)
         return nil;
-    NSString *label = 0;
-    if (!title.isEmpty())
-        label = title;
+    NSString *label = nsStringNilIfEmpty(title);
     NSURL *cocoaURL = url;
     NSString *urlString = [cocoaURL absoluteString];
 

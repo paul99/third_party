@@ -41,8 +41,10 @@
 #include <algorithm>
 
 #include "NotImplemented.h"
+#include "PlatformMemoryInstrumentation.h"
 #include "TextEncoding.h"
 #include <wtf/HashMap.h>
+#include <wtf/MemoryInstrumentationString.h>
 #include <wtf/Vector.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/text/CString.h>
@@ -389,6 +391,13 @@ const String& KURLGooglePrivate::string() const
     return m_string;
 }
 
+void KURLGooglePrivate::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this);
+    info.addMember(m_utf8);
+    info.addMember(m_string);
+    info.addMember(m_innerURL);
+}
 // KURL ------------------------------------------------------------------------
 
 // Initializes with a string representing an absolute URL. No encoding
@@ -576,34 +585,6 @@ bool KURL::hasFragmentIdentifier() const
     // Note: KURL.cpp unescapes here.
     // FIXME determine if KURL.cpp agrees about an empty ref
     return m_url.m_parsed.ref.len >= 0;
-}
-
-void KURL::copyParsedQueryTo(ParsedURLParameters& parameters) const
-{
-    String query = m_url.componentString(m_url.m_parsed.query);
-    const UChar* pos = query.characters();
-    const UChar* end = query.characters() + query.length();
-    while (pos < end) {
-        const UChar* parameterStart = pos;
-        while (pos < end && *pos != '&')
-            ++pos;
-        const UChar* parameterEnd = pos;
-        if (pos < end) {
-            ASSERT(*pos == '&');
-            ++pos;
-        }
-        if (parameterStart == parameterEnd)
-            continue;
-        const UChar* nameStart = parameterStart;
-        const UChar* equalSign = parameterStart;
-        while (equalSign < parameterEnd && *equalSign != '=')
-            ++equalSign;
-        if (equalSign == nameStart)
-            continue;
-        String name(nameStart, equalSign - nameStart);
-        String value = equalSign == parameterEnd ? String() : String(equalSign + 1, parameterEnd - equalSign - 1);
-        parameters.set(name, value);
-    }
 }
 
 String KURL::baseAsString() const
@@ -797,16 +778,6 @@ void KURL::setPath(const String& path)
     replacements.SetPath(CharactersOrEmpty(path),
                          url_parse::Component(0, path.length()));
     m_url.replaceComponents(replacements);
-}
-
-// On Mac, this just seems to return the same URL, but with "/foo/bar" for
-// file: URLs instead of file:///foo/bar. We don't bother with any of this,
-// at least for now.
-String KURL::deprecatedString() const
-{
-    if (!m_url.m_isValid)
-        return String();
-    return m_url.string();
 }
 
 String decodeURLEscapeSequences(const String& str)

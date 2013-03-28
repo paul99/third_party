@@ -21,16 +21,22 @@
 #ifndef Page_h
 #define Page_h
 
+#include "FeatureObserver.h"
 #include "FrameLoaderTypes.h"
 #include "FindOptions.h"
-#include "LayoutTypes.h"
+#include "LayoutMilestones.h"
+#include "LayoutRect.h"
 #include "PageVisibilityState.h"
+#include "Pagination.h"
 #include "PlatformScreen.h"
-#include "PlatformString.h"
+#include "Region.h"
+#include "Supplementable.h"
 #include "ViewportArguments.h"
 #include <wtf/Forward.h>
+#include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/text/WTFString.h>
 
 #if OS(SOLARIS)
 #include <sys/time.h> // For time_t structure.
@@ -46,16 +52,16 @@ namespace JSC {
 
 namespace WebCore {
 
+    class AlternativeTextClient;
     class BackForwardController;
     class BackForwardList;
     class Chrome;
     class ChromeClient;
+    class ClientRectList;
+#if ENABLE(CONTEXT_MENUS)
     class ContextMenuClient;
     class ContextMenuController;
-    class DeviceMotionClient;
-    class DeviceMotionController;
-    class DeviceOrientationClient;
-    class DeviceOrientationController;
+#endif
     class Document;
     class DragCaretController;
     class DragClient;
@@ -64,33 +70,27 @@ namespace WebCore {
     class FocusController;
     class Frame;
     class FrameSelection;
-    class GeolocationClient;
-    class GeolocationController;
     class HaltablePlugin;
     class HistoryItem;
     class InspectorClient;
     class InspectorController;
     class MediaCanStartListener;
     class Node;
-    class NotificationController;
-    class NotificationPresenter;
     class PageGroup;
+    class PlugInClient;
     class PluginData;
+    class PluginViewBase;
     class PointerLockController;
     class ProgressTracker;
     class Range;
+    class RenderObject;
     class RenderTheme;
     class VisibleSelection;
     class ScrollableArea;
     class ScrollingCoordinator;
     class Settings;
-    class SpeechInput;
-    class SpeechInputClient;
-    class UserMediaClient;
     class StorageNamespace;
-#if ENABLE(NOTIFICATIONS)
-    class NotificationPresenter;
-#endif
+    class ValidationMessageClient;
 
     typedef uint64_t LinkHash;
 
@@ -98,7 +98,17 @@ namespace WebCore {
 
     float deviceScaleFactor(Frame*);
 
-    class Page {
+    struct ArenaSize {
+        ArenaSize(size_t treeSize, size_t allocated)
+            : treeSize(treeSize)
+            , allocated(allocated)
+        {
+        }
+        size_t treeSize;
+        size_t allocated;
+    };
+
+    class Page : public Supplementable<Page> {
         WTF_MAKE_NONCOPYABLE(Page);
         friend class Settings;
     public:
@@ -111,22 +121,23 @@ namespace WebCore {
             PageClients();
             ~PageClients();
 
+            AlternativeTextClient* alternativeTextClient;
             ChromeClient* chromeClient;
+#if ENABLE(CONTEXT_MENUS)
             ContextMenuClient* contextMenuClient;
+#endif
             EditorClient* editorClient;
             DragClient* dragClient;
             InspectorClient* inspectorClient;
-            GeolocationClient* geolocationClient;
-            DeviceMotionClient* deviceMotionClient;
-            DeviceOrientationClient* deviceOrientationClient;
+            PlugInClient* plugInClient;
             RefPtr<BackForwardList> backForwardClient;
-            SpeechInputClient* speechInputClient;
-            NotificationPresenter* notificationClient;
-            UserMediaClient* userMediaClient;
+            ValidationMessageClient* validationMessageClient;
         };
 
-        Page(PageClients&);
+        explicit Page(PageClients&);
         ~Page();
+
+        ArenaSize renderTreeSize() const;
 
         void setNeedsRecalcStyleInAllFrames();
 
@@ -141,6 +152,7 @@ namespace WebCore {
         bool canStartMedia() const { return m_canStartMedia; }
 
         EditorClient* editorClient() const { return m_editorClient; }
+        PlugInClient* plugInClient() const { return m_plugInClient; }
 
         void setMainFrame(PassRefPtr<Frame>);
         Frame* mainFrame() const { return m_mainFrame.get(); }
@@ -164,9 +176,9 @@ namespace WebCore {
         PageGroup& group() { if (!m_group) initGroup(); return *m_group; }
         PageGroup* groupPtr() { return m_group; } // can return 0
 
-        void incrementFrameCount() { ++m_frameCount; }
-        void decrementFrameCount() { ASSERT(m_frameCount); --m_frameCount; }
-        int frameCount() const { checkFrameCountConsistency(); return m_frameCount; }
+        void incrementSubframeCount() { ++m_subframeCount; }
+        void decrementSubframeCount() { ASSERT(m_subframeCount); --m_subframeCount; }
+        int subframeCount() const { checkSubframeCountConsistency(); return m_subframeCount; }
 
         Chrome* chrome() const { return m_chrome.get(); }
         DragCaretController* dragCaretController() const { return m_dragCaretController.get(); }
@@ -180,32 +192,22 @@ namespace WebCore {
 #if ENABLE(INSPECTOR)
         InspectorController* inspectorController() const { return m_inspectorController.get(); }
 #endif
-#if ENABLE(CLIENT_BASED_GEOLOCATION)
-        GeolocationController* geolocationController() const { return m_geolocationController.get(); }
-#endif
-#if ENABLE(DEVICE_ORIENTATION)
-        DeviceMotionController* deviceMotionController() const { return m_deviceMotionController.get(); }
-        DeviceOrientationController* deviceOrientationController() const { return m_deviceOrientationController.get(); }
-#endif
-#if ENABLE(NOTIFICATIONS)
-        NotificationController* notificationController() const { return m_notificationController.get(); }
-#endif
 #if ENABLE(POINTER_LOCK)
         PointerLockController* pointerLockController() const { return m_pointerLockController.get(); }
 #endif
-#if ENABLE(INPUT_SPEECH)
-        SpeechInput* speechInput();
-#endif
-#if ENABLE(MEDIA_STREAM)
-        UserMediaClient* userMediaClient() const { return m_userMediaClient; }
-#endif
-#if ENABLE(THREADED_SCROLLING)
+        ValidationMessageClient* validationMessageClient() const { return m_validationMessageClient; }
+
         ScrollingCoordinator* scrollingCoordinator();
-#endif
+
+        String scrollingStateTreeAsText();
+        String mainThreadScrollingReasonsAsText();
+        PassRefPtr<ClientRectList> nonFastScrollableRects(const Frame*);
 
         Settings* settings() const { return m_settings.get(); }
         ProgressTracker* progress() const { return m_progress.get(); }
         BackForwardController* backForward() const { return m_backForwardController.get(); }
+
+        FeatureObserver* featureObserver() { return &m_featureObserver; }
 
         enum ViewMode {
             ViewModeInvalid,
@@ -252,9 +254,6 @@ namespace WebCore {
         bool inLowQualityImageInterpolationMode() const;
         void setInLowQualityImageInterpolationMode(bool = true);
 
-        bool cookieEnabled() const { return m_cookieEnabled; }
-        void setCookieEnabled(bool enabled) { m_cookieEnabled = enabled; }
-
         float mediaVolume() const { return m_mediaVolume; }
         void setMediaVolume(float volume);
 
@@ -264,33 +263,13 @@ namespace WebCore {
         float deviceScaleFactor() const { return m_deviceScaleFactor; }
         void setDeviceScaleFactor(float);
 
-#if OS(ANDROID)
-        float devicePixelRatioForDeviceDimensions() const { return m_devicePixelRatioForDeviceDimensions; }
-        void setDevicePixelRatioForDeviceDimensions(float scaleFactor) {
-            m_devicePixelRatioForDeviceDimensions = scaleFactor;
-        }
-#endif
+        bool shouldSuppressScrollbarAnimations() const { return m_suppressScrollbarAnimations; }
+        void setShouldSuppressScrollbarAnimations(bool suppressAnimations);
 
-        struct Pagination {
-            enum Mode { Unpaginated, HorizontallyPaginated, VerticallyPaginated };
-
-            Pagination()
-                : mode(Unpaginated)
-                , pageLength(0)
-                , gap(0)
-            {
-            };
-
-            bool operator==(const Pagination& other) const
-            {
-                return mode == other.mode && pageLength == other.pageLength && gap == other.gap;
-            }
-
-            Mode mode;
-            unsigned pageLength;
-            unsigned gap;
-        };
-
+        // Page and FrameView both store a Pagination value. Page::pagination() is set only by API,
+        // and FrameView::pagination() is set only by CSS. Page::pagination() will affect all
+        // FrameViews in the page cache, but FrameView::pagination() only affects the current
+        // FrameView. 
         const Pagination& pagination() const { return m_pagination; }
         void setPagination(const Pagination&);
 
@@ -299,16 +278,19 @@ namespace WebCore {
         // Notifications when the Page starts and stops being presented via a native window.
         void didMoveOnscreen();
         void willMoveOffscreen();
+        bool isOnscreen() const { return m_isOnscreen; }
 
         void windowScreenDidChange(PlatformDisplayID);
         
         void suspendScriptedAnimations();
         void resumeScriptedAnimations();
+        bool scriptedAnimationsSuspended() const { return m_scriptedAnimationsSuspended; }
         
         void userStyleSheetLocationChanged();
         const String& userStyleSheet() const;
 
         void dnsPrefetchingStateChanged();
+        void storageBlockingStateChanged();
         void privateBrowsingStateChanged();
 
         static void setDebuggerForAllPages(JSC::Debugger*);
@@ -334,15 +316,6 @@ namespace WebCore {
         void setMemoryCacheClientCallsEnabled(bool);
         bool areMemoryCacheClientCallsEnabled() const { return m_areMemoryCacheClientCallsEnabled; }
 
-        void setJavaScriptURLsAreAllowed(bool);
-        bool javaScriptURLsAreAllowed() const;
-
-        typedef HashSet<ScrollableArea*> ScrollableAreaSet;
-        void addScrollableArea(ScrollableArea*);
-        void removeScrollableArea(ScrollableArea*);
-        bool containsScrollableArea(ScrollableArea*) const;
-        const ScrollableAreaSet* scrollableAreaSet() const { return m_scrollableAreaSet.get(); }
-
         // Don't allow more than a certain number of frames in a page.
         // This seems like a reasonable upper bound, and otherwise mutually
         // recursive frameset pages can quickly bring the program to its knees
@@ -354,24 +327,61 @@ namespace WebCore {
 
 #if ENABLE(PAGE_VISIBILITY_API)
         PageVisibilityState visibilityState() const;
+#endif
+#if ENABLE(PAGE_VISIBILITY_API) || ENABLE(HIDDEN_PAGE_DOM_TIMER_THROTTLING)
         void setVisibilityState(PageVisibilityState, bool);
 #endif
 
         PlatformDisplayID displayID() const { return m_displayID; }
-        
+
+        void addLayoutMilestones(LayoutMilestones);
+        LayoutMilestones layoutMilestones() const { return m_layoutMilestones; }
+
+        bool isCountingRelevantRepaintedObjects() const;
+        void startCountingRelevantRepaintedObjects();
+        void resetRelevantPaintedObjectCounter();
+        void addRelevantRepaintedObject(RenderObject*, const LayoutRect& objectPaintRect);
+        void addRelevantUnpaintedObject(RenderObject*, const LayoutRect& objectPaintRect);
+
+        void suspendActiveDOMObjectsAndAnimations();
+        void resumeActiveDOMObjectsAndAnimations();
+#ifndef NDEBUG
+        void setIsPainting(bool painting) { m_isPainting = painting; }
+        bool isPainting() const { return m_isPainting; }
+#endif
+
+        AlternativeTextClient* alternativeTextClient() const { return m_alternativeTextClient; }
+
+        bool hasSeenPlugin(const String& serviceType) const;
+        bool hasSeenAnyPlugin() const;
+        void sawPlugin(const String& serviceType);
+        void resetSeenPlugins();
+
+        bool hasSeenMediaEngine(const String& engineName) const;
+        bool hasSeenAnyMediaEngine() const;
+        void sawMediaEngine(const String& engineName);
+        void resetSeenMediaEngines();
+
+        void reportMemoryUsage(MemoryObjectInfo*) const;
+
     private:
         void initGroup();
 
 #if ASSERT_DISABLED
-        void checkFrameCountConsistency() const { }
+        void checkSubframeCountConsistency() const { }
 #else
-        void checkFrameCountConsistency() const;
+        void checkSubframeCountConsistency() const;
 #endif
 
         MediaCanStartListener* takeAnyMediaCanStartListener();
 
         void setMinimumTimerInterval(double);
         double minimumTimerInterval() const;
+
+        void setTimerAlignmentInterval(double);
+        double timerAlignmentInterval() const;
+
+        void collectPluginViews(Vector<RefPtr<PluginViewBase>, 32>& pluginViewBases);
 
         OwnPtr<Chrome> m_chrome;
         OwnPtr<DragCaretController> m_dragCaretController;
@@ -386,29 +396,11 @@ namespace WebCore {
 #if ENABLE(INSPECTOR)
         OwnPtr<InspectorController> m_inspectorController;
 #endif
-#if ENABLE(CLIENT_BASED_GEOLOCATION)
-        OwnPtr<GeolocationController> m_geolocationController;
-#endif
-#if ENABLE(DEVICE_ORIENTATION)
-        OwnPtr<DeviceMotionController> m_deviceMotionController;
-        OwnPtr<DeviceOrientationController> m_deviceOrientationController;
-#endif
-#if ENABLE(NOTIFICATIONS)
-        OwnPtr<NotificationController> m_notificationController;
-#endif
 #if ENABLE(POINTER_LOCK)
         OwnPtr<PointerLockController> m_pointerLockController;
 #endif
-#if ENABLE(INPUT_SPEECH)
-        SpeechInputClient* m_speechInputClient;
-        OwnPtr<SpeechInput> m_speechInput;
-#endif
-#if ENABLE(MEDIA_STREAM)
-        UserMediaClient* m_userMediaClient;
-#endif
-#if ENABLE(THREADED_SCROLLING)
         RefPtr<ScrollingCoordinator> m_scrollingCoordinator;
-#endif
+
         OwnPtr<Settings> m_settings;
         OwnPtr<ProgressTracker> m_progress;
         
@@ -420,13 +412,18 @@ namespace WebCore {
         RefPtr<RenderTheme> m_theme;
 
         EditorClient* m_editorClient;
+        PlugInClient* m_plugInClient;
+        ValidationMessageClient* m_validationMessageClient;
 
-        int m_frameCount;
+        FeatureObserver m_featureObserver;
+
+        int m_subframeCount;
         String m_groupName;
         bool m_openedByDOM;
 
         bool m_tabKeyCyclesThroughElements;
         bool m_defersLoading;
+        unsigned m_defersLoadingCallCount;
 
         bool m_inLowQualityInterpolationMode;
         bool m_cookieEnabled;
@@ -435,13 +432,10 @@ namespace WebCore {
 
         float m_pageScaleFactor;
         float m_deviceScaleFactor;
-#if OS(ANDROID)
-        float m_devicePixelRatioForDeviceDimensions;
-#endif
+
+        bool m_suppressScrollbarAnimations;
 
         Pagination m_pagination;
-
-        bool m_javaScriptURLsAreAllowed;
 
         String m_userStyleSheetPath;
         mutable String m_userStyleSheet;
@@ -460,22 +454,35 @@ namespace WebCore {
 
         RefPtr<StorageNamespace> m_sessionStorage;
 
-#if ENABLE(NOTIFICATIONS)
-        NotificationPresenter* m_notificationPresenter;
-#endif
-
         ViewMode m_viewMode;
 
         double m_minimumTimerInterval;
 
-        OwnPtr<ScrollableAreaSet> m_scrollableAreaSet;
+        double m_timerAlignmentInterval;
 
         bool m_isEditable;
+        bool m_isOnscreen;
 
 #if ENABLE(PAGE_VISIBILITY_API)
         PageVisibilityState m_visibilityState;
 #endif
         PlatformDisplayID m_displayID;
+
+        LayoutMilestones m_layoutMilestones;
+
+        HashSet<RenderObject*> m_relevantUnpaintedRenderObjects;
+        Region m_relevantPaintedRegion;
+        Region m_relevantUnpaintedRegion;
+        bool m_isCountingRelevantRepaintedObjects;
+#ifndef NDEBUG
+        bool m_isPainting;
+#endif
+        AlternativeTextClient* m_alternativeTextClient;
+
+        bool m_scriptedAnimationsSuspended;
+
+        HashSet<String> m_seenPlugins;
+        HashSet<String> m_seenMediaEngines;
     };
 
 } // namespace WebCore

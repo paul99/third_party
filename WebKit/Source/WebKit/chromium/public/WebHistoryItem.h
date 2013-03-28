@@ -95,10 +95,6 @@ public:
 
     WEBKIT_EXPORT float pageScaleFactor() const;
     WEBKIT_EXPORT void setPageScaleFactor(float);
-#if defined(ANDROID)
-    WEBKIT_EXPORT bool loadComplete() const;
-    WEBKIT_EXPORT void setLoadComplete(bool);
-#endif
 
     WEBKIT_EXPORT bool isTargetItem() const;
     WEBKIT_EXPORT void setIsTargetItem(bool);
@@ -127,6 +123,8 @@ public:
     WEBKIT_EXPORT WebVector<WebHistoryItem> children() const;
     WEBKIT_EXPORT void setChildren(const WebVector<WebHistoryItem>&);
     WEBKIT_EXPORT void appendToChildren(const WebHistoryItem&);
+
+    WEBKIT_EXPORT WebVector<WebString> getReferencedFilePaths() const;
 
 #if WEBKIT_IMPLEMENTATION
     WebHistoryItem(const WTF::PassRefPtr<WebCore::HistoryItem>&);

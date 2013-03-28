@@ -33,21 +33,22 @@
 @class WKEditorUndoTargetObjC;
 @class WKView;
 
+namespace WebCore {
+class AlternativeTextUIController;
+}
+
 namespace WebKit {
-
 class FindIndicatorWindow;
-
-// NOTE: This does not use String::operator NSString*() since that function
-// expects to be called on the thread running WebCore.
-NSString* nsStringFromWebCoreString(const String&);
 
 class PageClientImpl : public PageClient {
 public:
     static PassOwnPtr<PageClientImpl> create(WKView*);
     virtual ~PageClientImpl();
+    
+    void viewWillMoveToAnotherWindow();
 
 private:
-    PageClientImpl(WKView*);
+    explicit PageClientImpl(WKView*);
 
     virtual PassOwnPtr<DrawingAreaProxy> createDrawingAreaProxy();
     virtual void setViewNeedsDisplay(const WebCore::IntRect&);
@@ -59,14 +60,17 @@ private:
     virtual bool isViewFocused();
     virtual bool isViewVisible();
     virtual bool isViewInWindow();
-    
+    virtual LayerHostingMode viewLayerHostingMode() OVERRIDE;
+    virtual ColorSpaceData colorSpace() OVERRIDE;
+    virtual void setAcceleratedCompositingRootLayer(CALayer *) OVERRIDE;
+
     virtual void processDidCrash();
     virtual void pageClosed();
     virtual void didRelaunchProcess();
     virtual void toolTipChanged(const String& oldToolTip, const String& newToolTip);
     virtual void setCursor(const WebCore::Cursor&);
     virtual void setCursorHiddenUntilMouseMoves(bool);
-    virtual void didChangeViewportProperties(const WebCore::ViewportArguments&);
+    virtual void didChangeViewportProperties(const WebCore::ViewportAttributes&);
 
     virtual void registerEditCommand(PassRefPtr<WebEditCommandProxy>, WebPageProxy::UndoOrRedo);
     virtual void clearAllEditCommands();
@@ -75,6 +79,8 @@ private:
     virtual bool interpretKeyEvent(const NativeWebKeyboardEvent&, Vector<WebCore::KeypressCommand>&);
     virtual bool executeSavedCommandBySelector(const String& selector);
     virtual void setDragImage(const WebCore::IntPoint& clientPosition, PassRefPtr<ShareableBitmap> dragImage, bool isLinkDrag);
+    virtual void setPromisedData(const String& pasteboardName, PassRefPtr<WebCore::SharedBuffer> imageBuffer, const String& filename, const String& extension, const String& title,
+                                 const String& url, const String& visibleUrl, PassRefPtr<WebCore::SharedBuffer> archiveBuffer);
     virtual void updateTextInputState(bool updateSecureInputState);
     virtual void resetTextInputState();
 
@@ -91,10 +97,15 @@ private:
     virtual PassRefPtr<WebPopupMenuProxy> createPopupMenuProxy(WebPageProxy*);
     virtual PassRefPtr<WebContextMenuProxy> createContextMenuProxy(WebPageProxy*);
 
+#if ENABLE(INPUT_TYPE_COLOR)
+    virtual PassRefPtr<WebColorChooserProxy> createColorChooserProxy(WebPageProxy*, const WebCore::Color& initialColor, const WebCore::IntRect&);
+#endif
+
     void setFindIndicator(PassRefPtr<FindIndicator>, bool fadeOut, bool animate);
 
     virtual void enterAcceleratedCompositingMode(const LayerTreeContext&);
     virtual void exitAcceleratedCompositingMode();
+    virtual void updateAcceleratedCompositingMode(const LayerTreeContext&);
 
     virtual void accessibilityWebProcessTokenReceived(const CoreIPC::DataReference&);
 
@@ -104,8 +115,6 @@ private:
     virtual void makeFirstResponder();
     
     virtual CGContextRef containingWindowGraphicsContext();
-
-    virtual void didChangeScrollbarsForMainFrame() const;
 
     virtual void didCommitLoadForMainFrame(bool useCustomRepresentation);
     virtual void didFinishLoadingDataForCustomRepresentation(const String& suggestedFilename, const CoreIPC::DataReference&);
@@ -117,22 +126,34 @@ private:
 
     virtual void flashBackingStoreUpdates(const Vector<WebCore::IntRect>& updateRects);
 
-    virtual void didPerformDictionaryLookup(const String&, double scaleFactor, const DictionaryPopupInfo&);
+    virtual void didPerformDictionaryLookup(const AttributedString&, const DictionaryPopupInfo&);
     virtual void dismissDictionaryLookupPanel();
 
-    virtual void showCorrectionPanel(WebCore::CorrectionPanelInfo::PanelType, const WebCore::FloatRect& boundingBoxOfReplacedString, const String& replacedString, const String& replacementString, const Vector<String>& alternativeReplacementStrings);
-    virtual void dismissCorrectionPanel(WebCore::ReasonForDismissingCorrectionPanel);
-    virtual String dismissCorrectionPanelSoon(WebCore::ReasonForDismissingCorrectionPanel);
-    virtual void recordAutocorrectionResponse(WebCore::EditorClient::AutocorrectionResponseType, const String& replacedString, const String& replacementString);
+    virtual void showCorrectionPanel(WebCore::AlternativeTextType, const WebCore::FloatRect& boundingBoxOfReplacedString, const String& replacedString, const String& replacementString, const Vector<String>& alternativeReplacementStrings);
+    virtual void dismissCorrectionPanel(WebCore::ReasonForDismissingAlternativeText);
+    virtual String dismissCorrectionPanelSoon(WebCore::ReasonForDismissingAlternativeText);
+    virtual void recordAutocorrectionResponse(WebCore::AutocorrectionResponseType, const String& replacedString, const String& replacementString);
 
     virtual void recommendedScrollbarStyleDidChange(int32_t newStyle);
 
     virtual WKView* wkView() const { return m_wkView; }
+    virtual void intrinsicContentSizeDidChange(const WebCore::IntSize& intrinsicContentSize) OVERRIDE;
+
+#if USE(DICTATION_ALTERNATIVES)
+    virtual uint64_t addDictationAlternatives(const RetainPtr<NSTextAlternatives>&);
+    virtual void removeDictationAlternatives(uint64_t dictationContext);
+    virtual void showDictationAlternativeUI(const WebCore::FloatRect& boundingBoxOfDictatedText, uint64_t dictationContext);
+    virtual void dismissDictationAlternativeUI();
+    virtual Vector<String> dictationAlternatives(uint64_t dictationContext);
+#endif
 
     WKView* m_wkView;
     RetainPtr<WKEditorUndoTargetObjC> m_undoTarget;
-#if !defined(BUILDING_ON_SNOW_LEOPARD)
+#if USE(AUTOCORRECTION_PANEL)
     CorrectionPanel m_correctionPanel;
+#endif
+#if USE(DICTATION_ALTERNATIVES)
+    OwnPtr<WebCore::AlternativeTextUIController> m_alternativeTextUIController;
 #endif
 };
 

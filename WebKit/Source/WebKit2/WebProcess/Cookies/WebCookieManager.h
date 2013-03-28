@@ -30,9 +30,13 @@
 #include <wtf/Noncopyable.h>
 #include <wtf/text/WTFString.h>
 
+#if USE(SOUP)
+#include "SoupCookiePersistentStorageType.h"
+#endif
+
 namespace CoreIPC {
-    class ArgumentDecoder;
     class Connection;
+    class MessageDecoder;
     class MessageID;
 }
 
@@ -43,11 +47,15 @@ class WebCookieManager {
 public:
     static WebCookieManager& shared();
 
-    void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+    void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
     
     void dispatchCookiesDidChange();
 
     void setHTTPCookieAcceptPolicy(HTTPCookieAcceptPolicy);
+
+#if USE(SOUP)
+    void setCookiePersistentStorage(const String& storagePath, uint32_t storageType);
+#endif
 
 private:
     WebCookieManager();
@@ -63,7 +71,7 @@ private:
     void startObservingCookieChanges();
     void stopObservingCookieChanges();
 
-    void didReceiveWebCookieManagerMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+    void didReceiveWebCookieManagerMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
 };
 
 } // namespace WebKit

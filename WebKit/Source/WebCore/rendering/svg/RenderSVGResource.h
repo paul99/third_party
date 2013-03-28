@@ -38,6 +38,7 @@ enum RenderSVGResourceType {
     ClipperResourceType
 };
 
+// If this enum changes change the unsigned bitfields using it.
 enum RenderSVGResourceMode {
     ApplyToDefaultMode = 1 << 0, // used for all resources except gradient/pattern
     ApplyToFillMode    = 1 << 1,
@@ -82,9 +83,6 @@ public:
     static RenderSVGResourceSolidColor* sharedSolidPaintingResource();
 
     static void markForLayoutAndParentResourceInvalidation(RenderObject*, bool needsLayout = true);
-
-private:
-    static void removeFromFilterCache(RenderObject*);
 };
 
 }

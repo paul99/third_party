@@ -26,7 +26,6 @@
 
 namespace JSC {
 
-ASSERT_CLASS_FITS_IN_CELL(BooleanConstructor);
 ASSERT_HAS_TRIVIAL_DESTRUCTOR(BooleanConstructor);
 
 const ClassInfo BooleanConstructor::s_info = { "Function", &Base::s_info, 0, 0, CREATE_METHOD_TABLE(BooleanConstructor) };
@@ -38,7 +37,7 @@ BooleanConstructor::BooleanConstructor(JSGlobalObject* globalObject, Structure* 
 
 void BooleanConstructor::finishCreation(ExecState* exec, BooleanPrototype* booleanPrototype)
 {
-    Base::finishCreation(exec->globalData(), Identifier(exec, booleanPrototype->classInfo()->className));
+    Base::finishCreation(exec->globalData(), booleanPrototype->classInfo()->className);
     putDirectWithoutTransition(exec->globalData(), exec->propertyNames().prototype, booleanPrototype, DontEnum | DontDelete | ReadOnly);
 
     // no. of arguments for constructor

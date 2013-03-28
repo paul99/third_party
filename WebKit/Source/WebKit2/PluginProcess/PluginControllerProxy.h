@@ -33,14 +33,10 @@
 #include "PluginController.h"
 #include "PluginControllerProxyMessages.h"
 #include "ShareableBitmap.h"
+#include "WebProcessConnectionMessages.h"
 #include <WebCore/RunLoop.h>
+#include <WebCore/SecurityOrigin.h>
 #include <wtf/Noncopyable.h>
-
-#if PLATFORM(MAC)
-#include <wtf/RetainPtr.h>
-
-typedef struct __WKCARemoteLayerClientRef *WKCARemoteLayerClientRef;
-#endif
 
 namespace CoreIPC {
     class DataReference;
@@ -48,6 +44,7 @@ namespace CoreIPC {
 
 namespace WebKit {
 
+class LayerHostingContext;
 class ShareableBitmap;
 class WebProcessConnection;
 struct PluginCreationParameters;
@@ -64,14 +61,21 @@ public:
     bool initialize(const PluginCreationParameters&);
     void destroy();
 
-    void didReceivePluginControllerProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
-    void didReceiveSyncPluginControllerProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*, OwnPtr<CoreIPC::ArgumentEncoder>&);
+    void didReceivePluginControllerProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
+    void didReceiveSyncPluginControllerProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&, OwnPtr<CoreIPC::MessageEncoder>&);
+
+    bool wantsWheelEvents() const;
 
 #if PLATFORM(MAC)
     uint32_t remoteLayerClientID() const;
 #endif
 
     PluginController* asPluginController() { return this; }
+
+    bool isInitializing() const { return m_isInitializing; }
+    
+    void setInitializationReply(PassRefPtr<Messages::WebProcessConnection::CreatePlugin::DelayedReply>);
+    PassRefPtr<Messages::WebProcessConnection::CreatePlugin::DelayedReply> takeInitializationReply();
 
 private:
     PluginControllerProxy(WebProcessConnection*, const PluginCreationParameters&);
@@ -89,11 +93,12 @@ private:
     virtual NPObject* windowScriptNPObject();
     virtual NPObject* pluginElementNPObject();
     virtual bool evaluate(NPObject*, const String& scriptString, NPVariant* result, bool allowPopups);
-    virtual bool tryToShortCircuitInvoke(NPObject*, NPIdentifier methodName, const NPVariant* arguments, uint32_t argumentCount, bool& returnValue, NPVariant& result);
     virtual void setStatusbarText(const String&);
     virtual bool isAcceleratedCompositingEnabled();
     virtual void pluginProcessCrashed();
     virtual void willSendEventToPlugin();
+    virtual void didInitializePlugin() OVERRIDE;
+    virtual void didFailToInitializePlugin() OVERRIDE;
 
 #if PLATFORM(MAC)
     virtual void pluginFocusOrWindowFocusChanged(bool);
@@ -109,6 +114,10 @@ private:
     virtual bool getAuthenticationInfo(const WebCore::ProtectionSpace&, String& username, String& password);
     virtual void protectPluginFromDestruction();
     virtual void unprotectPluginFromDestruction();
+#if PLUGIN_ARCHITECTURE(X11)
+    virtual uint64_t createPluginContainer();
+    virtual void windowedPluginGeometryDidChange(const WebCore::IntRect& frameRect, const WebCore::IntRect& clipRect, uint64_t windowID);
+#endif
     
     // Message handlers.
     void frameDidFinishLoading(uint64_t requestID);
@@ -128,6 +137,9 @@ private:
     void handleMouseEnterEvent(const WebMouseEvent&, bool& handled);
     void handleMouseLeaveEvent(const WebMouseEvent&, bool& handled);
     void handleKeyboardEvent(const WebKeyboardEvent&, bool& handled);
+    void handleEditingCommand(const String&, const String&, bool&);
+    void isEditingCommandEnabled(const String&, bool&);
+    void handlesPageScaleFactor(bool&);
     void paintEntirePlugin();
     void snapshot(ShareableBitmap::Handle& backingStoreHandle);
     void setFocus(bool);
@@ -139,16 +151,16 @@ private:
     void windowAndViewFramesChanged(const WebCore::IntRect& windowFrameInScreenCoordinates, const WebCore::IntRect& viewFrameInWindowCoordinates);
     void windowVisibilityChanged(bool);
     void sendComplexTextInput(const String& textInput);
+    void setLayerHostingMode(uint32_t);
+
+    void updateLayerHostingContext(LayerHostingMode);
 #endif
 
+    void storageBlockingStateChanged(bool);
     void privateBrowsingStateChanged(bool);
     void getFormValue(bool& returnValue, String& formValue);
 
-    bool tryToShortCircuitEvaluate(NPObject*, const String& scriptString, NPVariant* result);
-
-    bool inInitialize() const { return m_pluginCreationParameters; }
-
-    void platformInitialize();
+    void platformInitialize(const PluginCreationParameters&);
     void platformDestroy();
     void platformGeometryDidChange();
 
@@ -156,8 +168,12 @@ private:
     uint64_t m_pluginInstanceID;
 
     String m_userAgent;
+    bool m_storageBlockingEnabled;
     bool m_isPrivateBrowsingEnabled;
     bool m_isAcceleratedCompositingEnabled;
+    bool m_isInitializing;
+
+    RefPtr<Messages::WebProcessConnection::CreatePlugin::DelayedReply> m_initializationReply;
 
     RefPtr<Plugin> m_plugin;
 
@@ -176,9 +192,6 @@ private:
     // code is on the stack.
     WebCore::RunLoop::Timer<PluginControllerProxy> m_pluginDestroyTimer;
 
-    // Will point to the plug-in creation parameters of the plug-in we're currently initializing and will be null when we're done initializing.
-    const PluginCreationParameters* m_pluginCreationParameters;
-
     // Whether we're waiting for the plug-in proxy in the web process to draw the contents of its
     // backing store into the web process backing store.
     bool m_waitingForDidUpdate;
@@ -191,7 +204,7 @@ private:
     bool m_isComplexTextInputEnabled;
 
     // For CA plug-ins, this holds the information needed to export the layer hierarchy to the UI process.
-    RetainPtr<WKCARemoteLayerClientRef> m_remoteLayerClient;
+    OwnPtr<LayerHostingContext> m_layerHostingContext;
 #endif
 
     // The contents scale factor of this plug-in.

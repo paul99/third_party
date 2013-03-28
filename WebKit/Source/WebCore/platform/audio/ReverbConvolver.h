@@ -30,6 +30,7 @@
 #define ReverbConvolver_h
 
 #include "AudioArray.h"
+#include "DirectConvolver.h"
 #include "FFTConvolver.h"
 #include "ReverbAccumulationBuffer.h"
 #include "ReverbConvolverStage.h"
@@ -62,6 +63,7 @@ public:
     bool useBackgroundThreads() const { return m_useBackgroundThreads; }
     void backgroundThreadEntry();
 
+    size_t latencyFrames() const;
 private:
     Vector<OwnPtr<ReverbConvolverStage> > m_stages;
     Vector<OwnPtr<ReverbConvolverStage> > m_backgroundStages;
@@ -71,10 +73,6 @@ private:
 
     // One or more background threads read from this input buffer which is fed from the realtime thread.
     ReverbInputBuffer m_inputBuffer;
-
-    // We're given a rendering hint, so the FFTs can be optimized to not all occur at the same time
-    // (very bad when rendering on a real-time thread).
-    size_t m_renderSliceSize;
 
     // First stage will be of size m_minFFTSize.  Each next stage will be twice as big until we hit m_maxFFTSize.
     size_t m_minFFTSize;

@@ -31,14 +31,14 @@
 #ifndef ColorInputType_h
 #define ColorInputType_h
 
+#include "BaseClickableWithKeyInputType.h"
 #include "ColorChooserClient.h"
-#include "InputType.h"
 
-#if ENABLE(INPUT_COLOR)
+#if ENABLE(INPUT_TYPE_COLOR)
 
 namespace WebCore {
 
-class ColorInputType : public InputType, public ColorChooserClient {
+class ColorInputType : public BaseClickableWithKeyInputType, public ColorChooserClient {
 public:
     static PassOwnPtr<InputType> create(HTMLInputElement*);
     virtual ~ColorInputType();
@@ -46,20 +46,26 @@ public:
     // ColorChooserClient implementation.
     virtual void didChooseColor(const Color&) OVERRIDE;
     virtual void didEndChooser() OVERRIDE;
+    virtual IntRect elementRectRelativeToRootView() const OVERRIDE;
+    virtual Color currentColor() OVERRIDE;
+    virtual bool shouldShowSuggestions() const OVERRIDE;
+    virtual Vector<Color> suggestions() const OVERRIDE;
 
 private:
-    ColorInputType(HTMLInputElement* element) : InputType(element) { }
+    ColorInputType(HTMLInputElement* element) : BaseClickableWithKeyInputType(element) { }
     virtual bool isColorControl() const OVERRIDE;
     virtual const AtomicString& formControlType() const OVERRIDE;
     virtual bool supportsRequired() const OVERRIDE;
     virtual String fallbackValue() const OVERRIDE;
     virtual String sanitizeValue(const String&) const OVERRIDE;
-    virtual Color valueAsColor() const OVERRIDE;
     virtual void createShadowSubtree() OVERRIDE;
-    virtual void setValue(const String&, bool valueChanged, bool sendChangeEvent) OVERRIDE;
+    virtual void setValue(const String&, bool valueChanged, TextFieldEventBehavior) OVERRIDE;
     virtual void handleDOMActivateEvent(Event*) OVERRIDE;
     virtual void detach() OVERRIDE;
+    virtual bool shouldRespectListAttribute() OVERRIDE;
+    virtual bool typeMismatchFor(const String&) const OVERRIDE;
 
+    Color valueAsColor() const;
     void endColorChooser();
     void updateColorSwatch();
     HTMLElement* shadowColorSwatch() const;
@@ -69,6 +75,6 @@ private:
 
 } // namespace WebCore
 
-#endif // ENABLE(INPUT_COLOR)
+#endif // ENABLE(INPUT_TYPE_COLOR)
 
 #endif // ColorInputType_h

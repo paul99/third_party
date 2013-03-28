@@ -40,6 +40,16 @@ namespace DFG {
 
 MacroAssemblerCodeRef osrExitGenerationThunkGenerator(JSGlobalData*);
 
+MacroAssemblerCodeRef throwExceptionFromCallSlowPathGenerator(JSGlobalData*);
+
+MacroAssemblerCodeRef linkCallThunkGenerator(JSGlobalData*);
+MacroAssemblerCodeRef linkConstructThunkGenerator(JSGlobalData*);
+
+MacroAssemblerCodeRef linkClosureCallThunkGenerator(JSGlobalData*);
+
+MacroAssemblerCodeRef virtualCallThunkGenerator(JSGlobalData*);
+MacroAssemblerCodeRef virtualConstructThunkGenerator(JSGlobalData*);
+
 } } // namespace JSC::DFG
 
 #endif // ENABLE(DFG_JIT)

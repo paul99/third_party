@@ -28,12 +28,13 @@
 
 #include "config.h"
 
-#include "InspectorDOMStorageAgent.h"
-
 #if ENABLE(INSPECTOR)
+
+#include "InspectorDOMStorageAgent.h"
 
 #include "Database.h"
 #include "DOMWindow.h"
+#include "Document.h"
 #include "ExceptionCode.h"
 #include "Frame.h"
 #include "InspectorDOMStorageResource.h"
@@ -44,7 +45,9 @@
 #include "Storage.h"
 #include "StorageArea.h"
 #include "VoidCallback.h"
+#include "WebCoreMemoryInstrumentation.h"
 
+#include <wtf/MemoryInstrumentationHashMap.h>
 #include <wtf/Vector.h>
 
 namespace WebCore {
@@ -52,8 +55,6 @@ namespace WebCore {
 namespace DOMStorageAgentState {
 static const char domStorageAgentEnabled[] = "domStorageAgentEnabled";
 };
-
-typedef HashMap<int, RefPtr<InspectorDOMStorageResource> > DOMStorageResourcesMap;
 
 InspectorDOMStorageAgent::InspectorDOMStorageAgent(InstrumentingAgents* instrumentingAgents, InspectorState* state)
     : InspectorBaseAgent<InspectorDOMStorageAgent>("DOMStorage", instrumentingAgents, state)
@@ -78,7 +79,7 @@ void InspectorDOMStorageAgent::clearFrontend()
 {
     DOMStorageResourcesMap::iterator domStorageEnd = m_resources.end();
     for (DOMStorageResourcesMap::iterator it = m_resources.begin(); it != domStorageEnd; ++it)
-        it->second->unbind();
+        it->value->unbind();
     m_frontend = 0;
     disable(0);
 }
@@ -97,7 +98,7 @@ void InspectorDOMStorageAgent::enable(ErrorString*)
 
     DOMStorageResourcesMap::iterator resourcesEnd = m_resources.end();
     for (DOMStorageResourcesMap::iterator it = m_resources.begin(); it != resourcesEnd; ++it)
-        it->second->bind(m_frontend);
+        it->value->bind(m_frontend);
 }
 
 void InspectorDOMStorageAgent::disable(ErrorString*)
@@ -108,74 +109,94 @@ void InspectorDOMStorageAgent::disable(ErrorString*)
     m_state->setBoolean(DOMStorageAgentState::domStorageAgentEnabled, m_enabled);
 }
 
-void InspectorDOMStorageAgent::getDOMStorageEntries(ErrorString*, int storageId, RefPtr<InspectorArray>& entries)
+void InspectorDOMStorageAgent::getDOMStorageEntries(ErrorString*, const String& storageId, RefPtr<TypeBuilder::Array<TypeBuilder::Array<String> > >& entries)
 {
+    // FIXME: consider initializing this array after 2 checks below. The checks should return error messages in this case.
+    entries = TypeBuilder::Array<TypeBuilder::Array<String> >::create();
+
     InspectorDOMStorageResource* storageResource = getDOMStorageResourceForId(storageId);
-    if (storageResource) {
-        storageResource->startReportingChangesToFrontend();
-        Storage* domStorage = storageResource->domStorage();
-        for (unsigned i = 0; i < domStorage->length(); ++i) {
-            String name(domStorage->key(i));
-            String value(domStorage->getItem(name));
-            RefPtr<InspectorArray> entry = InspectorArray::create();
-            entry->pushString(name);
-            entry->pushString(value);
-            entries->pushArray(entry);
-        }
+    if (!storageResource)
+        return;
+    Frame* frame = storageResource->frame();
+    if (!frame)
+        return;
+
+    // FIXME: Exceptions are not reported here.
+    ExceptionCode ec = 0;
+    StorageArea* storageArea = storageResource->storageArea();
+    for (unsigned i = 0; i < storageArea->length(ec, frame); ++i) {
+        String name(storageArea->key(i, ec, frame));
+        if (ec)
+            return;
+        String value(storageArea->getItem(name, ec, frame));
+        if (ec)
+            return;
+        RefPtr<TypeBuilder::Array<String> > entry = TypeBuilder::Array<String>::create();
+        entry->addItem(name);
+        entry->addItem(value);
+        entries->addItem(entry);
     }
 }
 
-void InspectorDOMStorageAgent::setDOMStorageItem(ErrorString*, int storageId, const String& key, const String& value, bool* success)
+void InspectorDOMStorageAgent::setDOMStorageItem(ErrorString*, const String& storageId, const String& key, const String& value, bool* success)
 {
     InspectorDOMStorageResource* storageResource = getDOMStorageResourceForId(storageId);
     if (storageResource) {
         ExceptionCode exception = 0;
-        storageResource->domStorage()->setItem(key, value, exception);
+        storageResource->storageArea()->setItem(key, value, exception, storageResource->frame());
         *success = !exception;
-    }
+    } else
+        *success = false;
 }
 
-void InspectorDOMStorageAgent::removeDOMStorageItem(ErrorString*, int storageId, const String& key, bool* success)
+void InspectorDOMStorageAgent::removeDOMStorageItem(ErrorString*, const String& storageId, const String& key, bool* success)
 {
     InspectorDOMStorageResource* storageResource = getDOMStorageResourceForId(storageId);
     if (storageResource) {
-        storageResource->domStorage()->removeItem(key);
-        *success = true;
-    }
+        ExceptionCode exception = 0;
+        storageResource->storageArea()->removeItem(key, exception, storageResource->frame());
+        *success = !exception;
+    } else
+        *success = false;
 }
 
-int InspectorDOMStorageAgent::storageId(Storage* storage)
+String InspectorDOMStorageAgent::storageId(Storage* storage)
 {
     ASSERT(storage);
     Frame* frame = storage->frame();
     ExceptionCode ec = 0;
-    bool isLocalStorage = (frame->domWindow()->localStorage(ec) == storage && !ec);
-    DOMStorageResourcesMap::iterator domStorageEnd = m_resources.end();
-    for (DOMStorageResourcesMap::iterator it = m_resources.begin(); it != domStorageEnd; ++it) {
-        if (it->second->isSameHostAndType(frame, isLocalStorage))
-            return it->first;
-    }
-    return 0;
+    bool isLocalStorage = (frame->document()->domWindow()->localStorage(ec) == storage && !ec);
+    return storageId(frame->document()->securityOrigin(), isLocalStorage);
 }
 
-InspectorDOMStorageResource* InspectorDOMStorageAgent::getDOMStorageResourceForId(int storageId)
+String InspectorDOMStorageAgent::storageId(SecurityOrigin* securityOrigin, bool isLocalStorage)
+{
+    ASSERT(securityOrigin);
+    DOMStorageResourcesMap::iterator domStorageEnd = m_resources.end();
+    for (DOMStorageResourcesMap::iterator it = m_resources.begin(); it != domStorageEnd; ++it) {
+        if (it->value->isSameOriginAndType(securityOrigin, isLocalStorage))
+            return it->key;
+    }
+    return String();
+}
+
+InspectorDOMStorageResource* InspectorDOMStorageAgent::getDOMStorageResourceForId(const String& storageId)
 {
     DOMStorageResourcesMap::iterator it = m_resources.find(storageId);
     if (it == m_resources.end())
         return 0;
-    return it->second.get();
+    return it->value.get();
 }
 
 void InspectorDOMStorageAgent::didUseDOMStorage(StorageArea* storageArea, bool isLocalStorage, Frame* frame)
 {
     DOMStorageResourcesMap::iterator domStorageEnd = m_resources.end();
     for (DOMStorageResourcesMap::iterator it = m_resources.begin(); it != domStorageEnd; ++it) {
-        if (it->second->isSameHostAndType(frame, isLocalStorage))
+        if (it->value->isSameOriginAndType(frame->document()->securityOrigin(), isLocalStorage))
             return;
     }
 
-    RefPtr<Storage> domStorage = Storage::create(frame, storageArea);
-    RefPtr<InspectorDOMStorageResource> resource = InspectorDOMStorageResource::create(domStorage.get(), isLocalStorage, frame);
+    RefPtr<InspectorDOMStorageResource> resource = InspectorDOMStorageResource::create(storageArea, isLocalStorage, frame);
 
     m_resources.set(resource->id(), resource);
 
@@ -184,11 +205,31 @@ void InspectorDOMStorageAgent::didUseDOMStorage(StorageArea* storageArea, bool i
         resource->bind(m_frontend);
 }
 
+void InspectorDOMStorageAgent::didDispatchDOMStorageEvent(const String&, const String&, const String&, StorageType storageType, SecurityOrigin* securityOrigin, Page*)
+{
+    if (!m_frontend || !m_enabled)
+        return;
+
+    String id = storageId(securityOrigin, storageType == LocalStorage);
+
+    if (id.isEmpty())
+        return;
+
+    m_frontend->domstorage()->domStorageUpdated(id);
+}
+
 void InspectorDOMStorageAgent::clearResources()
 {
     m_resources.clear();
 }
 
+void InspectorDOMStorageAgent::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::InspectorDOMStorageAgent);
+    InspectorBaseAgent<InspectorDOMStorageAgent>::reportMemoryUsage(memoryObjectInfo);
+    info.addMember(m_resources);
+    info.addWeakPointer(m_frontend);
+}
 
 } // namespace WebCore
 

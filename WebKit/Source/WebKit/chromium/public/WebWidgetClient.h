@@ -35,6 +35,7 @@
 #include "WebScreenInfo.h"
 #include "platform/WebCommon.h"
 #include "platform/WebRect.h"
+#include <public/WebLayerTreeView.h>
 
 namespace WebKit {
 
@@ -56,13 +57,31 @@ public:
     virtual void didAutoResize(const WebSize& newSize) { }
 
     // Called when the compositor is enabled or disabled.
-    // The WebCompositor identifier can be used on the compositor thread to get access
-    // to the WebCompositor instance associated with this WebWidget.
-    // If there is no WebCompositor associated with this WebWidget (for example if
-    // threaded compositing is not enabled) then calling WebCompositor::fromIdentifier()
+    // The inputHandlerIdentifier can be used on the compositor thread to get access
+    // to the WebCompositorInputHandler instance associated with this WebWidget.
+    // If there is no WebCompositorInputHandler associated with this WebWidget (for example if
+    // threaded compositing is not enabled) then calling WebCompositorInputHandler::fromIdentifier()
     // for the specified identifier will return 0.
-    virtual void didActivateCompositor(int compositorIdentifier) { }
+    virtual void didActivateCompositor(int inputHandlerIdentifier) { }
     virtual void didDeactivateCompositor() { }
+
+    // Attempt to initialize compositing for this widget using the given
+    // parameters. If this is successful, layerTreeView() will return a valid
+    // WebLayerTreeView. If not, nothing happens.
+    virtual void initializeLayerTreeView(WebLayerTreeViewClient*, const WebLayer& rootLayer, const WebLayerTreeView::Settings&) { }
+
+    // Return a compositing view used for this widget. This is owned by the
+    // WebWidgetClient.
+    virtual WebLayerTreeView* layerTreeView() { return 0; }
+
+    // Indicates to the embedder that the compositor is about to begin a
+    // frame. This is primarily to signal to flow control mechanisms that a
+    // frame is beginning, not to perform actual painting work.
+    virtual void willBeginCompositorFrame() { }
+
+    // Indicates to the embedder that the WebWidget is ready for additional
+    // input.
+    virtual void didBecomeReadyForAdditionalInput() { }
 
     // Called for compositing mode when the draw commands for a WebKit-side
     // frame have been issued.
@@ -121,6 +140,9 @@ public:
     // Called to query information about the screen where this widget is
     // displayed.
     virtual WebScreenInfo screenInfo() { return WebScreenInfo(); }
+
+    // Called to get the scale factor of the display.
+    virtual float deviceScaleFactor() { return 1; }
 
     // When this method gets called, WebWidgetClient implementation should
     // reset the input method by cancelling any ongoing composition.

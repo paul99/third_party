@@ -9,7 +9,7 @@ TARGET  = qmlwebkitplugin
 
 TARGET.module_name = QtWebKit
 
-CONFIG += qt plugin
+CONFIG += plugin
 
 QMLDIRFILE = $${_PRO_FILE_PWD_}/qmldir
 copy2build.input = QMLDIRFILE
@@ -24,38 +24,31 @@ contains(QT_CONFIG, reduce_exports):CONFIG += hide_symbols
 
 wince*:LIBS += $$QMAKE_LIBS_GUI
 
-CONFIG += qtwebkit qtwebkit-private
+QT += webkit webkit-private quick quick-private
 
-QT += declarative
-haveQt(5): QT += widgets quick
-
-contains(QT_CONFIG, qtquick1): {
-    QT += qtquick1
-}
+WEBKIT += wtf
 
 DESTDIR = $${ROOT_BUILD_DIR}/imports/$${TARGET.module_name}
 
 CONFIG += rpath
 RPATHDIR_RELATIVE_TO_DESTDIR = ../../lib
 
-INCLUDEPATH += \
-    ../../../WebKit2/Shared/qt \
-    ../../../JavaScriptCore \
-    ../../../JavaScriptCore/runtime \
-    ../../../JavaScriptCore/wtf
+SOURCES += plugin.cpp
 
-SOURCES += qdeclarativewebview.cpp plugin.cpp
-HEADERS += qdeclarativewebview_p.h
-
-!no_webkit2: {
+build?(webkit2): {
     DEFINES += HAVE_WEBKIT2
     QT += network
 }
 
-target.path = $$[QT_INSTALL_IMPORTS]/$${TARGET.module_name}
+# The fallback to QT_INSTALL_IMPORTS can be removed once we
+# depend on Qt 5 RC1.
+importPath = $$[QT_INSTALL_QML]
+isEmpty(importPath): importPath = $$[QT_INSTALL_IMPORTS]
+
+target.path = $${importPath}/$${TARGET.module_name}
 
 
 qmldir.files += $$PWD/qmldir
-qmldir.path +=  $$[QT_INSTALL_IMPORTS]/$${TARGET.module_name}
+qmldir.path +=  $${importPath}/$${TARGET.module_name}
 
 INSTALLS += target qmldir

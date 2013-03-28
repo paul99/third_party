@@ -23,7 +23,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 #ifndef RenderMathMLUnderOver_h
 #define RenderMathMLUnderOver_h
 
@@ -35,14 +34,14 @@ namespace WebCore {
     
 class RenderMathMLUnderOver : public RenderMathMLBlock {
 public:
-    RenderMathMLUnderOver(Node* expression);
-    virtual void addChild(RenderObject* child, RenderObject* beforeChild = 0);
-    virtual void layout();
-    virtual bool hasBase() const { return true; }
-    virtual int nonOperatorHeight() const;
-    virtual int baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const;    
-    virtual void stretchToHeight(int pixelHeight);
+    RenderMathMLUnderOver(Element*);
+    
+    virtual RenderMathMLOperator* unembellishedOperator();
+
+    virtual int firstLineBoxBaseline() const OVERRIDE;
+    
 private:
+    virtual bool isRenderMathMLUnderOver() const { return true; }
     virtual const char* renderName() const { return "RenderMathMLUnderOver"; }
 
     enum UnderOverType { Under, Over, UnderOver };

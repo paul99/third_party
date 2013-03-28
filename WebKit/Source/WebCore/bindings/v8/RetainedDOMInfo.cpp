@@ -31,7 +31,8 @@
 #include "config.h"
 #include "RetainedDOMInfo.h"
 
-#include "Node.h"
+#include "ContainerNode.h"
+#include "NodeTraversal.h"
 
 namespace WebCore {
 
@@ -53,12 +54,16 @@ void RetainedDOMInfo::Dispose()
 bool RetainedDOMInfo::IsEquivalent(v8::RetainedObjectInfo* other)
 {
     ASSERT(other);
-    return other == this || static_cast<WebCore::RetainedObjectInfo*>(other)->GetEquivalenceClass() == this->GetEquivalenceClass();
+    if (other == this)
+        return true;
+    if (strcmp(GetLabel(), other->GetLabel()))
+        return false;
+    return static_cast<WebCore::RetainedObjectInfo*>(other)->GetEquivalenceClass() == this->GetEquivalenceClass();
 }
 
 intptr_t RetainedDOMInfo::GetHash()
 {
-    return reinterpret_cast<intptr_t>(m_root);
+    return PtrHash<void*>::hash(m_root);
 }
     
 const char* RetainedDOMInfo::GetGroupLabel()
@@ -76,7 +81,7 @@ intptr_t RetainedDOMInfo::GetElementCount()
     intptr_t count = 1;
     Node* current = m_root;
     while (current) {
-        current = current->traverseNextNode(m_root);
+        current = NodeTraversal::next(current, m_root);
         ++count;
     }
     return count;

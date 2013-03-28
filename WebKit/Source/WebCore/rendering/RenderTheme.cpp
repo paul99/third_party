@@ -1,7 +1,7 @@
 /**
  * This file is part of the theme implementation for form controls in WebCore.
  *
- * Copyright (C) 2005, 2006, 2007, 2008, 2009, 2010 Apple Computer, Inc.
+ * Copyright (C) 2005, 2006, 2007, 2008, 2009, 2010, 2012 Apple Computer, Inc.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -24,6 +24,7 @@
 
 #include "CSSValueKeywords.h"
 #include "Document.h"
+#include "FileList.h"
 #include "FileSystem.h"
 #include "FloatConversion.h"
 #include "FocusController.h"
@@ -40,16 +41,25 @@
 #include "RenderStyle.h"
 #include "RenderView.h"
 #include "Settings.h"
+#include "SpinButtonElement.h"
 #include "StringTruncator.h"
 #include "TextControlInnerElements.h"
 
-#if ENABLE(METER_TAG)
+#if ENABLE(METER_ELEMENT)
 #include "HTMLMeterElement.h"
 #include "RenderMeter.h"
 #endif
 
 #if ENABLE(INPUT_SPEECH)
 #include "RenderInputSpeech.h"
+#endif
+
+#if ENABLE(DATALIST_ELEMENT)
+#include "ElementShadow.h"
+#include "HTMLCollection.h"
+#include "HTMLDataListElement.h"
+#include "HTMLOptionElement.h"
+#include "HTMLParserIdioms.h"
 #endif
 
 // The methods in this file are shared by all themes on every platform.
@@ -71,7 +81,7 @@ RenderTheme::RenderTheme()
 {
 }
 
-void RenderTheme::adjustStyle(CSSStyleSelector* selector, RenderStyle* style, Element* e,
+void RenderTheme::adjustStyle(StyleResolver* styleResolver, RenderStyle* style, Element* e,
                               bool UAHasAppearance, const BorderData& border, const FillLayer& background, const Color& backgroundColor)
 {
     // Force inline and table display styles to be inline-block (except for table- which is block)
@@ -100,7 +110,6 @@ void RenderTheme::adjustStyle(CSSStyleSelector* selector, RenderStyle* style, El
     
 #if USE(NEW_THEME)
     switch (part) {
-        case ListButtonPart:
         case CheckboxPart:
         case InnerSpinButtonPart:
         case RadioPart:
@@ -183,59 +192,67 @@ void RenderTheme::adjustStyle(CSSStyleSelector* selector, RenderStyle* style, El
     switch (style->appearance()) {
 #if !USE(NEW_THEME)
         case CheckboxPart:
-            return adjustCheckboxStyle(selector, style, e);
+            return adjustCheckboxStyle(styleResolver, style, e);
         case RadioPart:
-            return adjustRadioStyle(selector, style, e);
+            return adjustRadioStyle(styleResolver, style, e);
         case PushButtonPart:
         case SquareButtonPart:
-        case ListButtonPart:
         case DefaultButtonPart:
         case ButtonPart:
-            return adjustButtonStyle(selector, style, e);
+            return adjustButtonStyle(styleResolver, style, e);
         case InnerSpinButtonPart:
-            return adjustInnerSpinButtonStyle(selector, style, e);
+            return adjustInnerSpinButtonStyle(styleResolver, style, e);
 #endif
         case TextFieldPart:
-            return adjustTextFieldStyle(selector, style, e);
+            return adjustTextFieldStyle(styleResolver, style, e);
         case TextAreaPart:
-            return adjustTextAreaStyle(selector, style, e);
+            return adjustTextAreaStyle(styleResolver, style, e);
         case MenulistPart:
-            return adjustMenuListStyle(selector, style, e);
+            return adjustMenuListStyle(styleResolver, style, e);
         case MenulistButtonPart:
-            return adjustMenuListButtonStyle(selector, style, e);
+            return adjustMenuListButtonStyle(styleResolver, style, e);
+        case MediaPlayButtonPart:
+        case MediaCurrentTimePart:
+        case MediaTimeRemainingPart:
+        case MediaEnterFullscreenButtonPart:
+        case MediaExitFullscreenButtonPart:
+        case MediaMuteButtonPart:
+        case MediaVolumeSliderContainerPart:
+            return adjustMediaControlStyle(styleResolver, style, e);
         case MediaSliderPart:
         case MediaVolumeSliderPart:
+        case MediaFullScreenVolumeSliderPart:
         case SliderHorizontalPart:
         case SliderVerticalPart:
-            return adjustSliderTrackStyle(selector, style, e);
+            return adjustSliderTrackStyle(styleResolver, style, e);
         case SliderThumbHorizontalPart:
         case SliderThumbVerticalPart:
-            return adjustSliderThumbStyle(selector, style, e);
+            return adjustSliderThumbStyle(styleResolver, style, e);
         case SearchFieldPart:
-            return adjustSearchFieldStyle(selector, style, e);
+            return adjustSearchFieldStyle(styleResolver, style, e);
         case SearchFieldCancelButtonPart:
-            return adjustSearchFieldCancelButtonStyle(selector, style, e);
+            return adjustSearchFieldCancelButtonStyle(styleResolver, style, e);
         case SearchFieldDecorationPart:
-            return adjustSearchFieldDecorationStyle(selector, style, e);
+            return adjustSearchFieldDecorationStyle(styleResolver, style, e);
         case SearchFieldResultsDecorationPart:
-            return adjustSearchFieldResultsDecorationStyle(selector, style, e);
+            return adjustSearchFieldResultsDecorationStyle(styleResolver, style, e);
         case SearchFieldResultsButtonPart:
-            return adjustSearchFieldResultsButtonStyle(selector, style, e);
-#if ENABLE(PROGRESS_TAG)
+            return adjustSearchFieldResultsButtonStyle(styleResolver, style, e);
+#if ENABLE(PROGRESS_ELEMENT)
         case ProgressBarPart:
-            return adjustProgressBarStyle(selector, style, e);
+            return adjustProgressBarStyle(styleResolver, style, e);
 #endif
-#if ENABLE(METER_TAG)
+#if ENABLE(METER_ELEMENT)
         case MeterPart:
         case RelevancyLevelIndicatorPart:
         case ContinuousCapacityLevelIndicatorPart:
         case DiscreteCapacityLevelIndicatorPart:
         case RatingLevelIndicatorPart:
-            return adjustMeterStyle(selector, style, e);
+            return adjustMeterStyle(styleResolver, style, e);
 #endif
 #if ENABLE(INPUT_SPEECH)
         case InputSpeechButtonPart:
-            return adjustInputFieldSpeechButtonStyle(selector, style, e);
+            return adjustInputFieldSpeechButtonStyle(styleResolver, style, e);
 #endif
         default:
             break;
@@ -263,7 +280,6 @@ bool RenderTheme::paint(RenderObject* o, const PaintInfo& paintInfo, const IntRe
         case RadioPart:
         case PushButtonPart:
         case SquareButtonPart:
-        case ListButtonPart:
         case DefaultButtonPart:
         case ButtonPart:
         case InnerSpinButtonPart:
@@ -283,7 +299,6 @@ bool RenderTheme::paint(RenderObject* o, const PaintInfo& paintInfo, const IntRe
             return paintRadio(o, paintInfo, r);
         case PushButtonPart:
         case SquareButtonPart:
-        case ListButtonPart:
         case DefaultButtonPart:
         case ButtonPart:
             return paintButton(o, paintInfo, r);
@@ -292,7 +307,7 @@ bool RenderTheme::paint(RenderObject* o, const PaintInfo& paintInfo, const IntRe
 #endif
         case MenulistPart:
             return paintMenuList(o, paintInfo, r);
-#if ENABLE(METER_TAG)
+#if ENABLE(METER_ELEMENT)
         case MeterPart:
         case RelevancyLevelIndicatorPart:
         case ContinuousCapacityLevelIndicatorPart:
@@ -300,7 +315,7 @@ bool RenderTheme::paint(RenderObject* o, const PaintInfo& paintInfo, const IntRe
         case RatingLevelIndicatorPart:
             return paintMeter(o, paintInfo, r);
 #endif
-#if ENABLE(PROGRESS_TAG)
+#if ENABLE(PROGRESS_ELEMENT)
         case ProgressBarPart:
             return paintProgressBar(o, paintInfo, r);
 #endif
@@ -310,7 +325,8 @@ bool RenderTheme::paint(RenderObject* o, const PaintInfo& paintInfo, const IntRe
         case SliderThumbHorizontalPart:
         case SliderThumbVerticalPart:
             return paintSliderThumb(o, paintInfo, r);
-        case MediaFullscreenButtonPart:
+        case MediaEnterFullscreenButtonPart:
+        case MediaExitFullscreenButtonPart:
             return paintMediaFullscreenButton(o, paintInfo, r);
         case MediaPlayButtonPart:
             return paintMediaPlayButton(o, paintInfo, r);
@@ -340,6 +356,10 @@ bool RenderTheme::paint(RenderObject* o, const PaintInfo& paintInfo, const IntRe
             return paintMediaVolumeSliderTrack(o, paintInfo, r);
         case MediaVolumeSliderThumbPart:
             return paintMediaVolumeSliderThumb(o, paintInfo, r);
+        case MediaFullScreenVolumeSliderPart:
+            return paintMediaFullScreenVolumeSliderTrack(o, paintInfo, r);
+        case MediaFullScreenVolumeSliderThumbPart:
+            return paintMediaFullScreenVolumeSliderThumb(o, paintInfo, r);
         case MediaTimeRemainingPart:
             return paintMediaTimeRemaining(o, paintInfo, r);
         case MediaCurrentTimePart:
@@ -391,18 +411,17 @@ bool RenderTheme::paintBorderOnly(RenderObject* o, const PaintInfo& paintInfo, c
         case RadioPart:
         case PushButtonPart:
         case SquareButtonPart:
-        case ListButtonPart:
         case DefaultButtonPart:
         case ButtonPart:
         case MenulistPart:
-#if ENABLE(METER_TAG)
+#if ENABLE(METER_ELEMENT)
         case MeterPart:
         case RelevancyLevelIndicatorPart:
         case ContinuousCapacityLevelIndicatorPart:
         case DiscreteCapacityLevelIndicatorPart:
         case RatingLevelIndicatorPart:
 #endif
-#if ENABLE(PROGRESS_TAG)
+#if ENABLE(PROGRESS_ELEMENT)
         case ProgressBarPart:
 #endif
         case SliderHorizontalPart:
@@ -439,18 +458,17 @@ bool RenderTheme::paintDecorations(RenderObject* o, const PaintInfo& paintInfo, 
         case RadioPart:
         case PushButtonPart:
         case SquareButtonPart:
-        case ListButtonPart:
         case DefaultButtonPart:
         case ButtonPart:
         case MenulistPart:
-#if ENABLE(METER_TAG)
+#if ENABLE(METER_ELEMENT)
         case MeterPart:
         case RelevancyLevelIndicatorPart:
         case ContinuousCapacityLevelIndicatorPart:
         case DiscreteCapacityLevelIndicatorPart:
         case RatingLevelIndicatorPart:
 #endif
-#if ENABLE(PROGRESS_TAG)
+#if ENABLE(PROGRESS_ELEMENT)
         case ProgressBarPart:
 #endif
         case SliderHorizontalPart:
@@ -505,7 +523,7 @@ String RenderTheme::formatMediaControlsRemainingTime(float currentTime, float du
 IntPoint RenderTheme::volumeSliderOffsetFromMuteButton(RenderBox* muteButtonBox, const IntSize& size) const
 {
     int y = -size.height();
-    FloatPoint absPoint = muteButtonBox->localToAbsolute(FloatPoint(muteButtonBox->offsetLeft(), y), true, true);
+    FloatPoint absPoint = muteButtonBox->localToAbsolute(FloatPoint(muteButtonBox->pixelSnappedOffsetLeft(), y), IsFixed | UseTransforms);
     if (absPoint.y() < 0)
         y = muteButtonBox->height();
     return IntPoint(0, y);
@@ -668,6 +686,9 @@ void RenderTheme::adjustRepaintRect(const RenderObject* o, IntRect& r)
 {
 #if USE(NEW_THEME)
     m_theme->inflateControlPaintRect(o->style()->appearance(), controlStatesForRenderer(o), r, o->style()->effectiveZoom());
+#else
+    UNUSED_PARAM(o);
+    UNUSED_PARAM(r);
 #endif
 }
 
@@ -804,7 +825,7 @@ bool RenderTheme::isReadOnlyControl(const RenderObject* o) const
     Node* node = o->node();
     if (!node || !node->isElementNode())
         return false;
-    return static_cast<Element*>(node)->isReadOnlyFormControl();
+    return toElement(node)->matchesReadOnlyPseudoClass();
 }
 
 bool RenderTheme::isHovered(const RenderObject* o) const
@@ -845,7 +866,7 @@ bool RenderTheme::isDefault(const RenderObject* o) const
 
 #if !USE(NEW_THEME)
 
-void RenderTheme::adjustCheckboxStyle(CSSStyleSelector*, RenderStyle* style, Element*) const
+void RenderTheme::adjustCheckboxStyle(StyleResolver*, RenderStyle* style, Element*) const
 {
     // A summary of the rules for checkbox designed to match WinIE:
     // width/height - honored (WinIE actually scales its control for small widths, but lets it overflow for small heights.)
@@ -862,7 +883,7 @@ void RenderTheme::adjustCheckboxStyle(CSSStyleSelector*, RenderStyle* style, Ele
     style->setBoxShadow(nullptr);
 }
 
-void RenderTheme::adjustRadioStyle(CSSStyleSelector*, RenderStyle* style, Element*) const
+void RenderTheme::adjustRadioStyle(StyleResolver*, RenderStyle* style, Element*) const
 {
     // A summary of the rules for checkbox designed to match WinIE:
     // width/height - honored (WinIE actually scales its control for small widths, but lets it overflow for small heights.)
@@ -879,34 +900,34 @@ void RenderTheme::adjustRadioStyle(CSSStyleSelector*, RenderStyle* style, Elemen
     style->setBoxShadow(nullptr);
 }
 
-void RenderTheme::adjustButtonStyle(CSSStyleSelector*, RenderStyle* style, Element*) const
+void RenderTheme::adjustButtonStyle(StyleResolver*, RenderStyle* style, Element*) const
 {
     // Most platforms will completely honor all CSS, and so we have no need to adjust the style
     // at all by default.  We will still allow the theme a crack at setting up a desired vertical size.
     setButtonSize(style);
 }
 
-void RenderTheme::adjustInnerSpinButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+void RenderTheme::adjustInnerSpinButtonStyle(StyleResolver*, RenderStyle*, Element*) const
 {
 }
 #endif
 
-void RenderTheme::adjustTextFieldStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+void RenderTheme::adjustTextFieldStyle(StyleResolver*, RenderStyle*, Element*) const
 {
 }
 
-void RenderTheme::adjustTextAreaStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+void RenderTheme::adjustTextAreaStyle(StyleResolver*, RenderStyle*, Element*) const
 {
 }
 
-void RenderTheme::adjustMenuListStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+void RenderTheme::adjustMenuListStyle(StyleResolver*, RenderStyle*, Element*) const
 {
 }
 
 #if ENABLE(INPUT_SPEECH)
-void RenderTheme::adjustInputFieldSpeechButtonStyle(CSSStyleSelector* selector, RenderStyle* style, Element* element) const
+void RenderTheme::adjustInputFieldSpeechButtonStyle(StyleResolver* styleResolver, RenderStyle* style, Element* element) const
 {
-    RenderInputSpeech::adjustInputFieldSpeechButtonStyle(selector, style, element);
+    RenderInputSpeech::adjustInputFieldSpeechButtonStyle(styleResolver, style, element);
 }
 
 bool RenderTheme::paintInputFieldSpeechButton(RenderObject* object, const PaintInfo& paintInfo, const IntRect& rect)
@@ -915,8 +936,8 @@ bool RenderTheme::paintInputFieldSpeechButton(RenderObject* object, const PaintI
 }
 #endif
 
-#if ENABLE(METER_TAG)
-void RenderTheme::adjustMeterStyle(CSSStyleSelector*, RenderStyle* style, Element*) const
+#if ENABLE(METER_ELEMENT)
+void RenderTheme::adjustMeterStyle(StyleResolver*, RenderStyle* style, Element*) const
 {
     style->setBoxShadow(nullptr);
 }
@@ -938,7 +959,96 @@ bool RenderTheme::paintMeter(RenderObject*, const PaintInfo&, const IntRect&)
 
 #endif
 
-#if ENABLE(PROGRESS_TAG)
+#if ENABLE(DATALIST_ELEMENT)
+LayoutUnit RenderTheme::sliderTickSnappingThreshold() const
+{
+    return 0;
+}
+
+void RenderTheme::paintSliderTicks(RenderObject* o, const PaintInfo& paintInfo, const IntRect& rect)
+{
+    Node* node = o->node();
+    if (!node)
+        return;
+
+    HTMLInputElement* input = node->toInputElement();
+    if (!input)
+        return;
+
+    HTMLDataListElement* dataList = static_cast<HTMLDataListElement*>(input->list());
+    if (!dataList)
+        return;
+
+    double min = input->minimum();
+    double max = input->maximum();
+    ControlPart part = o->style()->appearance();
+    // We don't support ticks on alternate sliders like MediaVolumeSliders.
+    if (part !=  SliderHorizontalPart && part != SliderVerticalPart)
+        return;
+    bool isHorizontal = part ==  SliderHorizontalPart;
+
+    IntSize thumbSize;
+    RenderObject* thumbRenderer = input->sliderThumbElement()->renderer();
+    if (thumbRenderer) {
+        RenderStyle* thumbStyle = thumbRenderer->style();
+        int thumbWidth = thumbStyle->width().intValue();
+        int thumbHeight = thumbStyle->height().intValue();
+        thumbSize.setWidth(isHorizontal ? thumbWidth : thumbHeight);
+        thumbSize.setHeight(isHorizontal ? thumbHeight : thumbWidth);
+    }
+
+    IntSize tickSize = sliderTickSize();
+    float zoomFactor = o->style()->effectiveZoom();
+    FloatRect tickRect;
+    int tickRegionSideMargin = 0;
+    int tickRegionWidth = 0;
+    IntRect trackBounds;
+    RenderObject* trackRenderer = input->sliderTrackElement()->renderer();
+    // We can ignoring transforms because transform is handled by the graphics context.
+    if (trackRenderer)
+        trackBounds = trackRenderer->absoluteBoundingBoxRectIgnoringTransforms();
+    IntRect sliderBounds = o->absoluteBoundingBoxRectIgnoringTransforms();
+
+    // Make position relative to the transformed ancestor element.
+    trackBounds.setX(trackBounds.x() - sliderBounds.x() + rect.x());
+    trackBounds.setY(trackBounds.y() - sliderBounds.y() + rect.y());
+
+    if (isHorizontal) {
+        tickRect.setWidth(floor(tickSize.width() * zoomFactor));
+        tickRect.setHeight(floor(tickSize.height() * zoomFactor));
+        tickRect.setY(floor(rect.y() + rect.height() / 2.0 + sliderTickOffsetFromTrackCenter() * zoomFactor));
+        tickRegionSideMargin = trackBounds.x() + (thumbSize.width() - tickSize.width() * zoomFactor) / 2.0;
+        tickRegionWidth = trackBounds.width() - thumbSize.width();
+    } else {
+        tickRect.setWidth(floor(tickSize.height() * zoomFactor));
+        tickRect.setHeight(floor(tickSize.width() * zoomFactor));
+        tickRect.setX(floor(rect.x() + rect.width() / 2.0 + sliderTickOffsetFromTrackCenter() * zoomFactor));
+        tickRegionSideMargin = trackBounds.y() + (thumbSize.width() - tickSize.width() * zoomFactor) / 2.0;
+        tickRegionWidth = trackBounds.height() - thumbSize.width();
+    }
+    RefPtr<HTMLCollection> options = dataList->options();
+    GraphicsContextStateSaver stateSaver(*paintInfo.context);
+    paintInfo.context->setFillColor(o->style()->visitedDependentColor(CSSPropertyColor), ColorSpaceDeviceRGB);
+    for (unsigned i = 0; Node* node = options->item(i); i++) {
+        ASSERT(node->hasTagName(optionTag));
+        HTMLOptionElement* optionElement = static_cast<HTMLOptionElement*>(node);
+        String value = optionElement->value();
+        if (!input->isValidValue(value))
+            continue;
+        double parsedValue = parseToDoubleForNumberType(input->sanitizeValue(value));
+        double tickFraction = (parsedValue - min) / (max - min);
+        double tickRatio = isHorizontal && o->style()->isLeftToRightDirection() ? tickFraction : 1.0 - tickFraction;
+        double tickPosition = round(tickRegionSideMargin + tickRegionWidth * tickRatio);
+        if (isHorizontal)
+            tickRect.setX(tickPosition);
+        else
+            tickRect.setY(tickPosition);
+        paintInfo.context->fillRect(tickRect);
+    }
+}
+#endif
+
+#if ENABLE(PROGRESS_ELEMENT)
 double RenderTheme::animationRepeatIntervalForProgressBar(RenderProgress*) const
 {
     return 0;
@@ -949,7 +1059,7 @@ double RenderTheme::animationDurationForProgressBar(RenderProgress*) const
     return 0;
 }
 
-void RenderTheme::adjustProgressBarStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+void RenderTheme::adjustProgressBarStyle(StyleResolver*, RenderStyle*, Element*) const
 {
 }
 #endif
@@ -959,40 +1069,44 @@ bool RenderTheme::shouldHaveSpinButton(HTMLInputElement* inputElement) const
     return inputElement->isSteppable() && !inputElement->isRangeControl();
 }
 
-void RenderTheme::adjustMenuListButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+void RenderTheme::adjustMenuListButtonStyle(StyleResolver*, RenderStyle*, Element*) const
 {
 }
 
-void RenderTheme::adjustSliderTrackStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+void RenderTheme::adjustMediaControlStyle(StyleResolver*, RenderStyle*, Element*) const
 {
 }
 
-void RenderTheme::adjustSliderThumbStyle(CSSStyleSelector*, RenderStyle* style, Element*) const
-{
-    adjustSliderThumbSize(style);
-}
-
-void RenderTheme::adjustSliderThumbSize(RenderStyle*) const
+void RenderTheme::adjustSliderTrackStyle(StyleResolver*, RenderStyle*, Element*) const
 {
 }
 
-void RenderTheme::adjustSearchFieldStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+void RenderTheme::adjustSliderThumbStyle(StyleResolver*, RenderStyle* style, Element* element) const
+{
+    adjustSliderThumbSize(style, element);
+}
+
+void RenderTheme::adjustSliderThumbSize(RenderStyle*, Element*) const
 {
 }
 
-void RenderTheme::adjustSearchFieldCancelButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+void RenderTheme::adjustSearchFieldStyle(StyleResolver*, RenderStyle*, Element*) const
 {
 }
 
-void RenderTheme::adjustSearchFieldDecorationStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+void RenderTheme::adjustSearchFieldCancelButtonStyle(StyleResolver*, RenderStyle*, Element*) const
 {
 }
 
-void RenderTheme::adjustSearchFieldResultsDecorationStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+void RenderTheme::adjustSearchFieldDecorationStyle(StyleResolver*, RenderStyle*, Element*) const
 {
 }
 
-void RenderTheme::adjustSearchFieldResultsButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+void RenderTheme::adjustSearchFieldResultsDecorationStyle(StyleResolver*, RenderStyle*, Element*) const
+{
+}
+
+void RenderTheme::adjustSearchFieldResultsButtonStyle(StyleResolver*, RenderStyle*, Element*) const
 {
 }
 
@@ -1127,24 +1241,32 @@ Color RenderTheme::focusRingColor()
     return customFocusRingColor().isValid() ? customFocusRingColor() : defaultTheme()->platformFocusRingColor();
 }
 
-String RenderTheme::fileListNameForWidth(const Vector<String>& filenames, const Font& font, int width, bool multipleFilesAllowed)
+String RenderTheme::fileListDefaultLabel(bool multipleFilesAllowed) const
+{
+    if (multipleFilesAllowed)
+        return fileButtonNoFilesSelectedLabel();
+    return fileButtonNoFileSelectedLabel();
+}
+
+String RenderTheme::fileListNameForWidth(const FileList* fileList, const Font& font, int width, bool multipleFilesAllowed) const
 {
     if (width <= 0)
         return String();
 
     String string;
-    if (filenames.isEmpty()) {
-        if (multipleFilesAllowed)
-            string = fileButtonNoFilesSelectedLabel();
-        else
-            string = fileButtonNoFileSelectedLabel();
-    }
-    else if (filenames.size() == 1)
-        string = pathGetFileName(filenames[0]);
+    if (fileList->isEmpty())
+        string = fileListDefaultLabel(multipleFilesAllowed);
+    else if (fileList->length() == 1)
+        string = fileList->item(0)->name();
     else
-        return StringTruncator::rightTruncate(multipleFileUploadText(filenames.size()), width, font, StringTruncator::EnableRoundingHacks);
+        return StringTruncator::rightTruncate(multipleFileUploadText(fileList->length()), width, font, StringTruncator::EnableRoundingHacks);
 
     return StringTruncator::centerTruncate(string, width, font, StringTruncator::EnableRoundingHacks);
+}
+
+bool RenderTheme::shouldOpenPickerWithF4Key() const
+{
+    return false;
 }
 
 } // namespace WebCore

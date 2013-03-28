@@ -28,6 +28,7 @@
 
 #include "FEGaussianBlur.h"
 #include "IntSize.h"
+#include "LengthFunctions.h"
 
 #if ENABLE(CSS_FILTERS)
 
@@ -86,6 +87,27 @@ bool FilterOperations::operationsMatch(const FilterOperations& other) const
     return true;
 }
 
+#if ENABLE(CSS_SHADERS)
+bool FilterOperations::hasCustomFilter() const
+{
+    for (size_t i = 0; i < m_operations.size(); ++i) {
+        FilterOperation::OperationType type = m_operations.at(i)->getOperationType();
+        if (type == FilterOperation::CUSTOM || type == FilterOperation::VALIDATED_CUSTOM)
+            return true;
+    }
+    return false;
+}
+#endif
+
+bool FilterOperations::hasReferenceFilter() const
+{
+    for (size_t i = 0; i < m_operations.size(); ++i) {
+        if (m_operations.at(i)->getOperationType() == FilterOperation::REFERENCE)
+            return true;
+    }
+    return false;
+}
+
 bool FilterOperations::hasOutsets() const
 {
     for (size_t i = 0; i < m_operations.size(); ++i) {
@@ -96,7 +118,7 @@ bool FilterOperations::hasOutsets() const
     return false;
 }
 
-void FilterOperations::getOutsets(LayoutUnit& top, LayoutUnit& right, LayoutUnit& bottom, LayoutUnit& left) const
+void FilterOperations::getOutsets(int& top, int& right, int& bottom, int& left) const
 {
     top = 0;
     right = 0;
@@ -107,7 +129,7 @@ void FilterOperations::getOutsets(LayoutUnit& top, LayoutUnit& right, LayoutUnit
         switch (filterOperation->getOperationType()) {
         case FilterOperation::BLUR: {
             BlurFilterOperation* blurOperation = static_cast<BlurFilterOperation*>(filterOperation);
-            float stdDeviation = blurOperation->stdDeviation().calcFloatValue(0);
+            float stdDeviation = floatValueForLength(blurOperation->stdDeviation(), 0);
             IntSize outset = outsetSizeForBlur(stdDeviation);
             top += outset.height();
             right += outset.width();
@@ -118,15 +140,17 @@ void FilterOperations::getOutsets(LayoutUnit& top, LayoutUnit& right, LayoutUnit
         case FilterOperation::DROP_SHADOW: {
             DropShadowFilterOperation* dropShadowOperation = static_cast<DropShadowFilterOperation*>(filterOperation);
             IntSize outset = outsetSizeForBlur(dropShadowOperation->stdDeviation());
-            top += outset.height() - dropShadowOperation->y();
-            right += outset.width() + dropShadowOperation->x();
-            bottom += outset.height() + dropShadowOperation->y();
-            left += outset.width() - dropShadowOperation->x();
+            top += std::max(0, outset.height() - dropShadowOperation->y());
+            right += std::max(0, outset.width() + dropShadowOperation->x());
+            bottom += std::max(0, outset.height() + dropShadowOperation->y());
+            left += std::max(0, outset.width() - dropShadowOperation->x());
             break;
         }
 #if ENABLE(CSS_SHADERS)
-        case FilterOperation::CUSTOM: {
-            // Need to include the filter margins here.
+        case FilterOperation::CUSTOM:
+        case FilterOperation::VALIDATED_CUSTOM: {
+            // FIXME: Need to include the filter margins here.
+            // https://bugs.webkit.org/show_bug.cgi?id=71400
             break;
         }
 #endif
@@ -134,6 +158,22 @@ void FilterOperations::getOutsets(LayoutUnit& top, LayoutUnit& right, LayoutUnit
             break;
         }
     }
+}
+
+bool FilterOperations::hasFilterThatAffectsOpacity() const
+{
+    for (size_t i = 0; i < m_operations.size(); ++i)
+        if (m_operations[i]->affectsOpacity())
+            return true;
+    return false;
+}
+
+bool FilterOperations::hasFilterThatMovesPixels() const
+{
+    for (size_t i = 0; i < m_operations.size(); ++i)
+        if (m_operations[i]->movesPixels())
+            return true;
+    return false;
 }
 
 } // namespace WebCore

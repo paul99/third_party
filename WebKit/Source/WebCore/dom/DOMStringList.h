@@ -26,10 +26,10 @@
 #ifndef DOMStringList_h
 #define DOMStringList_h
 
-#include "PlatformString.h"
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -45,11 +45,14 @@ public:
     bool isEmpty() const { return m_strings.isEmpty(); }
     void clear() { m_strings.clear(); }
     void append(const String& string) { m_strings.append(string); }
+    void sort();
 
     // Implements the IDL.
     size_t length() const { return m_strings.size(); }
     String item(unsigned index) const;
     bool contains(const String& str) const;
+
+    operator const Vector<String>&() const { return m_strings; }
 
 private:
     DOMStringList() { }

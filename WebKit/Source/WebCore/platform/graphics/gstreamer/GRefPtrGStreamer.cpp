@@ -19,6 +19,7 @@
 
 #include "config.h"
 #include "GRefPtrGStreamer.h"
+#include "GStreamerVersioning.h"
 
 #if USE(GSTREAMER)
 #include <gst/gstelement.h>
@@ -27,16 +28,14 @@ namespace WTF {
 
 template <> GRefPtr<GstElement> adoptGRef(GstElement* ptr)
 {
-    ASSERT(!ptr || !GST_OBJECT_IS_FLOATING(GST_OBJECT(ptr)));
+    ASSERT(!ptr || !gstObjectIsFloating(GST_OBJECT(ptr)));
     return GRefPtr<GstElement>(ptr, GRefPtrAdopt);
 }
 
 template <> GstElement* refGPtr<GstElement>(GstElement* ptr)
 {
-    if (ptr) {
-        gst_object_ref(GST_OBJECT(ptr));
-        gst_object_sink(GST_OBJECT(ptr));
-    }
+    if (ptr)
+        webkitGstObjectRefSink(GST_OBJECT(ptr));
 
     return ptr;
 }
@@ -49,16 +48,15 @@ template <> void derefGPtr<GstElement>(GstElement* ptr)
 
 template <> GRefPtr<GstPad> adoptGRef(GstPad* ptr)
 {
-    ASSERT(!ptr || !GST_OBJECT_IS_FLOATING(GST_OBJECT(ptr)));
+    ASSERT(!ptr || !gstObjectIsFloating(GST_OBJECT(ptr)));
     return GRefPtr<GstPad>(ptr, GRefPtrAdopt);
 }
 
 template <> GstPad* refGPtr<GstPad>(GstPad* ptr)
 {
-    if (ptr) {
-        gst_object_ref(GST_OBJECT(ptr));
-        gst_object_sink(GST_OBJECT(ptr));
-    }
+    if (ptr)
+        webkitGstObjectRefSink(GST_OBJECT(ptr));
+
     return ptr;
 }
 
@@ -70,16 +68,15 @@ template <> void derefGPtr<GstPad>(GstPad* ptr)
 
 template <> GRefPtr<GstPadTemplate> adoptGRef(GstPadTemplate* ptr)
 {
-    ASSERT(!ptr || !GST_OBJECT_IS_FLOATING(GST_OBJECT(ptr)));
+    ASSERT(!ptr || !gstObjectIsFloating(GST_OBJECT(ptr)));
     return GRefPtr<GstPadTemplate>(ptr, GRefPtrAdopt);
 }
 
 template <> GstPadTemplate* refGPtr<GstPadTemplate>(GstPadTemplate* ptr)
 {
-    if (ptr) {
-        gst_object_ref(GST_OBJECT(ptr));
-        gst_object_sink(GST_OBJECT(ptr));
-    }
+    if (ptr)
+        webkitGstObjectRefSink(GST_OBJECT(ptr));
+
     return ptr;
 }
 
@@ -87,6 +84,11 @@ template <> void derefGPtr<GstPadTemplate>(GstPadTemplate* ptr)
 {
     if (ptr)
         gst_object_unref(GST_OBJECT(ptr));
+}
+
+template <> GRefPtr<GstCaps> adoptGRef(GstCaps* ptr)
+{
+    return GRefPtr<GstCaps>(ptr, GRefPtrAdopt);
 }
 
 template <> GstCaps* refGPtr<GstCaps>(GstCaps* ptr)
@@ -105,21 +107,59 @@ template <> void derefGPtr<GstCaps>(GstCaps* ptr)
 
 template <> GRefPtr<GstTask> adoptGRef(GstTask* ptr)
 {
-    ASSERT(!GST_OBJECT_IS_FLOATING(GST_OBJECT(ptr)));
+    ASSERT(!gstObjectIsFloating(GST_OBJECT(ptr)));
     return GRefPtr<GstTask>(ptr, GRefPtrAdopt);
 }
 
 template <> GstTask* refGPtr<GstTask>(GstTask* ptr)
 {
-    if (ptr) {
-        gst_object_ref(GST_OBJECT(ptr));
-        gst_object_sink(GST_OBJECT(ptr));
-    }
+    if (ptr)
+        webkitGstObjectRefSink(GST_OBJECT(ptr));
 
     return ptr;
 }
 
 template <> void derefGPtr<GstTask>(GstTask* ptr)
+{
+    if (ptr)
+        gst_object_unref(ptr);
+}
+
+template <> GRefPtr<GstBus> adoptGRef(GstBus* ptr)
+{
+    ASSERT(!gstObjectIsFloating(GST_OBJECT(ptr)));
+    return GRefPtr<GstBus>(ptr, GRefPtrAdopt);
+}
+
+template <> GstBus* refGPtr<GstBus>(GstBus* ptr)
+{
+    if (ptr)
+        webkitGstObjectRefSink(GST_OBJECT(ptr));
+
+    return ptr;
+}
+
+template <> void derefGPtr<GstBus>(GstBus* ptr)
+{
+    if (ptr)
+        gst_object_unref(ptr);
+}
+
+template <> GRefPtr<GstElementFactory> adoptGRef(GstElementFactory* ptr)
+{
+    ASSERT(!gstObjectIsFloating(GST_OBJECT(ptr)));
+    return GRefPtr<GstElementFactory>(ptr, GRefPtrAdopt);
+}
+
+template <> GstElementFactory* refGPtr<GstElementFactory>(GstElementFactory* ptr)
+{
+    if (ptr)
+        webkitGstObjectRefSink(GST_OBJECT(ptr));
+
+    return ptr;
+}
+
+template <> void derefGPtr<GstElementFactory>(GstElementFactory* ptr)
 {
     if (ptr)
         gst_object_unref(ptr);

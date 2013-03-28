@@ -30,31 +30,31 @@
 #include <vssym32.h>
 
 #include "CSSValueKeywords.h"
-#include "CurrentTime.h"
 #include "FontSelector.h"
 #include "FontUtilsChromiumWin.h"
 #include "GraphicsContext.h"
 #include "HTMLMediaElement.h"
 #include "HTMLNames.h"
-#include "HWndDC.h"
+#include "LayoutTestSupport.h"
 #include "MediaControlElements.h"
 #include "PaintInfo.h"
-#include "PlatformSupport.h"
+#include "PlatformContextSkia.h"
 #include "RenderBox.h"
 #include "RenderProgress.h"
 #include "RenderSlider.h"
+#include "RenderThemeChromiumCommon.h"
 #include "ScrollbarTheme.h"
 #include "SystemInfo.h"
 #include "TransparencyWin.h"
+#include <public/Platform.h>
+#include <public/WebColor.h>
+#include <public/WebRect.h>
+#include <public/win/WebThemeEngine.h>
+#include <wtf/CurrentTime.h>
+
 
 // FIXME: This dependency should eventually be removed.
 #include <skia/ext/skia_utils_win.h>
-
-#define SIZEOF_STRUCT_WITH_SPECIFIED_LAST_MEMBER(structName, member) \
-    offsetof(structName, member) + \
-    (sizeof static_cast<structName*>(0)->member)
-#define NONCLIENTMETRICS_SIZE_PRE_VISTA \
-    SIZEOF_STRUCT_WITH_SPECIFIED_LAST_MEMBER(NONCLIENTMETRICS, lfMessageFont)
 
 namespace WebCore {
 
@@ -101,18 +101,11 @@ public:
 
 private:
 
-    static bool canvasHasMultipleLayers(const SkCanvas* canvas)
-    {
-        SkCanvas::LayerIter iter(const_cast<SkCanvas*>(canvas), false);
-        iter.next(); // There is always at least one layer.
-        return !iter.done(); // There is > 1 layer if the the iterator can stil advance.
-    }
-
     static TransparencyWin::LayerMode getLayerMode(GraphicsContext* context, TransparencyWin::TransformMode transformMode)
     {
         if (context->platformContext()->isDrawingToImageBuffer()) // Might have transparent background.
             return TransparencyWin::WhiteLayer;
-        if (canvasHasMultipleLayers(context->platformContext()->canvas())) // Needs antialiasing help.
+        if (context->platformContext()->canvas()->isDrawingToLayer()) // Needs antialiasing help.
             return TransparencyWin::OpaqueCompositeLayer;
         // Nothing interesting.
         return transformMode == TransparencyWin::KeepTransform ? TransparencyWin::NoLayer : TransparencyWin::OpaqueCompositeLayer;
@@ -140,19 +133,6 @@ bool ThemePainter::s_hasInstance = false;
 
 } // namespace
 
-static void getNonClientMetrics(NONCLIENTMETRICS* metrics)
-{
-    static UINT size = (windowsVersion() >= WindowsVista) ?
-        (sizeof NONCLIENTMETRICS) : NONCLIENTMETRICS_SIZE_PRE_VISTA;
-    metrics->cbSize = size;
-    bool success = !!SystemParametersInfo(SPI_GETNONCLIENTMETRICS, size, metrics, 0);
-    ASSERT(success);
-}
-
-static FontDescription smallSystemFont;
-static FontDescription menuFont;
-static FontDescription labelFont;
-
 // Internal static helper functions.  We don't put them in an anonymous
 // namespace so they have easier access to the WebCore namespace.
 
@@ -169,55 +149,6 @@ static bool supportsFocus(ControlPart appearance)
         return true;
     }
     return false;
-}
-
-// Return the height of system font |font| in pixels.  We use this size by
-// default for some non-form-control elements.
-static float systemFontSize(const LOGFONT& font)
-{
-    float size = -font.lfHeight;
-    if (size < 0) {
-        HFONT hFont = CreateFontIndirect(&font);
-        if (hFont) {
-            HWndDC hdc(0); // What about printing? Is this the right DC?
-            if (hdc) {
-                HGDIOBJ hObject = SelectObject(hdc, hFont);
-                TEXTMETRIC tm;
-                GetTextMetrics(hdc, &tm);
-                SelectObject(hdc, hObject);
-                size = tm.tmAscent;
-            }
-            DeleteObject(hFont);
-        }
-    }
-
-    // The "codepage 936" bit here is from Gecko; apparently this helps make
-    // fonts more legible in Simplified Chinese where the default font size is
-    // too small.
-    //
-    // FIXME: http://b/1119883 Since this is only used for "small caption",
-    // "menu", and "status bar" objects, I'm not sure how much this even
-    // matters.  Plus the Gecko patch went in back in 2002, and maybe this
-    // isn't even relevant anymore.  We should investigate whether this should
-    // be removed, or perhaps broadened to be "any CJK locale".
-    //
-    return ((size < 12.0f) && (GetACP() == 936)) ? 12.0f : size;
-}
-
-// Converts |points| to pixels.  One point is 1/72 of an inch.
-static float pointsToPixels(float points)
-{
-    static float pixelsPerInch = 0.0f;
-    if (!pixelsPerInch) {
-        HWndDC hdc(0); // What about printing? Is this the right DC?
-        if (hdc) // Can this ever actually be NULL?
-            pixelsPerInch = GetDeviceCaps(hdc, LOGPIXELSY);
-        else
-            pixelsPerInch = 96.0f;
-    }
-
-    static const float pointsPerInch = 72.0f;
-    return points / pointsPerInch * pixelsPerInch;
 }
 
 static double querySystemBlinkInterval(double defaultInterval)
@@ -253,7 +184,7 @@ bool RenderThemeChromiumWin::supportsFocusRing(const RenderStyle* style) const
 
 Color RenderThemeChromiumWin::platformActiveSelectionBackgroundColor() const
 {
-    if (PlatformSupport::layoutTestMode())
+    if (isRunningLayoutTest())
         return Color(0x00, 0x00, 0xff); // Royal blue.
     COLORREF color = GetSysColor(COLOR_HIGHLIGHT);
     return Color(GetRValue(color), GetGValue(color), GetBValue(color), 0xff);
@@ -261,7 +192,7 @@ Color RenderThemeChromiumWin::platformActiveSelectionBackgroundColor() const
 
 Color RenderThemeChromiumWin::platformInactiveSelectionBackgroundColor() const
 {
-    if (PlatformSupport::layoutTestMode())
+    if (isRunningLayoutTest())
         return Color(0x99, 0x99, 0x99); // Medium gray.
     COLORREF color = GetSysColor(COLOR_GRAYTEXT);
     return Color(GetRValue(color), GetGValue(color), GetBValue(color), 0xff);
@@ -269,7 +200,7 @@ Color RenderThemeChromiumWin::platformInactiveSelectionBackgroundColor() const
 
 Color RenderThemeChromiumWin::platformActiveSelectionForegroundColor() const
 {
-    if (PlatformSupport::layoutTestMode())
+    if (isRunningLayoutTest())
         return Color(0xff, 0xff, 0xcc); // Pale yellow.
     COLORREF color = GetSysColor(COLOR_HIGHLIGHTTEXT);
     return Color(GetRValue(color), GetGValue(color), GetBValue(color), 0xff);
@@ -288,67 +219,6 @@ Color RenderThemeChromiumWin::platformActiveTextSearchHighlightColor() const
 Color RenderThemeChromiumWin::platformInactiveTextSearchHighlightColor() const
 {
     return Color(0xff, 0xff, 0x96); // Yellow.
-}
-
-void RenderThemeChromiumWin::systemFont(int propId, FontDescription& fontDescription) const
-{
-    // This logic owes much to RenderThemeSafari.cpp.
-    FontDescription* cachedDesc = 0;
-    AtomicString faceName;
-    float fontSize = 0;
-    switch (propId) {
-    case CSSValueSmallCaption:
-        cachedDesc = &smallSystemFont;
-        if (!smallSystemFont.isAbsoluteSize()) {
-            NONCLIENTMETRICS metrics;
-            getNonClientMetrics(&metrics);
-            faceName = AtomicString(metrics.lfSmCaptionFont.lfFaceName, wcslen(metrics.lfSmCaptionFont.lfFaceName));
-            fontSize = systemFontSize(metrics.lfSmCaptionFont);
-        }
-        break;
-    case CSSValueMenu:
-        cachedDesc = &menuFont;
-        if (!menuFont.isAbsoluteSize()) {
-            NONCLIENTMETRICS metrics;
-            getNonClientMetrics(&metrics);
-            faceName = AtomicString(metrics.lfMenuFont.lfFaceName, wcslen(metrics.lfMenuFont.lfFaceName));
-            fontSize = systemFontSize(metrics.lfMenuFont);
-        }
-        break;
-    case CSSValueStatusBar:
-        cachedDesc = &labelFont;
-        if (!labelFont.isAbsoluteSize()) {
-            NONCLIENTMETRICS metrics;
-            getNonClientMetrics(&metrics);
-            faceName = metrics.lfStatusFont.lfFaceName;
-            fontSize = systemFontSize(metrics.lfStatusFont);
-        }
-        break;
-    case CSSValueWebkitMiniControl:
-    case CSSValueWebkitSmallControl:
-    case CSSValueWebkitControl:
-        faceName = defaultGUIFont();
-        // Why 2 points smaller?  Because that's what Gecko does.
-        fontSize = defaultFontSize - pointsToPixels(2);
-        break;
-    default:
-        faceName = defaultGUIFont();
-        fontSize = defaultFontSize;
-        break;
-    }
-
-    if (!cachedDesc)
-        cachedDesc = &fontDescription;
-
-    if (fontSize) {
-        cachedDesc->firstFamily().setFamily(faceName);
-        cachedDesc->setIsAbsoluteSize(true);
-        cachedDesc->setGenericFamily(FontDescription::NoFamily);
-        cachedDesc->setSpecifiedSize(fontSize);
-        cachedDesc->setWeight(FontWeightNormal);
-        cachedDesc->setItalic(false);
-    }
-    fontDescription = *cachedDesc;
 }
 
 // Map a CSSValue* system color to an index understood by GetSysColor().
@@ -390,14 +260,26 @@ static int cssValueIdToSysColorIndex(int cssValueId)
 Color RenderThemeChromiumWin::systemColor(int cssValueId) const
 {
     int sysColorIndex = cssValueIdToSysColorIndex(cssValueId);
-    if (PlatformSupport::layoutTestMode() || (sysColorIndex == -1))
+    if (isRunningLayoutTest() || (sysColorIndex == -1))
         return RenderTheme::systemColor(cssValueId);
 
     COLORREF color = GetSysColor(sysColorIndex);
     return Color(GetRValue(color), GetGValue(color), GetBValue(color));
 }
 
-void RenderThemeChromiumWin::adjustSliderThumbSize(RenderStyle* style) const
+#if ENABLE(DATALIST_ELEMENT)
+IntSize RenderThemeChromiumWin::sliderTickSize() const
+{
+    return IntSize(1, 3);
+}
+
+int RenderThemeChromiumWin::sliderTickOffsetFromTrackCenter() const
+{
+    return 11;
+}
+#endif
+
+void RenderThemeChromiumWin::adjustSliderThumbSize(RenderStyle* style, Element* element) const
 {
     // These sizes match what WinXP draws for various menus.
     const int sliderThumbAlongAxis = 11;
@@ -409,7 +291,7 @@ void RenderThemeChromiumWin::adjustSliderThumbSize(RenderStyle* style) const
         style->setWidth(Length(sliderThumbAcrossAxis, Fixed));
         style->setHeight(Length(sliderThumbAlongAxis, Fixed));
     } else
-        RenderThemeChromiumSkia::adjustSliderThumbSize(style);
+        RenderThemeChromiumSkia::adjustSliderThumbSize(style, element);
 }
 
 bool RenderThemeChromiumWin::paintCheckbox(RenderObject* o, const PaintInfo& i, const IntRect& r)
@@ -426,11 +308,8 @@ bool RenderThemeChromiumWin::paintButton(RenderObject* o, const PaintInfo& i, co
     const ThemeData& themeData = getThemeData(o);
 
     ThemePainter painter(i.context, r);
-    PlatformSupport::paintButton(painter.context(),
-                                themeData.m_part,
-                                themeData.m_state,
-                                themeData.m_classicState,
-                                painter.drawRect());
+    WebKit::WebCanvas* canvas = painter.context()->platformContext()->canvas();
+    WebKit::Platform::current()->themeEngine()->paintButton(canvas, themeData.m_part, themeData.m_state, themeData.m_classicState, WebKit::WebRect(painter.drawRect()));
     return false;
 }
 
@@ -444,22 +323,30 @@ bool RenderThemeChromiumWin::paintSliderTrack(RenderObject* o, const PaintInfo& 
     const ThemeData& themeData = getThemeData(o);
 
     ThemePainter painter(i.context, r);
-    PlatformSupport::paintTrackbar(painter.context(),
-                                  themeData.m_part,
-                                  themeData.m_state,
-                                  themeData.m_classicState,
-                                  painter.drawRect());
+    WebKit::WebCanvas* canvas = painter.context()->platformContext()->canvas();
+    WebKit::Platform::current()->themeEngine()->paintTrackbar(canvas, themeData.m_part, themeData.m_state, themeData.m_classicState, WebKit::WebRect(painter.drawRect()));
+
+#if ENABLE(DATALIST_ELEMENT)
+    paintSliderTicks(o, i, r);
+#endif
+
     return false;
 }
 
 bool RenderThemeChromiumWin::paintSliderThumb(RenderObject* o, const PaintInfo& i, const IntRect& r)
 {
-    return paintSliderTrack(o, i, r);
+    const ThemeData& themeData = getThemeData(o);
+
+    ThemePainter painter(i.context, r);
+    WebKit::WebCanvas* canvas = painter.context()->platformContext()->canvas();
+    WebKit::Platform::current()->themeEngine()->paintTrackbar(canvas, themeData.m_part, themeData.m_state, themeData.m_classicState, WebKit::WebRect(painter.drawRect()));
+
+    return false;
 }
 
 static int menuListButtonWidth()
 {
-    static int width = PlatformSupport::layoutTestMode() ? kStandardMenuListButtonWidth : GetSystemMetrics(SM_CXVSCROLL);
+    static int width = isRunningLayoutTest() ? kStandardMenuListButtonWidth : GetSystemMetrics(SM_CXVSCROLL);
     return width;
 }
 
@@ -507,21 +394,9 @@ bool RenderThemeChromiumWin::paintMenuList(RenderObject* o, const PaintInfo& i, 
 
     // Get the correct theme data for a textfield and paint the menu.
     ThemePainter painter(i.context, rect);
-    PlatformSupport::paintMenuList(painter.context(),
-                                   CP_DROPDOWNBUTTON,
-                                   determineState(o),
-                                   determineClassicState(o),
-                                   painter.drawRect());
+    WebKit::WebCanvas* canvas = painter.context()->platformContext()->canvas();
+    WebKit::Platform::current()->themeEngine()->paintMenuList(canvas, CP_DROPDOWNBUTTON, determineState(o), determineClassicState(o), WebKit::WebRect(painter.drawRect()));
     return false;
-}
-
-// static
-void RenderThemeChromiumWin::setDefaultFontSize(int fontSize)
-{
-    RenderThemeChromiumSkia::setDefaultFontSize(fontSize);
-
-    // Reset cached fonts.
-    smallSystemFont = menuFont = labelFont = FontDescription();
 }
 
 double RenderThemeChromiumWin::caretBlinkIntervalInternal() const
@@ -583,7 +458,7 @@ unsigned RenderThemeChromiumWin::determineClassicState(RenderObject* o, ControlS
 
     // So are readonly text fields.
     if (isReadOnlyControl(o) && (part == TextFieldPart || part == TextAreaPart || part == SearchFieldPart))
-        return result;   
+        return result;
 
     if (part == SliderThumbHorizontalPart || part == SliderThumbVerticalPart) {
         if (!isEnabled(o))
@@ -673,7 +548,6 @@ bool RenderThemeChromiumWin::paintTextFieldInternal(RenderObject* o,
                                                     bool drawEdges)
 {
     // Fallback to white if the specified color object is invalid.
-    // (Note PlatformSupport::paintTextField duplicates this check).
     Color backgroundColor(Color::white);
     if (o->style()->visitedDependentColor(CSSPropertyBackgroundColor).isValid())
         backgroundColor = o->style()->visitedDependentColor(CSSPropertyBackgroundColor);
@@ -697,14 +571,8 @@ bool RenderThemeChromiumWin::paintTextFieldInternal(RenderObject* o,
     {
         const ThemeData& themeData = getThemeData(o);
         ThemePainter painter(i.context, r);
-        PlatformSupport::paintTextField(painter.context(),
-                                        themeData.m_part,
-                                        themeData.m_state,
-                                        themeData.m_classicState,
-                                        painter.drawRect(),
-                                        backgroundColor,
-                                        fillContentArea,
-                                        drawEdges);
+        WebKit::WebCanvas* canvas = painter.context()->platformContext()->canvas();
+        WebKit::Platform::current()->themeEngine()->paintTextField(canvas, themeData.m_part, themeData.m_state, themeData.m_classicState, WebKit::WebRect(painter.drawRect()), backgroundColor.rgb(), fillContentArea, drawEdges);
         // End of block commits the painter before restoring context.
     }
     if (o->style()->hasBorderRadius())
@@ -712,7 +580,7 @@ bool RenderThemeChromiumWin::paintTextFieldInternal(RenderObject* o,
     return false;
 }
 
-void RenderThemeChromiumWin::adjustInnerSpinButtonStyle(CSSStyleSelector*, RenderStyle* style, Element*) const
+void RenderThemeChromiumWin::adjustInnerSpinButtonStyle(StyleResolver*, RenderStyle* style, Element*) const
 {
     int width = ScrollbarTheme::theme()->scrollbarThickness();
     style->setWidth(Length(width, Fixed));
@@ -728,27 +596,21 @@ bool RenderThemeChromiumWin::paintInnerSpinButton(RenderObject* object, const Pa
         half.setHeight(rect.height() / 2);
         const ThemeData& upThemeData = getThemeData(object, SpinButtonUp);
         ThemePainter upPainter(info.context, half);
-        PlatformSupport::paintSpinButton(upPainter.context(),
-                                         upThemeData.m_part,
-                                         upThemeData.m_state,
-                                         upThemeData.m_classicState,
-                                         upPainter.drawRect());
+        WebKit::WebCanvas* canvas = upPainter.context()->platformContext()->canvas();
+        WebKit::Platform::current()->themeEngine()->paintSpinButton(canvas, upThemeData.m_part, upThemeData.m_state, upThemeData.m_classicState, WebKit::WebRect(upPainter.drawRect()));
     }
 
     {
         half.setY(rect.y() + rect.height() / 2);
         const ThemeData& downThemeData = getThemeData(object, SpinButtonDown);
         ThemePainter downPainter(info.context, half);
-        PlatformSupport::paintSpinButton(downPainter.context(),
-                                         downThemeData.m_part,
-                                         downThemeData.m_state,
-                                         downThemeData.m_classicState,
-                                         downPainter.drawRect());
+        WebKit::WebCanvas* canvas = downPainter.context()->platformContext()->canvas();
+        WebKit::Platform::current()->themeEngine()->paintSpinButton(canvas, downThemeData.m_part, downThemeData.m_state, downThemeData.m_classicState, WebKit::WebRect(downPainter.drawRect()));
     }
     return false;
 }
 
-#if ENABLE(PROGRESS_TAG)
+#if ENABLE(PROGRESS_ELEMENT)
 
 // MSDN says that update intervals for the bar is 30ms.
 // http://msdn.microsoft.com/en-us/library/bb760842(v=VS.85).aspx
@@ -766,7 +628,7 @@ double RenderThemeChromiumWin::animationDurationForProgressBar(RenderProgress* r
     return progressAnimationFrameRate;
 }
 
-void RenderThemeChromiumWin::adjustProgressBarStyle(CSSStyleSelector*, RenderStyle*, Element*) const
+void RenderThemeChromiumWin::adjustProgressBarStyle(StyleResolver*, RenderStyle*, Element*) const
 {
 }
 
@@ -781,10 +643,17 @@ bool RenderThemeChromiumWin::paintProgressBar(RenderObject* o, const PaintInfo& 
     IntRect valueRect = renderProgress->isDeterminate() ? determinateProgressValueRectFor(renderProgress, r) : IntRect(0, 0, 0, 0);
     double animatedSeconds = renderProgress->animationStartTime() ?  WTF::currentTime() - renderProgress->animationStartTime() : 0;
     ThemePainter painter(i.context, r);
-    PlatformSupport::paintProgressBar(painter.context(), r, valueRect, renderProgress->isDeterminate(), animatedSeconds);
+    DirectionFlippingScope scope(o, i, r);
+    WebKit::WebCanvas* canvas = painter.context()->platformContext()->canvas();
+    WebKit::Platform::current()->themeEngine()->paintProgressBar(canvas, WebKit::WebRect(r), WebKit::WebRect(valueRect), renderProgress->isDeterminate(), animatedSeconds);
     return false;
 }
 
 #endif
+
+bool RenderThemeChromiumWin::shouldOpenPickerWithF4Key() const
+{
+    return true;
+}
 
 } // namespace WebCore

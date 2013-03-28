@@ -116,12 +116,6 @@
     margin-left: 0;
 }
 
-.audit-launcher-view .resource-progress > img {
-    content: url(Images/spinner.gif);
-    vertical-align: text-top;
-    margin: 0 4px 0 8px;
-}
-
 .audit-result-view {
     overflow: auto;
     position: absolute;
@@ -178,6 +172,18 @@
     margin: 0;
 }
 
+.audit-result-tree ol.outline-disclosure {
+    -webkit-padding-start: 0;
+}
+
+.audit-result-tree .section .header {
+    padding-left: 13px;
+}
+
+.audit-result-tree .section .header::before {
+    left: 2px;
+}
+
 .audit-result-tree li {
     padding: 0 0 0 14px;
     margin-top: 1px;
@@ -220,4 +226,12 @@
     float: left;
     margin-left: -28px;
     margin-top: -1px;
+}
+
+.audit-launcher-view .progress-bar-container {
+    display: inline-block;
+}
+
+.audit-launcher-view .progress-bar-container .progress-bar-stop-button {
+    display: none;
 }

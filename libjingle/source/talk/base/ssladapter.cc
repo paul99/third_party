@@ -29,16 +29,9 @@
 #include "config.h"
 #endif  // HAVE_CONFIG_H
 
-// Decide which (if any) implementation of SSL we will use.
-#if !defined(SSL_USE_SCHANNEL) && !defined(SSL_USE_OPENSSL)
-#ifdef WIN32
-#define SSL_USE_SCHANNEL 1
-#else  // !WIN32
-#define SSL_USE_OPENSSL HAVE_OPENSSL_SSL_H
-#endif  // !WIN32
-#endif
-
 #include "talk/base/ssladapter.h"
+
+#include "talk/base/sslconfig.h"
 
 #if SSL_USE_SCHANNEL
 
@@ -48,7 +41,11 @@
 
 #include "openssladapter.h"
 
-#endif  // SSL_USE_OPENSSL && !SSL_USE_SCHANNEL
+#elif SSL_USE_NSS     // && !SSL_USE_CHANNEL && !SSL_USE_OPENSSL
+
+#include "nssstreamadapter.h"
+
+#endif  // SSL_USE_OPENSSL && !SSL_USE_SCHANNEL && !SSL_USE_NSS
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -81,7 +78,21 @@ bool CleanupSSL() {
   return OpenSSLAdapter::CleanupSSL();
 }
 
-#else  // !SSL_USE_OPENSSL
+#elif SSL_USE_NSS  // !SSL_USE_OPENSSL
+
+bool InitializeSSL(VerificationCallback callback) {
+  return NSSContext::InitializeSSL(callback);
+}
+
+bool InitializeSSLThread() {
+  return NSSContext::InitializeSSLThread();
+}
+
+bool CleanupSSL() {
+  return NSSContext::CleanupSSL();
+}
+
+#else  // !SSL_USE_OPENSSL && !SSL_USE_NSS
 
 bool InitializeSSL(VerificationCallback callback) {
   return true;
@@ -95,7 +106,7 @@ bool CleanupSSL() {
   return true;
 }
 
-#endif  // !SSL_USE_OPENSSL
+#endif  // !SSL_USE_OPENSSL && !SSL_USE_NSS
 
 ///////////////////////////////////////////////////////////////////////////////
 

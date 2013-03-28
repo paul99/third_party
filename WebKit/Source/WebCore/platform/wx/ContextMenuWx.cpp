@@ -27,12 +27,13 @@
 
 #include "ContextMenu.h"
 #include "ContextMenuItem.h"
+#include "NotImplemented.h"
 #include "PlatformMenuDescription.h"
 #include "wx/menu.h"
 
 #include <wtf/HashMap.h>
 
-using namespace WebCore;
+namespace WebCore {
 
 typedef WTF::HashMap<int, ContextMenuAction> ItemActionMap;
 static ItemActionMap s_itemActions;
@@ -66,8 +67,8 @@ void ContextMenu::appendItem(ContextMenuItem& item)
 
     ItemActionMap::const_iterator end = s_itemActions.end();
     for (ItemActionMap::const_iterator it = s_itemActions.begin();  it != end; ++it) {
-        if (it->second == itemDescription.action)
-            idWx = it->first;
+        if (it->value == itemDescription.action)
+            idWx = it->key;
     }
 
     if (itemDescription.subMenu) {
@@ -109,4 +110,21 @@ PlatformMenuDescription ContextMenu::releasePlatformDescription()
     m_platformDescription = 0;
 
     return description;
+}
+
+unsigned ContextMenu::itemCount() const
+{
+    if (m_platformDescription)
+        return m_platformDescription->GetMenuItemCount();
+    
+    return 0;
+}
+
+Vector<ContextMenuItem> contextMenuItemVector(wxMenu* menu)
+{
+    Vector<ContextMenuItem> menuItemVector;
+    notImplemented();
+    return menuItemVector;
+}
+    
 }

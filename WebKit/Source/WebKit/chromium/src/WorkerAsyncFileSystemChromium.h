@@ -33,8 +33,8 @@
 
 #if ENABLE(FILE_SYSTEM) && ENABLE(WORKERS)
 
-#include "AsyncFileSystem.h"
-#include "PlatformString.h"
+#include "AsyncFileSystemChromium.h"
+#include "FileSystemType.h"
 #include <wtf/PassOwnPtr.h>
 #include <wtf/RefPtr.h>
 
@@ -51,11 +51,11 @@ class AsyncFileSystemCallbacks;
 class ScriptExecutionContext;
 class WorkerContext;
 
-class WorkerAsyncFileSystemChromium : public AsyncFileSystem {
+class WorkerAsyncFileSystemChromium : public AsyncFileSystemChromium {
 public:
-    static PassOwnPtr<AsyncFileSystem> create(ScriptExecutionContext* context, AsyncFileSystem::Type type, const WebKit::WebURL& rootURL, bool synchronous)
+    static PassOwnPtr<AsyncFileSystem> create(ScriptExecutionContext* context, FileSystemSynchronousType synchronousType)
     {
-        return adoptPtr(new WorkerAsyncFileSystemChromium(context, type, rootURL, synchronous));
+        return adoptPtr(new WorkerAsyncFileSystemChromium(context, synchronousType));
     }
 
     virtual ~WorkerAsyncFileSystemChromium();
@@ -63,34 +63,30 @@ public:
     // Runs one pending operation (to wait for completion in the sync-mode).
     virtual bool waitForOperationToComplete();
 
-    virtual void move(const String& sourcePath, const String& destinationPath, PassOwnPtr<AsyncFileSystemCallbacks>);
-    virtual void copy(const String& sourcePath, const String& destinationPath, PassOwnPtr<AsyncFileSystemCallbacks>);
-    virtual void remove(const String& path, PassOwnPtr<AsyncFileSystemCallbacks>);
-    virtual void removeRecursively(const String& path, PassOwnPtr<AsyncFileSystemCallbacks>);
-    virtual void readMetadata(const String& path, PassOwnPtr<AsyncFileSystemCallbacks>);
-    virtual void createFile(const String& path, bool exclusive, PassOwnPtr<AsyncFileSystemCallbacks>);
-    virtual void createDirectory(const String& path, bool exclusive, PassOwnPtr<AsyncFileSystemCallbacks>);
-    virtual void fileExists(const String& path, PassOwnPtr<AsyncFileSystemCallbacks>);
-    virtual void directoryExists(const String& path, PassOwnPtr<AsyncFileSystemCallbacks>);
-    virtual void readDirectory(const String& path, PassOwnPtr<AsyncFileSystemCallbacks>);
-    virtual void createWriter(AsyncFileWriterClient* client, const String& path, PassOwnPtr<AsyncFileSystemCallbacks>);
+    virtual void move(const KURL& sourcePath, const KURL& destinationPath, PassOwnPtr<AsyncFileSystemCallbacks>);
+    virtual void copy(const KURL& sourcePath, const KURL& destinationPath, PassOwnPtr<AsyncFileSystemCallbacks>);
+    virtual void remove(const KURL& path, PassOwnPtr<AsyncFileSystemCallbacks>);
+    virtual void removeRecursively(const KURL& path, PassOwnPtr<AsyncFileSystemCallbacks>);
+    virtual void readMetadata(const KURL& path, PassOwnPtr<AsyncFileSystemCallbacks>);
+    virtual void createFile(const KURL& path, bool exclusive, PassOwnPtr<AsyncFileSystemCallbacks>);
+    virtual void createDirectory(const KURL& path, bool exclusive, PassOwnPtr<AsyncFileSystemCallbacks>);
+    virtual void fileExists(const KURL& path, PassOwnPtr<AsyncFileSystemCallbacks>);
+    virtual void directoryExists(const KURL& path, PassOwnPtr<AsyncFileSystemCallbacks>);
+    virtual void readDirectory(const KURL& path, PassOwnPtr<AsyncFileSystemCallbacks>);
+    virtual void createWriter(AsyncFileWriterClient*, const KURL& path, PassOwnPtr<AsyncFileSystemCallbacks>);
+    virtual void createSnapshotFileAndReadMetadata(const KURL& path, PassOwnPtr<AsyncFileSystemCallbacks>);
 
 private:
-    WorkerAsyncFileSystemChromium(ScriptExecutionContext*, AsyncFileSystem::Type, const WebKit::WebURL& rootURL, bool synchronous);
+    WorkerAsyncFileSystemChromium(ScriptExecutionContext*, FileSystemSynchronousType);
 
     PassRefPtr<WebKit::WorkerFileSystemCallbacksBridge> createWorkerFileSystemCallbacksBridge(PassOwnPtr<AsyncFileSystemCallbacks>);
 
-    // Converts a given absolute virtual path to a full origin-qualified FileSystem URL.
-    KURL virtualPathToFileSystemURL(const String& virtualPath) const;
-
     ScriptExecutionContext* m_scriptExecutionContext;
-    WebKit::WebFileSystem* m_webFileSystem;
     WebKit::WebWorkerBase* m_worker;
     WorkerContext* m_workerContext;
     RefPtr<WebKit::WorkerFileSystemCallbacksBridge> m_bridgeForCurrentOperation;
     String m_modeForCurrentOperation;
-    bool m_synchronous;
-    KURL m_filesystemRootURL;
+    FileSystemSynchronousType m_synchronousType;
 };
 
 } // namespace WebCore

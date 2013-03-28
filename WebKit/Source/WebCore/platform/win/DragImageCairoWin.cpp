@@ -31,7 +31,8 @@
 #include "GraphicsContext.h"
 #include "GraphicsContextPlatformPrivateCairo.h"
 #include "Image.h"
-#include "RetainPtr.h"
+#include "NativeImageCairo.h"
+#include <wtf/RetainPtr.h>
 #include <cairo-win32.h>
 #include <windows.h>
 
@@ -150,7 +151,7 @@ exit:
     return hbmp;
 }
     
-DragImageRef createDragImageFromImage(Image* img)
+DragImageRef createDragImageFromImage(Image* img, RespectImageOrientationEnum)
 {
     HBITMAP hbmp = 0;
     HDC dc = GetDC(0);
@@ -172,11 +173,14 @@ DragImageRef createDragImageFromImage(Image* img)
     cairo_set_source_rgb(cr, 1.0, 0.0, 1.0);
     cairo_fill_preserve(cr);
 
-    cairo_surface_t* srcImage = img->nativeImageForCurrentFrame();
+    NativeImageCairo* srcNativeImage = img->nativeImageForCurrentFrame();
+    cairo_surface_t* srcImage = (srcNativeImage) ? srcNativeImage->surface() : 0;
 
-    // Draw the image.
-    cairo_set_source_surface(cr, srcImage, 0.0, 0.0);
-    cairo_paint(cr);
+    if (srcImage) {
+        // Draw the image.
+        cairo_set_source_surface(cr, srcImage, 0.0, 0.0);
+        cairo_paint(cr);
+    }
 
     deallocContext(drawContext);
 

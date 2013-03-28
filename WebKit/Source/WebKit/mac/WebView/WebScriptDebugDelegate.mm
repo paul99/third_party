@@ -174,19 +174,19 @@ NSString * const WebScriptErrorLineNumberKey = @"WebScriptErrorLineNumber";
     if (!_private->debuggerCallFrame)
         return [NSArray array];
 
-    JSLock lock(SilenceAssertionsOnly);
 
-    ScopeChainNode* scopeChain = _private->debuggerCallFrame->scopeChain();
-    if (!scopeChain->next)  // global frame
+    JSScope* scope = _private->debuggerCallFrame->scope();
+    JSLockHolder lock(scope->globalData());
+    if (!scope->next())  // global frame
         return [NSArray arrayWithObject:_private->globalObject];
 
     NSMutableArray *scopes = [[NSMutableArray alloc] init];
 
-    ScopeChainIterator end = scopeChain->end();
-    for (ScopeChainIterator it = scopeChain->begin(); it != end; ++it) {
-        JSObject* object = it->get();
+    ScopeChainIterator end = scope->end();
+    for (ScopeChainIterator it = scope->begin(); it != end; ++it) {
+        JSObject* object = it.get();
         if (object->isActivationObject())
-            object = DebuggerActivation::create(*scopeChain->globalData, object);
+            object = DebuggerActivation::create(*scope->globalData(), object);
         [scopes addObject:[self _convertValueToObjcValue:object]];
     }
 
@@ -203,8 +203,8 @@ NSString * const WebScriptErrorLineNumberKey = @"WebScriptErrorLineNumber";
     if (!_private->debuggerCallFrame)
         return nil;
 
-    const UString* functionName = _private->debuggerCallFrame->functionName();
-    return functionName ? toNSString(*functionName) : nil;
+    String functionName = _private->debuggerCallFrame->functionName();
+    return nsStringNilIfEmpty(functionName);
 }
 
 // Returns the pending exception for this frame (nil if none).
@@ -229,27 +229,27 @@ NSString * const WebScriptErrorLineNumberKey = @"WebScriptErrorLineNumber";
     if (!_private->debuggerCallFrame)
         return nil;
 
-    JSLock lock(SilenceAssertionsOnly);
-
     // If this is the global call frame and there is no dynamic global object,
     // Dashcode is attempting to execute JS in the evaluator using a stale
     // WebScriptCallFrame. Instead, we need to set the dynamic global object
     // and evaluate the JS in the global object's global call frame.
     JSGlobalObject* globalObject = _private->debugger->globalObject();
+    JSLockHolder lock(globalObject->globalData());
+
     if (self == _private->debugger->globalCallFrame() && !globalObject->globalData().dynamicGlobalObject) {
         JSGlobalObject* globalObject = _private->debugger->globalObject();
 
         DynamicGlobalObjectScope globalObjectScope(globalObject->globalData(), globalObject);
 
         JSValue exception;
-        JSValue result = evaluateInGlobalCallFrame(stringToUString(script), exception, globalObject);
+        JSValue result = evaluateInGlobalCallFrame(script, exception, globalObject);
         if (exception)
             return [self _convertValueToObjcValue:exception];
         return result ? [self _convertValueToObjcValue:result] : nil;        
     }
 
     JSValue exception;
-    JSValue result = _private->debuggerCallFrame->evaluate(stringToUString(script), exception);
+    JSValue result = _private->debuggerCallFrame->evaluate(script, exception);
     if (exception)
         return [self _convertValueToObjcValue:exception];
     return result ? [self _convertValueToObjcValue:result] : nil;

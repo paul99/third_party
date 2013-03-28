@@ -3,6 +3,7 @@
  * Copyright (C) 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
  * Copyright (C) 2009 Torch Mobile Inc. http://www.torchmobile.com/
  * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2011 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,46 +32,73 @@
 
 #include "config.h"
 #include "HTTPParsers.h"
-#include "ResourceResponseBase.h"
 
-#include "PlatformString.h"
+#include <wtf/DateMath.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/StringBuilder.h>
-#include <wtf/DateMath.h>
+#include <wtf/text/WTFString.h>
+#include <wtf/unicode/CharacterNames.h>
 
 using namespace WTF;
 
 namespace WebCore {
 
-// true if there is more to parse
+// true if there is more to parse, after incrementing pos past whitespace.
+// Note: Might return pos == str.length()
 static inline bool skipWhiteSpace(const String& str, unsigned& pos, bool fromHttpEquivMeta)
 {
     unsigned len = str.length();
 
     if (fromHttpEquivMeta) {
-        while (pos != len && str[pos] <= ' ')
+        while (pos < len && str[pos] <= ' ')
             ++pos;
     } else {
-        while (pos != len && (str[pos] == '\t' || str[pos] == ' '))
+        while (pos < len && (str[pos] == '\t' || str[pos] == ' '))
             ++pos;
     }
 
-    return pos != len;
+    return pos < len;
 }
 
-// Returns true if the function can match the whole token (case insensitive).
+// Returns true if the function can match the whole token (case insensitive)
+// incrementing pos on match, otherwise leaving pos unchanged.
 // Note: Might return pos == str.length()
 static inline bool skipToken(const String& str, unsigned& pos, const char* token)
 {
     unsigned len = str.length();
+    unsigned current = pos;
 
-    while (pos != len && *token) {
-        if (toASCIILower(str[pos]) != *token++)
+    while (current < len && *token) {
+        if (toASCIILower(str[current]) != *token++)
             return false;
-        ++pos;
+        ++current;
     }
 
+    if (*token)
+        return false;
+
+    pos = current;
     return true;
+}
+
+// True if the expected equals sign is seen and there is more to follow.
+static inline bool skipEquals(const String& str, unsigned &pos)
+{
+    return skipWhiteSpace(str, pos, false) && str[pos++] == '=' && skipWhiteSpace(str, pos, false);
+}
+
+// True if a value present, incrementing pos to next space or semicolon, if any.  
+// Note: might return pos == str.length().
+static inline bool skipValue(const String& str, unsigned& pos)
+{
+    unsigned start = pos;
+    unsigned len = str.length();
+    while (pos < len) {
+        if (str[pos] == ' ' || str[pos] == '\t' || str[pos] == ';')
+            break;
+        ++pos;
+    }
+    return pos != start;
 }
 
 // See RFC 2616, Section 2.2.
@@ -88,6 +116,15 @@ bool isRFC2616Token(const String& characters)
         return false;
     }
     return true;
+}
+
+static const size_t maxInputSampleSize = 128;
+static String trimInputSample(const char* p, size_t length)
+{
+    String s = String(p, std::min<size_t>(length, maxInputSampleSize));
+    if (length > maxInputSampleSize)
+        s.append(horizontalEllipsis);
+    return s;
 }
 
 ContentDispositionType contentDispositionType(const String& contentDisposition)
@@ -303,31 +340,93 @@ void findCharsetInMediaType(const String& mediaType, unsigned int& charsetPos, u
     }
 }
 
-XSSProtectionDisposition parseXSSProtectionHeader(const String& header)
+XSSProtectionDisposition parseXSSProtectionHeader(const String& header, String& failureReason, unsigned& failurePosition, String& reportURL)
 {
-    String stippedHeader = header.stripWhiteSpace();
+    DEFINE_STATIC_LOCAL(String, failureReasonInvalidToggle, (ASCIILiteral("expected 0 or 1")));
+    DEFINE_STATIC_LOCAL(String, failureReasonInvalidSeparator, (ASCIILiteral("expected semicolon")));
+    DEFINE_STATIC_LOCAL(String, failureReasonInvalidEquals, (ASCIILiteral("expected equals sign")));
+    DEFINE_STATIC_LOCAL(String, failureReasonInvalidMode, (ASCIILiteral("invalid mode directive")));
+    DEFINE_STATIC_LOCAL(String, failureReasonInvalidReport, (ASCIILiteral("invalid report directive")));
+    DEFINE_STATIC_LOCAL(String, failureReasonDuplicateMode, (ASCIILiteral("duplicate mode directive")));
+    DEFINE_STATIC_LOCAL(String, failureReasonDuplicateReport, (ASCIILiteral("duplicate report directive")));
+    DEFINE_STATIC_LOCAL(String, failureReasonInvalidDirective, (ASCIILiteral("unrecognized directive")));
 
-    if (stippedHeader.isEmpty())
+    unsigned pos = 0;
+
+    if (!skipWhiteSpace(header, pos, false))
         return XSSProtectionEnabled;
 
-    if (stippedHeader[0] == '0')
+    if (header[pos] == '0')
         return XSSProtectionDisabled;
 
-    unsigned length = header.length();
-    unsigned pos = 0;
-    if (stippedHeader[pos++] == '1'
-        && skipWhiteSpace(stippedHeader, pos, false)
-        && stippedHeader[pos++] == ';'
-        && skipWhiteSpace(stippedHeader, pos, false)
-        && skipToken(stippedHeader, pos, "mode")
-        && skipWhiteSpace(stippedHeader, pos, false)
-        && stippedHeader[pos++] == '='
-        && skipWhiteSpace(stippedHeader, pos, false)
-        && skipToken(stippedHeader, pos, "block")
-        && pos == length)
-        return XSSProtectionBlockEnabled;
+    if (header[pos++] != '1') {
+        failureReason = failureReasonInvalidToggle;
+        return XSSProtectionInvalid;
+    }
 
-    return XSSProtectionEnabled;
+    XSSProtectionDisposition result = XSSProtectionEnabled;
+    bool modeDirectiveSeen = false;
+    bool reportDirectiveSeen = false;
+
+    while (1) {
+        // At end of previous directive: consume whitespace, semicolon, and whitespace.
+        if (!skipWhiteSpace(header, pos, false))
+            return result;
+
+        if (header[pos++] != ';') {
+            failureReason = failureReasonInvalidSeparator;
+            failurePosition = pos;
+            return XSSProtectionInvalid;
+        }
+
+        if (!skipWhiteSpace(header, pos, false))
+            return result;
+
+        // At start of next directive.
+        if (skipToken(header, pos, "mode")) {
+            if (modeDirectiveSeen) {
+                failureReason = failureReasonDuplicateMode;
+                failurePosition = pos;
+                return XSSProtectionInvalid;
+            }
+            modeDirectiveSeen = true;
+            if (!skipEquals(header, pos)) {
+                failureReason = failureReasonInvalidEquals;
+                failurePosition = pos;
+                return XSSProtectionInvalid;
+            }
+            if (!skipToken(header, pos, "block")) {
+                failureReason = failureReasonInvalidMode;
+                failurePosition = pos;
+                return XSSProtectionInvalid;
+            }
+            result = XSSProtectionBlockEnabled;
+        } else if (skipToken(header, pos, "report")) {
+            if (reportDirectiveSeen) {
+                failureReason = failureReasonDuplicateReport;
+                failurePosition = pos;
+                return XSSProtectionInvalid;
+            }
+            reportDirectiveSeen = true;
+            if (!skipEquals(header, pos)) {
+                failureReason = failureReasonInvalidEquals;
+                failurePosition = pos;
+                return XSSProtectionInvalid;
+            }
+            size_t startPos = pos;
+            if (!skipValue(header, pos)) {
+                failureReason = failureReasonInvalidReport;
+                failurePosition = pos;
+                return XSSProtectionInvalid;
+            }
+            reportURL = header.substring(startPos, pos - startPos);
+            failurePosition = startPos; // If later semantic check deems unacceptable.
+        } else {
+            failureReason = failureReasonInvalidDirective;
+            failurePosition = pos;
+            return XSSProtectionInvalid;
+        }
+    }
 }
 
 String extractReasonPhraseFromHTTPStatusLine(const String& statusLine)
@@ -393,6 +492,147 @@ bool parseRange(const String& range, long long& rangeOffset, long long& rangeEnd
     rangeOffset = firstBytePos;
     rangeEnd = lastBytePos;
     return true;
+}
+
+// HTTP/1.1 - RFC 2616
+// http://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html#sec5.1
+// Request-Line = Method SP Request-URI SP HTTP-Version CRLF
+size_t parseHTTPRequestLine(const char* data, size_t length, String& failureReason, String& method, String& url, HTTPVersion& httpVersion)
+{
+    method = String();
+    url = String();
+    httpVersion = Unknown;
+
+    const char* space1 = 0;
+    const char* space2 = 0;
+    const char* p;
+    size_t consumedLength;
+
+    for (p = data, consumedLength = 0; consumedLength < length; p++, consumedLength++) {
+        if (*p == ' ') {
+            if (!space1)
+                space1 = p;
+            else if (!space2)
+                space2 = p;
+        } else if (*p == '\n')
+            break;
+    }
+
+    // Haven't finished header line.
+    if (consumedLength == length) {
+        failureReason = "Incomplete Request Line";
+        return 0;
+    }
+
+    // RequestLine does not contain 3 parts.
+    if (!space1 || !space2) {
+        failureReason = "Request Line does not appear to contain: <Method> <Url> <HTTPVersion>.";
+        return 0;
+    }
+
+    // The line must end with "\r\n".
+    const char* end = p + 1;
+    if (*(end - 2) != '\r') {
+        failureReason = "Request line does not end with CRLF";
+        return 0;
+    }
+
+    // Request Method.
+    method = String(data, space1 - data); // For length subtract 1 for space, but add 1 for data being the first character.
+
+    // Request URI.
+    url = String(space1 + 1, space2 - space1 - 1); // For length subtract 1 for space.
+
+    // HTTP Version.
+    String httpVersionString(space2 + 1, end - space2 - 3); // For length subtract 1 for space, and 2 for "\r\n".
+    if (httpVersionString.length() != 8 || !httpVersionString.startsWith("HTTP/1."))
+        httpVersion = Unknown;
+    else if (httpVersionString[7] == '0')
+        httpVersion = HTTP_1_0;
+    else if (httpVersionString[7] == '1')
+        httpVersion = HTTP_1_1;
+    else
+        httpVersion = Unknown;
+
+    return end - data;
+}
+
+size_t parseHTTPHeader(const char* start, size_t length, String& failureReason, AtomicString& nameStr, String& valueStr)
+{
+    const char* p = start;
+    const char* end = start + length;
+
+    Vector<char> name;
+    Vector<char> value;
+    nameStr = AtomicString();
+    valueStr = String();
+
+    for (; p < end; p++) {
+        switch (*p) {
+        case '\r':
+            if (name.isEmpty()) {
+                if (p + 1 < end && *(p + 1) == '\n')
+                    return (p + 2) - start;
+                failureReason = "CR doesn't follow LF at " + trimInputSample(p, end - p);
+                return 0;
+            }
+            failureReason = "Unexpected CR in name at " + trimInputSample(name.data(), name.size());
+            return 0;
+        case '\n':
+            failureReason = "Unexpected LF in name at " + trimInputSample(name.data(), name.size());
+            return 0;
+        case ':':
+            break;
+        default:
+            name.append(*p);
+            continue;
+        }
+        if (*p == ':') {
+            ++p;
+            break;
+        }
+    }
+
+    for (; p < end && *p == 0x20; p++) { }
+
+    for (; p < end; p++) {
+        switch (*p) {
+        case '\r':
+            break;
+        case '\n':
+            failureReason = "Unexpected LF in value at " + trimInputSample(value.data(), value.size());
+            return 0;
+        default:
+            value.append(*p);
+        }
+        if (*p == '\r') {
+            ++p;
+            break;
+        }
+    }
+    if (p >= end || *p != '\n') {
+        failureReason = "CR doesn't follow LF after value at " + trimInputSample(p, end - p);
+        return 0;
+    }
+    nameStr = AtomicString::fromUTF8(name.data(), name.size());
+    valueStr = String::fromUTF8(value.data(), value.size());
+    if (nameStr.isNull()) {
+        failureReason = "Invalid UTF-8 sequence in header name";
+        return 0;
+    }
+    if (valueStr.isNull()) {
+        failureReason = "Invalid UTF-8 sequence in header value";
+        return 0;
+    }
+    return p - start;
+}
+
+size_t parseHTTPRequestBody(const char* data, size_t length, Vector<unsigned char>& body)
+{
+    body.clear();
+    body.append(data, length);
+
+    return length;
 }
 
 }

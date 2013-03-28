@@ -33,14 +33,15 @@
 
 #include "DOMWindow.h"
 #include "FloatRect.h"
+#include "InspectorInstrumentation.h"
 #include "NotImplemented.h"
 #include "Page.h"
 #include "WebDevToolsAgentImpl.h"
-#include "platform/WebRect.h"
-#include "platform/WebURL.h"
-#include "platform/WebURLRequest.h"
 #include "WebViewClient.h"
 #include "WebViewImpl.h"
+#include <public/WebRect.h>
+#include <public/WebURL.h>
+#include <public/WebURLRequest.h>
 #include <wtf/Vector.h>
 
 using namespace WebCore;
@@ -63,10 +64,11 @@ void InspectorClientImpl::inspectorDestroyed()
         agent->inspectorDestroyed();
 }
 
-void InspectorClientImpl::openInspectorFrontend(InspectorController* controller)
+InspectorFrontendChannel* InspectorClientImpl::openInspectorFrontend(InspectorController* controller)
 {
     if (WebDevToolsAgentImpl* agent = devToolsAgent())
-        agent->openInspectorFrontend(controller);
+        return agent->openInspectorFrontend(controller);
+    return 0;
 }
 
 void InspectorClientImpl::closeInspectorFrontend()
@@ -126,6 +128,65 @@ void InspectorClientImpl::clearBrowserCookies()
 {
     if (WebDevToolsAgentImpl* agent = devToolsAgent())
         agent->clearBrowserCookies();
+}
+
+bool InspectorClientImpl::canMonitorMainThread()
+{
+    return true;
+}
+
+bool InspectorClientImpl::canOverrideDeviceMetrics()
+{
+    return true;
+}
+
+void InspectorClientImpl::overrideDeviceMetrics(int width, int height, float fontScaleFactor, bool fitWindow)
+{
+    if (WebDevToolsAgentImpl* agent = devToolsAgent())
+        agent->overrideDeviceMetrics(width, height, fontScaleFactor, fitWindow);
+}
+
+void InspectorClientImpl::autoZoomPageToFitWidth()
+{
+    if (WebDevToolsAgentImpl* agent = devToolsAgent())
+        agent->autoZoomPageToFitWidth();
+}
+
+bool InspectorClientImpl::overridesShowPaintRects()
+{
+    return m_inspectedWebView->isAcceleratedCompositingActive();
+}
+
+void InspectorClientImpl::setShowPaintRects(bool show)
+{
+    m_inspectedWebView->setShowPaintRects(show);
+}
+
+bool InspectorClientImpl::canShowFPSCounter()
+{
+    return true;
+}
+
+void InspectorClientImpl::setShowFPSCounter(bool show)
+{
+    m_inspectedWebView->setShowFPSCounter(show);
+}
+
+bool InspectorClientImpl::supportsFrameInstrumentation()
+{
+    return true;
+}
+
+void InspectorClientImpl::getAllocatedObjects(HashSet<const void*>& set)
+{
+    if (WebDevToolsAgentImpl* agent = devToolsAgent())
+        agent->getAllocatedObjects(set);
+}
+
+void InspectorClientImpl::dumpUncountedAllocatedObjects(const HashMap<const void*, size_t>& map)
+{
+    if (WebDevToolsAgentImpl* agent = devToolsAgent())
+        agent->dumpUncountedAllocatedObjects(map);
 }
 
 WebDevToolsAgentImpl* InspectorClientImpl::devToolsAgent()

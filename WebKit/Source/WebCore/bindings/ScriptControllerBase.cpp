@@ -32,13 +32,18 @@
 #include "SecurityOrigin.h"
 #include "Settings.h"
 #include "UserGestureIndicator.h"
+#include <wtf/text/TextPosition.h>
 
 namespace WebCore {
 
 bool ScriptController::canExecuteScripts(ReasonForCallingCanExecuteScripts reason)
 {
-    if (m_frame->document() && m_frame->document()->isSandboxed(SandboxScripts))
+    if (m_frame->document() && m_frame->document()->isSandboxed(SandboxScripts)) {
+        // FIXME: This message should be moved off the console once a solution to https://bugs.webkit.org/show_bug.cgi?id=103274 exists.
+        if (reason == AboutToExecuteScript)
+            m_frame->document()->addConsoleMessage(HTMLMessageSource, ErrorMessageLevel, "Blocked script execution in '" + m_frame->document()->url().string() + "' because the document's frame is sandboxed and the 'allow-scripts' permission is not set."); 
         return false;
+    }
 
     if (m_frame->document() && m_frame->document()->isViewSource()) {
         ASSERT(m_frame->document()->securityOrigin()->isUnique());
@@ -74,8 +79,7 @@ bool ScriptController::executeIfJavaScriptURL(const KURL& url, ShouldReplaceDocu
         return false;
 
     if (!m_frame->page()
-        || !m_frame->page()->javaScriptURLsAreAllowed()
-        || !m_frame->document()->contentSecurityPolicy()->allowJavaScriptURLs()
+        || !m_frame->document()->contentSecurityPolicy()->allowJavaScriptURLs(m_frame->document()->url(), eventHandlerPosition().m_line)
         || m_frame->inViewSourceMode())
         return true;
 

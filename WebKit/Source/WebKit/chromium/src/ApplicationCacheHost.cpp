@@ -44,10 +44,10 @@
 #include "WebFrameImpl.h"
 #include "WrappedResourceRequest.h"
 #include "WrappedResourceResponse.h"
-#include "platform/WebURL.h"
-#include "platform/WebURLError.h"
-#include "platform/WebURLResponse.h"
-#include "platform/WebVector.h"
+#include <public/WebURL.h>
+#include <public/WebURLError.h>
+#include <public/WebURLResponse.h>
+#include <public/WebVector.h>
 
 using namespace WebKit;
 
@@ -193,10 +193,12 @@ void ApplicationCacheHost::maybeLoadFallbackSynchronously(const ResourceRequest&
     // N/A to the chromium port
 }
 
-bool ApplicationCacheHost::canCacheInPageCache() const
+bool ApplicationCacheHost::canCacheInPageCache()
 {
-    // N/A to the chromium port which doesn't use the page cache.
-    return false;
+    // Chromium doesn't use the page cache, however, that's controlled by WebCore::Settings, which has usesPageCache() return
+    // false. So we return an hyptothetical here: Chromium won't end up using the PageCache, but the statistics in PageCache.cpp
+    // will be reported correctly for re-evaluating that decision.
+    return !isApplicationCacheEnabled() || status() == UNCACHED;
 }
 
 void ApplicationCacheHost::setDOMApplicationCache(DOMApplicationCache* domApplicationCache)
@@ -297,7 +299,8 @@ bool ApplicationCacheHost::swapCache()
 
 void ApplicationCacheHost::abort()
 {
-    // FIXME: See https://bugs.webkit.org/show_bug.cgi?id=76270
+    if (m_internal)
+        m_internal->m_outerHost->abort();
 }
 
 bool ApplicationCacheHost::isApplicationCacheEnabled()

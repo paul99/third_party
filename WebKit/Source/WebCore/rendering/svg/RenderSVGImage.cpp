@@ -41,7 +41,7 @@
 #include "SVGImageElement.h"
 #include "SVGLength.h"
 #include "SVGPreserveAspectRatio.h"
-#include "SVGRenderSupport.h"
+#include "SVGRenderingContext.h"
 #include "SVGResources.h"
 #include "SVGResourcesCache.h"
 
@@ -79,9 +79,10 @@ bool RenderSVGImage::updateImageViewport()
 
 void RenderSVGImage::layout()
 {
+    StackStats::LayoutCheckPoint layoutCheckPoint;
     ASSERT(needsLayout());
 
-    LayoutRepainter repainter(*this, checkForRepaintDuringLayout() && selfNeedsLayout());
+    LayoutRepainter repainter(*this, SVGRenderSupport::checkForSVGRepaintDuringLayout(this) && selfNeedsLayout());
     updateImageViewport();
 
     bool transformOrBoundariesUpdate = m_needsTransformUpdate || m_needsBoundariesUpdate;
@@ -91,8 +92,12 @@ void RenderSVGImage::layout()
     }
 
     if (m_needsBoundariesUpdate) {
-        m_repaintBoundingBox = m_objectBoundingBox;
-        SVGRenderSupport::intersectRepaintRectWithResources(this, m_repaintBoundingBox);
+        m_repaintBoundingBoxExcludingShadow = m_objectBoundingBox;
+        SVGRenderSupport::intersectRepaintRectWithResources(this, m_repaintBoundingBoxExcludingShadow);
+
+        m_repaintBoundingBox = m_repaintBoundingBoxExcludingShadow;
+        SVGRenderSupport::intersectRepaintRectWithShadows(this, m_repaintBoundingBox);
+
         m_needsBoundariesUpdate = false;
     }
 
@@ -124,9 +129,9 @@ void RenderSVGImage::paint(PaintInfo& paintInfo, const LayoutPoint&)
         childPaintInfo.applyTransform(m_localTransform);
 
         if (childPaintInfo.phase == PaintPhaseForeground) {
-            PaintInfo savedInfo(childPaintInfo);
+            SVGRenderingContext renderingContext(this, childPaintInfo);
 
-            if (SVGRenderSupport::prepareToRenderSVGContent(this, childPaintInfo)) {
+            if (renderingContext.isRenderingPrepared()) {
                 RefPtr<Image> image = m_imageResource->image();
                 FloatRect destRect = m_objectBoundingBox;
                 FloatRect srcRect(0, 0, image->width(), image->height());
@@ -136,8 +141,6 @@ void RenderSVGImage::paint(PaintInfo& paintInfo, const LayoutPoint&)
 
                 childPaintInfo.context->drawImage(image.get(), ColorSpaceDeviceRGB, destRect, srcRect);
             }
-
-            SVGRenderSupport::finishRenderSVGContent(this, childPaintInfo, savedInfo.context);
         }
 
         if (drawsOutline)
@@ -180,13 +183,18 @@ void RenderSVGImage::imageChanged(WrappedImagePtr, const IntRect*)
     // Eventually notify parent resources, that we've changed.
     RenderSVGResource::markForLayoutAndParentResourceInvalidation(this, false);
 
+    // Update the SVGImageCache sizeAndScales entry in case image loading finished after layout.
+    // (https://bugs.webkit.org/show_bug.cgi?id=99489)
+    m_objectBoundingBox = FloatRect();
+    updateImageViewport();
+
     repaint();
 }
 
-void RenderSVGImage::addFocusRingRects(Vector<LayoutRect>& rects, const LayoutPoint&)
+void RenderSVGImage::addFocusRingRects(Vector<IntRect>& rects, const LayoutPoint&)
 {
     // this is called from paint() after the localTransform has already been applied
-    LayoutRect contentRect = enclosingLayoutRect(repaintRectInLocalCoordinates());
+    IntRect contentRect = enclosingIntRect(repaintRectInLocalCoordinates());
     if (!contentRect.isEmpty())
         rects.append(contentRect);
 }

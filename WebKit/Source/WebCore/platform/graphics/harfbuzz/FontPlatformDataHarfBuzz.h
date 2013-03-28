@@ -1,10 +1,10 @@
 /*
  * Copyright (c) 2006, 2007, 2008, Google Inc. All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
  * met:
- * 
+ *
  *     * Redistributions of source code must retain the above copyright
  * notice, this list of conditions and the following disclaimer.
  *     * Redistributions in binary form must reproduce the above
@@ -14,7 +14,7 @@
  *     * Neither the name of Google Inc. nor the names of its
  * contributors may be used to endorse or promote products derived from
  * this software without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -33,9 +33,9 @@
 
 #include "FontOrientation.h"
 #include "FontRenderStyle.h"
-#include "HarfBuzzSkia.h"
+#include "OpenTypeVerticalData.h"
+#include "SharedBuffer.h"
 #include "SkPaint.h"
-#include "TextOrientation.h"
 #include <wtf/Forward.h>
 #include <wtf/RefPtr.h>
 #include <wtf/text/CString.h>
@@ -47,6 +47,12 @@ typedef uint32_t SkFontID;
 namespace WebCore {
 
 class FontDescription;
+
+#if USE(HARFBUZZ_NG)
+class HarfBuzzNGFace;
+#else
+class HarfbuzzFace;
+#endif
 
 // -----------------------------------------------------------------------------
 // FontPlatformData is the handle which WebKit has on a specific face. A face
@@ -60,38 +66,11 @@ public:
     // to this "Deleted" one. It expects the Deleted one to be differentiable
     // from the 0 one (created with the empty constructor), so we can't just
     // set everything to 0.
-    FontPlatformData(WTF::HashTableDeletedValueType)
-        : m_typeface(hashTableDeletedFontValue())
-        , m_textSize(0)
-        , m_emSizeInFontUnits(0)
-        , m_fakeBold(false)
-        , m_fakeItalic(false)
-        , m_orientation(Horizontal)
-        , m_textOrientation(TextOrientationVerticalRight)
-        { }
-
-    FontPlatformData()
-        : m_typeface(0)
-        , m_textSize(0)
-        , m_emSizeInFontUnits(0)
-        , m_fakeBold(false)
-        , m_fakeItalic(false)
-        , m_orientation(Horizontal)
-        , m_textOrientation(TextOrientationVerticalRight)
-        { }
-
-    FontPlatformData(float textSize, bool fakeBold, bool fakeItalic)
-        : m_typeface(0)
-        , m_textSize(textSize)
-        , m_emSizeInFontUnits(0)
-        , m_fakeBold(fakeBold)
-        , m_fakeItalic(fakeItalic)
-        , m_orientation(Horizontal)
-        , m_textOrientation(TextOrientationVerticalRight)
-        { }
-
+    FontPlatformData(WTF::HashTableDeletedValueType);
+    FontPlatformData();
+    FontPlatformData(float textSize, bool fakeBold, bool fakeItalic);
     FontPlatformData(const FontPlatformData&);
-    FontPlatformData(SkTypeface*, const char* name, float textSize, bool fakeBold, bool fakeItalic, FontOrientation = Horizontal, TextOrientation = TextOrientationVerticalRight);
+    FontPlatformData(SkTypeface*, const char* name, float textSize, bool fakeBold, bool fakeItalic, FontOrientation = Horizontal);
     FontPlatformData(const FontPlatformData& src, float textSize);
     ~FontPlatformData();
 
@@ -124,20 +103,36 @@ public:
     FontPlatformData& operator=(const FontPlatformData&);
     bool isHashTableDeletedValue() const { return m_typeface == hashTableDeletedFontValue(); }
 
+#if ENABLE(OPENTYPE_VERTICAL)
+    PassRefPtr<OpenTypeVerticalData> verticalData() const;
+    PassRefPtr<SharedBuffer> openTypeTable(uint32_t table) const;
+#endif
+
 #ifndef NDEBUG
     String description() const;
 #endif
 
+#if USE(HARFBUZZ_NG)
+    HarfBuzzNGFace* harfbuzzFace() const;
+#else
     HarfbuzzFace* harfbuzzFace() const;
+#endif
+
+    // The returned styles are all actual styles without FontRenderStyle::NoPreference.
+    const FontRenderStyle& fontRenderStyle() const { return m_style; }
 
     // -------------------------------------------------------------------------
     // Global font preferences...
 
     static void setHinting(SkPaint::Hinting);
-    static void setAntiAlias(bool on);
-    static void setSubpixelGlyphs(bool on);
+    static void setAutoHint(bool);
+    static void setUseBitmaps(bool);
+    static void setAntiAlias(bool);
+    static void setSubpixelRendering(bool);
+    static void setSubpixelPositioning(bool);
 
 private:
+    void getRenderStyleForStrike(const char*, int);
     void querySystemForRenderStyle();
 
     // FIXME: Could SkAutoUnref be used here?
@@ -148,9 +143,12 @@ private:
     bool m_fakeBold;
     bool m_fakeItalic;
     FontOrientation m_orientation;
-    TextOrientation m_textOrientation;
     FontRenderStyle m_style;
+#if USE(HARFBUZZ_NG)
+    mutable RefPtr<HarfBuzzNGFace> m_harfbuzzFace;
+#else
     mutable RefPtr<HarfbuzzFace> m_harfbuzzFace;
+#endif
 
     SkTypeface* hashTableDeletedFontValue() const { return reinterpret_cast<SkTypeface*>(-1); }
 };

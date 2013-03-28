@@ -20,7 +20,10 @@
 #ifndef TextureMapperPlatformLayer_h
 #define TextureMapperPlatformLayer_h
 
-#include "FloatRect.h"
+#if USE(GRAPHICS_SURFACE)
+#include "GraphicsSurface.h"
+#endif
+
 #include "TransformationMatrix.h"
 
 namespace WebCore {
@@ -30,7 +33,14 @@ class BitmapTexture;
 
 class TextureMapperPlatformLayer {
 public:
-    virtual void paintToTextureMapper(TextureMapper*, const FloatRect&, const TransformationMatrix& modelViewMatrix = TransformationMatrix(), float opacity = 1.0, BitmapTexture* mask = 0) const = 0;
+    virtual ~TextureMapperPlatformLayer() { }
+    virtual void paintToTextureMapper(TextureMapper*, const FloatRect&, const TransformationMatrix& modelViewMatrix = TransformationMatrix(), float opacity = 1.0, BitmapTexture* mask = 0) = 0;
+    virtual void swapBuffers() { }
+#if USE(GRAPHICS_SURFACE)
+    virtual IntSize platformLayerSize() const { return IntSize(); }
+    virtual uint32_t copyToGraphicsSurface() { return 0; }
+    virtual GraphicsSurfaceToken graphicsSurfaceToken() const { return GraphicsSurfaceToken(); }
+#endif
 };
 
 };

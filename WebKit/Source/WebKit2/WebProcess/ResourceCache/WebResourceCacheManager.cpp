@@ -56,9 +56,9 @@ WebResourceCacheManager::~WebResourceCacheManager()
 {
 }
 
-void WebResourceCacheManager::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::ArgumentDecoder* arguments)
+void WebResourceCacheManager::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
 {
-    didReceiveWebResourceCacheManagerMessage(connection, messageID, arguments);
+    didReceiveWebResourceCacheManagerMessage(connection, messageID, decoder);
 }
 
 
@@ -118,8 +118,7 @@ void WebResourceCacheManager::clearCacheForOrigin(SecurityOriginData originData,
 #if USE(CFURLCACHE)
     if (resourceCachesToClear != InMemoryResourceCachesOnly) { 
         RetainPtr<CFMutableArrayRef> hostArray(AdoptCF, CFArrayCreateMutable(0, 0, &kCFTypeArrayCallBacks));
-        RetainPtr<CFStringRef> host(AdoptCF, origin->host().createCFString());
-        CFArrayAppendValue(hostArray.get(), host.get());
+        CFArrayAppendValue(hostArray.get(), origin->host().createCFString().get());
 
         clearCFURLCacheForHostNames(hostArray.get());
     }

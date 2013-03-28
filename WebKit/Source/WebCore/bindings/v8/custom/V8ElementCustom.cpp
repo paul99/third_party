@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007-2009 Google Inc. All rights reserved.
+ * Copyright (C) 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -29,40 +29,28 @@
  */
 
 #include "config.h"
-#include "V8Element.h"
-
-#include "Attr.h"
-#include "Document.h"
 #include "Element.h"
-#include "ExceptionCode.h"
-#include "HTMLFrameElementBase.h"
-#include "HTMLNames.h"
-#include "Node.h"
 
-#include "V8Attr.h"
-#include "V8Binding.h"
-#include "V8BindingState.h"
+#include "V8Element.h"
 #include "V8HTMLElement.h"
-#include "V8Proxy.h"
 
 #if ENABLE(SVG)
 #include "V8SVGElement.h"
 #endif
 
-#include <wtf/RefPtr.h>
-
 namespace WebCore {
 
-v8::Handle<v8::Value> toV8(Element* impl, bool forceNewObject)
+// This code is duplicated in V8Node::wrap for performance. It must be kept in sync.
+v8::Handle<v8::Object> wrap(Element* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
 {
-    if (!impl)
-        return v8::Null();
+    ASSERT(impl);
     if (impl->isHTMLElement())
-        return toV8(toHTMLElement(impl), forceNewObject);
+        return wrap(toHTMLElement(impl), creationContext, isolate);
 #if ENABLE(SVG)
     if (impl->isSVGElement())
-        return toV8(static_cast<SVGElement*>(impl), forceNewObject);
+        return wrap(static_cast<SVGElement*>(impl), creationContext, isolate);
 #endif
-    return V8Element::wrap(impl, forceNewObject);
+    return V8Element::createWrapper(static_cast<Element*>(impl), creationContext, isolate);
 }
-} // namespace WebCore
+
+}

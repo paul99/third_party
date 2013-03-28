@@ -36,7 +36,7 @@ namespace WebCore {
 class AccessibilityTableRow : public AccessibilityRenderObject {
     
 protected:
-    AccessibilityTableRow(RenderObject*);
+    explicit AccessibilityTableRow(RenderObject*);
 public:
     static PassRefPtr<AccessibilityTableRow> create(RenderObject*);
     virtual ~AccessibilityTableRow();
@@ -58,6 +58,8 @@ public:
     
 private:
     int m_rowIndex;
+    
+    virtual AccessibilityObject* observableObject() const;
 }; 
    
 } // namespace WebCore 

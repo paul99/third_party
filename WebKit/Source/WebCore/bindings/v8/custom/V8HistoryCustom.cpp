@@ -31,76 +31,77 @@
 #include "config.h"
 #include "V8History.h"
 
+#include "BindingState.h"
 #include "ExceptionCode.h"
 #include "History.h"
 #include "SerializedScriptValue.h"
 #include "V8Binding.h"
-#include "V8BindingState.h"
 #include "V8DOMWindow.h"
-#include "V8Proxy.h"
+#include "V8HiddenPropertyName.h"
 
 namespace WebCore {
+
+v8::Handle<v8::Value> V8History::stateAccessorGetter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
+{
+    INC_STATS("DOM.History.state");
+    History* history = V8History::toNative(info.Holder());
+
+    v8::Handle<v8::Value> value = info.Holder()->GetHiddenValue(V8HiddenPropertyName::state());
+
+    if (!value.IsEmpty() && !history->stateChanged())
+        return value;
+
+    RefPtr<SerializedScriptValue> serialized = history->state();
+    value = serialized ? serialized->deserialize(info.GetIsolate()) : v8::Handle<v8::Value>(v8Null(info.GetIsolate()));
+    info.Holder()->SetHiddenValue(V8HiddenPropertyName::state(), value);
+
+    return value;
+}
 
 v8::Handle<v8::Value> V8History::pushStateCallback(const v8::Arguments& args)
 {
     bool didThrow = false;
-    RefPtr<SerializedScriptValue> historyState = SerializedScriptValue::create(args[0], 0, 0, didThrow);
+    RefPtr<SerializedScriptValue> historyState = SerializedScriptValue::create(args[0], 0, 0, didThrow, args.GetIsolate());
     if (didThrow)
         return v8::Undefined();
 
-    v8::TryCatch tryCatch;
-    String title = toWebCoreStringWithNullOrUndefinedCheck(args[1]);
-    if (tryCatch.HasCaught())
-        return v8::Undefined();
-    String url;
-    if (args.Length() > 2) {
-        url = toWebCoreStringWithNullOrUndefinedCheck(args[2]);
-        if (tryCatch.HasCaught())
-            return v8::Undefined();
-    }
+    V8TRYCATCH_FOR_V8STRINGRESOURCE(V8StringResource<WithUndefinedOrNullCheck>, title, args[1]);
+    V8TRYCATCH_FOR_V8STRINGRESOURCE(V8StringResource<WithUndefinedOrNullCheck>, url, MAYBE_MISSING_PARAMETER(args, 2, DefaultIsNullString));
 
     ExceptionCode ec = 0;
     History* history = V8History::toNative(args.Holder());
     history->stateObjectAdded(historyState.release(), title, url, History::StateObjectPush, ec);
-    return throwError(ec);
+    args.Holder()->DeleteHiddenValue(V8HiddenPropertyName::state());
+    return setDOMException(ec, args.GetIsolate());
 }
 
 v8::Handle<v8::Value> V8History::replaceStateCallback(const v8::Arguments& args)
 {
     bool didThrow = false;
-    RefPtr<SerializedScriptValue> historyState = SerializedScriptValue::create(args[0], 0, 0, didThrow);
+    RefPtr<SerializedScriptValue> historyState = SerializedScriptValue::create(args[0], 0, 0, didThrow, args.GetIsolate());
     if (didThrow)
         return v8::Undefined();
 
-    v8::TryCatch tryCatch;
-    String title = toWebCoreStringWithNullOrUndefinedCheck(args[1]);
-    if (tryCatch.HasCaught())
-        return v8::Undefined();
-    String url;
-    if (args.Length() > 2) {
-        url = toWebCoreStringWithNullOrUndefinedCheck(args[2]);
-        if (tryCatch.HasCaught())
-            return v8::Undefined();
-    }
+    V8TRYCATCH_FOR_V8STRINGRESOURCE(V8StringResource<WithUndefinedOrNullCheck>, title, args[1]);
+    V8TRYCATCH_FOR_V8STRINGRESOURCE(V8StringResource<WithUndefinedOrNullCheck>, url, MAYBE_MISSING_PARAMETER(args, 2, DefaultIsNullString));
 
     ExceptionCode ec = 0;
     History* history = V8History::toNative(args.Holder());
     history->stateObjectAdded(historyState.release(), title, url, History::StateObjectReplace, ec);
-    return throwError(ec);
+    args.Holder()->DeleteHiddenValue(V8HiddenPropertyName::state());
+    return setDOMException(ec, args.GetIsolate());
 }
 
 bool V8History::indexedSecurityCheck(v8::Local<v8::Object> host, uint32_t index, v8::AccessType type, v8::Local<v8::Value>)
 {
-    // Only allow same origin access.
     History* history = V8History::toNative(host);
-    return V8BindingSecurity::canAccessFrame(V8BindingState::Only(), history->frame(), false);
+    return BindingSecurity::shouldAllowAccessToFrame(BindingState::instance(), history->frame(), DoNotReportSecurityError);
 }
 
 bool V8History::namedSecurityCheck(v8::Local<v8::Object> host, v8::Local<v8::Value> key, v8::AccessType type, v8::Local<v8::Value>)
 {
-    // Only allow same origin access.
     History* history = V8History::toNative(host);
-    return V8BindingSecurity::canAccessFrame(V8BindingState::Only(), history->frame(), false);
+    return BindingSecurity::shouldAllowAccessToFrame(BindingState::instance(), history->frame(), DoNotReportSecurityError);
 }
 
 } // namespace WebCore

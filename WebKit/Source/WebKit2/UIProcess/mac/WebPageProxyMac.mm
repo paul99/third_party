@@ -27,6 +27,7 @@
 #import "WebPageProxy.h"
 
 #import "AttributedString.h"
+#import "ColorSpaceData.h"
 #import "DataReference.h"
 #import "DictionaryPopupInfo.h"
 #import "EditorState.h"
@@ -34,9 +35,14 @@
 #import "PluginComplexTextInputState.h"
 #import "PageClient.h"
 #import "PageClientImpl.h"
+#import "StringUtilities.h"
 #import "TextChecker.h"
 #import "WebPageMessages.h"
 #import "WebProcessProxy.h"
+#import <WebCore/DictationAlternative.h>
+#import <WebCore/GraphicsLayer.h>
+#import <WebCore/SharedBuffer.h>
+#import <WebCore/TextAlternativeWithRange.h>
 #import <WebKitSystemInterface.h>
 #import <wtf/text/StringConcatenate.h>
 
@@ -58,7 +64,7 @@ namespace WebKit {
 #error Unknown architecture
 #endif
 
-#if !defined(BUILDING_ON_SNOW_LEOPARD) && !defined(BUILDING_ON_LION)
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
 
 static String macOSXVersionString()
 {
@@ -93,7 +99,7 @@ static String macOSXVersionString()
     return String::format("%d", major);
 }
 
-#endif // !defined(BUILDING_ON_SNOW_LEOPARD) && !defined(BUILDING_ON_LION)
+#endif // __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
 
 static String userVisibleWebKitVersionString()
 {
@@ -138,7 +144,7 @@ void WebPageProxy::searchWithSpotlight(const String& string)
 {
     [[NSWorkspace sharedWorkspace] showSearchResultsForQueryString:nsStringFromWebCoreString(string)];
 }
-
+    
 CGContextRef WebPageProxy::containingWindowGraphicsContext()
 {
     return m_pageClient->containingWindowGraphicsContext();
@@ -194,6 +200,35 @@ bool WebPageProxy::insertText(const String& text, uint64_t replacementRangeStart
     bool handled = true;
     process()->sendSync(Messages::WebPage::InsertText(text, replacementRangeStart, replacementRangeEnd), Messages::WebPage::InsertText::Reply(handled, m_editorState), m_pageID);
     return handled;
+}
+
+bool WebPageProxy::insertDictatedText(const String& text, uint64_t replacementRangeStart, uint64_t replacementRangeEnd, const Vector<TextAlternativeWithRange>& dictationAlternativesWithRange)
+{
+#if USE(DICTATION_ALTERNATIVES)
+    if (dictationAlternativesWithRange.isEmpty())
+        return insertText(text, replacementRangeStart, replacementRangeEnd);
+
+    if (!isValid())
+        return true;
+
+    Vector<DictationAlternative> dictationAlternatives;
+
+    for (size_t i = 0; i < dictationAlternativesWithRange.size(); ++i) {
+        const TextAlternativeWithRange& alternativeWithRange = dictationAlternativesWithRange[i];
+        uint64_t dictationContext = m_pageClient->addDictationAlternatives(alternativeWithRange.alternatives);
+        if (dictationContext)
+            dictationAlternatives.append(DictationAlternative(alternativeWithRange.range.location, alternativeWithRange.range.length, dictationContext));
+    }
+
+    if (dictationAlternatives.isEmpty())
+        return insertText(text, replacementRangeStart, replacementRangeEnd);
+
+    bool handled = true;
+    process()->sendSync(Messages::WebPage::InsertDictatedText(text, replacementRangeStart, replacementRangeEnd, dictationAlternatives), Messages::WebPage::InsertDictatedText::Reply(handled, m_editorState), m_pageID);
+    return handled;
+#else
+    return insertText(text, replacementRangeStart, replacementRangeEnd);
+#endif
 }
 
 void WebPageProxy::getMarkedRange(uint64_t& location, uint64_t& length)
@@ -255,15 +290,30 @@ bool WebPageProxy::executeKeypressCommands(const Vector<WebCore::KeypressCommand
     return result;
 }
 
-bool WebPageProxy::writeSelectionToPasteboard(const String& pasteboardName, const Vector<String>& pasteboardTypes)
+String WebPageProxy::stringSelectionForPasteboard()
+{
+    String value;
+    if (!isValid())
+        return value;
+    
+    const double messageTimeout = 20;
+    process()->sendSync(Messages::WebPage::GetStringSelectionForPasteboard(), Messages::WebPage::GetStringSelectionForPasteboard::Reply(value), m_pageID, messageTimeout);
+    return value;
+}
+
+PassRefPtr<WebCore::SharedBuffer> WebPageProxy::dataSelectionForPasteboard(const String& pasteboardType)
 {
     if (!isValid())
-        return false;
-
-    bool result = false;
+        return 0;
+    SharedMemory::Handle handle;
+    uint64_t size = 0;
     const double messageTimeout = 20;
-    process()->sendSync(Messages::WebPage::WriteSelectionToPasteboard(pasteboardName, pasteboardTypes), Messages::WebPage::WriteSelectionToPasteboard::Reply(result), m_pageID, messageTimeout);
-    return result;
+    process()->sendSync(Messages::WebPage::GetDataSelectionForPasteboard(pasteboardType),
+                                                Messages::WebPage::GetDataSelectionForPasteboard::Reply(handle, size), m_pageID, messageTimeout);
+    if (handle.isNull())
+        return 0;
+    RefPtr<SharedMemory> sharedMemoryBuffer = SharedMemory::create(handle, SharedMemory::ReadOnly);
+    return SharedBuffer::create(static_cast<unsigned char *>(sharedMemoryBuffer->data()), size);
 }
 
 bool WebPageProxy::readSelectionFromPasteboard(const String& pasteboardName)
@@ -277,6 +327,7 @@ bool WebPageProxy::readSelectionFromPasteboard(const String& pasteboardName)
     return result;
 }
 
+#if ENABLE(DRAG_SUPPORT)
 void WebPageProxy::setDragImage(const WebCore::IntPoint& clientPosition, const ShareableBitmap::Handle& dragImageHandle, bool isLinkDrag)
 {
     RefPtr<ShareableBitmap> dragImage = ShareableBitmap::create(dragImageHandle);
@@ -285,6 +336,21 @@ void WebPageProxy::setDragImage(const WebCore::IntPoint& clientPosition, const S
     
     m_pageClient->setDragImage(clientPosition, dragImage.release(), isLinkDrag);
 }
+
+void WebPageProxy::setPromisedData(const String& pasteboardName, const SharedMemory::Handle& imageHandle, uint64_t imageSize, const String& filename, const String& extension,
+                                   const String& title, const String& url, const String& visibleURL, const SharedMemory::Handle& archiveHandle, uint64_t archiveSize)
+{
+    RefPtr<SharedMemory> sharedMemoryImage = SharedMemory::create(imageHandle, SharedMemory::ReadOnly);
+    RefPtr<SharedBuffer> imageBuffer = SharedBuffer::create(static_cast<unsigned char*>(sharedMemoryImage->data()), imageSize);
+    RefPtr<SharedBuffer> archiveBuffer;
+    
+    if (!archiveHandle.isNull()) {
+        RefPtr<SharedMemory> sharedMemoryArchive = SharedMemory::create(archiveHandle, SharedMemory::ReadOnly);;
+        archiveBuffer = SharedBuffer::create(static_cast<unsigned char*>(sharedMemoryArchive->data()), archiveSize);
+    }
+    m_pageClient->setPromisedData(pasteboardName, imageBuffer, filename, extension, title, url, visibleURL, archiveBuffer);
+}
+#endif
 
 void WebPageProxy::performDictionaryLookupAtLocation(const WebCore::FloatPoint& point)
 {
@@ -325,7 +391,7 @@ void WebPageProxy::capitalizeWord()
 }
 
 void WebPageProxy::setSmartInsertDeleteEnabled(bool isSmartInsertDeleteEnabled)
-{ 
+{
     if (m_isSmartInsertDeleteEnabled == isSmartInsertDeleteEnabled)
         return;
 
@@ -334,9 +400,9 @@ void WebPageProxy::setSmartInsertDeleteEnabled(bool isSmartInsertDeleteEnabled)
     process()->send(Messages::WebPage::SetSmartInsertDeleteEnabled(isSmartInsertDeleteEnabled), m_pageID);
 }
 
-void WebPageProxy::didPerformDictionaryLookup(const String& text, const DictionaryPopupInfo& dictionaryPopupInfo)
+void WebPageProxy::didPerformDictionaryLookup(const AttributedString& text, const DictionaryPopupInfo& dictionaryPopupInfo)
 {
-    m_pageClient->didPerformDictionaryLookup(text, m_pageScaleFactor, dictionaryPopupInfo);
+    m_pageClient->didPerformDictionaryLookup(text, dictionaryPopupInfo);
 }
     
 void WebPageProxy::registerWebProcessAccessibilityToken(const CoreIPC::DataReference& data)
@@ -348,7 +414,12 @@ void WebPageProxy::makeFirstResponder()
 {
     m_pageClient->makeFirstResponder();
 }
-    
+
+ColorSpaceData WebPageProxy::colorSpace()
+{
+    return m_pageClient->colorSpace();
+}
+
 void WebPageProxy::registerUIProcessAccessibilityTokens(const CoreIPC::DataReference& elementToken, const CoreIPC::DataReference& windowToken)
 {
     if (!isValid())
@@ -371,6 +442,8 @@ void WebPageProxy::setPluginComplexTextInputState(uint64_t pluginComplexTextInpu
 
 void WebPageProxy::executeSavedCommandBySelector(const String& selector, bool& handled)
 {
+    MESSAGE_CHECK(isValidKeypressCommandName(selector));
+
     handled = m_pageClient->executeSavedCommandBySelector(selector);
 }
 
@@ -399,6 +472,114 @@ bool WebPageProxy::acceptsFirstMouse(int eventNumber, const WebKit::WebMouseEven
 WKView* WebPageProxy::wkView() const
 {
     return m_pageClient->wkView();
+}
+
+void WebPageProxy::intrinsicContentSizeDidChange(const IntSize& intrinsicContentSize)
+{
+    m_pageClient->intrinsicContentSizeDidChange(intrinsicContentSize);
+}
+
+void WebPageProxy::setAcceleratedCompositingRootLayer(const GraphicsLayer* rootLayer)
+{
+    m_pageClient->setAcceleratedCompositingRootLayer(rootLayer->platformLayer());
+}
+
+static NSString *temporaryPDFDirectoryPath()
+{
+    static NSString *temporaryPDFDirectoryPath;
+
+    if (!temporaryPDFDirectoryPath) {
+        NSString *temporaryDirectoryTemplate = [NSTemporaryDirectory() stringByAppendingPathComponent:@"WebKitPDFs-XXXXXX"];
+        CString templateRepresentation = [temporaryDirectoryTemplate fileSystemRepresentation];
+
+        if (mkdtemp(templateRepresentation.mutableData()))
+            temporaryPDFDirectoryPath = [[[NSFileManager defaultManager] stringWithFileSystemRepresentation:templateRepresentation.data() length:templateRepresentation.length()] copy];
+    }
+
+    return temporaryPDFDirectoryPath;
+}
+
+static NSString *pathToPDFOnDisk(const String& suggestedFilename)
+{
+    NSString *pdfDirectoryPath = temporaryPDFDirectoryPath();
+    if (!pdfDirectoryPath) {
+        WTFLogAlways("Cannot create temporary PDF download directory.");
+        return nil;
+    }
+
+    NSString *path = [pdfDirectoryPath stringByAppendingPathComponent:suggestedFilename];
+
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    if ([fileManager fileExistsAtPath:path]) {
+        NSString *pathTemplatePrefix = [pdfDirectoryPath stringByAppendingPathComponent:@"XXXXXX-"];
+        NSString *pathTemplate = [pathTemplatePrefix stringByAppendingString:suggestedFilename];
+        CString pathTemplateRepresentation = [pathTemplate fileSystemRepresentation];
+
+        int fd = mkstemps(pathTemplateRepresentation.mutableData(), pathTemplateRepresentation.length() - strlen([pathTemplatePrefix fileSystemRepresentation]) + 1);
+        if (fd < 0) {
+            WTFLogAlways("Cannot create PDF file in the temporary directory (%s).", suggestedFilename.utf8().data());
+            return nil;
+        }
+
+        close(fd);
+        path = [fileManager stringWithFileSystemRepresentation:pathTemplateRepresentation.data() length:pathTemplateRepresentation.length()];
+    }
+
+    return path;
+}
+
+void WebPageProxy::savePDFToTemporaryFolderAndOpenWithNativeApplicationRaw(const String& suggestedFilename, const String& originatingURLString, const uint8_t* data, unsigned long size, const String& pdfUUID)
+{
+    // FIXME: Write originatingURLString to the file's originating URL metadata (perhaps WKSetMetadataURL?).
+    UNUSED_PARAM(originatingURLString);
+
+    if (!suggestedFilename.endsWith(".pdf", false)) {
+        WTFLogAlways("Cannot save file without .pdf extension to the temporary directory.");
+        return;
+    }
+
+    if (!size) {
+        WTFLogAlways("Cannot save empty PDF file to the temporary directory.");
+        return;
+    }
+
+    NSString *nsPath = pathToPDFOnDisk(suggestedFilename);
+
+    if (!nsPath)
+        return;
+
+    RetainPtr<NSNumber> permissions = adoptNS([[NSNumber alloc] initWithInt:S_IRUSR]);
+    RetainPtr<NSDictionary> fileAttributes = adoptNS([[NSDictionary alloc] initWithObjectsAndKeys:permissions.get(), NSFilePosixPermissions, nil]);
+    RetainPtr<NSData> nsData = adoptNS([[NSData alloc] initWithBytesNoCopy:(void*)data length:size freeWhenDone:NO]);
+
+    if (![[NSFileManager defaultManager] createFileAtPath:nsPath contents:nsData.get() attributes:fileAttributes.get()]) {
+        WTFLogAlways("Cannot create PDF file in the temporary directory (%s).", suggestedFilename.utf8().data());
+        return;
+    }
+
+    m_temporaryPDFFiles.add(pdfUUID, nsPath);
+
+    [[NSWorkspace sharedWorkspace] openFile:nsPath];
+}
+
+void WebPageProxy::savePDFToTemporaryFolderAndOpenWithNativeApplication(const String& suggestedFilename, const String& originatingURLString, const CoreIPC::DataReference& data, const String& pdfUUID)
+{
+    if (data.isEmpty()) {
+        WTFLogAlways("Cannot save empty PDF file to the temporary directory.");
+        return;
+    }
+
+    savePDFToTemporaryFolderAndOpenWithNativeApplicationRaw(suggestedFilename, originatingURLString, data.data(), data.size(), pdfUUID);
+}
+
+void WebPageProxy::openPDFFromTemporaryFolderWithNativeApplication(const String& pdfUUID)
+{
+    String pdfFilename = m_temporaryPDFFiles.get(pdfUUID);
+
+    if (!pdfFilename.endsWith(".pdf", false))
+        return;
+
+    [[NSWorkspace sharedWorkspace] openFile:pdfFilename];
 }
 
 } // namespace WebKit

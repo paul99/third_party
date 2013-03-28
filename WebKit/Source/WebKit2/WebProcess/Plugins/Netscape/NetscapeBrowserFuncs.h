@@ -26,13 +26,19 @@
 #ifndef NetscapeBrowserFuncs_h
 #define NetscapeBrowserFuncs_h
 
+#if ENABLE(NETSCAPE_PLUGIN_API)
+
 #include <WebCore/npfunctions.h>
 
 namespace WebKit {
+
+// The Core Animation render server port.
+static const unsigned WKNVCALayerRenderServerPort = 71879;
 
 NPNetscapeFuncs* netscapeBrowserFuncs();
 
 } // namespace WebKit
 
+#endif // ENABLE(NETSCAPE_PLUGIN_API)
 
 #endif // NetscapeBrowserFuncs_h

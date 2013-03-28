@@ -27,16 +27,28 @@
 
 #include "talk/p2p/base/portallocatorsessionproxy.h"
 
+#include "talk/base/thread.h"
 #include "talk/p2p/base/portallocator.h"
 #include "talk/p2p/base/portproxy.h"
 
 namespace cricket {
 
+enum {
+  MSG_SEND_ALLOCATION_DONE = 1,
+  MSG_SEND_ALLOCATED_PORTS,
+};
+
+typedef talk_base::TypedMessageData<PortAllocatorSessionProxy*> ProxyObjData;
+
 PortAllocatorSessionMuxer::PortAllocatorSessionMuxer(
     PortAllocatorSession* session)
-    : session_(session) {
+    : worker_thread_(talk_base::Thread::Current()),
+      session_(session),
+      candidate_done_signal_received_(false) {
   session_->SignalPortReady.connect(
       this, &PortAllocatorSessionMuxer::OnPortReady);
+  session_->SignalCandidatesAllocationDone.connect(
+      this, &PortAllocatorSessionMuxer::OnCandidatesAllocationDone);
 }
 
 PortAllocatorSessionMuxer::~PortAllocatorSessionMuxer() {
@@ -52,18 +64,35 @@ void PortAllocatorSessionMuxer::RegisterSessionProxy(
   session_proxy->SignalDestroyed.connect(
       this, &PortAllocatorSessionMuxer::OnSessionProxyDestroyed);
   session_proxy->set_impl(session_.get());
+
+  // Populate new proxy session with the information available in the actual
+  // implementation.
+  if (!ports_.empty()) {
+    worker_thread_->Post(
+        this, MSG_SEND_ALLOCATED_PORTS, new ProxyObjData(session_proxy));
+  }
+
+  if (candidate_done_signal_received_) {
+    worker_thread_->Post(
+        this, MSG_SEND_ALLOCATION_DONE, new ProxyObjData(session_proxy));
+  }
+}
+
+void PortAllocatorSessionMuxer::OnCandidatesAllocationDone(
+    PortAllocatorSession* session) {
+  candidate_done_signal_received_ = true;
 }
 
 void PortAllocatorSessionMuxer::OnPortReady(PortAllocatorSession* session,
-                                            Port* port) {
+                                            PortInterface* port) {
   ASSERT(session == session_.get());
   ports_.push_back(port);
   port->SignalDestroyed.connect(
       this, &PortAllocatorSessionMuxer::OnPortDestroyed);
 }
 
-void PortAllocatorSessionMuxer::OnPortDestroyed(Port* port) {
-  std::vector<Port*>::iterator it =
+void PortAllocatorSessionMuxer::OnPortDestroyed(PortInterface* port) {
+  std::vector<PortInterface*>::iterator it =
       std::find(ports_.begin(), ports_.end(), port);
   if (it != ports_.end())
     ports_.erase(it);
@@ -71,10 +100,12 @@ void PortAllocatorSessionMuxer::OnPortDestroyed(Port* port) {
 
 void PortAllocatorSessionMuxer::OnSessionProxyDestroyed(
     PortAllocatorSession* proxy) {
+
   std::vector<PortAllocatorSessionProxy*>::iterator it =
       std::find(session_proxies_.begin(), session_proxies_.end(), proxy);
-  if (it != session_proxies_.end())
+  if (it != session_proxies_.end()) {
     session_proxies_.erase(it);
+  }
 
   if (session_proxies_.empty()) {
     // Destroy PortAllocatorSession and its associated muxer object if all
@@ -83,8 +114,52 @@ void PortAllocatorSessionMuxer::OnSessionProxyDestroyed(
   }
 }
 
+void PortAllocatorSessionMuxer::OnMessage(talk_base::Message *pmsg) {
+  ProxyObjData* proxy = static_cast<ProxyObjData*> (pmsg->pdata);
+  switch (pmsg->message_id) {
+    case MSG_SEND_ALLOCATION_DONE:
+      SendAllocationDone_w(proxy->data());
+      delete proxy;
+      break;
+    case MSG_SEND_ALLOCATED_PORTS:
+      SendAllocatedPorts_w(proxy->data());
+      delete proxy;
+      break;
+    default:
+      ASSERT(false);
+      break;
+  }
+}
+
+void PortAllocatorSessionMuxer::SendAllocationDone_w(
+    PortAllocatorSessionProxy* proxy) {
+  std::vector<PortAllocatorSessionProxy*>::iterator iter =
+      std::find(session_proxies_.begin(), session_proxies_.end(), proxy);
+  if (iter != session_proxies_.end()) {
+    proxy->OnCandidatesAllocationDone(session_.get());
+  }
+}
+
+void PortAllocatorSessionMuxer::SendAllocatedPorts_w(
+    PortAllocatorSessionProxy* proxy) {
+  std::vector<PortAllocatorSessionProxy*>::iterator iter =
+      std::find(session_proxies_.begin(), session_proxies_.end(), proxy);
+  if (iter != session_proxies_.end()) {
+    for (size_t i = 0; i < ports_.size(); ++i) {
+      PortInterface* port = ports_[i];
+      proxy->OnPortReady(session_.get(), port);
+      // If port already has candidates, send this to the clients of proxy
+      // session. This can happen if proxy is created later than the actual
+      // implementation.
+      if (!port->Candidates().empty()) {
+        proxy->OnCandidatesReady(session_.get(), port->Candidates());
+      }
+    }
+  }
+}
+
 PortAllocatorSessionProxy::~PortAllocatorSessionProxy() {
-  std::map<Port*, PortProxy*>::iterator it;
+  std::map<PortInterface*, PortProxy*>::iterator it;
   for (it = proxy_ports_.begin(); it != proxy_ports_.end(); it++)
     delete it->second;
 
@@ -99,21 +174,35 @@ void PortAllocatorSessionProxy::set_impl(
       this, &PortAllocatorSessionProxy::OnCandidatesReady);
   impl_->SignalPortReady.connect(
       this, &PortAllocatorSessionProxy::OnPortReady);
+  impl_->SignalCandidatesAllocationDone.connect(
+      this, &PortAllocatorSessionProxy::OnCandidatesAllocationDone);
 }
 
 void PortAllocatorSessionProxy::GetInitialPorts() {
   ASSERT(impl_ != NULL);
-  impl_->GetInitialPorts();
+  // Since all proxies share a common PortAllocatorSession, this check will
+  // prohibit sending multiple STUN ping messages to the stun server, which
+  // is a problem on Chrome. GetInitialPorts() and StartGetAllPorts() called
+  // from the worker thread and are called together from TransportChannel,
+  // checking for IsGettingAllPorts() for GetInitialPorts() will not be a
+  // problem.
+  if (!impl_->IsGettingAllPorts()) {
+    impl_->GetInitialPorts();
+  }
 }
 
 void PortAllocatorSessionProxy::StartGetAllPorts() {
   ASSERT(impl_ != NULL);
-  impl_->StartGetAllPorts();
+  if (!impl_->IsGettingAllPorts()) {
+    impl_->StartGetAllPorts();
+  }
 }
 
 void PortAllocatorSessionProxy::StopGetAllPorts() {
   ASSERT(impl_ != NULL);
-  impl_->StartGetAllPorts();
+  if (impl_->IsGettingAllPorts()) {
+    impl_->StopGetAllPorts();
+  }
 }
 
 bool PortAllocatorSessionProxy::IsGettingAllPorts() {
@@ -122,12 +211,10 @@ bool PortAllocatorSessionProxy::IsGettingAllPorts() {
 }
 
 void PortAllocatorSessionProxy::OnPortReady(PortAllocatorSession* session,
-                                            Port* port) {
+                                            PortInterface* port) {
   ASSERT(session == impl_);
 
-  PortProxy* proxy_port = new PortProxy(
-      port->thread(), port->type(), port->socket_factory(), port->network(),
-      port->ip(), port->min_port(), port->max_port());
+  PortProxy* proxy_port = new PortProxy();
   proxy_port->set_impl(port);
   proxy_ports_[port] = proxy_port;
   SignalPortReady(this, proxy_port);
@@ -144,11 +231,16 @@ void PortAllocatorSessionProxy::OnCandidatesReady(
   std::vector<Candidate> our_candidates;
   for (size_t i = 0; i < candidates.size(); ++i) {
     Candidate new_local_candidate = candidates[i];
-    new_local_candidate.set_name(name_);
+    new_local_candidate.set_component(component_);
     our_candidates.push_back(new_local_candidate);
   }
-
   SignalCandidatesReady(this, our_candidates);
+}
+
+void PortAllocatorSessionProxy::OnCandidatesAllocationDone(
+    PortAllocatorSession* session) {
+  ASSERT(session == impl_);
+  SignalCandidatesAllocationDone(this);
 }
 
 }  // namespace cricket

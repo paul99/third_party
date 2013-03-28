@@ -22,6 +22,7 @@
 
 #include "Event.h"
 #include "Frame.h"
+#include "InspectorCounters.h"
 #include "JSEvent.h"
 #include "JSEventTarget.h"
 #include "JSMainThreadExecState.h"
@@ -36,31 +37,39 @@ namespace WebCore {
 
 JSEventListener::JSEventListener(JSObject* function, JSObject* wrapper, bool isAttribute, DOMWrapperWorld* isolatedWorld)
     : EventListener(JSEventListenerType)
-    , m_wrapper(*isolatedWorld->globalData(), wrapper)
+    , m_wrapper(wrapper)
     , m_isAttribute(isAttribute)
     , m_isolatedWorld(isolatedWorld)
 {
-    if (wrapper)
-        m_jsFunction.setMayBeNull(*m_isolatedWorld->globalData(), wrapper, function);
-    else
+    if (wrapper) {
+        JSC::Heap::writeBarrier(wrapper, function);
+        m_jsFunction = JSC::PassWeak<JSC::JSObject>(function);
+    } else
         ASSERT(!function);
-
+#if ENABLE(INSPECTOR)
+    ThreadLocalInspectorCounters::current().incrementCounter(ThreadLocalInspectorCounters::JSEventListenerCounter);
+#endif
 }
 
 JSEventListener::~JSEventListener()
 {
+#if ENABLE(INSPECTOR)
+    ThreadLocalInspectorCounters::current().decrementCounter(ThreadLocalInspectorCounters::JSEventListenerCounter);
+#endif
 }
 
 JSObject* JSEventListener::initializeJSFunction(ScriptExecutionContext*) const
 {
-    ASSERT_NOT_REACHED();
     return 0;
 }
 
 void JSEventListener::visitJSFunction(SlotVisitor& visitor)
 {
-    if (m_jsFunction)
-        visitor.append(&m_jsFunction);
+    // If m_wrapper is 0, then m_jsFunction is zombied, and should never be accessed.
+    if (!m_wrapper)
+        return;
+
+    visitor.appendUnbarrieredWeak(&m_jsFunction);
 }
 
 void JSEventListener::handleEvent(ScriptExecutionContext* scriptExecutionContext, Event* event)
@@ -69,7 +78,7 @@ void JSEventListener::handleEvent(ScriptExecutionContext* scriptExecutionContext
     if (!scriptExecutionContext || scriptExecutionContext->isJSExecutionForbidden())
         return;
 
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(scriptExecutionContext->globalData());
 
     JSObject* jsFunction = this->jsFunction(scriptExecutionContext);
     if (!jsFunction)
@@ -79,18 +88,12 @@ void JSEventListener::handleEvent(ScriptExecutionContext* scriptExecutionContext
     if (!globalObject)
         return;
 
-    Frame* frame = 0;
     if (scriptExecutionContext->isDocument()) {
-        JSDOMWindow* window = static_cast<JSDOMWindow*>(globalObject);
-        frame = window->impl()->frame();
-        if (!frame)
-            return;
-        // The window must still be active in its frame. See <https://bugs.webkit.org/show_bug.cgi?id=21921>.
-        // FIXME: A better fix for this may be to change DOMWindow::frame() to not return a frame the detached window used to be in.
-        if (frame->domWindow() != window->impl())
+        JSDOMWindow* window = jsCast<JSDOMWindow*>(globalObject);
+        if (!window->impl()->isCurrentlyDisplayedInFrame())
             return;
         // FIXME: Is this check needed for other contexts?
-        ScriptController* script = frame->script();
+        ScriptController* script = window->impl()->frame()->script();
         if (!script->canExecuteScripts(AboutToExecuteScript) || script->isPaused())
             return;
     }
@@ -119,10 +122,14 @@ void JSEventListener::handleEvent(ScriptExecutionContext* scriptExecutionContext
         DynamicGlobalObjectScope globalObjectScope(globalData, globalData.dynamicGlobalObject ? globalData.dynamicGlobalObject : globalObject);
 
         globalData.timeoutChecker.start();
+        InspectorInstrumentationCookie cookie = JSMainThreadExecState::instrumentFunctionCall(scriptExecutionContext, callType, callData);
+
         JSValue thisValue = handleEventFunction == jsFunction ? toJS(exec, globalObject, event->currentTarget()) : jsFunction;
         JSValue retval = scriptExecutionContext->isDocument()
-            ? JSMainThreadExecState::instrumentedCall(frame ? frame->page() : 0, exec, handleEventFunction, callType, callData, thisValue, args)
+            ? JSMainThreadExecState::call(exec, handleEventFunction, callType, callData, thisValue, args)
             : JSC::call(exec, handleEventFunction, callType, callData, thisValue, args);
+
+        InspectorInstrumentation::didCallFunction(cookie);
         globalData.timeoutChecker.stop();
 
         globalObject->setCurrentEvent(savedEvent);
@@ -140,7 +147,7 @@ void JSEventListener::handleEvent(ScriptExecutionContext* scriptExecutionContext
             reportCurrentException(exec);
         } else {
             if (!retval.isUndefinedOrNull() && event->storesResultAsString())
-                event->storeResult(ustringToString(retval.toString(exec)->value(exec)));
+                event->storeResult(retval.toString(exec)->value(exec));
             if (m_isAttribute) {
                 if (retval.isFalse())
                     event->preventDefault();

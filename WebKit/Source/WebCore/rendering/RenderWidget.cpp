@@ -47,53 +47,42 @@ static HashMap<const Widget*, RenderWidget*>& widgetRendererMap()
     return *staticWidgetRendererMap;
 }
 
-static unsigned widgetHierarchyUpdateSuspendCount;
+unsigned WidgetHierarchyUpdatesSuspensionScope::s_widgetHierarchyUpdateSuspendCount = 0;
 
-typedef HashMap<RefPtr<Widget>, FrameView*> WidgetToParentMap;
-
-static WidgetToParentMap& widgetNewParentMap()
+WidgetHierarchyUpdatesSuspensionScope::WidgetToParentMap& WidgetHierarchyUpdatesSuspensionScope::widgetNewParentMap()
 {
     DEFINE_STATIC_LOCAL(WidgetToParentMap, map, ());
     return map;
 }
 
-void RenderWidget::suspendWidgetHierarchyUpdates()
+void WidgetHierarchyUpdatesSuspensionScope::moveWidgets()
 {
-    widgetHierarchyUpdateSuspendCount++;
-}
-
-void RenderWidget::resumeWidgetHierarchyUpdates()
-{
-    ASSERT(widgetHierarchyUpdateSuspendCount);
-    if (widgetHierarchyUpdateSuspendCount == 1) {
-        WidgetToParentMap map = widgetNewParentMap();
-        widgetNewParentMap().clear();
-        WidgetToParentMap::iterator end = map.end();
-        for (WidgetToParentMap::iterator it = map.begin(); it != end; ++it) {
-            Widget* child = it->first.get();
-            ScrollView* currentParent = child->parent();
-            FrameView* newParent = it->second;
-            if (newParent != currentParent) {
-                if (currentParent)
-                    currentParent->removeChild(child);
-                if (newParent)
-                    newParent->addChild(child);
-            }
+    WidgetToParentMap map = widgetNewParentMap();
+    widgetNewParentMap().clear();
+    WidgetToParentMap::iterator end = map.end();
+    for (WidgetToParentMap::iterator it = map.begin(); it != end; ++it) {
+        Widget* child = it->key.get();
+        ScrollView* currentParent = child->parent();
+        FrameView* newParent = it->value;
+        if (newParent != currentParent) {
+            if (currentParent)
+                currentParent->removeChild(child);
+            if (newParent)
+                newParent->addChild(child);
         }
     }
-    widgetHierarchyUpdateSuspendCount--;
 }
 
 static void moveWidgetToParentSoon(Widget* child, FrameView* parent)
 {
-    if (!widgetHierarchyUpdateSuspendCount) {
+    if (!WidgetHierarchyUpdatesSuspensionScope::isSuspended()) {
         if (parent)
             parent->addChild(child);
         else
             child->removeFromParent();
         return;
     }
-    widgetNewParentMap().set(child, parent);
+    WidgetHierarchyUpdatesSuspensionScope::scheduleWidgetToMove(child, parent);
 }
 
 RenderWidget::RenderWidget(Node* node)
@@ -130,7 +119,7 @@ void RenderWidget::destroy()
     // Grab the arena from node()->document()->renderArena() before clearing the node pointer.
     // Clear the node before deref-ing, as this may be deleted when deref is called.
     RenderArena* arena = renderArena();
-    setNode(0);
+    clearNode();
     deref(arena);
 }
 
@@ -140,12 +129,20 @@ RenderWidget::~RenderWidget()
     clearWidget();
 }
 
-bool RenderWidget::setWidgetGeometry(const IntRect& frame)
+// Widgets are always placed on integer boundaries, so rounding the size is actually
+// the desired behavior. This function is here because it's otherwise seldom what we
+// want to do with a LayoutRect.
+static inline IntRect roundedIntRect(const LayoutRect& rect)
+{
+    return IntRect(roundedIntPoint(rect.location()), roundedIntSize(rect.size()));
+}
+
+bool RenderWidget::setWidgetGeometry(const LayoutRect& frame)
 {
     if (!node())
         return false;
 
-    IntRect clipRect = enclosingLayer()->childrenClipRect();
+    IntRect clipRect = roundedIntRect(enclosingLayer()->childrenClipRect());
     bool clipChanged = m_clipRect != clipRect;
     bool boundsChanged = m_widget->frameRect() != frame;
 
@@ -156,7 +153,7 @@ bool RenderWidget::setWidgetGeometry(const IntRect& frame)
 
     RenderWidgetProtector protector(this);
     RefPtr<Node> protectedNode(node());
-    m_widget->setFrameRect(frame);
+    m_widget->setFrameRect(roundedIntRect(frame));
     
 #if USE(ACCELERATED_COMPOSITING)
     if (hasLayer() && layer()->isComposited())
@@ -168,11 +165,11 @@ bool RenderWidget::setWidgetGeometry(const IntRect& frame)
 
 bool RenderWidget::updateWidgetGeometry()
 {
-    IntRect contentBox = contentBoxRect();
+    LayoutRect contentBox = contentBoxRect();
     if (!m_widget->transformsAffectFrameRect())
         return setWidgetGeometry(absoluteContentBox());
 
-    IntRect absoluteContentBox = IntRect(localToAbsoluteQuad(FloatQuad(contentBox)).boundingBox());
+    LayoutRect absoluteContentBox(localToAbsoluteQuad(FloatQuad(contentBox)).boundingBox());
     if (m_widget->isFrameView()) {
         contentBox.setLocation(absoluteContentBox.location());
         return setWidgetGeometry(contentBox);
@@ -214,6 +211,7 @@ void RenderWidget::setWidget(PassRefPtr<Widget> widget)
 
 void RenderWidget::layout()
 {
+    StackStats::LayoutCheckPoint layoutCheckPoint;
     ASSERT(needsLayout());
 
     setNeedsLayout(false);
@@ -270,17 +268,20 @@ void RenderWidget::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 
         // Push a clip if we have a border radius, since we want to round the foreground content that gets painted.
         paintInfo.context->save();
-        paintInfo.context->addRoundedRectClip(style()->getRoundedBorderFor(borderRect));
+        RoundedRect roundedInnerRect = style()->getRoundedInnerBorderFor(borderRect,
+            paddingTop() + borderTop(), paddingBottom() + borderBottom(), paddingLeft() + borderLeft(), paddingRight() + borderRight(), true, true);
+        clipRoundedInnerRect(paintInfo.context, borderRect, roundedInnerRect);
     }
 
     if (m_widget) {
         // Tell the widget to paint now.  This is the only time the widget is allowed
         // to paint itself.  That way it will composite properly with z-indexed layers.
-        LayoutPoint widgetLocation = m_widget->frameRect().location();
-        LayoutPoint paintLocation(adjustedPaintOffset.x() + borderLeft() + paddingLeft(), adjustedPaintOffset.y() + borderTop() + paddingTop());
-        LayoutRect paintRect = paintInfo.rect;
+        IntPoint widgetLocation = m_widget->frameRect().location();
+        IntPoint paintLocation(roundToInt(adjustedPaintOffset.x() + borderLeft() + paddingLeft()),
+            roundToInt(adjustedPaintOffset.y() + borderTop() + paddingTop()));
+        IntRect paintRect = paintInfo.rect;
 
-        LayoutSize widgetPaintOffset = paintLocation - widgetLocation;
+        IntSize widgetPaintOffset = paintLocation - widgetLocation;
         // When painting widgets into compositing layers, tx and ty are relative to the enclosing compositing layer,
         // not the root. In this case, shift the CTM and adjust the paintRect to be root-relative to fix plug-in drawing.
         if (!widgetPaintOffset.isZero()) {
@@ -308,7 +309,7 @@ void RenderWidget::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
     // Paint a partially transparent wash over selected widgets.
     if (isSelected() && !document()->printing()) {
         // FIXME: selectionRect() is in absolute, not painting coordinates.
-        paintInfo.context->fillRect(selectionRect(), selectionBackgroundColor(), style()->colorSpace());
+        paintInfo.context->fillRect(pixelSnappedIntRect(selectionRect()), selectionBackgroundColor(), style()->colorSpace());
     }
 }
 
@@ -376,11 +377,11 @@ RenderWidget* RenderWidget::find(const Widget* widget)
     return widgetRendererMap().get(widget);
 }
 
-bool RenderWidget::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction action)
+bool RenderWidget::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction action)
 {
     bool hadResult = result.innerNode();
-    bool inside = RenderReplaced::nodeAtPoint(request, result, pointInContainer, accumulatedOffset, action);
-    
+    bool inside = RenderReplaced::nodeAtPoint(request, result, locationInContainer, accumulatedOffset, action);
+
     // Check to see if we are really over the widget itself (and not just in the border/padding area).
     if ((inside || result.isRectBasedTest()) && !hadResult && result.innerNode() == node())
         result.setIsOverWidget(contentBoxRect().contains(result.localPoint()));

@@ -30,15 +30,17 @@
 #include "DataURL.h"
 #include "HTTPParsers.h"
 #include "MIMETypeRegistry.h"
-#include "MainThread.h"
 #include "NotImplemented.h"
 #include "ResourceError.h"
 #include "ResourceHandleClient.h"
 #include "ResourceHandleInternal.h"
 #include "SharedBuffer.h"
 #include "Timer.h"
-#include "UnusedParam.h"
+
+#include <wtf/MainThread.h>
+#include <wtf/UnusedParam.h>
 #include <wtf/text/CString.h>
+
 #include <windows.h>
 #include <wininet.h>
 
@@ -321,15 +323,15 @@ bool ResourceHandle::start(NetworkingContext* context)
     const HTTPHeaderMap& httpHeaderFields = firstRequest().httpHeaderFields();
 
     for (HTTPHeaderMap::const_iterator it = httpHeaderFields.begin(); it != httpHeaderFields.end(); ++it) {
-        if (equalIgnoringCase(it->first, "Accept") || equalIgnoringCase(it->first, "Referer") || equalIgnoringCase(it->first, "User-Agent"))
+        if (equalIgnoringCase(it->key, "Accept") || equalIgnoringCase(it->key, "Referer") || equalIgnoringCase(it->key, "User-Agent"))
             continue;
 
         if (!httpHeaders.isEmpty())
             httpHeaders.append('\n');
 
-        httpHeaders.append(it->first.characters(), it->first.length());
+        httpHeaders.append(it->key.characters(), it->key.length());
         httpHeaders.append(':');
-        httpHeaders.append(it->second.characters(), it->second.length());
+        httpHeaders.append(it->value.characters(), it->value.length());
     }
 
     INTERNET_BUFFERSW internetBuffers;

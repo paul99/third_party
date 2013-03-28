@@ -19,10 +19,11 @@
  */
 
 #import "config.h"
+
+#import "LayoutTestSupport.h"
 #import "LocalCurrentGraphicsContext.h"
 #import "RenderThemeChromiumMac.h"
 #import "PaintInfo.h"
-#import "PlatformSupport.h"
 #import "RenderMediaControlsChromium.h"
 #import "WebCoreSystemInterface.h"
 #import "UserAgentStyleSheets.h"
@@ -71,9 +72,14 @@ PassRefPtr<RenderTheme> RenderThemeChromiumMac::create()
     return adoptRef(new RenderThemeChromiumMac);
 }
 
+bool RenderThemeChromiumMac::supportsDataListUI(const AtomicString& type) const
+{
+    return RenderThemeChromiumCommon::supportsDataListUI(type);
+}
+
 bool RenderThemeChromiumMac::usesTestModeFocusRingColor() const
 {
-    return PlatformSupport::layoutTestMode();
+    return isRunningLayoutTest();
 }
 
 NSView* RenderThemeChromiumMac::documentViewFor(RenderObject*) const
@@ -92,7 +98,7 @@ int RenderThemeChromiumMac::popupInternalPaddingLeft(RenderStyle* style) const
     if (style->appearance() == TextFieldPart)
         return autofillPopupHorizontalPadding;
 
-    return RenderThemeMac::popupInternalPaddingLeft(style);
+    return RenderThemeMacShared::popupInternalPaddingLeft(style);
 }
 
 int RenderThemeChromiumMac::popupInternalPaddingRight(RenderStyle* style) const
@@ -100,7 +106,7 @@ int RenderThemeChromiumMac::popupInternalPaddingRight(RenderStyle* style) const
     if (style->appearance() == TextFieldPart)
         return autofillPopupHorizontalPadding;
 
-    return RenderThemeMac::popupInternalPaddingRight(style);
+    return RenderThemeMacShared::popupInternalPaddingRight(style);
 }
 
 // Updates the control tint (a.k.a. active state) of |cell| (from |o|).
@@ -127,23 +133,6 @@ bool RenderThemeChromiumMac::shouldShowPlaceholderWhenFocused() const
     return true;
 }
 
-bool RenderThemeChromiumMac::paintTextField(RenderObject* o, const PaintInfo& paintInfo, const IntRect& r)
-{
-    // Using the Cocoa code to paint the text field as RenderThemeMac does runs
-    // into a bug when building against the 10.5 SDK, so we are forced here to
-    // use the SPI. This override of paintTextField should be able to be removed
-    // when 10.6 is the minimum required system and Chromium is built against
-    // the 10.6 SDK.
-    //
-    // https://bugs.webkit.org/show_bug.cgi?id=75860
-    // http://code.google.com/p/chromium/issues/detail?id=109567
-
-    LocalCurrentGraphicsContext localContext(paintInfo.context);
-    wkDrawBezeledTextFieldCell(r, isEnabled(o) && !isReadOnlyControl(o));
-
-    return false;
-}
-
 #if ENABLE(VIDEO)
 
 void RenderThemeChromiumMac::adjustMediaSliderThumbSize(RenderStyle* style) const
@@ -166,11 +155,6 @@ bool RenderThemeChromiumMac::paintMediaSliderTrack(RenderObject* object, const P
     return RenderMediaControlsChromium::paintMediaControlsPart(MediaSlider, object, paintInfo, rect);
 }
 
-bool RenderThemeChromiumMac::paintMediaControlsBackground(RenderObject* object, const PaintInfo& paintInfo, const IntRect& rect)
-{
-    return RenderMediaControlsChromium::paintMediaControlsPart(MediaTimelineContainer, object, paintInfo, rect);
-}
-
 String RenderThemeChromiumMac::extraMediaControlsStyleSheet()
 {
     return String(mediaControlsChromiumUserAgentStyleSheet, sizeof(mediaControlsChromiumUserAgentStyleSheet));
@@ -186,10 +170,23 @@ String RenderThemeChromiumMac::extraFullScreenStyleSheet()
 
 String RenderThemeChromiumMac::extraDefaultStyleSheet()
 {
-    return RenderThemeMac::extraDefaultStyleSheet() +
+    return RenderThemeMacShared::extraDefaultStyleSheet() +
            String(themeChromiumUserAgentStyleSheet, sizeof(themeChromiumUserAgentStyleSheet));
 }
 
+#if ENABLE(DATALIST_ELEMENT)
+LayoutUnit RenderThemeChromiumMac::sliderTickSnappingThreshold() const
+{
+    return RenderThemeChromiumCommon::sliderTickSnappingThreshold();
+}
+#endif
+
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI) && ENABLE(CALENDAR_PICKER)
+bool RenderThemeChromiumMac::supportsCalendarPicker(const AtomicString& type) const
+{
+    return RenderThemeChromiumCommon::supportsCalendarPicker(type);
+}
+#endif
 
 bool RenderThemeChromiumMac::paintMediaVolumeSliderContainer(RenderObject* object, const PaintInfo& paintInfo, const IntRect& rect)
 {
@@ -214,6 +211,31 @@ bool RenderThemeChromiumMac::paintMediaSliderThumb(RenderObject* object, const P
 IntPoint RenderThemeChromiumMac::volumeSliderOffsetFromMuteButton(RenderBox* muteButtonBox, const IntSize& size) const
 {
     return RenderTheme::volumeSliderOffsetFromMuteButton(muteButtonBox, size);
+}
+
+String RenderThemeChromiumMac::formatMediaControlsTime(float time) const
+{
+    return RenderMediaControlsChromium::formatMediaControlsTime(time);
+}
+
+String RenderThemeChromiumMac::formatMediaControlsCurrentTime(float currentTime, float duration) const
+{
+    return RenderMediaControlsChromium::formatMediaControlsCurrentTime(currentTime, duration);
+}
+
+String RenderThemeChromiumMac::formatMediaControlsRemainingTime(float currentTime, float duration) const
+{
+    return RenderThemeChromiumMac::formatMediaControlsRemainingTime(currentTime, duration);
+}
+
+bool RenderThemeChromiumMac::paintMediaFullscreenButton(RenderObject* object, const PaintInfo& paintInfo, const IntRect& rect)
+{
+    return RenderMediaControlsChromium::paintMediaControlsPart(MediaEnterFullscreenButton, object, paintInfo, rect);
+}
+
+bool RenderThemeChromiumMac::paintMediaToggleClosedCaptionsButton(RenderObject* object, const PaintInfo& paintInfo, const IntRect& rect)
+{
+    return RenderMediaControlsChromium::paintMediaControlsPart(MediaShowClosedCaptionsButton, object, paintInfo, rect);
 }
 #endif
 

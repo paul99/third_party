@@ -67,14 +67,38 @@ Vector<IntRect> Region::rects() const
 
 bool Region::contains(const Region& region) const
 {
-    return WebCore::intersect(region, *this) == region;
+    if (!m_bounds.contains(region.m_bounds))
+        return false;
+
+    return Shape::compareShapes<Shape::CompareContainsOperation>(m_shape, region.m_shape);
 }
 
 bool Region::contains(const IntPoint& point) const
 {
-    // FIXME: This is inefficient. We should be able to iterate over the spans and find
-    // out if the region contains the point.
-    return contains(IntRect(point, IntSize(1, 1)));
+    if (!m_bounds.contains(point))
+        return false;
+
+    for (Shape::SpanIterator span = m_shape.spans_begin(), end = m_shape.spans_end(); span != end && span + 1 != end; ++span) {
+        int y = span->y;
+        int maxY = (span + 1)->y;
+
+        if (y > point.y())
+            break;
+        if (maxY <= point.y())
+            continue;
+
+        for (Shape::SegmentIterator segment = m_shape.segments_begin(span), end = m_shape.segments_end(span); segment != end && segment + 1 != end; segment += 2) {
+            int x = *segment;
+            int maxX = *(segment + 1);
+
+            if (x > point.x())
+                break;
+            if (maxX > point.x())
+                return true;
+        }
+    }
+
+    return false;
 }
 
 bool Region::intersects(const Region& region) const
@@ -82,10 +106,7 @@ bool Region::intersects(const Region& region) const
     if (!m_bounds.intersects(region.m_bounds))
         return false;
 
-    // FIXME: this could be optimized.
-    Region tempRegion(*this);
-    tempRegion.intersect(region);
-    return !tempRegion.isEmpty();
+    return Shape::compareShapes<Shape::CompareIntersectsOperation>(m_shape, region.m_shape);
 }
 
 unsigned Region::totalArea() const
@@ -101,6 +122,104 @@ unsigned Region::totalArea() const
 
     return totalArea;
 }
+
+template<typename CompareOperation>
+bool Region::Shape::compareShapes(const Shape& aShape, const Shape& bShape)
+{
+    bool result = CompareOperation::defaultResult;
+
+    Shape::SpanIterator aSpan = aShape.spans_begin();
+    Shape::SpanIterator aSpanEnd = aShape.spans_end();
+    Shape::SpanIterator bSpan = bShape.spans_begin();
+    Shape::SpanIterator bSpanEnd = bShape.spans_end();
+
+    bool aHadSegmentInPreviousSpan = false;
+    bool bHadSegmentInPreviousSpan = false;
+    while (aSpan != aSpanEnd && aSpan + 1 != aSpanEnd && bSpan != bSpanEnd && bSpan + 1 != bSpanEnd) {
+        int aY = aSpan->y;
+        int aMaxY = (aSpan + 1)->y;
+        int bY = bSpan->y;
+        int bMaxY = (bSpan + 1)->y;
+
+        Shape::SegmentIterator aSegment = aShape.segments_begin(aSpan);
+        Shape::SegmentIterator aSegmentEnd = aShape.segments_end(aSpan);
+        Shape::SegmentIterator bSegment = bShape.segments_begin(bSpan);
+        Shape::SegmentIterator bSegmentEnd = bShape.segments_end(bSpan);
+
+        // Look for a non-overlapping part of the spans. If B had a segment in its previous span, then we already tested A against B within that span.
+        bool aHasSegmentInSpan = aSegment != aSegmentEnd;
+        bool bHasSegmentInSpan = bSegment != bSegmentEnd;
+        if (aY < bY && !bHadSegmentInPreviousSpan && aHasSegmentInSpan && CompareOperation::aOutsideB(result))
+            return result;
+        if (bY < aY && !aHadSegmentInPreviousSpan && bHasSegmentInSpan && CompareOperation::bOutsideA(result))
+            return result;
+
+        aHadSegmentInPreviousSpan = aHasSegmentInSpan;
+        bHadSegmentInPreviousSpan = bHasSegmentInSpan;
+
+        bool spansOverlap = bMaxY > aY && bY < aMaxY;
+        if (spansOverlap) {
+            while (aSegment != aSegmentEnd && bSegment != bSegmentEnd) {
+                int aX = *aSegment;
+                int aMaxX = *(aSegment + 1);
+                int bX = *bSegment;
+                int bMaxX = *(bSegment + 1);
+
+                bool segmentsOverlap = bMaxX > aX && bX < aMaxX;
+                if (segmentsOverlap && CompareOperation::aOverlapsB(result))
+                    return result;
+                if (aX < bX && CompareOperation::aOutsideB(result))
+                    return result;
+                if (bX < aX && CompareOperation::bOutsideA(result))
+                    return result;
+
+                if (aMaxX < bMaxX)
+                    aSegment += 2;
+                else if (bMaxX < aMaxX)
+                    bSegment += 2;
+                else {
+                    aSegment += 2;
+                    bSegment += 2;
+                }
+            }
+
+            if (aSegment != aSegmentEnd && CompareOperation::aOutsideB(result))
+                return result;
+            if (bSegment != bSegmentEnd && CompareOperation::bOutsideA(result))
+                return result;
+        }
+
+        if (aMaxY < bMaxY)
+            aSpan += 1;
+        else if (bMaxY < aMaxY)
+            bSpan += 1;
+        else {
+            aSpan += 1;
+            bSpan += 1;
+        }
+    }
+
+    if (aSpan != aSpanEnd && aSpan + 1 != aSpanEnd && CompareOperation::aOutsideB(result))
+        return result;
+    if (bSpan != bSpanEnd && bSpan + 1 != bSpanEnd && CompareOperation::bOutsideA(result))
+        return result;
+
+    return result;
+}
+
+struct Region::Shape::CompareContainsOperation {
+    const static bool defaultResult = true;
+    inline static bool aOutsideB(bool& /* result */) { return false; }
+    inline static bool bOutsideA(bool& result) { result = false; return true; }
+    inline static bool aOverlapsB(bool& /* result */) { return false; }
+};
+
+struct Region::Shape::CompareIntersectsOperation {
+    const static bool defaultResult = false;
+    inline static bool aOutsideB(bool& /* result */) { return false; }
+    inline static bool bOutsideA(bool& /* result */) { return false; }
+    inline static bool aOverlapsB(bool& result) { result = true; return true; }
+};
 
 Region::Shape::Shape()
 {
@@ -368,11 +487,6 @@ struct Region::Shape::UnionOperation {
             return true;
         }
         
-        if (shape2.isEmpty()) {
-            result = shape1;
-            return true;
-        }
-
         return false;
     }
 
@@ -390,18 +504,8 @@ Region::Shape Region::Shape::unionShapes(const Shape& shape1, const Shape& shape
 }
 
 struct Region::Shape::IntersectOperation {
-    static bool trySimpleOperation(const Shape& shape1, const Shape& shape2, Shape& result)
+    static bool trySimpleOperation(const Shape&, const Shape&, Shape&)
     {
-        if (shape1.isEmpty()) {
-            result = Shape();
-            return true;
-        }
-
-        if (shape2.isEmpty()) {
-            result = shape1;
-            return true;
-        }
-        
         return false;
     }
     
@@ -419,14 +523,8 @@ Region::Shape Region::Shape::intersectShapes(const Shape& shape1, const Shape& s
 }
 
 struct Region::Shape::SubtractOperation {
-    static bool trySimpleOperation(const Shape& shape1, const Shape& shape2, Region::Shape& result)
+    static bool trySimpleOperation(const Shape&, const Shape&, Region::Shape&)
     {
-        
-        if (shape1.isEmpty() || shape2.isEmpty()) {
-            result = Shape();
-            return true;
-        }
-        
         return false;
     }
     
@@ -454,6 +552,8 @@ void Region::dump() const
 
 void Region::intersect(const Region& region)
 {
+    if (m_bounds.isEmpty())
+        return;
     if (!m_bounds.intersects(region.m_bounds)) {
         m_shape = Shape();
         m_bounds = IntRect();
@@ -468,6 +568,19 @@ void Region::intersect(const Region& region)
 
 void Region::unite(const Region& region)
 {
+    if (region.isEmpty())
+        return;
+    if (isRect() && m_bounds.contains(region.m_bounds))
+        return;
+    if (region.isRect() && region.m_bounds.contains(m_bounds)) {
+        m_shape = region.m_shape;
+        m_bounds = region.m_bounds;
+        return;
+    }
+    // FIXME: We may want another way to construct a Region without doing this test when we expect it to be false.
+    if (!isRect() && contains(region))
+        return;
+
     Shape unitedShape = Shape::unionShapes(m_shape, region.m_shape);
 
     m_shape.swap(unitedShape);
@@ -476,6 +589,13 @@ void Region::unite(const Region& region)
 
 void Region::subtract(const Region& region)
 {
+    if (m_bounds.isEmpty())
+        return;
+    if (region.isEmpty())
+        return;
+    if (!m_bounds.intersects(region.m_bounds))
+        return;
+
     Shape subtractedShape = Shape::subtractShapes(m_shape, region.m_shape);
 
     m_shape.swap(subtractedShape);

@@ -23,20 +23,24 @@
 
 #include "qquickurlschemedelegate_p.h"
 #include "qwebkitglobal.h"
-#include <QtDeclarative/qdeclarativelist.h>
+#include <QtQml/qqmllist.h>
 #include <QtQuick/qquickitem.h>
+#include <private/qquickflickable_p.h>
 
+QT_BEGIN_NAMESPACE
+class QQmlComponent;
+QT_END_NAMESPACE
 class QWebNavigationRequest;
-class QDeclarativeComponent;
 class QQuickWebPage;
 class QQuickWebViewAttached;
+class QWebLoadRequest;
 class QQuickWebViewPrivate;
 class QQuickWebViewExperimental;
 class QWebDownloadItem;
 class QWebNavigationHistory;
 class QWebPreferences;
 class QWebPermissionRequest;
-class QWebViewportInfo;
+class QWebKitTest;
 class QQuickNetworkReply;
 
 namespace WTR {
@@ -44,7 +48,11 @@ class PlatformWebView;
 }
 
 namespace WebKit {
-class QtRefCountedNetworkRequestData;
+struct QtRefCountedNetworkRequestData;
+class PageViewportControllerClientQt;
+class QtWebPageLoadClient;
+class QtWebPagePolicyClient;
+class QtWebPageUIClient;
 }
 
 namespace WTF {
@@ -58,37 +66,62 @@ typedef const struct OpaqueWKPage* WKPageRef;
 QT_BEGIN_NAMESPACE
 class QPainter;
 class QUrl;
+class QQuickFlickable;
+class QJSValue;
 QT_END_NAMESPACE
 
-class QWEBKIT_EXPORT QQuickWebView : public QQuickItem {
+
+// Instantiating the WebView in C++ is only possible by creating
+// a QQmlComponent as the initialization depends on the
+// componentComplete method being called.
+class QWEBKIT_EXPORT QQuickWebView : public QQuickFlickable {
     Q_OBJECT
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
-    Q_PROPERTY(QUrl url READ url NOTIFY urlChanged)
+    Q_PROPERTY(QUrl url READ url WRITE setUrl NOTIFY urlChanged)
     Q_PROPERTY(QUrl icon READ icon NOTIFY iconChanged FINAL)
+    Q_PROPERTY(bool canGoBack READ canGoBack NOTIFY navigationHistoryChanged FINAL)
+    Q_PROPERTY(bool canGoForward READ canGoForward NOTIFY navigationHistoryChanged FINAL)
+    Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged FINAL)
     Q_PROPERTY(int loadProgress READ loadProgress NOTIFY loadProgressChanged)
-    Q_PROPERTY(bool canGoBack READ canGoBack NOTIFY navigationStateChanged FINAL)
-    Q_PROPERTY(bool canGoForward READ canGoForward NOTIFY navigationStateChanged FINAL)
-    Q_PROPERTY(bool loading READ loading NOTIFY navigationStateChanged FINAL)
-    Q_PROPERTY(bool canReload READ canReload NOTIFY navigationStateChanged FINAL)
     Q_ENUMS(NavigationRequestAction)
+    Q_ENUMS(LoadStatus)
     Q_ENUMS(ErrorDomain)
+    Q_ENUMS(NavigationType)
 
 public:
     enum NavigationRequestAction {
         AcceptRequest,
-        IgnoreRequest
+        // Make room in the valid range of the enum for extra actions exposed in Experimental.
+        IgnoreRequest = 0xFF
     };
-
+    enum LoadStatus {
+        LoadStartedStatus,
+        LoadStoppedStatus,
+        LoadSucceededStatus,
+        LoadFailedStatus
+    };
     enum ErrorDomain {
+        NoErrorDomain,
         InternalErrorDomain,
         NetworkErrorDomain,
         HttpErrorDomain,
         DownloadErrorDomain
     };
+
+    enum NavigationType {
+        LinkClickedNavigation,
+        FormSubmittedNavigation,
+        BackForwardNavigation,
+        ReloadNavigation,
+        FormResubmittedNavigation,
+        OtherNavigation
+    };
+
     QQuickWebView(QQuickItem* parent = 0);
     virtual ~QQuickWebView();
 
     QUrl url() const;
+    void setUrl(const QUrl&);
     QUrl icon() const;
     QString title() const;
     int loadProgress() const;
@@ -96,7 +129,6 @@ public:
     bool canGoBack() const;
     bool canGoForward() const;
     bool loading() const;
-    bool canReload() const;
 
     virtual QVariant inputMethodQuery(Qt::InputMethodQuery property) const;
 
@@ -112,9 +144,16 @@ public:
 
     static void platformInitialize(); // Only needed by WTR.
 
+    // Private C++-only API.
+    qreal zoomFactor() const;
+    void setZoomFactor(qreal);
+    void runJavaScriptInMainFrame(const QString& script, QObject* receiver, const char* method);
+    // Used to automatically accept the HTTPS certificate in WTR. No other use intended.
+    bool allowAnyHTTPSCertificateForLocalHost() const;
+    void setAllowAnyHTTPSCertificateForLocalHost(bool allow);
+
 public Q_SLOTS:
-    void load(const QUrl&);
-    void loadHtml(const QString& html, const QUrl& baseUrl = QUrl());
+    void loadHtml(const QString& html, const QUrl& baseUrl = QUrl(), const QUrl& unreachableUrl = QUrl());
 
     void goBack();
     void goForward();
@@ -122,25 +161,24 @@ public Q_SLOTS:
     void reload();
 
 Q_SIGNALS:
-    void titleChanged(const QString& title);
-    void loadStarted();
-    void loadSucceeded();
-    void loadFailed(QQuickWebView::ErrorDomain errorDomain, int errorCode, const QUrl& url, const QString& description);
-    void loadProgressChanged(int progress);
-    void urlChanged(const QUrl& url);
-    void iconChanged(const QUrl& iconURL);
-    void linkHovered(const QUrl& url, const QString& title);
-    void navigationStateChanged();
+    void titleChanged();
+    void navigationHistoryChanged();
+    void loadingChanged(QWebLoadRequest* loadRequest);
+    void loadProgressChanged();
+    void urlChanged();
+    void iconChanged();
+    void linkHovered(const QUrl& hoveredUrl, const QString& hoveredTitle);
     void navigationRequested(QWebNavigationRequest* request);
 
 protected:
+    virtual bool childMouseEventFilter(QQuickItem*, QEvent*);
     virtual void geometryChanged(const QRectF&, const QRectF&);
-
+    virtual void componentComplete();
     virtual void keyPressEvent(QKeyEvent*);
     virtual void keyReleaseEvent(QKeyEvent*);
     virtual void inputMethodEvent(QInputMethodEvent*);
     virtual void focusInEvent(QFocusEvent*);
-    virtual void focusOutEvent(QFocusEvent*);
+    virtual void itemChange(ItemChange change, const ItemChangeData &value);
     virtual void touchEvent(QTouchEvent*);
     virtual void mousePressEvent(QMouseEvent*);
     virtual void mouseMoveEvent(QMouseEvent*);
@@ -159,24 +197,31 @@ protected:
 private:
     Q_DECLARE_PRIVATE(QQuickWebView)
 
+    void handleFlickableMousePress(const QPointF& position, qint64 eventTimestampMillis);
+    void handleFlickableMouseMove(const QPointF& position, qint64 eventTimestampMillis);
+    void handleFlickableMouseRelease(const QPointF& position, qint64 eventTimestampMillis);
+
+    QPointF contentPos() const;
+    void setContentPos(const QPointF&);
+
     QQuickWebView(WKContextRef, WKPageGroupRef, QQuickItem* parent = 0);
     WKPageRef pageRef() const;
 
-    Q_PRIVATE_SLOT(d_func(), void _q_suspend());
-    Q_PRIVATE_SLOT(d_func(), void _q_resume());
-    Q_PRIVATE_SLOT(d_func(), void _q_viewportTrajectoryVectorChanged(const QPointF&));
-    Q_PRIVATE_SLOT(d_func(), void _q_onOpenPanelFilesSelected());
-    Q_PRIVATE_SLOT(d_func(), void _q_onOpenPanelFinished(int result));
+    void emitUrlChangeIfNeeded();
+
     Q_PRIVATE_SLOT(d_func(), void _q_onVisibleChanged());
+    Q_PRIVATE_SLOT(d_func(), void _q_onUrlChanged());
     Q_PRIVATE_SLOT(d_func(), void _q_onReceivedResponseFromDownload(QWebDownloadItem*));
-    Q_PRIVATE_SLOT(d_func(), void _q_onIconChangedForPageURL(const QUrl&, const QUrl&));
+    Q_PRIVATE_SLOT(d_func(), void _q_onIconChangedForPageURL(const QString&));
+
     // Hides QObject::d_ptr allowing us to use the convenience macros.
     QScopedPointer<QQuickWebViewPrivate> d_ptr;
-    QQuickWebViewExperimental* m_experimental;
 
-    friend class QtWebPageLoadClient;
-    friend class QtWebPagePolicyClient;
-    friend class QtWebPageUIClient;
+    friend class QWebKitTest;
+    friend class WebKit::PageViewportControllerClientQt;
+    friend class WebKit::QtWebPageLoadClient;
+    friend class WebKit::QtWebPagePolicyClient;
+    friend class WebKit::QtWebPageUIClient;
     friend class WTR::PlatformWebView;
     friend class QQuickWebViewExperimental;
 };
@@ -204,83 +249,139 @@ QML_DECLARE_TYPEINFO(QQuickWebView, QML_HAS_ATTACHED_PROPERTIES)
 class QWEBKIT_EXPORT QQuickWebViewExperimental : public QObject {
     Q_OBJECT
     Q_PROPERTY(QQuickWebPage* page READ page CONSTANT FINAL)
+
+    Q_PROPERTY(bool transparentBackground WRITE setTransparentBackground READ transparentBackground)
+    Q_PROPERTY(bool useDefaultContentItemSize WRITE setUseDefaultContentItemSize READ useDefaultContentItemSize)
+
+    Q_PROPERTY(int preferredMinimumContentsWidth WRITE setPreferredMinimumContentsWidth READ preferredMinimumContentsWidth NOTIFY preferredMinimumContentsWidthChanged)
+    Q_PROPERTY(int deviceWidth WRITE setDeviceWidth READ deviceWidth NOTIFY deviceWidthChanged)
+    Q_PROPERTY(int deviceHeight WRITE setDeviceHeight READ deviceHeight NOTIFY deviceHeightChanged)
+
     Q_PROPERTY(QWebNavigationHistory* navigationHistory READ navigationHistory CONSTANT FINAL)
-    Q_PROPERTY(QDeclarativeComponent* alertDialog READ alertDialog WRITE setAlertDialog NOTIFY alertDialogChanged)
-    Q_PROPERTY(QDeclarativeComponent* confirmDialog READ confirmDialog WRITE setConfirmDialog NOTIFY confirmDialogChanged)
-    Q_PROPERTY(QDeclarativeComponent* promptDialog READ promptDialog WRITE setPromptDialog NOTIFY promptDialogChanged)
-    Q_PROPERTY(QDeclarativeComponent* authenticationDialog READ authenticationDialog WRITE setAuthenticationDialog NOTIFY authenticationDialogChanged)
-    Q_PROPERTY(QDeclarativeComponent* certificateVerificationDialog READ certificateVerificationDialog WRITE setCertificateVerificationDialog NOTIFY certificateVerificationDialogChanged)
-    Q_PROPERTY(QDeclarativeComponent* itemSelector READ itemSelector WRITE setItemSelector NOTIFY itemSelectorChanged)
+
+    Q_PROPERTY(QQmlComponent* alertDialog READ alertDialog WRITE setAlertDialog NOTIFY alertDialogChanged)
+    Q_PROPERTY(QQmlComponent* confirmDialog READ confirmDialog WRITE setConfirmDialog NOTIFY confirmDialogChanged)
+    Q_PROPERTY(QQmlComponent* promptDialog READ promptDialog WRITE setPromptDialog NOTIFY promptDialogChanged)
+    Q_PROPERTY(QQmlComponent* authenticationDialog READ authenticationDialog WRITE setAuthenticationDialog NOTIFY authenticationDialogChanged)
+    Q_PROPERTY(QQmlComponent* proxyAuthenticationDialog READ proxyAuthenticationDialog WRITE setProxyAuthenticationDialog NOTIFY proxyAuthenticationDialogChanged)
+    Q_PROPERTY(QQmlComponent* certificateVerificationDialog READ certificateVerificationDialog WRITE setCertificateVerificationDialog NOTIFY certificateVerificationDialogChanged)
+    Q_PROPERTY(QQmlComponent* itemSelector READ itemSelector WRITE setItemSelector NOTIFY itemSelectorChanged)
+    Q_PROPERTY(QQmlComponent* filePicker READ filePicker WRITE setFilePicker NOTIFY filePickerChanged)
+    Q_PROPERTY(QQmlComponent* databaseQuotaDialog READ databaseQuotaDialog WRITE setDatabaseQuotaDialog NOTIFY databaseQuotaDialogChanged)
+    Q_PROPERTY(QQmlComponent* colorChooser READ colorChooser WRITE setColorChooser NOTIFY colorChooserChanged)
+
     Q_PROPERTY(QWebPreferences* preferences READ preferences CONSTANT FINAL)
-    Q_PROPERTY(bool useTraditionalDesktopBehaviour READ useTraditionalDesktopBehaviour WRITE setUseTraditionalDesktopBehaviour)
-    Q_PROPERTY(QWebViewportInfo* viewportInfo READ viewportInfo CONSTANT FINAL)
-    Q_PROPERTY(QDeclarativeListProperty<QQuickUrlSchemeDelegate> urlSchemeDelegates READ schemeDelegates)
-    Q_ENUMS(NavigationRequestAction)
+    Q_PROPERTY(QWebKitTest* test READ test CONSTANT FINAL)
+    Q_PROPERTY(QQmlListProperty<QQuickUrlSchemeDelegate> urlSchemeDelegates READ schemeDelegates)
+    Q_PROPERTY(QString userAgent READ userAgent WRITE setUserAgent NOTIFY userAgentChanged)
+    Q_PROPERTY(QList<QUrl> userScripts READ userScripts WRITE setUserScripts NOTIFY userScriptsChanged)
+    Q_PROPERTY(QUrl remoteInspectorUrl READ remoteInspectorUrl NOTIFY remoteInspectorUrlChanged FINAL)
+    Q_ENUMS(NavigationRequestActionExperimental)
 
 public:
-    enum NavigationRequestAction {
-        DownloadRequest = 2
+    enum NavigationRequestActionExperimental {
+        DownloadRequest = QQuickWebView::IgnoreRequest - 1
     };
 
-    QQuickWebViewExperimental(QQuickWebView* webView);
     virtual ~QQuickWebViewExperimental();
 
-    QDeclarativeComponent* alertDialog() const;
-    void setAlertDialog(QDeclarativeComponent*);
-    QDeclarativeComponent* confirmDialog() const;
-    void setConfirmDialog(QDeclarativeComponent*);
-    QDeclarativeComponent* promptDialog() const;
-    void setPromptDialog(QDeclarativeComponent*);
-    QDeclarativeComponent* authenticationDialog() const;
-    void setAuthenticationDialog(QDeclarativeComponent*);
-    QDeclarativeComponent* certificateVerificationDialog() const;
-    void setCertificateVerificationDialog(QDeclarativeComponent*);
-    QDeclarativeComponent* itemSelector() const;
-    void setItemSelector(QDeclarativeComponent*);
-    bool useTraditionalDesktopBehaviour() const;
-    void setUseTraditionalDesktopBehaviour(bool enable);
+    QQmlComponent* alertDialog() const;
+    void setAlertDialog(QQmlComponent*);
+    QQmlComponent* confirmDialog() const;
+    void setConfirmDialog(QQmlComponent*);
+    QQmlComponent* promptDialog() const;
+    void setPromptDialog(QQmlComponent*);
+    QQmlComponent* authenticationDialog() const;
+    void setAuthenticationDialog(QQmlComponent*);
+    QQmlComponent* certificateVerificationDialog() const;
+    void setCertificateVerificationDialog(QQmlComponent*);
+    QQmlComponent* itemSelector() const;
+    void setItemSelector(QQmlComponent*);
+    QQmlComponent* proxyAuthenticationDialog() const;
+    void setProxyAuthenticationDialog(QQmlComponent*);
+    QQmlComponent* filePicker() const;
+    void setFilePicker(QQmlComponent*);
+    QQmlComponent* databaseQuotaDialog() const;
+    void setDatabaseQuotaDialog(QQmlComponent*);
+    QQmlComponent* colorChooser() const;
+    void setColorChooser(QQmlComponent*);
+    QString userAgent() const;
+    void setUserAgent(const QString& userAgent);
+    int deviceWidth() const;
+    void setDeviceWidth(int);
+    int deviceHeight() const;
+    void setDeviceHeight(int);
+    QList<QUrl> userScripts() const;
+    void setUserScripts(const QList<QUrl>& userScripts);
+    QUrl remoteInspectorUrl() const;
 
-    QWebViewportInfo* viewportInfo();
+    QWebKitTest* test();
 
     QWebPreferences* preferences() const;
     QWebNavigationHistory* navigationHistory() const;
     QQuickWebPage* page();
 
-    static QQuickUrlSchemeDelegate* schemeDelegates_At(QDeclarativeListProperty<QQuickUrlSchemeDelegate>*, int index);
-    static void schemeDelegates_Append(QDeclarativeListProperty<QQuickUrlSchemeDelegate>*, QQuickUrlSchemeDelegate*);
-    static int schemeDelegates_Count(QDeclarativeListProperty<QQuickUrlSchemeDelegate>*);
-    static void schemeDelegates_Clear(QDeclarativeListProperty<QQuickUrlSchemeDelegate>*);
-    QDeclarativeListProperty<QQuickUrlSchemeDelegate> schemeDelegates();
+    static QQuickUrlSchemeDelegate* schemeDelegates_At(QQmlListProperty<QQuickUrlSchemeDelegate>*, int index);
+    static void schemeDelegates_Append(QQmlListProperty<QQuickUrlSchemeDelegate>*, QQuickUrlSchemeDelegate*);
+    static int schemeDelegates_Count(QQmlListProperty<QQuickUrlSchemeDelegate>*);
+    static void schemeDelegates_Clear(QQmlListProperty<QQuickUrlSchemeDelegate>*);
+    QQmlListProperty<QQuickUrlSchemeDelegate> schemeDelegates();
     void invokeApplicationSchemeHandler(WTF::PassRefPtr<WebKit::QtRefCountedNetworkRequestData>);
     void sendApplicationSchemeReply(QQuickNetworkReply*);
+
+    bool transparentBackground() const;
+    void setTransparentBackground(bool);
+
+    bool useDefaultContentItemSize() const;
+    void setUseDefaultContentItemSize(bool enable);
+
+    int preferredMinimumContentsWidth() const;
+    void setPreferredMinimumContentsWidth(int);
 
     // C++ only
     bool renderToOffscreenBuffer() const;
     void setRenderToOffscreenBuffer(bool enable);
+    static void setFlickableViewportEnabled(bool enable);
+    static bool flickableViewportEnabled();
 
 public Q_SLOTS:
     void goBackTo(int index);
     void goForwardTo(int index);
     void postMessage(const QString&);
+    void evaluateJavaScript(const QString& script, const QJSValue& value = QJSValue());
 
 Q_SIGNALS:
+    void loadVisuallyCommitted();
     void alertDialogChanged();
     void confirmDialogChanged();
     void promptDialogChanged();
     void authenticationDialogChanged();
     void certificateVerificationDialogChanged();
     void itemSelectorChanged();
+    void filePickerChanged();
+    void databaseQuotaDialogChanged();
+    void colorChooserChanged();
     void downloadRequested(QWebDownloadItem* downloadItem);
     void permissionRequested(QWebPermissionRequest* permission);
     void messageReceived(const QVariantMap& message);
+    void proxyAuthenticationDialogChanged();
+    void userAgentChanged();
+    void deviceWidthChanged();
+    void deviceHeightChanged();
+    void enterFullScreenRequested();
+    void exitFullScreenRequested();
+    void userScriptsChanged();
+    void preferredMinimumContentsWidthChanged();
+    void remoteInspectorUrlChanged();
 
 private:
+    QQuickWebViewExperimental(QQuickWebView* webView, QQuickWebViewPrivate* webViewPrivate);
     QQuickWebView* q_ptr;
     QQuickWebViewPrivate* d_ptr;
     QObject* schemeParent;
-    QWebViewportInfo* m_viewportInfo;
+    QWebKitTest* m_test;
 
-    friend class QtWebPageUIClient;
+    friend class WebKit::QtWebPageUIClient;
 
     Q_DECLARE_PRIVATE(QQuickWebView)
     Q_DECLARE_PUBLIC(QQuickWebView)

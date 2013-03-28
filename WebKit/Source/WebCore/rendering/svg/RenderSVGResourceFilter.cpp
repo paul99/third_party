@@ -38,15 +38,17 @@
 #include "Page.h"
 #include "RenderSVGResource.h"
 #include "RenderSVGResourceFilterPrimitive.h"
-#include "Settings.h"
 #include "SVGElement.h"
 #include "SVGFilter.h"
 #include "SVGFilterElement.h"
 #include "SVGFilterPrimitiveStandardAttributes.h"
-#include "SVGImageBufferTools.h"
 #include "SVGNames.h"
+#include "SVGRenderingContext.h"
 #include "SVGStyledElement.h"
 #include "SVGUnitTypes.h"
+#include "Settings.h"
+#include "SourceAlpha.h"
+#include "SourceGraphic.h"
 
 #include <wtf/UnusedParam.h>
 #include <wtf/Vector.h>
@@ -87,7 +89,7 @@ void RenderSVGResourceFilter::removeClientFromCache(RenderObject* client, bool m
 
     if (FilterData* filterData = m_filter.get(client)) {
         if (filterData->savedContext)
-            filterData->markedForRemoval = true;
+            filterData->state = FilterData::MarkedForRemoval;
         else
             delete m_filter.take(client);
     }
@@ -101,7 +103,7 @@ PassRefPtr<SVGFilterBuilder> RenderSVGResourceFilter::buildPrimitives(SVGFilter*
     FloatRect targetBoundingBox = filter->targetBoundingBox();
 
     // Add effects to the builder
-    RefPtr<SVGFilterBuilder> builder = SVGFilterBuilder::create(filter);
+    RefPtr<SVGFilterBuilder> builder = SVGFilterBuilder::create(SourceGraphic::create(filter), SourceAlpha::create(filter));
     for (Node* node = filterElement->firstChild(); node; node = node->nextSibling()) {
         if (!node->isSVGElement())
             continue;
@@ -119,6 +121,8 @@ PassRefPtr<SVGFilterBuilder> RenderSVGResourceFilter::buildPrimitives(SVGFilter*
         builder->appendEffectToEffectReferences(effect, effectElement->renderer());
         effectElement->setStandardAttributes(effect.get());
         effect->setEffectBoundaries(SVGLengthContext::resolveRectangle<SVGFilterPrimitiveStandardAttributes>(effectElement, filterElement->primitiveUnits(), targetBoundingBox));
+        effect->setColorSpace(effectElement->renderer()->style()->svgStyle()->colorInterpolationFilters() == CI_LINEARRGB
+                ? ColorSpaceLinearRGB : ColorSpaceDeviceRGB);
         builder->add(effectElement->result(), effect);
     }
     return builder.release();
@@ -145,14 +149,11 @@ bool RenderSVGResourceFilter::applyResource(RenderObject* object, RenderStyle*, 
     ASSERT(context);
     ASSERT_UNUSED(resourceMode, resourceMode == ApplyToDefaultMode);
 
-    // Returning false here, to avoid drawings onto the context. We just want to
-    // draw the stored filter output, not the unfiltered object as well.
     if (m_filter.contains(object)) {
         FilterData* filterData = m_filter.get(object);
-        if (filterData->builded)
-            return false;
-
-        delete m_filter.take(object); // Oops, have to rebuild, go through normal code path
+        if (filterData->state == FilterData::PaintingSource || filterData->state == FilterData::Applying)
+            filterData->state = FilterData::CycleDetected;
+        return false; // Already built, or we're in a cycle, or we're marked for removal. Regardless, just do nothing more now.
     }
 
     OwnPtr<FilterData> filterData(adoptPtr(new FilterData));
@@ -165,7 +166,7 @@ bool RenderSVGResourceFilter::applyResource(RenderObject* object, RenderStyle*, 
 
     // Determine absolute transformation matrix for filter. 
     AffineTransform absoluteTransform;
-    SVGImageBufferTools::calculateTransformationToOutermostSVGCoordinateSystem(object, absoluteTransform);
+    SVGRenderingContext::calculateTransformationToOutermostSVGCoordinateSystem(object, absoluteTransform);
     if (!absoluteTransform.isInvertible())
         return false;
 
@@ -235,7 +236,7 @@ bool RenderSVGResourceFilter::applyResource(RenderObject* object, RenderStyle*, 
 
     OwnPtr<ImageBuffer> sourceGraphic;
     RenderingMode renderingMode = object->document()->page()->settings()->acceleratedFiltersEnabled() ? Accelerated : Unaccelerated;
-    if (!SVGImageBufferTools::createImageBuffer(drawingRegion, effectiveTransform, sourceGraphic, ColorSpaceLinearRGB, renderingMode)) {
+    if (!SVGRenderingContext::createImageBuffer(drawingRegion, effectiveTransform, sourceGraphic, ColorSpaceLinearRGB, renderingMode)) {
         ASSERT(!m_filter.contains(object));
         filterData->savedContext = context;
         m_filter.set(object, filterData.leakPtr());
@@ -269,12 +270,21 @@ void RenderSVGResourceFilter::postApplyResource(RenderObject* object, GraphicsCo
     if (!filterData)
         return;
 
-    if (filterData->markedForRemoval) {
+    switch (filterData->state) {
+    case FilterData::MarkedForRemoval:
         delete m_filter.take(object);
         return;
-    }
 
-    if (!filterData->builded) {
+    case FilterData::CycleDetected:
+    case FilterData::Applying:
+        // We have a cycle if we are already applying the data.
+        // This can occur due to FeImage referencing a source that makes use of the FEImage itself.
+        // This is the first place we've hit the cycle, so set the state back to PaintingSource so the return stack
+        // will continue correctly.
+        filterData->state = FilterData::PaintingSource;
+        return;
+
+    case FilterData::PaintingSource:
         if (!filterData->savedContext) {
             removeClientFromCache(object);
             return;
@@ -282,10 +292,9 @@ void RenderSVGResourceFilter::postApplyResource(RenderObject* object, GraphicsCo
 
         context = filterData->savedContext;
         filterData->savedContext = 0;
-#if !USE(CG)
-        if (filterData->sourceGraphicBuffer)
-            filterData->sourceGraphicBuffer->transformColorSpace(ColorSpaceDeviceRGB, ColorSpaceLinearRGB);
-#endif
+        break;
+
+    case FilterData::Built: { } // Empty
     }
 
     FilterEffect* lastEffect = filterData->builder->lastEffect();
@@ -294,26 +303,27 @@ void RenderSVGResourceFilter::postApplyResource(RenderObject* object, GraphicsCo
         // This is the real filtering of the object. It just needs to be called on the
         // initial filtering process. We just take the stored filter result on a
         // second drawing.
-        if (!filterData->builded)
+        if (filterData->state != FilterData::Built)
             filterData->filter->setSourceImage(filterData->sourceGraphicBuffer.release());
 
-        // Always true if filterData is just built (filterData->builded is false).
+        // Always true if filterData is just built (filterData->state == FilterData::Built).
         if (!lastEffect->hasResult()) {
+            filterData->state = FilterData::Applying;
             lastEffect->apply();
+            lastEffect->correctFilterResultIfNeeded();
 #if !USE(CG)
             ImageBuffer* resultImage = lastEffect->asImageBuffer();
             if (resultImage)
-                resultImage->transformColorSpace(ColorSpaceLinearRGB, ColorSpaceDeviceRGB);
+                resultImage->transformColorSpace(lastEffect->colorSpace(), ColorSpaceDeviceRGB);
 #endif
         }
-        filterData->builded = true;
+        filterData->state = FilterData::Built;
 
         ImageBuffer* resultImage = lastEffect->asImageBuffer();
         if (resultImage) {
             context->concatCTM(filterData->shearFreeAbsoluteTransform.inverse());
 
             context->scale(FloatSize(1 / filterData->filter->filterResolution().width(), 1 / filterData->filter->filterResolution().height()));
-            context->clip(lastEffect->maxEffectRect());
             context->drawImageBuffer(resultImage, object->style()->colorSpace(), lastEffect->absolutePaintRect());
             context->scale(filterData->filter->filterResolution());
 
@@ -338,8 +348,8 @@ void RenderSVGResourceFilter::primitiveAttributeChanged(RenderObject* object, co
     SVGFilterPrimitiveStandardAttributes* primitve = static_cast<SVGFilterPrimitiveStandardAttributes*>(object->node());
 
     for (; it != end; ++it) {
-        FilterData* filterData = it->second;
-        if (!filterData->builded)
+        FilterData* filterData = it->value;
+        if (filterData->state != FilterData::Built)
             continue;
 
         SVGFilterBuilder* builder = filterData->builder.get();
@@ -353,7 +363,7 @@ void RenderSVGResourceFilter::primitiveAttributeChanged(RenderObject* object, co
         builder->clearResultsRecursive(effect);
 
         // Repaint the image on the screen.
-        markClientForInvalidation(it->first, RepaintInvalidation);
+        markClientForInvalidation(it->key, RepaintInvalidation);
     }
 }
 

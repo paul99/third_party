@@ -43,7 +43,6 @@
 #include "HTMLFrameOwnerElement.h"
 #include "NotImplemented.h"
 #include "Page.h"
-#include "PlatformString.h"
 #include "PluginView.h"
 #include "ProgressTracker.h"
 #include "RenderPart.h"
@@ -56,8 +55,12 @@
 
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefPtr.h>
+#include <wtf/text/WTFString.h>
 
 #include <stdio.h>
+#if OS(UNIX)
+#include <sys/utsname.h>
+#endif
 
 #include "FrameNetworkingContextWx.h"
 #include "WebFrame.h"
@@ -66,25 +69,27 @@
 #include "WebView.h"
 #include "WebViewPrivate.h"
 
+using namespace WebKit;
+
 namespace WebCore {
 
 inline int wxNavTypeFromWebNavType(NavigationType type){
     if (type == NavigationTypeLinkClicked)
-        return wxWEBVIEW_NAV_LINK_CLICKED;
+        return WEBVIEW_NAV_LINK_CLICKED;
     
     if (type == NavigationTypeFormSubmitted)
-        return wxWEBVIEW_NAV_FORM_SUBMITTED;
+        return WEBVIEW_NAV_FORM_SUBMITTED;
         
     if (type == NavigationTypeBackForward)
-        return wxWEBVIEW_NAV_BACK_NEXT;
+        return WEBVIEW_NAV_BACK_NEXT;
         
     if (type == NavigationTypeReload)
-        return wxWEBVIEW_NAV_RELOAD;
+        return WEBVIEW_NAV_RELOAD;
         
     if (type == NavigationTypeFormResubmitted)
-        return wxWEBVIEW_NAV_FORM_RESUBMITTED;
+        return WEBVIEW_NAV_FORM_RESUBMITTED;
         
-    return wxWEBVIEW_NAV_OTHER;
+    return WEBVIEW_NAV_OTHER;
 }
 
 FrameLoaderClientWx::FrameLoaderClientWx()
@@ -100,13 +105,13 @@ FrameLoaderClientWx::~FrameLoaderClientWx()
 {
 }
 
-void FrameLoaderClientWx::setFrame(wxWebFrame *frame)
+void FrameLoaderClientWx::setFrame(WebKit::WebFrame *frame)
 {
     m_webFrame = frame;
     m_frame = m_webFrame->m_impl->frame;
 }
 
-void FrameLoaderClientWx::setWebView(wxWebView *webview)
+void FrameLoaderClientWx::setWebView(WebKit::WebView *webview)
 {
     m_webView = webview;
 }
@@ -235,8 +240,8 @@ void FrameLoaderClientWx::detachedFromParent3()
 void FrameLoaderClientWx::dispatchDidHandleOnloadEvents()
 {
     if (m_webView) {
-        wxWebViewLoadEvent wkEvent(m_webView);
-        wkEvent.SetState(wxWEBVIEW_LOAD_ONLOAD_HANDLED);
+        WebKit::WebViewLoadEvent wkEvent(m_webView);
+        wkEvent.SetState(WEBVIEW_LOAD_ONLOAD_HANDLED);
         wkEvent.SetURL(m_frame->loader()->documentLoader()->request().url().string());
         wkEvent.SetFrame(m_webFrame);
         m_webView->GetEventHandler()->ProcessEvent(wkEvent);
@@ -293,8 +298,8 @@ void FrameLoaderClientWx::dispatchWillClose()
 void FrameLoaderClientWx::dispatchDidStartProvisionalLoad()
 {
     if (m_webView) {
-        wxWebViewLoadEvent wkEvent(m_webView);
-        wkEvent.SetState(wxWEBVIEW_LOAD_NEGOTIATING);
+        WebKit::WebViewLoadEvent wkEvent(m_webView);
+        wkEvent.SetState(WEBVIEW_LOAD_NEGOTIATING);
         wkEvent.SetURL(m_frame->loader()->provisionalDocumentLoader()->request().url().string());
         wkEvent.SetFrame(m_webFrame);
         m_webView->GetEventHandler()->ProcessEvent(wkEvent);
@@ -309,7 +314,7 @@ void FrameLoaderClientWx::dispatchDidReceiveTitle(const StringWithDirection& tit
         if (m_webFrame == m_webView->GetMainFrame())
             m_webView->SetPageTitle(title.string());
         
-        wxWebViewReceivedTitleEvent wkEvent(m_webView);
+        WebViewReceivedTitleEvent wkEvent(m_webView);
         wkEvent.SetFrame(m_webFrame);
         wkEvent.SetTitle(title.string());
         m_webView->GetEventHandler()->ProcessEvent(wkEvent);
@@ -320,8 +325,8 @@ void FrameLoaderClientWx::dispatchDidReceiveTitle(const StringWithDirection& tit
 void FrameLoaderClientWx::dispatchDidCommitLoad()
 {
     if (m_webView) {
-        wxWebViewLoadEvent wkEvent(m_webView);
-        wkEvent.SetState(wxWEBVIEW_LOAD_TRANSFERRING);
+        WebKit::WebViewLoadEvent wkEvent(m_webView);
+        wkEvent.SetState(WEBVIEW_LOAD_TRANSFERRING);
         wkEvent.SetURL(m_frame->loader()->documentLoader()->request().url().string());
         wkEvent.SetFrame(m_webFrame);
         m_webView->GetEventHandler()->ProcessEvent(wkEvent);
@@ -331,8 +336,8 @@ void FrameLoaderClientWx::dispatchDidCommitLoad()
 void FrameLoaderClientWx::dispatchDidFinishDocumentLoad()
 {
     if (m_webView) {
-        wxWebViewLoadEvent wkEvent(m_webView);
-        wkEvent.SetState(wxWEBVIEW_LOAD_DOC_COMPLETED);
+        WebKit::WebViewLoadEvent wkEvent(m_webView);
+        wkEvent.SetState(WEBVIEW_LOAD_DOC_COMPLETED);
         wkEvent.SetURL(m_frame->document()->url().string());
         wkEvent.SetFrame(m_webFrame);
         m_webView->GetEventHandler()->ProcessEvent(wkEvent);
@@ -349,13 +354,7 @@ void FrameLoaderClientWx::dispatchDidFinishLoad()
     notImplemented();
 }
 
-
-void FrameLoaderClientWx::dispatchDidFirstLayout()
-{
-    notImplemented();
-}
-
-void FrameLoaderClientWx::dispatchDidFirstVisuallyNonEmptyLayout()
+void FrameLoaderClientWx::dispatchDidLayout(LayoutMilestones)
 {
     notImplemented();
 }
@@ -382,12 +381,6 @@ void FrameLoaderClientWx::dispatchWillSubmitForm(FramePolicyFunction function,
 }
 
 
-void FrameLoaderClientWx::dispatchDidLoadMainResource(DocumentLoader*)
-{
-    notImplemented();
-}
-
-
 void FrameLoaderClientWx::revertToProvisionalState(DocumentLoader*)
 {
     notImplemented();
@@ -406,8 +399,8 @@ void FrameLoaderClientWx::postProgressEstimateChangedNotification()
 void FrameLoaderClientWx::postProgressFinishedNotification()
 {
     if (m_webView) {
-        wxWebViewLoadEvent wkEvent(m_webView);
-        wkEvent.SetState(wxWEBVIEW_LOAD_DL_COMPLETED);
+        WebKit::WebViewLoadEvent wkEvent(m_webView);
+        wkEvent.SetState(WEBVIEW_LOAD_DL_COMPLETED);
         wkEvent.SetURL(m_frame->document()->url().string());
         wkEvent.SetFrame(m_webFrame);
         m_webView->GetEventHandler()->ProcessEvent(wkEvent);
@@ -445,14 +438,9 @@ void FrameLoaderClientWx::didChangeTitle(DocumentLoader *l)
 }
 
 
-void FrameLoaderClientWx::finishedLoading(DocumentLoader* loader)
+void FrameLoaderClientWx::finishedLoading(DocumentLoader*)
 {
-    if (!m_pluginView) {
-        if (m_firstData) {
-            loader->writer()->setEncoding(m_response.textEncodingName(), false);
-            m_firstData = false;
-        }
-    } else {
+    if (m_pluginView) {
         m_pluginView->didFinishLoading();
         m_pluginView = 0;
         m_hasSentResponseToPlugin = false;
@@ -652,10 +640,7 @@ bool FrameLoaderClientWx::canCachePage() const
 
 void FrameLoaderClientWx::setMainDocumentError(WebCore::DocumentLoader* loader, const WebCore::ResourceError&)
 {
-    if (m_firstData) {
-        loader->writer()->setEncoding(m_response.textEncodingName(), false);
-        m_firstData = false;
-    }
+    notImplemented();
 }
 
 // FIXME: This function should be moved into WebCore.
@@ -727,7 +712,7 @@ WTF::PassRefPtr<DocumentLoader> FrameLoaderClientWx::createDocumentLoader(const 
     return DocumentLoader::create(request, substituteData);
 }
 
-void FrameLoaderClientWx::download(ResourceHandle*, const ResourceRequest&, const ResourceResponse&)
+void FrameLoaderClientWx::convertMainResourceLoadToDownload(WebCore::MainResourceLoader*, const ResourceRequest&, const ResourceResponse&)
 {
     notImplemented();
 }
@@ -762,7 +747,6 @@ void FrameLoaderClientWx::dispatchDidReceiveResponse(DocumentLoader* loader, uns
 {
     notImplemented();
     m_response = response;
-    m_firstData = true;
 }
 
 void FrameLoaderClientWx::dispatchDidReceiveContentLength(DocumentLoader* loader, unsigned long id, int length)
@@ -777,13 +761,9 @@ void FrameLoaderClientWx::dispatchDidFinishLoading(DocumentLoader*, unsigned lon
 
 void FrameLoaderClientWx::dispatchDidFailLoading(DocumentLoader* loader, unsigned long, const ResourceError&)
 {
-    if (m_firstData) {
-        loader->writer()->setEncoding(m_response.textEncodingName(), false);
-        m_firstData = false;
-    }
     if (m_webView) {
-        wxWebViewLoadEvent wkEvent(m_webView);
-        wkEvent.SetState(wxWEBVIEW_LOAD_FAILED);
+        WebKit::WebViewLoadEvent wkEvent(m_webView);
+        wkEvent.SetState(WEBVIEW_LOAD_FAILED);
         wkEvent.SetURL(m_frame->loader()->documentLoader()->request().url().string());
         wkEvent.SetFrame(m_webFrame);
         m_webView->GetEventHandler()->ProcessEvent(wkEvent);
@@ -827,7 +807,7 @@ void FrameLoaderClientWx::dispatchDecidePolicyForNewWindowAction(FramePolicyFunc
         return;
 
     if (m_webView) {
-        wxWebViewNewWindowEvent wkEvent(m_webView);
+        WebKit::WebViewNewWindowEvent wkEvent(m_webView);
         wkEvent.SetURL(request.url().string());
         wkEvent.SetTargetName(targetName);
         wkEvent.SetFrame(m_webFrame);
@@ -848,7 +828,7 @@ void FrameLoaderClientWx::dispatchDecidePolicyForNavigationAction(FramePolicyFun
         return;
         
     if (m_webView) {
-        wxWebViewBeforeLoadEvent wkEvent(m_webView);
+        WebKit::WebViewBeforeLoadEvent wkEvent(m_webView);
         wkEvent.SetNavigationType(wxNavTypeFromWebNavType(action.type()));
         wkEvent.SetURL(request.url().string());
         wkEvent.SetFrame(m_webFrame);
@@ -883,7 +863,7 @@ PassRefPtr<Frame> FrameLoaderClientWx::createFrame(const KURL& url, const String
     data->marginWidth = marginWidth;
     data->marginHeight = marginHeight;
 
-    wxWebFrame* newFrame = new wxWebFrame(m_webView, m_webFrame, data);
+    WebKit::WebFrame* newFrame = new WebKit::WebFrame(m_webView, m_webFrame, data);
 
     RefPtr<Frame> childFrame = adoptRef(newFrame->m_impl->frame);
 
@@ -898,14 +878,6 @@ PassRefPtr<Frame> FrameLoaderClientWx::createFrame(const KURL& url, const String
         return 0;
     
     return childFrame.release();
-}
-
-void FrameLoaderClientWx::didTransferChildFrameToNewDocument(Page*)
-{
-}
-
-void FrameLoaderClientWx::transferLoadingResourceFromPage(ResourceLoader*, const ResourceRequest&, Page*)
-{
 }
 
 ObjectContentType FrameLoaderClientWx::objectContentType(const KURL& url, const String& mimeType, bool shouldPreferPlugInsForImages)
@@ -926,9 +898,9 @@ PassRefPtr<Widget> FrameLoaderClientWx::createPlugin(const IntSize& size, HTMLPl
 
 void FrameLoaderClientWx::redirectDataToPlugin(Widget* pluginWidget)
 {
-    ASSERT(!m_pluginView);
     m_pluginView = static_cast<PluginView*>(pluginWidget);
-    m_hasSentResponseToPlugin = false;
+    if (pluginWidget)
+        m_hasSentResponseToPlugin = false;
 }
 
 ResourceError FrameLoaderClientWx::pluginWillHandleLoadError(const ResourceResponse& response)
@@ -956,7 +928,7 @@ void FrameLoaderClientWx::dispatchDidClearWindowObjectInWorld(DOMWrapperWorld* w
         return;
 
     if (m_webView) {
-        wxWebViewWindowObjectClearedEvent wkEvent(m_webView);
+        WebKit::WebViewWindowObjectClearedEvent wkEvent(m_webView);
         Frame* coreFrame = m_webView->GetMainFrame()->GetFrame();
         JSGlobalContextRef context = toGlobalRef(coreFrame->script()->globalObject(mainThreadNormalWorld())->globalExec());
         JSObjectRef windowObject = toRef(coreFrame->script()->globalObject(mainThreadNormalWorld()));
@@ -1004,7 +976,7 @@ void FrameLoaderClientWx::transitionToCommittedForNewPage()
     Color backgroundColor = transparent ? WebCore::Color::transparent : WebCore::Color::white;
     
     if (m_frame)
-        m_frame->createView(size, backgroundColor, transparent, IntSize(), false); 
+        m_frame->createView(size, backgroundColor, transparent);
 }
 
 void FrameLoaderClientWx::didSaveToPageCache()

@@ -30,10 +30,10 @@
 #if ENABLE(SVG)
 
 #include "Image.h"
-#include "LayoutTypes.h"
 
 namespace WebCore {
 
+class FrameView;
 class ImageBuffer;
 class Page;
 class RenderBox;
@@ -51,8 +51,9 @@ public:
         DontClearImageBuffer
     };
 
-    void drawSVGToImageBuffer(ImageBuffer*, const IntSize&, float zoom, ShouldClearBuffer);
+    void drawSVGToImageBuffer(ImageBuffer*, const IntSize&, float zoom, float scale, ShouldClearBuffer);
     RenderBox* embeddedContentBox() const;
+    FrameView* frameView() const;
 
     virtual bool isSVGImage() const { return true; }
     virtual IntSize size() const;
@@ -60,13 +61,16 @@ public:
     virtual bool hasRelativeWidth() const;
     virtual bool hasRelativeHeight() const;
 
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
+
 private:
+    friend class SVGImageChromeClient;
     virtual ~SVGImage();
 
     virtual String filenameExtension() const;
 
     virtual void setContainerSize(const IntSize&);
-    virtual bool usesContainerSize() const;
+    virtual bool usesContainerSize() const { return true; }
     virtual void computeIntrinsicDimensions(Length& intrinsicWidth, Length& intrinsicHeight, FloatSize& intrinsicRatio);
 
     virtual bool dataChanged(bool allDataReceived);
@@ -79,7 +83,7 @@ private:
     virtual NativeImagePtr frameAtIndex(size_t) { return 0; }
 
     SVGImage(ImageObserver*);
-    virtual void draw(GraphicsContext*, const FloatRect& fromRect, const FloatRect& toRect, ColorSpace styleColorSpace, CompositeOperator);
+    virtual void draw(GraphicsContext*, const FloatRect& fromRect, const FloatRect& toRect, ColorSpace styleColorSpace, CompositeOperator, BlendMode);
 
     virtual NativeImagePtr nativeImageForCurrentFrame();
 

@@ -28,12 +28,18 @@ namespace WebCore {
 
 class SVGAnimatedProperty;
 
+enum AnimatedPropertyState {
+    PropertyIsReadWrite,
+    PropertyIsReadOnly
+};
+
 enum AnimatedPropertyType {
     AnimatedAngle,
     AnimatedBoolean,
     AnimatedColor,
     AnimatedEnumeration,
     AnimatedInteger,
+    AnimatedIntegerOptionalInteger,
     AnimatedLength,
     AnimatedLengthList,
     AnimatedNumber,
@@ -49,13 +55,16 @@ enum AnimatedPropertyType {
 };
 
 struct SVGPropertyInfo {
+    WTF_MAKE_FAST_ALLOCATED;
+public:
     typedef void (*SynchronizeProperty)(void*);
     typedef PassRefPtr<SVGAnimatedProperty> (*LookupOrCreateWrapperForAnimatedProperty)(void*);
 
-    SVGPropertyInfo(AnimatedPropertyType newType, const QualifiedName& newAttributeName,
+    SVGPropertyInfo(AnimatedPropertyType newType, AnimatedPropertyState newState, const QualifiedName& newAttributeName,
                     const AtomicString& newPropertyIdentifier, SynchronizeProperty newSynchronizeProperty,
                     LookupOrCreateWrapperForAnimatedProperty newLookupOrCreateWrapperForAnimatedProperty)
         : animatedPropertyType(newType)
+        , animatedPropertyState(newState)
         , attributeName(newAttributeName)
         , propertyIdentifier(newPropertyIdentifier)
         , synchronizeProperty(newSynchronizeProperty)
@@ -64,6 +73,7 @@ struct SVGPropertyInfo {
     }
 
     AnimatedPropertyType animatedPropertyType;
+    AnimatedPropertyState animatedPropertyState;
     const QualifiedName& attributeName;
     const AtomicString& propertyIdentifier;
     SynchronizeProperty synchronizeProperty;

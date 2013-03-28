@@ -28,56 +28,70 @@
 #ifndef TALK_P2P_BASE_PORTPROXY_H_
 #define TALK_P2P_BASE_PORTPROXY_H_
 
-#include "talk/p2p/base/port.h"
+#include "talk/base/sigslot.h"
+#include "talk/p2p/base/portinterface.h"
+
+namespace talk_base {
+class Network;
+}
 
 namespace cricket {
 
-class PortProxy : public Port {
+class PortProxy : public PortInterface, public sigslot::has_slots<> {
  public:
-  PortProxy(talk_base::Thread* thread, const std::string& type,
-            talk_base::PacketSocketFactory* factory,
-            talk_base::Network* network,
-            const talk_base::IPAddress& ip, int min_port, int max_port)
-      : Port(thread, type, factory, network, ip, min_port, max_port) {
-  }
+  PortProxy() {}
   virtual ~PortProxy() {}
 
-  Port* impl() { return impl_; }
-  void set_impl(Port* port);
+  PortInterface* impl() { return impl_; }
+  void set_impl(PortInterface* port);
+
+  virtual const std::string& Type() const;
+  virtual talk_base::Network* Network() const;
+
+  virtual void SetIceProtocolType(IceProtocolType protocol);
+  virtual IceProtocolType IceProtocol() const;
+
+  // Methods to set/get ICE role and tiebreaker values.
+  virtual void SetRole(TransportRole role);
+  virtual TransportRole Role() const;
+
+  virtual void SetTiebreaker(uint64 tiebreaker);
+  virtual uint64 Tiebreaker() const;
+
+  virtual bool SharedSocket() const;
 
   // Forwards call to the actual Port.
   virtual void PrepareAddress();
   virtual Connection* CreateConnection(const Candidate& remote_candidate,
-    CandidateOrigin origin);
-  virtual int SendTo(
-      const void* data, size_t size, const talk_base::SocketAddress& addr,
-      bool payload);
+                                       CandidateOrigin origin);
+  virtual Connection* GetConnection(
+      const talk_base::SocketAddress& remote_addr);
+
+  virtual int SendTo(const void* data, size_t size,
+                     const talk_base::SocketAddress& addr, bool payload);
   virtual int SetOption(talk_base::Socket::Option opt, int value);
   virtual int GetError();
 
+  virtual const std::vector<Candidate>& Candidates() const;
+
   virtual void SendBindingResponse(StunMessage* request,
-                           const talk_base::SocketAddress& addr) {
-    impl_->SendBindingResponse(request, addr);
-  }
-
-  virtual Connection* GetConnection(
-      const talk_base::SocketAddress& remote_addr) {
-    return impl_->GetConnection(remote_addr);
-  }
-
+                                   const talk_base::SocketAddress& addr);
   virtual void SendBindingErrorResponse(
         StunMessage* request, const talk_base::SocketAddress& addr,
-        int error_code, const std::string& reason) {
-    impl_->SendBindingErrorResponse(request, addr, error_code, reason);
-  }
+        int error_code, const std::string& reason);
+
+  virtual void EnablePortPackets();
+  virtual std::string ToString() const;
 
  private:
-  void OnUnknownAddress(Port *port, const talk_base::SocketAddress &addr,
-                        StunMessage *stun_msg,
+  void OnUnknownAddress(PortInterface *port,
+                        const talk_base::SocketAddress &addr,
+                        ProtocolType proto,
+                        IceMessage *stun_msg,
                         const std::string &remote_username,
                         bool port_muxed);
-  void OnPortDestroyed(Port* port);
-  Port* impl_;
+  void OnPortDestroyed(PortInterface* port);
+  PortInterface* impl_;
 };
 
 }  // namespace cricket

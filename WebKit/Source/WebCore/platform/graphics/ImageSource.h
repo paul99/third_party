@@ -27,72 +27,40 @@
 #ifndef ImageSource_h
 #define ImageSource_h
 
+#include "ImageOrientation.h"
+#include "NativeImagePtr.h"
+
 #include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/Vector.h>
 
-#if PLATFORM(WX)
-class wxBitmap;
-class wxGraphicsBitmap;
-#elif USE(CG)
+#if USE(CG)
 typedef struct CGImageSource* CGImageSourceRef;
-typedef struct CGImage* CGImageRef;
 typedef const struct __CFData* CFDataRef;
-#elif PLATFORM(QT)
-#include <qglobal.h>
-QT_BEGIN_NAMESPACE
-class QPixmap;
-QT_END_NAMESPACE
-#elif USE(CAIRO)
-struct _cairo_surface;
-typedef struct _cairo_surface cairo_surface_t;
-#elif USE(SKIA)
-namespace WebCore {
-class NativeImageSkia;
-}
-#elif OS(WINCE)
-#include "SharedBitmap.h"
 #endif
 
 namespace WebCore {
 
+class ImageOrientation;
 class IntPoint;
 class IntSize;
 class SharedBuffer;
 
 #if USE(CG)
-#if USE(WEBKIT_IMAGE_DECODERS)
+typedef CGImageSourceRef NativeImageDecoderPtr;
+#elif !PLATFORM(CHROMIUM)
 class ImageDecoder;
-typedef ImageDecoder* NativeImageSourcePtr;
-#else
-typedef CGImageSourceRef NativeImageSourcePtr;
+typedef ImageDecoder* NativeImageDecoderPtr;
 #endif
-typedef CGImageRef NativeImagePtr;
-#elif PLATFORM(OPENVG)
-class ImageDecoder;
-class TiledImageOpenVG;
-typedef ImageDecoder* NativeImageSourcePtr;
-typedef TiledImageOpenVG* NativeImagePtr;
-#elif PLATFORM(QT)
-class ImageDecoderQt;
-typedef ImageDecoderQt* NativeImageSourcePtr;
-typedef QPixmap* NativeImagePtr;
+
+#if PLATFORM(CHROMIUM)
+class DeferredImageDecoder;
+typedef DeferredImageDecoder NativeImageDecoder;
+typedef DeferredImageDecoder* NativeImageDecoderPtr;
+#elif USE(CG)
+#define NativeImageDecoder ImageDecoder
 #else
-class ImageDecoder;
-typedef ImageDecoder* NativeImageSourcePtr;
-#if PLATFORM(WX)
-#if USE(WXGC)
-typedef wxGraphicsBitmap* NativeImagePtr;
-#else
-typedef wxBitmap* NativeImagePtr;
-#endif
-#elif USE(CAIRO)
-typedef cairo_surface_t* NativeImagePtr;
-#elif USE(SKIA)
-typedef WebCore::NativeImageSkia* NativeImagePtr;
-#elif OS(WINCE)
-typedef RefPtr<SharedBitmap> NativeImagePtr;
-#endif
+typedef ImageDecoder NativeImageDecoder;
 #endif
 
 // Right now GIFs are the only recognized image format that supports animation.
@@ -127,9 +95,9 @@ public:
     };
 
 #if USE(CG)
-    enum ShouldSkipMetaData {
-        DoNotSkipMetaData,
-        SkipMetaData
+    enum ShouldSkipMetadata {
+        DoNotSkipMetadata,
+        SkipMetadata
     };
 #endif
 
@@ -168,8 +136,9 @@ public:
     String filenameExtension() const;
 
     bool isSizeAvailable();
-    IntSize size() const;
-    IntSize frameSizeAtIndex(size_t) const;
+    IntSize size(RespectImageOrientationEnum = DoNotRespectImageOrientation) const;
+    IntSize frameSizeAtIndex(size_t, RespectImageOrientationEnum = DoNotRespectImageOrientation) const;
+
     bool getHotSpot(IntPoint&) const;
 
     size_t bytesDecodedToDetermineProperties() const;
@@ -185,16 +154,26 @@ public:
     float frameDurationAtIndex(size_t);
     bool frameHasAlphaAtIndex(size_t); // Whether or not the frame actually used any alpha.
     bool frameIsCompleteAtIndex(size_t); // Whether or not the frame is completely decoded.
+    ImageOrientation orientationAtIndex(size_t) const; // EXIF image orientation
+
+    // Return the number of bytes in the decoded frame. If the frame is not yet
+    // decoded then return 0.
+    unsigned frameBytesAtIndex(size_t) const;
 
 #if ENABLE(IMAGE_DECODER_DOWN_SAMPLING)
     static unsigned maxPixelsPerDecodedImage() { return s_maxPixelsPerDecodedImage; }
     static void setMaxPixelsPerDecodedImage(unsigned maxPixels) { s_maxPixelsPerDecodedImage = maxPixels; }
 #endif
 
+    void reportMemoryUsage(MemoryObjectInfo*) const;
+
 private:
-    NativeImageSourcePtr m_decoder;
+    NativeImageDecoderPtr m_decoder;
+
+#if !USE(CG)
     AlphaOption m_alphaOption;
     GammaAndColorProfileOption m_gammaAndColorProfileOption;
+#endif
 #if ENABLE(IMAGE_DECODER_DOWN_SAMPLING)
     static unsigned s_maxPixelsPerDecodedImage;
 #endif

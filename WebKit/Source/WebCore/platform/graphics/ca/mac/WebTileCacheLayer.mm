@@ -28,6 +28,7 @@
 
 #import "IntRect.h"
 #import "TileCache.h"
+#import <wtf/MainThread.h>
 
 using namespace WebCore;
 
@@ -39,10 +40,34 @@ using namespace WebCore;
     if (!self)
         return nil;
 
-    // FIXME: The tile size should be configurable.
-    _tileCache = TileCache::create(self, IntSize(512, 512));
-
+    _tileCache = TileCache::create(self);
+#ifndef NDEBUG
+    [self setName:@"WebTileCacheLayer"];
+#endif
     return self;
+}
+
+- (void)dealloc
+{
+    ASSERT(!_tileCache);
+
+    [super dealloc];
+}
+
+- (id)initWithLayer:(id)layer
+{
+    UNUSED_PARAM(layer);
+
+    ASSERT_NOT_REACHED();
+    return nil;
+}
+
+- (id<CAAction>)actionForKey:(NSString *)key
+{
+    UNUSED_PARAM(key);
+    
+    // Disable all animations.
+    return nil;
 }
 
 - (void)setBounds:(CGRect)bounds
@@ -50,6 +75,16 @@ using namespace WebCore;
     [super setBounds:bounds];
 
     _tileCache->tileCacheLayerBoundsChanged();
+}
+
+- (void)setOpaque:(BOOL)opaque
+{
+    _tileCache->setTilesOpaque(opaque);
+}
+
+- (BOOL)isOpaque
+{
+    return _tileCache->tilesAreOpaque();
 }
 
 - (void)setNeedsDisplay
@@ -72,14 +107,26 @@ using namespace WebCore;
     return _tileCache->acceleratesDrawing();
 }
 
+- (void)setContentsScale:(CGFloat)contentsScale
+{
+    _tileCache->setScale(contentsScale);
+}
+
 - (CALayer *)tileContainerLayer
 {
     return _tileCache->tileContainerLayer();
 }
 
-- (CGColorRef)borderColor
+- (WebCore::TiledBacking*)tiledBacking
 {
-    return _tileCache->tileDebugBorderColor();
+    return _tileCache.get();
+}
+
+- (void)invalidate
+{
+    ASSERT(isMainThread());
+    ASSERT(_tileCache);
+    _tileCache = nullptr;
 }
 
 - (void)setBorderColor:(CGColorRef)borderColor
@@ -87,14 +134,10 @@ using namespace WebCore;
     _tileCache->setTileDebugBorderColor(borderColor);
 }
 
-- (CGFloat)borderWidth
-{
-    return _tileCache->tileDebugBorderWidth();
-}
-
 - (void)setBorderWidth:(CGFloat)borderWidth
 {
-    _tileCache->setTileDebugBorderWidth(borderWidth);
+    // Tiles adjoin, so halve the border width.
+    _tileCache->setTileDebugBorderWidth(borderWidth / 2);
 }
 
 @end

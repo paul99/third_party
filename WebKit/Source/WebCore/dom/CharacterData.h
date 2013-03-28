@@ -45,17 +45,17 @@ public:
 
     // Like appendData, but optimized for the parser (e.g., no mutation events).
     // Returns how much could be added before length limit was met.
-    unsigned parserAppendData(const UChar*, unsigned dataLength, unsigned lengthLimit);
+    unsigned parserAppendData(const String& string, unsigned offset, unsigned lengthLimit);
+
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const;
 
 protected:
     CharacterData(Document* document, const String& text, ConstructionType type)
         : Node(document, type)
         , m_data(!text.isNull() ? text : emptyString())
     {
-        ASSERT(type == CreateComment || type == CreateText);
+        ASSERT(type == CreateOther || type == CreateText || type == CreateEditingText);
     }
-
-    virtual bool rendererIsNeeded(const NodeRenderingContext&);
 
     void setDataWithoutUpdate(const String& data)
     {
@@ -71,7 +71,6 @@ private:
     virtual int maxCharacterOffset() const;
     virtual bool offsetInCharacters() const;
     void setDataAndUpdate(const String&, unsigned offsetOfReplacedData, unsigned oldLength, unsigned newLength);
-    void updateRenderer(unsigned offsetOfReplacedData, unsigned lengthOfReplacedData);
     void checkCharDataOperation(unsigned offset, ExceptionCode&);
 
     String m_data;

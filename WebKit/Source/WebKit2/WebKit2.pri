@@ -16,6 +16,7 @@ INCLUDEPATH += \
     $$SOURCE_DIR/Platform/qt \
     $$SOURCE_DIR/Shared \
     $$SOURCE_DIR/Shared/API/c \
+    $$SOURCE_DIR/Shared/CoordinatedGraphics \
     $$SOURCE_DIR/Shared/CoreIPCSupport \
     $$SOURCE_DIR/Shared/Plugins \
     $$SOURCE_DIR/Shared/Plugins/Netscape \
@@ -26,14 +27,19 @@ INCLUDEPATH += \
     $$SOURCE_DIR/UIProcess/API/cpp/qt \
     $$SOURCE_DIR/UIProcess/API/qt \
     $$SOURCE_DIR/UIProcess/Authentication \
+    $$SOURCE_DIR/UIProcess/CoordinatedGraphics \
     $$SOURCE_DIR/UIProcess/Downloads \
+    $$SOURCE_DIR/UIProcess/InspectorServer \
+    $$SOURCE_DIR/UIProcess/InspectorServer/qt \
     $$SOURCE_DIR/UIProcess/Launcher \
     $$SOURCE_DIR/UIProcess/Notifications \
     $$SOURCE_DIR/UIProcess/Plugins \
     $$SOURCE_DIR/UIProcess/qt \
+    $$SOURCE_DIR/UIProcess/texmap \
     $$SOURCE_DIR/WebProcess \
     $$SOURCE_DIR/WebProcess/ApplicationCache \
     $$SOURCE_DIR/WebProcess/Authentication \
+    $$SOURCE_DIR/WebProcess/Battery \
     $$SOURCE_DIR/WebProcess/Cookies \
     $$SOURCE_DIR/WebProcess/Cookies/qt \
     $$SOURCE_DIR/WebProcess/Downloads \
@@ -46,6 +52,7 @@ INCLUDEPATH += \
     $$SOURCE_DIR/WebProcess/InjectedBundle/API/c \
     $$SOURCE_DIR/WebProcess/KeyValueStorage \
     $$SOURCE_DIR/WebProcess/MediaCache \
+    $$SOURCE_DIR/WebProcess/NetworkInfo \
     $$SOURCE_DIR/WebProcess/Notifications \
     $$SOURCE_DIR/WebProcess/Plugins \
     $$SOURCE_DIR/WebProcess/Plugins/Netscape \
@@ -53,15 +60,22 @@ INCLUDEPATH += \
     $$SOURCE_DIR/WebProcess/WebCoreSupport \
     $$SOURCE_DIR/WebProcess/WebCoreSupport/qt \
     $$SOURCE_DIR/WebProcess/WebPage \
+    $$SOURCE_DIR/WebProcess/WebPage/CoordinatedGraphics \
     $$SOURCE_DIR/WebProcess/qt \
     $$SOURCE_DIR/PluginProcess
 
 # The WebKit2 Qt APIs depend on qwebkitglobal.h, which lives in WebKit
 INCLUDEPATH += $${ROOT_WEBKIT_DIR}/Source/WebKit/qt/Api
 
+INCLUDEPATH += $${ROOT_WEBKIT_DIR}/Source/WTF/wtf/qt
+
 INCLUDEPATH += $$WEBKIT2_GENERATED_SOURCES_DIR
 
-linux-g++*: {
+linux-*: {
     # -lrt is required for shm_open and shm_unlink.
     LIBS += -lrt
 }
+
+have?(QTQUICK): QT += qml quick
+
+enable?(GEOLOCATION): QT += location

@@ -37,6 +37,7 @@
 #include "HTMLParserIdioms.h"
 #include "KeyboardEvent.h"
 #include "MouseEvent.h"
+#include "NodeRenderingContext.h"
 #include "PlatformMouseEvent.h"
 #include "RenderSVGInline.h"
 #include "RenderSVGText.h"
@@ -98,25 +99,25 @@ bool SVGAElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<QualifiedName, SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGAElement::parseMappedAttribute(Attribute* attr)
+void SVGAElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
-    if (!isSupportedAttribute(attr->name())) {
-        SVGStyledTransformableElement::parseMappedAttribute(attr);
+    if (!isSupportedAttribute(name)) {
+        SVGStyledTransformableElement::parseAttribute(name, value);
         return;
     }
 
-    if (attr->name() == SVGNames::targetAttr) {
-        setSVGTargetBaseValue(attr->value());
+    if (name == SVGNames::targetAttr) {
+        setSVGTargetBaseValue(value);
         return;
     }
 
-    if (SVGURIReference::parseMappedAttribute(attr))
+    if (SVGURIReference::parseAttribute(name, value))
         return;
-    if (SVGTests::parseMappedAttribute(attr))
+    if (SVGTests::parseAttribute(name, value))
         return;
-    if (SVGLangSpace::parseMappedAttribute(attr))
+    if (SVGLangSpace::parseAttribute(name, value))
         return;
-    if (SVGExternalResourcesRequired::parseMappedAttribute(attr))
+    if (SVGExternalResourcesRequired::parseAttribute(name, value))
         return;
 
     ASSERT_NOT_REACHED();
@@ -144,7 +145,7 @@ void SVGAElement::svgAttributeChanged(const QualifiedName& attrName)
 
 RenderObject* SVGAElement::createRenderer(RenderArena* arena, RenderStyle*)
 {
-    if (static_cast<SVGElement*>(parentNode())->isTextContent())
+    if (parentNode() && parentNode()->isSVGElement() && static_cast<SVGElement*>(parentNode())->isTextContent())
         return new (arena) RenderSVGInline(this);
 
     return new (arena) RenderSVGTransformableContainer(this);
@@ -174,19 +175,15 @@ void SVGAElement::defaultEventHandler(Event* event)
                     return;
             }
 
-            // FIXME: Why does the SVG anchor element have this special logic
-            // for middle click that the HTML anchor element does not have?
-            // Making a middle click open a link in a new window or tab is
-            // properly handled at the client level, not inside WebKit; this
-            // code should be deleted.
-            String target = isMiddleMouseButtonEvent(event) ? "_blank" : this->target();
+            String target = this->target();
+            if (target.isEmpty() && fastGetAttribute(XLinkNames::showAttr) == "new")
+                target = "_blank";
+            event->setDefaultHandled();
 
-            // FIXME: It's not clear why setting target to "_self" is ever
-            // helpful.
-            if (target.isEmpty())
-                target = (fastGetAttribute(XLinkNames::showAttr) == "new") ? "_blank" : "_self";
-
-            handleLinkClick(event, document(), url, target);
+            Frame* frame = document()->frame();
+            if (!frame)
+                return;
+            frame->loader()->urlSelected(document()->completeURL(url), target, event, false, false, MaybeSendReferrer);
             return;
         }
     }
@@ -225,29 +222,16 @@ bool SVGAElement::isKeyboardFocusable(KeyboardEvent* event) const
     return document()->frame()->eventHandler()->tabsToLinks(event);
 }
 
-bool SVGAElement::childShouldCreateRenderer(Node* child) const
+bool SVGAElement::childShouldCreateRenderer(const NodeRenderingContext& childContext) const
 {
     // http://www.w3.org/2003/01/REC-SVG11-20030114-errata#linking-text-environment
     // The 'a' element may contain any element that its parent may contain, except itself.
-    if (child->hasTagName(SVGNames::aTag))
+    if (childContext.node()->hasTagName(SVGNames::aTag))
         return false;
     if (parentNode() && parentNode()->isSVGElement())
-        return parentNode()->childShouldCreateRenderer(child);
+        return parentNode()->childShouldCreateRenderer(childContext);
 
-    return SVGElement::childShouldCreateRenderer(child);
-}
-
-void SVGAElement::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
-{
-    SVGStyledTransformableElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
-
-    if (changedByParser || !renderer())
-        return;
-
-    // Invalidate the TextPosition cache in SVGTextLayoutAttributesBuilder as it may now point
-    // to no-longer existing SVGTextPositioningElements and thus needs to be rebuilt.
-    if (RenderSVGText* textRenderer = RenderSVGText::locateRenderSVGTextAncestor(renderer()))
-        textRenderer->invalidateTextPositioningElements();
+    return SVGElement::childShouldCreateRenderer(childContext);
 }
 
 } // namespace WebCore

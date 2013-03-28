@@ -411,6 +411,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\Shared\CacheModel.cpp"
+				>
+			</File>
+			<File
 				RelativePath="..\Shared\CacheModel.h"
 				>
 			</File>
@@ -423,11 +427,15 @@
 				>
 			</File>
 			<File
-				RelativePath="..\Shared\CommandLine.h"
+				RelativePath="..\Shared\ChildProcessProxy.cpp"
 				>
 			</File>
 			<File
-				RelativePath="..\Shared\ContextMenuState.h"
+				RelativePath="..\Shared\ChildProcessProxy.h"
+				>
+			</File>
+			<File
+				RelativePath="..\Shared\CommandLine.h"
 				>
 			</File>
 			<File
@@ -623,6 +631,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\Shared\WebConnection.messages.in"
+				>
+			</File>
+			<File
 				RelativePath="..\Shared\WebConnectionClient.cpp"
 				>
 			</File>
@@ -788,6 +800,22 @@
 			</File>
 			<File
 				RelativePath="..\Shared\WebProcessCreationParameters.h"
+				>
+			</File>
+			<File
+				RelativePath="..\Shared\WebRenderLayer.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\Shared\WebRenderLayer.h"
+				>
+			</File>
+			<File
+				RelativePath="..\Shared\WebRenderObject.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\Shared\WebRenderObject.h"
 				>
 			</File>
 			<File
@@ -971,6 +999,22 @@
 				</File>
 				<File
 					RelativePath="..\Shared\API\c\WKPageLoadTypes.h"
+					>
+				</File>
+				<File
+					RelativePath="..\Shared\API\c\WKRenderLayer.cpp"
+					>
+				</File>
+				<File
+					RelativePath="..\Shared\API\c\WKRenderLayer.h"
+					>
+				</File>
+				<File
+					RelativePath="..\Shared\API\c\WKRenderObject.cpp"
+					>
+				</File>
+				<File
+					RelativePath="..\Shared\API\c\WKRenderObject.h"
 					>
 				</File>
 				<File
@@ -1810,6 +1854,14 @@
 					>
 				</File>
 				<File
+					RelativePath="..\WebProcess\WebCoreSupport\WebColorChooser.cpp"
+					>
+				</File>
+				<File
+					RelativePath="..\WebProcess\WebCoreSupport\WebColorChooser.h"
+					>
+				</File>
+				<File
 					RelativePath="..\WebProcess\WebCoreSupport\WebContextMenuClient.cpp"
 					>
 				</File>
@@ -1895,6 +1947,14 @@
 				</File>
 				<File
 					RelativePath="..\WebProcess\WebCoreSupport\WebPlatformStrategies.h"
+					>
+				</File>
+				<File
+					RelativePath="..\WebProcess\WebCoreSupport\WebPlugInClient.cpp"
+					>
+				</File>
+				<File
+					RelativePath="..\WebProcess\WebCoreSupport\WebPlugInClient.h"
 					>
 				</File>
 				<File
@@ -2083,6 +2143,10 @@
 				</File>
 				<File
 					RelativePath="..\WebProcess\WebPage\WebPageGroupProxy.h"
+					>
+				</File>
+				<File
+					RelativePath="..\WebProcess\WebPage\WebPageGroupProxy.messages.in"
 					>
 				</File>
 				<File
@@ -2326,6 +2390,14 @@
 					>
 				</File>
 				<File
+					RelativePath="..\WebProcess\InjectedBundle\InjectedBundleDOMWindowExtension.cpp"
+					>
+				</File>
+				<File
+					RelativePath="..\WebProcess\InjectedBundle\InjectedBundleDOMWindowExtension.h"
+					>
+				</File>
+				<File
 					RelativePath="..\WebProcess\InjectedBundle\InjectedBundleHitTestResult.cpp"
 					>
 				</File>
@@ -2347,6 +2419,14 @@
 				</File>
 				<File
 					RelativePath="..\WebProcess\InjectedBundle\InjectedBundlePageContextMenuClient.h"
+					>
+				</File>
+				<File
+					RelativePath="..\WebProcess\InjectedBundle\InjectedBundlePageDiagnosticLoggingClient.cpp"
+					>
+				</File>
+				<File
+					RelativePath="..\WebProcess\InjectedBundle\InjectedBundlePageDiagnosticLoggingClient.h"
 					>
 				</File>
 				<File
@@ -2449,6 +2529,14 @@
 						</File>
 						<File
 							RelativePath="..\WebProcess\InjectedBundle\API\c\WKBundleBackForwardListItem.h"
+							>
+						</File>
+						<File
+							RelativePath="..\WebProcess\InjectedBundle\API\c\WKBundleDOMWindowExtension.cpp"
+							>
+						</File>
+						<File
+							RelativePath="..\WebProcess\InjectedBundle\API\c\WKBundleDOMWindowExtension.h"
 							>
 						</File>
 						<File
@@ -2705,18 +2793,6 @@
 					RelativePath="..\WebProcess\FullScreen\WebFullScreenManager.h"
 					>
 				</File>
-				<Filter
-					Name="win"
-					>
-					<File
-						RelativePath="..\WebProcess\FullScreen\win\WebFullScreenManagerWin.cpp"
-						>
-					</File>
-					<File
-						RelativePath="..\WebProcess\FullScreen\win\WebFullScreenManagerWin.h"
-						>
-					</File>
-				</Filter>
 			</Filter>
 			<Filter
 				Name="Notifications (User)"
@@ -2848,6 +2924,22 @@
 			</File>
 			<File
 				RelativePath="..\UIProcess\WebBackForwardList.h"
+				>
+			</File>
+			<File
+				RelativePath="..\UIProcess\WebColorChooserProxy.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\UIProcess\WebColorChooserProxy.h"
+				>
+			</File>
+			<File
+				RelativePath="..\UIProcess\WebColorPickerResultListenerProxy.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\UIProcess\WebColorPickerResultListenerProxy.h"
 				>
 			</File>
 			<File
@@ -3229,7 +3321,7 @@
 					Name="C"
 					>
 					<File
-						RelativePath="..\UIProcess\API\C\WebKit2.h"
+						RelativePath="..\UIProcess\API\C\WebKit2_C.h"
 						>
 					</File>
 					<File
@@ -3274,6 +3366,14 @@
 					</File>
 					<File
 						RelativePath="..\UIProcess\API\C\WKBackForwardListItem.h"
+						>
+					</File>
+					<File
+						RelativePath="..\UIProcess\API\C\WKColorPickerResultListener.cpp"
+						>
+					</File>
+					<File
+						RelativePath="..\UIProcess\API\C\WKColorPickerResultListener.h"
 						>
 					</File>
 					<File
@@ -3454,6 +3554,14 @@
 					</File>
 					<File
 						RelativePath="..\UIProcess\API\C\WKNotificationManager.h"
+						>
+					</File>
+					<File
+						RelativePath="..\UIProcess\API\C\WKNotificationPermissionRequest.cpp"
+						>
+					</File>
+					<File
+						RelativePath="..\UIProcess\API\C\WKNotificationPermissionRequest.h"
 						>
 					</File>
 					<File
@@ -3686,6 +3794,14 @@
 					>
 				</File>
 				<File
+					RelativePath="..\UIProcess\Downloads\DownloadProxyMap.cpp"
+					>
+				</File>
+				<File
+					RelativePath="..\UIProcess\Downloads\DownloadProxyMap.h"
+					>
+				</File>
+				<File
 					RelativePath="..\UIProcess\Downloads\DownloadProxy.messages.in"
 					>
 				</File>
@@ -3701,23 +3817,11 @@
 					RelativePath="..\UIProcess\Launcher\ProcessLauncher.h"
 					>
 				</File>
-				<File
-					RelativePath="..\UIProcess\Launcher\ThreadLauncher.cpp"
-					>
-				</File>
-				<File
-					RelativePath="..\UIProcess\Launcher\ThreadLauncher.h"
-					>
-				</File>
 				<Filter
 					Name="win"
 					>
 					<File
 						RelativePath="..\UIProcess\Launcher\win\ProcessLauncherWin.cpp"
-						>
-					</File>
-					<File
-						RelativePath="..\UIProcess\Launcher\win\ThreadLauncherWin.cpp"
 						>
 					</File>
 				</Filter>
@@ -3789,6 +3893,14 @@
 			<Filter
 				Name="Plugins"
 				>
+				<File
+					RelativePath="..\UIProcess\Plugins\PlugInAutoStartProvider.cpp"
+					>
+				</File>
+				<File
+					RelativePath="..\UIProcess\Plugins\PlugInAutoStartProvider.h"
+					>
+				</File>
 				<File
 					RelativePath="..\UIProcess\Plugins\PluginInfoStore.cpp"
 					>
@@ -4018,11 +4130,47 @@
 					>
 				</File>
 				<File
+					RelativePath="..\Platform\CoreIPC\MessageDecoder.cpp"
+					>
+				</File>
+				<File
+					RelativePath="..\Platform\CoreIPC\MessageDecoder.h"
+					>
+				</File>
+				<File
+					RelativePath="..\Platform\CoreIPC\MessageEncoder.cpp"
+					>
+				</File>
+				<File
+					RelativePath="..\Platform\CoreIPC\MessageEncoder.h"
+					>
+				</File>
+				<File
 					RelativePath="..\Platform\CoreIPC\MessageID.h"
 					>
 				</File>
 				<File
+					RelativePath="..\Platform\CoreIPC\MessageReceiver.h"
+					>
+				</File>
+				<File
+					RelativePath="..\Platform\CoreIPC\MessageReceiverMap.cpp"
+					>
+				</File>
+				<File
+					RelativePath="..\Platform\CoreIPC\MessageReceiverMap.h"
+					>
+				</File>
+				<File
 					RelativePath="..\Platform\CoreIPC\MessageSender.h"
+					>
+				</File>
+				<File
+					RelativePath="..\Platform\CoreIPC\StringReference.cpp"
+					>
+				</File>
+				<File
+					RelativePath="..\Platform\CoreIPC\StringReference.h"
 					>
 				</File>
 				<Filter
@@ -4211,6 +4359,14 @@
 				>
 			</File>
 			<File
+				RelativePath="$(ConfigurationBuildDir)\obj\$(ProjectName)\DerivedSources\WebConnectionMessageReceiver.cpp"
+				>
+			</File>
+			<File
+				RelativePath="$(ConfigurationBuildDir)\obj\$(ProjectName)\DerivedSources\WebConnectionMessages.h"
+				>
+			</File>
+			<File
 				RelativePath="$(ConfigurationBuildDir)\obj\$(ProjectName)\DerivedSources\WebContextMessageReceiver.cpp"
 				>
 			</File>
@@ -4363,6 +4519,14 @@
 				>
 			</File>
 			<File
+				RelativePath="$(ConfigurationBuildDir)\obj\$(ProjectName)\DerivedSources\WebPageGroupProxyMessageReceiver.cpp"
+				>
+			</File>
+			<File
+				RelativePath="$(ConfigurationBuildDir)\obj\$(ProjectName)\DerivedSources\WebPageGroupProxyMessages.h"
+				>
+			</File>
+			<File
 				RelativePath="$(ConfigurationBuildDir)\obj\$(ProjectName)\DerivedSources\WebPageMessageReceiver.cpp"
 				>
 			</File>
@@ -4452,7 +4616,7 @@
 			>
 		</File>
 		<File
-			RelativePath=".\WebKit2.def"
+			RelativePath="$(ConfigurationBuildDir)\obj\WebKit2ExportGenerator\WebKit2.def"
 			>
 		</File>
 		<File

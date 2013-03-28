@@ -41,8 +41,10 @@
 #include "InspectorConsoleAgent.h"
 #include "InspectorFrontend.h"
 #include "InspectorFrontendChannel.h"
+#include "InspectorProfilerAgent.h"
 #include "InspectorState.h"
 #include "InspectorStateClient.h"
+#include "InspectorTimelineAgent.h"
 #include "InstrumentingAgents.h"
 #include "WorkerConsoleAgent.h"
 #include "WorkerContext.h"
@@ -57,6 +59,7 @@ namespace WebCore {
 namespace {
 
 class PageInspectorProxy : public InspectorFrontendChannel {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit PageInspectorProxy(WorkerContext* workerContext) : m_workerContext(workerContext) { }
     virtual ~PageInspectorProxy() { }
@@ -70,11 +73,13 @@ private:
 };
 
 class WorkerStateClient : public InspectorStateClient {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     WorkerStateClient(WorkerContext* context) : m_workerContext(context) { }
     virtual ~WorkerStateClient() { }
 
 private:
+    virtual bool supportsInspectorStateUpdates() const { return true; }
     virtual void updateInspectorStateCookie(const String& cookie)
     {
         m_workerContext->thread()->workerReportingProxy().updateInspectorStateCookie(cookie);
@@ -89,15 +94,25 @@ WorkerInspectorController::WorkerInspectorController(WorkerContext* workerContex
     : m_workerContext(workerContext)
     , m_stateClient(adoptPtr(new WorkerStateClient(workerContext)))
     , m_state(adoptPtr(new InspectorState(m_stateClient.get())))
-    , m_instrumentingAgents(adoptPtr(new InstrumentingAgents()))
+    , m_instrumentingAgents(InstrumentingAgents::create())
     , m_injectedScriptManager(InjectedScriptManager::createForWorker())
+    , m_runtimeAgent(0)
 {
+    OwnPtr<InspectorRuntimeAgent> runtimeAgent = WorkerRuntimeAgent::create(m_instrumentingAgents.get(), m_state.get(), m_injectedScriptManager.get(), workerContext);
+    m_runtimeAgent = runtimeAgent.get();
+    m_agents.append(runtimeAgent.release());
 
+    OwnPtr<InspectorConsoleAgent> consoleAgent = WorkerConsoleAgent::create(m_instrumentingAgents.get(), m_state.get(), m_injectedScriptManager.get());
 #if ENABLE(JAVASCRIPT_DEBUGGER)
-    m_debuggerAgent = WorkerDebuggerAgent::create(m_instrumentingAgents.get(), m_state.get(), workerContext, m_injectedScriptManager.get());
+    OwnPtr<InspectorDebuggerAgent> debuggerAgent = WorkerDebuggerAgent::create(m_instrumentingAgents.get(), m_state.get(), workerContext, m_injectedScriptManager.get());
+    InspectorDebuggerAgent* debuggerAgentPtr = debuggerAgent.get();
+    m_runtimeAgent->setScriptDebugServer(&debuggerAgent->scriptDebugServer());
+    m_agents.append(debuggerAgent.release());
+
+    m_agents.append(InspectorProfilerAgent::create(m_instrumentingAgents.get(), consoleAgent.get(), workerContext, m_state.get(), m_injectedScriptManager.get()));
 #endif
-    m_runtimeAgent = WorkerRuntimeAgent::create(m_instrumentingAgents.get(), m_state.get(), m_injectedScriptManager.get(), workerContext);
-    m_consoleAgent = WorkerConsoleAgent::create(m_instrumentingAgents.get(), m_state.get(), m_injectedScriptManager.get());
+    m_agents.append(InspectorTimelineAgent::create(m_instrumentingAgents.get(), 0, m_state.get(), InspectorTimelineAgent::WorkerInspector, 0));
+    m_agents.append(consoleAgent.release());
 
     m_injectedScriptManager->injectedScriptHost()->init(0
         , 0
@@ -105,15 +120,16 @@ WorkerInspectorController::WorkerInspectorController(WorkerContext* workerContex
         , 0
 #endif
         , 0
-    );
-
+        , 0
 #if ENABLE(JAVASCRIPT_DEBUGGER)
-    m_runtimeAgent->setScriptDebugServer(&m_debuggerAgent->scriptDebugServer());
+        , debuggerAgentPtr
 #endif
+    );
 }
  
 WorkerInspectorController::~WorkerInspectorController()
 {
+    m_instrumentingAgents->reset();
     disconnectFrontend();
 }
 
@@ -124,16 +140,8 @@ void WorkerInspectorController::connectFrontend()
     m_frontendChannel = adoptPtr(new PageInspectorProxy(m_workerContext));
     m_frontend = adoptPtr(new InspectorFrontend(m_frontendChannel.get()));
     m_backendDispatcher = InspectorBackendDispatcher::create(m_frontendChannel.get());
-    m_consoleAgent->registerInDispatcher(m_backendDispatcher.get());
-#if ENABLE(JAVASCRIPT_DEBUGGER)
-    m_debuggerAgent->registerInDispatcher(m_backendDispatcher.get());
-#endif
-    m_runtimeAgent->registerInDispatcher(m_backendDispatcher.get());
-
-#if ENABLE(JAVASCRIPT_DEBUGGER)
-    m_debuggerAgent->setFrontend(m_frontend.get());
-#endif
-    m_consoleAgent->setFrontend(m_frontend.get());
+    m_agents.registerInDispatcher(m_backendDispatcher.get());
+    m_agents.setFrontend(m_frontend.get());
 }
 
 void WorkerInspectorController::disconnectFrontend()
@@ -145,11 +153,7 @@ void WorkerInspectorController::disconnectFrontend()
     // Destroying agents would change the state, but we don't want that.
     // Pre-disconnect state will be used to restore inspector agents.
     m_state->mute();
-#if ENABLE(JAVASCRIPT_DEBUGGER)
-    m_debuggerAgent->clearFrontend();
-#endif
-    m_consoleAgent->clearFrontend();
-
+    m_agents.clearFrontend();
     m_frontend.clear();
     m_frontendChannel.clear();
 }
@@ -160,10 +164,7 @@ void WorkerInspectorController::restoreInspectorStateFromCookie(const String& in
     connectFrontend();
     m_state->loadFromCookie(inspectorCookie);
 
-#if ENABLE(JAVASCRIPT_DEBUGGER)
-    m_debuggerAgent->restore();
-#endif
-    m_consoleAgent->restore();
+    m_agents.restore();
 }
 
 void WorkerInspectorController::dispatchMessageFromFrontend(const String& message)

@@ -51,10 +51,7 @@ typedef int ExceptionCode;
 
 class FileReader : public RefCounted<FileReader>, public ActiveDOMObject, public EventTarget, public FileReaderLoaderClient {
 public:
-    static PassRefPtr<FileReader> create(ScriptExecutionContext* context)
-    {
-        return adoptRef(new FileReader(context));
-    }
+    static PassRefPtr<FileReader> create(ScriptExecutionContext*);
 
     virtual ~FileReader();
 
@@ -82,7 +79,6 @@ public:
     // ActiveDOMObject
     virtual bool canSuspend() const;
     virtual void stop();
-    virtual bool hasPendingActivity() const;
 
     // EventTarget
     virtual const AtomicString& interfaceName() const;

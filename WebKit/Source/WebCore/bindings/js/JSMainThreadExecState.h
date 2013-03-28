@@ -36,7 +36,7 @@
 
 namespace WebCore {
 
-class Page;
+class ScriptExecutionContext;
 
 class JSMainThreadExecState {
     WTF_MAKE_NONCOPYABLE(JSMainThreadExecState);
@@ -56,33 +56,25 @@ public:
         return JSC::call(exec, functionObject, callType, callData, thisValue, args);
     };
 
-    static JSC::JSValue instrumentedCall(Page* page, JSC::ExecState* exec, JSC::JSValue functionObject, JSC::CallType callType, const JSC::CallData& callData, JSC::JSValue thisValue, const JSC::ArgList& args)
+    static inline InspectorInstrumentationCookie instrumentFunctionCall(ScriptExecutionContext* context, JSC::CallType callType, const JSC::CallData& callData)
     {
-        InspectorInstrumentationCookie cookie;
-        if (InspectorInstrumentation::hasFrontends()) {
-            String resourceName;
-            int lineNumber = 1;
+        if (!InspectorInstrumentation::timelineAgentEnabled(context))
+            return InspectorInstrumentationCookie();
+        String resourceName;
+        int lineNumber = 1;
+        if (callType == JSC::CallTypeJS) {
+            resourceName = callData.js.functionExecutable->sourceURL();
+            lineNumber = callData.js.functionExecutable->lineNo();
+        } else
+            resourceName = "undefined";
+        return InspectorInstrumentation::willCallFunction(context, resourceName, lineNumber);
+    }
 
-            if (callType == JSC::CallTypeJS) {
-                resourceName = ustringToString(callData.js.functionExecutable->sourceURL());
-                lineNumber = callData.js.functionExecutable->lineNo();
-            } else
-                resourceName = "undefined";
-
-            cookie = InspectorInstrumentation::willCallFunction(page, resourceName, lineNumber);
-        }
-
-        JSC::JSValue value = call(exec, functionObject, callType, callData, thisValue, args);
-
-        InspectorInstrumentation::didCallFunction(cookie);
-
-        return value;
-    };
-
-    static JSC::JSValue evaluate(JSC::ExecState* exec, JSC::ScopeChainNode* chain, const JSC::SourceCode& source, JSC::JSValue thisValue, JSC::JSValue* exception)
+    static JSC::JSValue evaluate(JSC::ExecState* exec, const JSC::SourceCode& source, JSC::JSValue thisValue, JSC::JSValue* exception)
     {
         JSMainThreadExecState currentState(exec);
-        return JSC::evaluate(exec, chain, source, thisValue, exception);
+        JSC::JSLockHolder lock(exec);
+        return JSC::evaluate(exec, source, thisValue, exception);
     };
 
 protected:
@@ -92,19 +84,28 @@ protected:
         ASSERT(isMainThread());
         s_mainThreadState = exec;
     };
-    
+
     ~JSMainThreadExecState()
     {
         ASSERT(isMainThread());
+
+        bool didExitJavaScript = s_mainThreadState && !m_previousState;
+
         s_mainThreadState = m_previousState;
+
+        if (didExitJavaScript)
+            didLeaveScriptContext();
     }
 
 private:
     static JSC::ExecState* s_mainThreadState;
     JSC::ExecState* m_previousState;
+
+    static void didLeaveScriptContext();
 };
 
 // Null state prevents origin security checks.
+// Used by non-JavaScript bindings (ObjC, GObject).
 class JSMainThreadNullState : private JSMainThreadExecState {
 public:
     explicit JSMainThreadNullState() : JSMainThreadExecState(0) {};

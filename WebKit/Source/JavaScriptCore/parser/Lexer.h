@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ *  Copyright (C) 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2011, 2012 Apple Inc. All rights reserved.
  *  Copyright (C) 2010 Zoltan Herczeg (zherczeg@inf.u-szeged.hu)
  *
  *  This library is free software; you can redistribute it and/or
@@ -67,8 +67,6 @@ enum LexerFlags {
     LexexFlagsDontBuildKeywords = 4
 };
 
-class RegExp;
-
 template <typename T>
 class Lexer {
     WTF_MAKE_NONCOPYABLE(Lexer);
@@ -79,8 +77,8 @@ public:
     ~Lexer();
 
     // Character manipulation functions.
-    static bool isWhiteSpace(int character);
-    static bool isLineTerminator(int character);
+    static bool isWhiteSpace(T character);
+    static bool isLineTerminator(T character);
     static unsigned char convertHex(int c1, int c2);
     static UChar convertUnicode(int c1, int c2, int c3, int c4);
 
@@ -89,9 +87,10 @@ public:
     void setIsReparsing() { m_isReparsing = true; }
     bool isReparsing() const { return m_isReparsing; }
 
-    JSTokenType lex(JSTokenData*, JSTokenInfo*, unsigned, bool strictMode);
+    JSTokenType lex(JSTokenData*, JSTokenLocation*, unsigned, bool strictMode);
     bool nextTokenIsColon();
     int lineNumber() const { return m_lineNumber; }
+    int currentColumnNumber() const { return m_columnNumber; }
     void setLastLineNumber(int lastLineNumber) { m_lastLineNumber = lastLineNumber; }
     int lastLineNumber() const { return m_lastLineNumber; }
     bool prevTerminator() const { return m_terminator; }
@@ -101,19 +100,19 @@ public:
 
     // Functions for use after parsing.
     bool sawError() const { return m_error; }
-    UString getErrorMessage() const { return m_lexErrorMessage; }
+    String getErrorMessage() const { return m_lexErrorMessage; }
     void clear();
     void setOffset(int offset)
     {
         m_error = 0;
-        m_lexErrorMessage = UString();
+        m_lexErrorMessage = String();
         m_code = m_codeStart + offset;
         m_buffer8.resize(0);
         m_buffer16.resize(0);
-        // Faster than an if-else sequence
-        m_current = -1;
         if (LIKELY(m_code < m_codeEnd))
             m_current = *m_code;
+        else
+            m_current = 0;
     }
     void setLineNumber(int line)
     {
@@ -122,7 +121,7 @@ public:
 
     SourceProvider* sourceProvider() const { return m_source->provider(); }
 
-    JSTokenType lexExpectIdentifier(JSTokenData*, JSTokenInfo*, unsigned, bool strictMode);
+    JSTokenType lexExpectIdentifier(JSTokenData*, JSTokenLocation*, unsigned, bool strictMode);
 
 private:
     void record8(int);
@@ -133,11 +132,12 @@ private:
     void append16(const UChar* characters, size_t length) { m_buffer16.append(characters, length); }
 
     ALWAYS_INLINE void shift();
-    ALWAYS_INLINE int peek(int offset);
-    int getUnicodeCharacter();
+    ALWAYS_INLINE bool atEnd() const;
+    ALWAYS_INLINE T peek(int offset) const;
+    int parseFourDigitUnicodeHex();
     void shiftLineTerminator();
 
-    UString getInvalidCharMessage();
+    String invalidCharacterMessage() const;
     ALWAYS_INLINE const T* currentCharacter() const;
     ALWAYS_INLINE int currentOffset() const { return m_code - m_codeStart; }
     ALWAYS_INLINE void setOffsetFromCharOffset(const T* charOffset) { setOffset(charOffset - m_codeStart); }
@@ -146,6 +146,9 @@ private:
 
     ALWAYS_INLINE const Identifier* makeIdentifier(const LChar* characters, size_t length);
     ALWAYS_INLINE const Identifier* makeIdentifier(const UChar* characters, size_t length);
+    ALWAYS_INLINE const Identifier* makeLCharIdentifier(const LChar* characters, size_t length);
+    ALWAYS_INLINE const Identifier* makeLCharIdentifier(const UChar* characters, size_t length);
+    ALWAYS_INLINE const Identifier* makeRightSizedIdentifier(const UChar* characters, size_t length, UChar orAllChars);
     ALWAYS_INLINE const Identifier* makeIdentifierLCharFromUChar(const UChar* characters, size_t length);
 
     ALWAYS_INLINE bool lastTokenWasRestrKeyword() const;
@@ -167,11 +170,11 @@ private:
 
     int m_lineNumber;
     int m_lastLineNumber;
+    int m_columnNumber;
 
     Vector<LChar> m_buffer8;
     Vector<UChar> m_buffer16;
     bool m_terminator;
-    bool m_delimited; // encountered delimiter like "'" and "}" on last run
     int m_lastToken;
 
     const SourceCode* m_source;
@@ -181,24 +184,35 @@ private:
     bool m_isReparsing;
     bool m_atLineStart;
     bool m_error;
-    UString m_lexErrorMessage;
+    String m_lexErrorMessage;
 
-    // current and following unicode characters (int to allow for -1 for end-of-file marker)
-    int m_current;
+    T m_current;
 
     IdentifierArena* m_arena;
 
     JSGlobalData* m_globalData;
 };
 
-template <typename T>
-ALWAYS_INLINE bool Lexer<T>::isWhiteSpace(int ch)
+template <>
+ALWAYS_INLINE bool Lexer<LChar>::isWhiteSpace(LChar ch)
 {
-    return isASCII(ch) ? (ch == ' ' || ch == '\t' || ch == 0xB || ch == 0xC) : (WTF::Unicode::isSeparatorSpace(ch) || ch == 0xFEFF);
+    return ch == ' ' || ch == '\t' || ch == 0xB || ch == 0xC || ch == 0xA0;
 }
 
-template <typename T>
-ALWAYS_INLINE bool Lexer<T>::isLineTerminator(int ch)
+template <>
+ALWAYS_INLINE bool Lexer<UChar>::isWhiteSpace(UChar ch)
+{
+    return (ch < 256) ? Lexer<LChar>::isWhiteSpace(static_cast<LChar>(ch)) : (WTF::Unicode::isSeparatorSpace(ch) || ch == 0xFEFF);
+}
+
+template <>
+ALWAYS_INLINE bool Lexer<LChar>::isLineTerminator(LChar ch)
+{
+    return ch == '\r' || ch == '\n';
+}
+
+template <>
+ALWAYS_INLINE bool Lexer<UChar>::isLineTerminator(UChar ch)
 {
     return ch == '\r' || ch == '\n' || (ch & ~1) == 0x2028;
 }
@@ -228,6 +242,21 @@ ALWAYS_INLINE const Identifier* Lexer<T>::makeIdentifier(const UChar* characters
 }
 
 template <>
+ALWAYS_INLINE const Identifier* Lexer<LChar>::makeRightSizedIdentifier(const UChar* characters, size_t length, UChar)
+{
+    return &m_arena->makeIdentifierLCharFromUChar(m_globalData, characters, length);
+}
+
+template <>
+ALWAYS_INLINE const Identifier* Lexer<UChar>::makeRightSizedIdentifier(const UChar* characters, size_t length, UChar orAllChars)
+{
+    if (!(orAllChars & ~0xff))
+        return &m_arena->makeIdentifierLCharFromUChar(m_globalData, characters, length);
+
+    return &m_arena->makeIdentifier(m_globalData, characters, length);
+}
+
+template <>
 ALWAYS_INLINE void Lexer<LChar>::setCodeStart(const StringImpl* sourceString)
 {
     ASSERT(sourceString->is8Bit());
@@ -248,7 +277,19 @@ ALWAYS_INLINE const Identifier* Lexer<T>::makeIdentifierLCharFromUChar(const UCh
 }
 
 template <typename T>
-ALWAYS_INLINE JSTokenType Lexer<T>::lexExpectIdentifier(JSTokenData* tokenData, JSTokenInfo* tokenInfo, unsigned lexerFlags, bool strictMode)
+ALWAYS_INLINE const Identifier* Lexer<T>::makeLCharIdentifier(const LChar* characters, size_t length)
+{
+    return &m_arena->makeIdentifier(m_globalData, characters, length);
+}
+
+template <typename T>
+ALWAYS_INLINE const Identifier* Lexer<T>::makeLCharIdentifier(const UChar* characters, size_t length)
+{
+    return &m_arena->makeIdentifierLCharFromUChar(m_globalData, characters, length);
+}
+
+template <typename T>
+ALWAYS_INLINE JSTokenType Lexer<T>::lexExpectIdentifier(JSTokenData* tokenData, JSTokenLocation* tokenLocation, unsigned lexerFlags, bool strictMode)
 {
     ASSERT((lexerFlags & LexerFlagsIgnoreReservedWords));
     const T* start = m_code;
@@ -273,23 +314,25 @@ ALWAYS_INLINE JSTokenType Lexer<T>::lexExpectIdentifier(JSTokenData* tokenData, 
             goto slowCase;
         m_current = *ptr;
     } else
-        m_current = -1;
+        m_current = 0;
 
     m_code = ptr;
+    m_columnNumber = m_columnNumber + (m_code - start);
 
     // Create the identifier if needed
     if (lexerFlags & LexexFlagsDontBuildKeywords)
         tokenData->ident = 0;
     else
-        tokenData->ident = makeIdentifier(start, ptr - start);
-    tokenInfo->line = m_lineNumber;
-    tokenInfo->startOffset = start - m_codeStart;
-    tokenInfo->endOffset = currentOffset();
+        tokenData->ident = makeLCharIdentifier(start, ptr - start);
+    tokenLocation->line = m_lineNumber;
+    tokenLocation->startOffset = start - m_codeStart;
+    tokenLocation->endOffset = currentOffset();
+    tokenLocation->column = m_columnNumber;
     m_lastToken = IDENT;
     return IDENT;
     
 slowCase:
-    return lex(tokenData, tokenInfo, lexerFlags, strictMode);
+    return lex(tokenData, tokenLocation, lexerFlags, strictMode);
 }
 
 } // namespace JSC

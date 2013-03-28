@@ -34,16 +34,17 @@
 #include "HTMLNames.h"
 #include "Logging.h"
 #include "RuntimeEnabledFeatures.h"
+#include "ScriptCallStack.h"
 #include "ScriptEventListener.h"
-
 using namespace std;
+
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
 #if !LOG_DISABLED
-static String urlForLogging(const KURL& url)
+static String urlForLoggingTrack(const KURL& url)
 {
     static const unsigned maximumURLLengthForLogging = 128;
     
@@ -55,7 +56,6 @@ static String urlForLogging(const KURL& url)
     
 inline HTMLTrackElement::HTMLTrackElement(const QualifiedName& tagName, Document* document)
     : HTMLElement(tagName, document)
-    , m_hasBeenConfigured(false)
 {
     LOG(Media, "HTMLTrackElement::HTMLTrackElement - %p", this);
     ASSERT(hasTagName(trackTag));
@@ -72,54 +72,46 @@ PassRefPtr<HTMLTrackElement> HTMLTrackElement::create(const QualifiedName& tagNa
     return adoptRef(new HTMLTrackElement(tagName, document));
 }
 
-void HTMLTrackElement::insertedIntoDocument()
+Node::InsertionNotificationRequest HTMLTrackElement::insertedInto(ContainerNode* insertionPoint)
 {
-    HTMLElement::insertedIntoDocument();
-
-    if (HTMLMediaElement* parent = mediaElement())
-        parent->trackWasAdded(this);
+    HTMLElement::insertedInto(insertionPoint);
+    HTMLMediaElement* parent = mediaElement();
+    if (insertionPoint == parent)
+        parent->didAddTrack(this);
+    return InsertionDone;
 }
 
-void HTMLTrackElement::removedFromDocument()
+void HTMLTrackElement::removedFrom(ContainerNode* insertionPoint)
 {
-    if (HTMLMediaElement* parent = mediaElement())
-        parent->trackWasRemoved(this);
-
-    HTMLElement::removedFromDocument();
+    if (!parentNode() && WebCore::isMediaElement(insertionPoint))
+        toMediaElement(insertionPoint)->didRemoveTrack(this);
+    HTMLElement::removedFrom(insertionPoint);
 }
 
-void HTMLTrackElement::parseMappedAttribute(Attribute* attribute)
+void HTMLTrackElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
-    const QualifiedName& attrName = attribute->name();
+    if (RuntimeEnabledFeatures::webkitVideoTrackEnabled()) {
+        if (name == srcAttr) {
+            if (!value.isEmpty() && mediaElement())
+                scheduleLoad();
+            // 4.8.10.12.3 Sourcing out-of-band text tracks
+            // As the kind, label, and srclang attributes are set, changed, or removed, the text track must update accordingly...
+        } else if (name == kindAttr)
+            track()->setKind(value.lower());
+        else if (name == labelAttr)
+            track()->setLabel(value);
+        else if (name == srclangAttr)
+            track()->setLanguage(value);
+        else if (name == defaultAttr)
+            track()->setIsDefault(!value.isNull());
+    }
 
-    if (attrName == onloadAttr)
-        setAttributeEventListener(eventNames().loadEvent, createAttributeEventListener(this, attribute));
-    else if (attrName == onerrorAttr)
-        setAttributeEventListener(eventNames().errorEvent, createAttributeEventListener(this, attribute));
+    if (name == onloadAttr)
+        setAttributeEventListener(eventNames().loadEvent, createAttributeEventListener(this, name, value));
+    else if (name == onerrorAttr)
+        setAttributeEventListener(eventNames().errorEvent, createAttributeEventListener(this, name, value));
     else
-        HTMLElement::parseMappedAttribute(attribute);
-}
-
-void HTMLTrackElement::attributeChanged(Attribute* attr, bool preserveDecls)
-{
-    HTMLElement::attributeChanged(attr, preserveDecls);
-
-    if (!RuntimeEnabledFeatures::webkitVideoTrackEnabled())
-        return;
-
-    const QualifiedName& attrName = attr->name();
-    if (attrName == srcAttr) {
-        if (!getAttribute(srcAttr).isEmpty() && mediaElement())
-            scheduleLoad();
-
-    // 4.8.10.12.3 Sourcing out-of-band text tracks
-    // As the kind, label, and srclang attributes are set, changed, or removed, the text track must update accordingly...
-    } else if (attrName == kindAttr)
-        track()->setKind(attr->value());
-    else if (attrName == labelAttr)
-        track()->setLabel(attr->value());
-    else if (attrName == srclangAttr)
-        track()->setLanguage(attr->value());
+        HTMLElement::parseAttribute(name, value);
 }
 
 KURL HTMLTrackElement::src() const
@@ -176,10 +168,10 @@ LoadableTextTrack* HTMLTrackElement::ensureTrack()
 {
     if (!m_track) {
         // The kind attribute is an enumerated attribute, limited only to know values. It defaults to 'subtitles' if missing or invalid.
-        String kind = getAttribute(kindAttr);
+        String kind = getAttribute(kindAttr).lower();
         if (!TextTrack::isValidKindKeyword(kind))
             kind = TextTrack::subtitlesKeyword();
-        m_track = LoadableTextTrack::create(this, kind, label(), srclang(), isDefault());
+        m_track = LoadableTextTrack::create(this, kind, label(), srclang());
     }
     return m_track.get();
 }
@@ -189,9 +181,9 @@ TextTrack* HTMLTrackElement::track()
     return ensureTrack();
 }
 
-bool HTMLTrackElement::isURLAttribute(Attribute* attribute) const
+bool HTMLTrackElement::isURLAttribute(const Attribute& attribute) const
 {
-    return attribute->name() == srcAttr || HTMLElement::isURLAttribute(attribute);
+    return attribute.name() == srcAttr || HTMLElement::isURLAttribute(attribute);
 }
 
 void HTMLTrackElement::scheduleLoad()
@@ -237,9 +229,9 @@ bool HTMLTrackElement::canLoadUrl(const KURL& url)
         return false;
 
     if (!document()->contentSecurityPolicy()->allowMediaFromSource(url)) {
-        DEFINE_STATIC_LOCAL(String, consoleMessage, ("Text track load denied by Content Security Policy."));
-        document()->addConsoleMessage(JSMessageSource, LogMessageType, ErrorMessageLevel, consoleMessage);
-        LOG(Media, "HTMLTrackElement::canLoadUrl(%s) -> rejected by Content Security Policy", urlForLogging(url).utf8().data());
+        DEFINE_STATIC_LOCAL(String, consoleMessage, (ASCIILiteral("Text track load denied by Content Security Policy.")));
+        document()->addConsoleMessage(JSMessageSource, ErrorMessageLevel, consoleMessage);
+        LOG(Media, "HTMLTrackElement::canLoadUrl(%s) -> rejected by Content Security Policy", urlForLoggingTrack(url).utf8().data());
         return false;
     }
     
@@ -323,7 +315,7 @@ void HTMLTrackElement::textTrackAddCues(TextTrack* track, const TextTrackCueList
 void HTMLTrackElement::textTrackRemoveCues(TextTrack* track, const TextTrackCueList* cues)
 {
     if (HTMLMediaElement* parent = mediaElement())
-        return parent->textTrackAddCues(track, cues);
+        return parent->textTrackRemoveCues(track, cues);
 }
     
 void HTMLTrackElement::textTrackAddCue(TextTrack* track, PassRefPtr<TextTrackCue> cue)

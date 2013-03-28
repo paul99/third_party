@@ -29,6 +29,10 @@
 #include "Connection.h"
 #include <WebCore/RunLoop.h>
 
+#if PLATFORM(MAC)
+OBJC_CLASS NSString;
+#endif
+
 namespace WebKit {
 
 class ChildProcess : protected CoreIPC::Connection::Client {
@@ -57,17 +61,33 @@ public:
         ChildProcess& m_childProcess;
     };
 
+#if PLATFORM(MAC)
+    bool applicationIsOccluded() const { return m_applicationIsOccluded; }
+    void setApplicationIsOccluded(bool);
+#endif
+
     static void didCloseOnConnectionWorkQueue(WorkQueue&, CoreIPC::Connection*);
 
 protected:
-    explicit ChildProcess(double terminationTimeout);
+    explicit ChildProcess();
     ~ChildProcess();
+
+    void setTerminationTimeout(double seconds) { m_terminationTimeout = seconds; }
 
 private:
     void terminationTimerFired();
 
     virtual bool shouldTerminate() = 0;
     virtual void terminate();
+
+#if PLATFORM(MAC)
+    void disableProcessSuppression(NSString *reason);
+    void enableProcessSuppression(NSString *reason);
+
+    static NSString * const processSuppressionVisibleApplicationReason;
+#endif
+
+    void platformInitialize();
 
     // The timeout, in seconds, before this process will be terminated if termination
     // has been enabled. If the timeout is 0 seconds, the process will be terminated immediately.
@@ -78,6 +98,10 @@ private:
     unsigned m_terminationCounter;
 
     WebCore::RunLoop::Timer<ChildProcess> m_terminationTimer;
+
+#if PLATFORM(MAC)
+    bool m_applicationIsOccluded;
+#endif
 };
 
 } // namespace WebKit

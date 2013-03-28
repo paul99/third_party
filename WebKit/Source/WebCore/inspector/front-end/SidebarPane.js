@@ -108,8 +108,11 @@ WebInspector.SidebarPane.prototype = {
             return;
         this._expanded = true;
         this.element.addStyleClass("expanded");
-        if (this.onexpand)
-            this.onexpand(this);
+        this.onexpand();
+    },
+
+    onexpand: function()
+    {
     },
 
     collapse: function()
@@ -118,8 +121,6 @@ WebInspector.SidebarPane.prototype = {
             return;
         this._expanded = false;
         this.element.removeStyleClass("expanded");
-        if (this.oncollapse)
-            this.oncollapse(this);
     },
 
     toggleExpanded: function()
@@ -131,7 +132,7 @@ WebInspector.SidebarPane.prototype = {
     {
         if (isEnterKey(event) || event.keyCode === WebInspector.KeyboardShortcut.Keys.Space.code)
             this.toggleExpanded();
-    }
-}
+    },
 
-WebInspector.SidebarPane.prototype.__proto__ = WebInspector.Object.prototype;
+    __proto__: WebInspector.Object.prototype
+}

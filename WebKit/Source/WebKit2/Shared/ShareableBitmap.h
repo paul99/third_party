@@ -60,6 +60,7 @@ namespace WebKit {
 class ShareableBitmap : public RefCounted<ShareableBitmap> {
 public:
     enum Flag {
+        NoFlags = 0,
         SupportsAlpha = 1 << 0,
     };
     typedef unsigned Flags;
@@ -71,7 +72,7 @@ public:
 
         bool isNull() const { return m_handle.isNull(); }
 
-        void encode(CoreIPC::ArgumentEncoder*) const;
+        void encode(CoreIPC::ArgumentEncoder&) const;
         static bool decode(CoreIPC::ArgumentDecoder*, Handle&);
 
     private:
@@ -92,10 +93,10 @@ public:
     static PassRefPtr<ShareableBitmap> create(const WebCore::IntSize&, Flags, PassRefPtr<SharedMemory>);
 
     // Create a shareable bitmap from a handle.
-    static PassRefPtr<ShareableBitmap> create(const Handle&);
+    static PassRefPtr<ShareableBitmap> create(const Handle&, SharedMemory::Protection = SharedMemory::ReadWrite);
 
     // Create a handle.
-    bool createHandle(Handle&);
+    bool createHandle(Handle&, SharedMemory::Protection = SharedMemory::ReadWrite);
 
     ~ShareableBitmap();
 
@@ -135,14 +136,18 @@ public:
     // This creates a QImage that directly references the shared bitmap data.
     // This is only safe to use when we know that the contents of the shareable bitmap won't change.
     QImage createQImage();
-    void swizzleRGB();
+    static void releaseSharedMemoryData(void* typelessBitmap);
 #endif
 
 private:
     ShareableBitmap(const WebCore::IntSize&, Flags, void*);
     ShareableBitmap(const WebCore::IntSize&, Flags, PassRefPtr<SharedMemory>);
 
+#if USE(CAIRO)
+    static size_t numBytesForSize(const WebCore::IntSize&);
+#else
     static size_t numBytesForSize(const WebCore::IntSize& size) { return size.width() * size.height() * 4; }
+#endif
 
 #if USE(CG)
     RetainPtr<CGImageRef> createCGImage(CGDataProviderRef) const;

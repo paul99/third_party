@@ -29,8 +29,9 @@
 #if ENABLE(DFG_JIT)
 
 #include "DFGAbstractValue.h"
+#include "DFGBranchDirection.h"
 #include "DFGNode.h"
-#include "DFGOperands.h"
+#include "Operands.h"
 #include <wtf/OwnPtr.h>
 #include <wtf/Vector.h>
 
@@ -38,14 +39,15 @@ namespace JSC { namespace DFG {
 
 typedef Vector <BlockIndex, 2> PredecessorList;
 
-struct BasicBlock {
-    BasicBlock(unsigned bytecodeBegin, NodeIndex begin, unsigned numArguments, unsigned numLocals)
+struct BasicBlock : Vector<NodeIndex, 8> {
+    BasicBlock(unsigned bytecodeBegin, unsigned numArguments, unsigned numLocals)
         : bytecodeBegin(bytecodeBegin)
-        , begin(begin)
-        , end(NoNode)
         , isOSRTarget(false)
         , cfaHasVisited(false)
         , cfaShouldRevisit(false)
+        , cfaFoundConstants(false)
+        , cfaDidFinish(true)
+        , cfaBranchDirection(InvalidBranchDirection)
 #if !ASSERT_DISABLED
         , isLinked(false)
 #endif
@@ -57,6 +59,10 @@ struct BasicBlock {
     {
     }
     
+    ~BasicBlock()
+    {
+    }
+    
     void ensureLocals(unsigned newNumLocals)
     {
         variablesAtHead.ensureLocals(newNumLocals);
@@ -64,21 +70,50 @@ struct BasicBlock {
         valuesAtHead.ensureLocals(newNumLocals);
         valuesAtTail.ensureLocals(newNumLocals);
     }
+    
+    size_t numNodes() const { return phis.size() + size(); }
+    NodeIndex nodeIndex(size_t i) const
+    {
+        if (i < phis.size())
+            return phis[i];
+        return at(i - phis.size());
+    }
+    bool isPhiIndex(size_t i) const { return i < phis.size(); }
+    
+    bool isInPhis(NodeIndex nodeIndex) const
+    {
+        for (size_t i = 0; i < phis.size(); ++i) {
+            if (phis[i] == nodeIndex)
+                return true;
+        }
+        return false;
+    }
+    
+    bool isInBlock(NodeIndex index) const
+    {
+        for (size_t i = 0; i < numNodes(); ++i) {
+            if (nodeIndex(i) == index)
+                return true;
+        }
+        return false;
+    }
 
     // This value is used internally for block linking and OSR entry. It is mostly meaningless
     // for other purposes due to inlining.
     unsigned bytecodeBegin;
     
-    NodeIndex begin;
-    NodeIndex end;
     bool isOSRTarget;
     bool cfaHasVisited;
     bool cfaShouldRevisit;
+    bool cfaFoundConstants;
+    bool cfaDidFinish;
+    BranchDirection cfaBranchDirection;
 #if !ASSERT_DISABLED
     bool isLinked;
 #endif
     bool isReachable;
     
+    Vector<NodeIndex> phis;
     PredecessorList m_predecessors;
     
     Operands<NodeIndex, NodeIndexTraits> variablesAtHead;

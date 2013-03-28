@@ -191,6 +191,15 @@ bool MacWindowPicker::GetDesktopList(DesktopDescriptionList* descriptions) {
   return display_count > 0;
 }
 
+// TODO(dcaiafa): add dimensions to DesktopDescription. Remove it from picker.
+bool MacWindowPicker::GetDesktopDimensions(const DesktopId& id,
+                                           int* width,
+                                           int* height) {
+  *width = CGDisplayPixelsWide(id.id());
+  *height = CGDisplayPixelsHigh(id.id());
+  return true;
+}
+
 bool MacWindowPicker::GetWindowList(WindowDescriptionList* descriptions) {
   // Init if we're not already inited.
   if (get_window_list_ == NULL && !Init()) {

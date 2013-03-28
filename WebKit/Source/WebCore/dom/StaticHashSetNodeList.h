@@ -55,12 +55,12 @@ public:
         return adoptRef(new StaticHashSetNodeList(nodes));
     }
 
-    virtual unsigned length() const;
-    virtual Node* item(unsigned index) const;
-    virtual Node* itemWithName(const AtomicString&) const;
+    virtual unsigned length() const OVERRIDE;
+    virtual Node* item(unsigned index) const OVERRIDE;
+    virtual Node* namedItem(const AtomicString&) const OVERRIDE;
 
 private:
-    StaticHashSetNodeList(ListHashSet<RefPtr<Node> >& nodes);
+    explicit StaticHashSetNodeList(ListHashSet<RefPtr<Node> >& nodes);
 
     ListHashSet<RefPtr<Node> > m_nodes;
 };

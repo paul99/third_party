@@ -26,10 +26,12 @@
 #ifndef DFGGPRInfo_h
 #define DFGGPRInfo_h
 
+#include <wtf/Platform.h>
+
 #if ENABLE(DFG_JIT)
 
-#include <assembler/MacroAssembler.h>
-#include <dfg/DFGRegisterBank.h>
+#include "DFGRegisterBank.h"
+#include "MacroAssembler.h"
 
 namespace JSC { namespace DFG {
 
@@ -216,7 +218,7 @@ public:
     
     GPRReg tagGPR() const
     {
-        ASSERT(!isAddress() && m_baseOrTag != InvalidGPRReg);
+        ASSERT(!isAddress() && static_cast<GPRReg>(m_baseOrTag) != InvalidGPRReg);
         return static_cast<GPRReg>(m_baseOrTag);
     }
     
@@ -271,6 +273,9 @@ public:
     // These constants provide the names for the general purpose argument & return value registers.
     static const GPRReg argumentGPR0 = X86Registers::ecx; // regT2
     static const GPRReg argumentGPR1 = X86Registers::edx; // regT1
+    static const GPRReg nonArgGPR0 = X86Registers::eax; // regT0
+    static const GPRReg nonArgGPR1 = X86Registers::ebx; // regT3
+    static const GPRReg nonArgGPR2 = X86Registers::esi; // regT4
     static const GPRReg returnValueGPR = X86Registers::eax; // regT0
     static const GPRReg returnValueGPR2 = X86Registers::edx; // regT1
     static const GPRReg nonPreservedNonReturnGPR = X86Registers::ecx;
@@ -285,25 +290,23 @@ public:
     static unsigned toIndex(GPRReg reg)
     {
         ASSERT(reg != InvalidGPRReg);
-        ASSERT(reg < 8);
+        ASSERT(static_cast<int>(reg) < 8);
         static const unsigned indexForRegister[8] = { 0, 2, 1, 3, InvalidIndex, InvalidIndex, 4, InvalidIndex };
         unsigned result = indexForRegister[reg];
         ASSERT(result != InvalidIndex);
         return result;
     }
 
-#ifndef NDEBUG
     static const char* debugName(GPRReg reg)
     {
         ASSERT(reg != InvalidGPRReg);
-        ASSERT(reg < 8);
+        ASSERT(static_cast<int>(reg) < 8);
         static const char* nameForRegister[8] = {
             "eax", "ecx", "edx", "ebx",
             "esp", "ebp", "esi", "edi",
         };
         return nameForRegister[reg];
     }
-#endif
 private:
 
     static const unsigned InvalidIndex = 0xffffffff;
@@ -342,6 +345,9 @@ public:
     static const GPRReg argumentGPR3 = X86Registers::ecx; // regT2
     static const GPRReg argumentGPR4 = X86Registers::r8;  // regT6
     static const GPRReg argumentGPR5 = X86Registers::r9;  // regT7
+    static const GPRReg nonArgGPR0 = X86Registers::eax; // regT0
+    static const GPRReg nonArgGPR1 = X86Registers::ebx; // regT3
+    static const GPRReg nonArgGPR2 = X86Registers::r10; // regT8
     static const GPRReg returnValueGPR = X86Registers::eax; // regT0
     static const GPRReg returnValueGPR2 = X86Registers::edx; // regT1
     static const GPRReg nonPreservedNonReturnGPR = X86Registers::esi;
@@ -356,18 +362,17 @@ public:
     static unsigned toIndex(GPRReg reg)
     {
         ASSERT(reg != InvalidGPRReg);
-        ASSERT(reg < 16);
+        ASSERT(static_cast<int>(reg) < 16);
         static const unsigned indexForRegister[16] = { 0, 2, 1, 3, InvalidIndex, InvalidIndex, 5, 4, 6, 7, 8, InvalidIndex, InvalidIndex, InvalidIndex, InvalidIndex, InvalidIndex };
         unsigned result = indexForRegister[reg];
         ASSERT(result != InvalidIndex);
         return result;
     }
 
-#ifndef NDEBUG
     static const char* debugName(GPRReg reg)
     {
         ASSERT(reg != InvalidGPRReg);
-        ASSERT(reg < 16);
+        ASSERT(static_cast<int>(reg) < 16);
         static const char* nameForRegister[16] = {
             "rax", "rcx", "rdx", "rbx",
             "rsp", "rbp", "rsi", "rdi",
@@ -376,7 +381,6 @@ public:
         };
         return nameForRegister[reg];
     }
-#endif
 private:
 
     static const unsigned InvalidIndex = 0xffffffff;
@@ -384,24 +388,23 @@ private:
 
 #endif
 
-#if CPU(ARM_THUMB2)
+#if CPU(ARM)
 #define NUMBER_OF_ARGUMENT_REGISTERS 4
 
 class GPRInfo {
 public:
     typedef GPRReg RegisterType;
-    static const unsigned numberOfRegisters = 9;
+    static const unsigned numberOfRegisters = 8;
 
     // Temporary registers.
     static const GPRReg regT0 = ARMRegisters::r0;
     static const GPRReg regT1 = ARMRegisters::r1;
     static const GPRReg regT2 = ARMRegisters::r2;
     static const GPRReg regT3 = ARMRegisters::r4;
-    static const GPRReg regT4 = ARMRegisters::r7;
-    static const GPRReg regT5 = ARMRegisters::r8;
-    static const GPRReg regT6 = ARMRegisters::r9;
-    static const GPRReg regT7 = ARMRegisters::r10;
-    static const GPRReg regT8 = ARMRegisters::r11;
+    static const GPRReg regT4 = ARMRegisters::r8;
+    static const GPRReg regT5 = ARMRegisters::r9;
+    static const GPRReg regT6 = ARMRegisters::r10;
+    static const GPRReg regT7 = ARMRegisters::r11;
     // These registers match the baseline JIT.
     static const GPRReg cachedResultRegister = regT0;
     static const GPRReg cachedResultRegister2 = regT1;
@@ -411,10 +414,13 @@ public:
     static const GPRReg argumentGPR1 = ARMRegisters::r1; // regT1
     static const GPRReg argumentGPR2 = ARMRegisters::r2; // regT2
     // FIXME: r3 is currently used be the MacroAssembler as a temporary - it seems
-    // This could threoretically be a problem if theis is used in code generation
+    // This could threoretically be a problem if this is used in code generation
     // between the arguments being set up, and the call being made. That said,
     // any change introducing a problem here is likely to be immediately apparent!
     static const GPRReg argumentGPR3 = ARMRegisters::r3; // FIXME!
+    static const GPRReg nonArgGPR0 = ARMRegisters::r4; // regT3
+    static const GPRReg nonArgGPR1 = ARMRegisters::r8; // regT4
+    static const GPRReg nonArgGPR2 = ARMRegisters::r9; // regT5
     static const GPRReg returnValueGPR = ARMRegisters::r0; // regT0
     static const GPRReg returnValueGPR2 = ARMRegisters::r1; // regT1
     static const GPRReg nonPreservedNonReturnGPR = ARMRegisters::r2;
@@ -422,7 +428,7 @@ public:
     static GPRReg toRegister(unsigned index)
     {
         ASSERT(index < numberOfRegisters);
-        static const GPRReg registerForIndex[numberOfRegisters] = { regT0, regT1, regT2, regT3, regT4, regT5, regT6, regT7, regT8 };
+        static const GPRReg registerForIndex[numberOfRegisters] = { regT0, regT1, regT2, regT3, regT4, regT5, regT6, regT7 };
         return registerForIndex[index];
     }
 
@@ -430,13 +436,12 @@ public:
     {
         ASSERT(reg != InvalidGPRReg);
         ASSERT(reg < 16);
-        static const unsigned indexForRegister[16] = { 0, 1, 2, InvalidIndex, 3, InvalidIndex, InvalidIndex, 4, 5, 6, 7, 8, InvalidIndex, InvalidIndex, InvalidIndex, InvalidIndex };
+        static const unsigned indexForRegister[16] = { 0, 1, 2, InvalidIndex, 3, InvalidIndex, InvalidIndex, InvalidIndex, 4, 5, 6, 7, InvalidIndex, InvalidIndex, InvalidIndex, InvalidIndex };
         unsigned result = indexForRegister[reg];
         ASSERT(result != InvalidIndex);
         return result;
     }
 
-#ifndef NDEBUG
     static const char* debugName(GPRReg reg)
     {
         ASSERT(reg != InvalidGPRReg);
@@ -449,7 +454,6 @@ public:
         };
         return nameForRegister[reg];
     }
-#endif
 private:
 
     static const unsigned InvalidIndex = 0xffffffff;

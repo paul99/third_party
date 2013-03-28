@@ -46,10 +46,8 @@ public:
 
     char** environmentPointer() const { return m_environmentPointer; }
 
-#if !defined(BUILDING_ON_SNOW_LEOPARD)
     static const char* preexistingProcessServiceNameKey();
     static const char* preexistingProcessTypeKey();
-#endif
 
 private:
     const char* valueIfVariableHasName(const char* environmentVariable, const char* name) const;

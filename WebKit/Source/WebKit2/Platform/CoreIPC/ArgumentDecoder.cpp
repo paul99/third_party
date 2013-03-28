@@ -31,9 +31,10 @@
 
 namespace CoreIPC {
 
-ArgumentDecoder::ArgumentDecoder(const uint8_t* buffer, size_t bufferSize)
+PassOwnPtr<ArgumentDecoder> ArgumentDecoder::create(const uint8_t* buffer, size_t bufferSize)
 {
-    initialize(buffer, bufferSize);
+    Deque<Attachment> attachments;
+    return adoptPtr(new ArgumentDecoder(buffer, bufferSize, attachments));
 }
 
 ArgumentDecoder::ArgumentDecoder(const uint8_t* buffer, size_t bufferSize, Deque<Attachment>& attachments)
@@ -46,7 +47,7 @@ ArgumentDecoder::ArgumentDecoder(const uint8_t* buffer, size_t bufferSize, Deque
 ArgumentDecoder::~ArgumentDecoder()
 {
     ASSERT(m_allocatedBase);
-    fastFree(m_allocatedBase);
+    free(m_allocatedBase);
 #if !USE(UNIX_DOMAIN_SOCKETS)
     // FIXME: We need to dispose of the mach ports in cases of failure.
 #else
@@ -69,16 +70,13 @@ void ArgumentDecoder::initialize(const uint8_t* buffer, size_t bufferSize)
 {
     // This is the largest primitive type we expect to unpack from the message.
     const size_t expectedAlignment = sizeof(uint64_t);
-    m_allocatedBase = static_cast<uint8_t*>(fastMalloc(bufferSize + expectedAlignment));
+    m_allocatedBase = static_cast<uint8_t*>(malloc(bufferSize + expectedAlignment));
     m_buffer = roundUpToAlignment(m_allocatedBase, expectedAlignment);
     ASSERT(!(reinterpret_cast<uintptr_t>(m_buffer) % expectedAlignment));
 
     m_bufferPos = m_buffer;
     m_bufferEnd = m_buffer + bufferSize;
     memcpy(m_buffer, buffer, bufferSize);
-
-    // Decode the destination ID.
-    decodeUInt64(m_destinationID);
 }
 
 static inline bool alignedBufferIsLargeEnoughToContain(const uint8_t* alignedPosition, const uint8_t* bufferEnd, size_t size)
@@ -137,6 +135,16 @@ bool ArgumentDecoder::decodeBool(bool& result)
         return false;
     
     result = *reinterpret_cast<bool*>(m_bufferPos);
+    m_bufferPos += sizeof(result);
+    return true;
+}
+
+bool ArgumentDecoder::decodeUInt16(uint16_t& result)
+{
+    if (!alignBufferPosition(sizeof(result), sizeof(result)))
+        return false;
+
+    result = *reinterpret_cast<uint16_t*>(m_bufferPos);
     m_bufferPos += sizeof(result);
     return true;
 }

@@ -41,14 +41,15 @@
 #include "MouseEventWithHitTestResults.h"
 #include "NotImplemented.h"
 #include "Page.h"
+#include "Pasteboard.h"
 #include "PlatformEventFactoryMac.h"
 #include "RenderWidget.h"
 #include "RuntimeApplicationChecks.h"
 #include "Scrollbar.h"
 #include "Settings.h"
 #include "WebCoreSystemInterface.h"
-#include <objc/objc-runtime.h>
 #include <wtf/MainThread.h>
+#include <wtf/ObjcRuntimeExtras.h>
 #include <wtf/StdLibExtras.h>
 
 namespace WebCore {
@@ -137,7 +138,7 @@ void EventHandler::focusDocumentView()
 bool EventHandler::passWidgetMouseDownEventToWidget(const MouseEventWithHitTestResults& event)
 {
     // Figure out which view to send the event to.
-    RenderObject* target = targetNode(event) ? targetNode(event)->renderer() : 0;
+    RenderObject* target = event.targetNode() ? event.targetNode()->renderer() : 0;
     if (!target || !target->isWidget())
         return false;
     
@@ -223,9 +224,10 @@ bool EventHandler::passMouseDownEventToWidget(Widget* pWidget)
     ASSERT(!m_sendingEventToSubview);
     m_sendingEventToSubview = true;
 
-    RenderWidget::suspendWidgetHierarchyUpdates();
-    [view mouseDown:currentNSEvent()];
-    RenderWidget::resumeWidgetHierarchyUpdates();
+    {
+        WidgetHierarchyUpdatesSuspensionScope suspendWidgetHierarchyUpdates;
+        [view mouseDown:currentNSEvent()];
+    }
 
     m_sendingEventToSubview = false;
     
@@ -351,7 +353,7 @@ bool EventHandler::passSubframeEventToSubframe(MouseEventWithHitTestResults& eve
             return true;
         
         case NSLeftMouseDown: {
-            Node* node = targetNode(event);
+            Node* node = event.targetNode();
             if (!node)
                 return false;
             RenderObject* renderer = node->renderer();
@@ -411,7 +413,7 @@ static void selfRetainingNSScrollViewScrollWheel(NSScrollView *self, SEL selecto
 
     if (shouldRetainSelf)
         [self retain];
-    originalNSScrollViewScrollWheel(self, selector, event);
+    wtfCallIMP<void>(originalNSScrollViewScrollWheel, self, selector, event);
     if (shouldRetainSelf)
         [self release];
 }
@@ -633,9 +635,12 @@ bool EventHandler::passMouseMoveEventToSubframe(MouseEventWithHitTestResults& me
     if (frameHasPlatformWidget(m_frame))
         return passSubframeEventToSubframe(mev, subframe, hoveredNode);
 
+#if ENABLE(DRAG_SUPPORT)
     // WebKit2 code path.
     if (m_mouseDownMayStartDrag && !m_mouseDownWasInSubframe)
         return false;
+#endif
+
     subframe->eventHandler()->handleMouseMoveEvent(mev.event(), hoveredNode);
     return true;
 }
@@ -668,11 +673,11 @@ bool EventHandler::eventActivatedView(const PlatformMouseEvent& event) const
 
 PassRefPtr<Clipboard> EventHandler::createDraggingClipboard() const
 {
-    NSPasteboard *pasteboard = [NSPasteboard pasteboardWithName:NSDragPboard];
     // Must be done before ondragstart adds types and data to the pboard,
     // also done for security, as it erases data from the last drag
-    [pasteboard declareTypes:[NSArray array] owner:nil];
-    return ClipboardMac::create(Clipboard::DragAndDrop, pasteboard, ClipboardWritable, m_frame);
+    Pasteboard pasteboard(NSDragPboard);
+    pasteboard.clear();
+    return ClipboardMac::create(Clipboard::DragAndDrop, String(NSDragPboard), ClipboardWritable, ClipboardMac::DragAndDropData, m_frame);
 }
 
 #endif
@@ -703,11 +708,6 @@ bool EventHandler::tabsToAllFormControls(KeyboardEvent* event) const
 
 bool EventHandler::needsKeyboardEventDisambiguationQuirks() const
 {
-    Document* document = m_frame->document();
-
-    // RSS view needs arrow key keypress events.
-    if (applicationIsSafari() && (document->url().protocolIs("feed") || document->url().protocolIs("feeds")))
-        return true;
     Settings* settings = m_frame->settings();
     if (!settings)
         return false;

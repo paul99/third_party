@@ -24,9 +24,13 @@
 #import "config.h"
 #import "FontPlatformData.h"
 
-#import "PlatformString.h"
 #import "WebCoreSystemInterface.h"
 #import <AppKit/NSFont.h>
+#import <wtf/text/WTFString.h>
+
+#if PLATFORM(CHROMIUM) && OS(DARWIN)
+#import "HarfBuzzNGFace.h"
+#endif
 
 namespace WebCore {
 
@@ -41,27 +45,33 @@ void FontPlatformData::loadFont(NSFont* nsFont, float, NSFont*& outNSFont, CGFon
 }
 #endif  // PLATFORM(MAC)
 
-FontPlatformData::FontPlatformData(NSFont *nsFont, float size, bool syntheticBold, bool syntheticOblique, FontOrientation orientation,
-                                   TextOrientation textOrientation, FontWidthVariant widthVariant)
+FontPlatformData::FontPlatformData(NSFont *nsFont, float size, bool isPrinterFont, bool syntheticBold, bool syntheticOblique, FontOrientation orientation, FontWidthVariant widthVariant)
     : m_syntheticBold(syntheticBold)
     , m_syntheticOblique(syntheticOblique)
     , m_orientation(orientation)
-    , m_textOrientation(textOrientation)
     , m_size(size)
     , m_widthVariant(widthVariant)
     , m_font(nsFont)
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
-    // FIXME: Chromium: The following code isn't correct for the Chromium port since the sandbox might
-    // have blocked font loading, in which case we'll only have the real loaded font file after the call to loadFont().
-    , m_isColorBitmapFont(CTFontGetSymbolicTraits(toCTFontRef(nsFont)) & kCTFontColorGlyphsTrait)
-#else
     , m_isColorBitmapFont(false)
-#endif
+    , m_isCompositeFontReference(false)
+    , m_isPrinterFont(isPrinterFont)
 {
     ASSERT_ARG(nsFont, nsFont);
 
     CGFontRef cgFont = 0;
     loadFont(nsFont, size, m_font, cgFont);
+    
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
+    // FIXME: Chromium: The following code isn't correct for the Chromium port since the sandbox might
+    // have blocked font loading, in which case we'll only have the real loaded font file after the call to loadFont().
+    {
+        CTFontSymbolicTraits traits = CTFontGetSymbolicTraits(toCTFontRef(m_font));
+        m_isColorBitmapFont = traits & kCTFontColorGlyphsTrait;
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
+        m_isCompositeFontReference = traits & kCTFontCompositeTrait;
+#endif
+    }
+#endif
 
     if (m_font)
         CFRetain(m_font);
@@ -84,6 +94,7 @@ void FontPlatformData::platformDataInit(const FontPlatformData& f)
 
 #if PLATFORM(CHROMIUM) && OS(DARWIN)
     m_inMemoryFont = f.m_inMemoryFont;
+    m_harfbuzzFace = f.m_harfbuzzFace;
 #endif
 }
 
@@ -100,6 +111,7 @@ const FontPlatformData& FontPlatformData::platformDataAssign(const FontPlatformD
     m_CTFont = f.m_CTFont;
 #if PLATFORM(CHROMIUM) && OS(DARWIN)
     m_inMemoryFont = f.m_inMemoryFont;
+    m_harfbuzzFace = f.m_harfbuzzFace;
 #endif
     return *this;
 }
@@ -140,8 +152,14 @@ void FontPlatformData::setFont(NSFont *font)
 #endif
     
     m_cgFont.adoptCF(cgFont);
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
-    m_isColorBitmapFont = CTFontGetSymbolicTraits(toCTFontRef(m_font)) & kCTFontColorGlyphsTrait;
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
+    {
+        CTFontSymbolicTraits traits = CTFontGetSymbolicTraits(toCTFontRef(m_font));
+        m_isColorBitmapFont = traits & kCTFontColorGlyphsTrait;
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
+        m_isCompositeFontReference = traits & kCTFontCompositeTrait;
+#endif
+    }
 #endif
     m_CTFont = 0;
 }
@@ -227,15 +245,7 @@ static CTFontDescriptorRef cascadeToLastResortAndDisableSwashesFontDescriptor()
 // Adding a cascade list breaks the font on Leopard
 static bool canSetCascadeListForCustomFont()
 {
-#if PLATFORM(CHROMIUM)
-    static SInt32 systemVersion;
-    if (!systemVersion) {
-        if (Gestalt(gestaltSystemVersion, &systemVersion) != noErr)
-            return false;
-    }
-
-    return systemVersion >= 0x1060;
-#elif !defined(BUILDING_ON_LEOPARD)
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
     return true;
 #else
     return false;
@@ -282,6 +292,37 @@ CTFontRef FontPlatformData::ctFont() const
 
     return m_CTFont.get();
 }
+
+#if PLATFORM(CHROMIUM) && OS(DARWIN)
+static bool isAATFont(CTFontRef ctFont)
+{
+    CFDataRef table = CTFontCopyTable(ctFont, kCTFontTableMort, 0);
+    if (table) {
+        CFRelease(table);
+        return true;
+    }
+    table = CTFontCopyTable(ctFont, kCTFontTableMorx, 0);
+    if (table) {
+        CFRelease(table);
+        return true;
+    }
+    return false;
+}
+
+HarfBuzzNGFace* FontPlatformData::harfbuzzFace()
+{
+    CTFontRef font = ctFont();
+    // HarfBuzz can't handle AAT font
+    if (isAATFont(font))
+        return 0;
+
+    if (!m_harfbuzzFace) {
+        uint64_t uniqueID = reinterpret_cast<uintptr_t>(font);
+        m_harfbuzzFace = HarfBuzzNGFace::create(const_cast<FontPlatformData*>(this), uniqueID);
+    }
+    return m_harfbuzzFace.get();
+}
+#endif
 
 #ifndef NDEBUG
 String FontPlatformData::description() const

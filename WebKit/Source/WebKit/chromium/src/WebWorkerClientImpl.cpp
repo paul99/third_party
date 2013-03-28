@@ -39,29 +39,31 @@
 #include "ErrorEvent.h"
 #include "Frame.h"
 #include "FrameLoaderClient.h"
+#include "GroupSettings.h"
+#include "InspectorInstrumentation.h"
 #include "MessageEvent.h"
 #include "MessagePort.h"
 #include "MessagePortChannel.h"
+#include "Page.h"
+#include "PageGroup.h"
 #include "ScriptCallStack.h"
 #include "ScriptExecutionContext.h"
 #include "Worker.h"
 #include "WorkerContext.h"
-#include "WorkerContextExecutionProxy.h"
 #include "WorkerScriptController.h"
 #include "WorkerMessagingProxy.h"
 #include <wtf/Threading.h>
 
 #include "FrameLoaderClientImpl.h"
 #include "PlatformMessagePortChannel.h"
+#include "WebFileSystemCallbacks.h"
 #include "WebFrameClient.h"
 #include "WebFrameImpl.h"
-#include "WebKit.h"
-#include "platform/WebKitPlatformSupport.h"
 #include "WebMessagePortChannel.h"
 #include "WebPermissionClient.h"
-#include "platform/WebString.h"
-#include "platform/WebURL.h"
 #include "WebViewImpl.h"
+#include <public/WebString.h>
+#include <public/WebURL.h>
 
 using namespace WebCore;
 
@@ -85,15 +87,23 @@ WorkerContextProxy* WebWorkerClientImpl::createWorkerContextProxy(Worker* worker
 
 void WebWorkerClientImpl::startWorkerContext(const KURL& scriptURL, const String& userAgent, const String& sourceCode, WorkerThreadStartMode startMode)
 {
-    RefPtr<DedicatedWorkerThread> thread = DedicatedWorkerThread::create(scriptURL, userAgent, sourceCode, *this, *this, startMode,
-                                                                         m_scriptExecutionContext->contentSecurityPolicy()->policy(),
-                                                                         m_scriptExecutionContext->contentSecurityPolicy()->headerType());
+    ASSERT(m_scriptExecutionContext->isDocument());
+    Document* document = static_cast<Document*>(m_scriptExecutionContext.get());
+    GroupSettings* settings = 0;
+    if (document->page())
+        settings = document->page()->group().groupSettings();
+    RefPtr<DedicatedWorkerThread> thread = DedicatedWorkerThread::create(scriptURL, userAgent, settings, sourceCode, *this, *this, startMode,
+                                                                         document->contentSecurityPolicy()->deprecatedHeader(),
+                                                                         document->contentSecurityPolicy()->deprecatedHeaderType(),
+                                                                         document->topDocument()->securityOrigin());
     m_proxy->workerThreadCreated(thread);
     thread->start();
+    InspectorInstrumentation::didStartWorkerContext(m_scriptExecutionContext.get(), m_proxy, scriptURL);
 }
 
 void WebWorkerClientImpl::terminateWorkerContext()
 {
+    m_webFrame = 0;
     m_proxy->terminateWorkerContext();
 }
 
@@ -147,9 +157,9 @@ void WebWorkerClientImpl::postTaskToLoader(PassOwnPtr<ScriptExecutionContext::Ta
     m_proxy->postTaskToLoader(task);
 }
 
-void WebWorkerClientImpl::postTaskForModeToWorkerContext(PassOwnPtr<ScriptExecutionContext::Task> task, const String& mode)
+bool WebWorkerClientImpl::postTaskForModeToWorkerContext(PassOwnPtr<ScriptExecutionContext::Task> task, const String& mode)
 {
-    m_proxy->postTaskForModeToWorkerContext(task, mode);
+    return m_proxy->postTaskForModeToWorkerContext(task, mode);
 }
 
 void WebWorkerClientImpl::postMessageToWorkerObject(PassRefPtr<SerializedScriptValue> value, PassOwnPtr<MessagePortChannelArray> ports)
@@ -177,9 +187,9 @@ void WebWorkerClientImpl::postExceptionToWorkerObject(const String& errorMessage
     m_proxy->postExceptionToWorkerObject(errorMessage, lineNumber, sourceURL);
 }
 
-void WebWorkerClientImpl::postConsoleMessageToWorkerObject(MessageSource source, MessageType type, MessageLevel level, const String& message, int lineNumber, const String& sourceURL)
+void WebWorkerClientImpl::postConsoleMessageToWorkerObject(MessageSource source, MessageLevel level, const String& message, int lineNumber, const String& sourceURL)
 {
-    m_proxy->postConsoleMessageToWorkerObject(source, type, level, message, lineNumber, sourceURL);
+    m_proxy->postConsoleMessageToWorkerObject(source, level, message, lineNumber, sourceURL);
 }
 
 void WebWorkerClientImpl::workerContextDestroyed()
@@ -200,7 +210,11 @@ bool WebWorkerClientImpl::allowFileSystem()
 void WebWorkerClientImpl::openFileSystem(WebFileSystem::Type type, long long size, bool create, 
                                          WebFileSystemCallbacks* callbacks)
 {
-     m_webFrame->client()->openFileSystem(m_webFrame, type, size, create, callbacks);
+    if (m_proxy->askedToTerminate()) {
+        callbacks->didFail(WebFileErrorAbort);
+        return;
+    }
+    m_webFrame->client()->openFileSystem(m_webFrame, type, size, create, callbacks);
 }
 
 bool WebWorkerClientImpl::allowDatabase(WebFrame*, const WebString& name, const WebString& displayName, unsigned long estimatedSize) 
@@ -211,6 +225,16 @@ bool WebWorkerClientImpl::allowDatabase(WebFrame*, const WebString& name, const 
     if (!webView)
         return false;
     return !webView->permissionClient() || webView->permissionClient()->allowDatabase(m_webFrame, name, displayName, estimatedSize);
+}
+
+bool WebWorkerClientImpl::allowIndexedDB(const WebString& name)
+{
+    if (m_proxy->askedToTerminate())
+        return false;
+    WebKit::WebViewImpl* webView = m_webFrame->viewImpl();
+    if (!webView)
+        return false;
+    return !webView->permissionClient() || webView->permissionClient()->allowIndexedDB(m_webFrame, name, WebSecurityOrigin());
 }
  
 WebView* WebWorkerClientImpl::view() const 

@@ -31,23 +31,28 @@
 
 #include "IntRect.h"
 #include "ImageSource.h"
-#include "PlatformString.h"
+#include "PlatformScreen.h"
 #include "SharedBuffer.h"
 #include <wtf/Assertions.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
+#include <wtf/text/WTFString.h>
 
 #if USE(SKIA)
 #include "NativeImageSkia.h"
 #include "SkColorPriv.h"
-#elif PLATFORM(QT)
-#include <QPixmap>
-#include <QImage>
+#endif
+
+#if USE(QCMSLIB)
+#include "qcms.h"
+#if OS(DARWIN)
+#include "GraphicsContextCG.h"
+#include <ApplicationServices/ApplicationServices.h>
+#include <wtf/RetainPtr.h>
+#endif
 #endif
 
 namespace WebCore {
-
-    typedef Vector<char> ColorProfile;
 
     // ImageFrame represents the decoded image data.  This buffer is what all
     // decoders write a single frame into.
@@ -64,7 +69,7 @@ namespace WebCore {
             DisposeOverwritePrevious  // Clear frame to previous framebuffer
                                       // contents
         };
-#if USE(SKIA) || PLATFORM(QT)
+#if USE(SKIA)
         typedef uint32_t PixelData;
 #else
         typedef unsigned PixelData;
@@ -86,10 +91,6 @@ namespace WebCore {
         // pixel data, so that modifications in one frame are not reflected in
         // the other.  Returns whether the copy succeeded.
         bool copyBitmapData(const ImageFrame&);
-
-        // Makes this frame reference the provided image's pixel data, so that
-        // modifications in one frame are reflected in the other.
-        void copyReferenceToBitmapData(const ImageFrame&);
 
         // Copies the pixel data at [(startX, startY), (endX, startY)) to the
         // same X-coordinates on each subsequent row up to but not including
@@ -122,6 +123,7 @@ namespace WebCore {
         unsigned duration() const { return m_duration; }
         FrameDisposalMethod disposalMethod() const { return m_disposalMethod; }
         bool premultiplyAlpha() const { return m_premultiplyAlpha; }
+        void reportMemoryUsage(MemoryObjectInfo*) const;
 
         void setHasAlpha(bool alpha);
         void setColorProfile(const ColorProfile&);
@@ -140,73 +142,84 @@ namespace WebCore {
         {
 #if USE(SKIA)
             return m_bitmap.bitmap().getAddr32(x, y);
-#elif PLATFORM(QT)
-            m_image = m_pixmap.toImage();
-            m_pixmap = QPixmap();
-            return reinterpret_cast_ptr<QRgb*>(m_image.scanLine(y)) + x;
 #else
             return m_bytes + (y * width()) + x;
 #endif
         }
 
-#if PLATFORM(QT)
-        void setPixmap(const QPixmap& pixmap);
+#if PLATFORM(CHROMIUM)
+        void setSkBitmap(const SkBitmap& bitmap)
+        {
+            m_bitmap = NativeImageSkia(bitmap, 1);
+        }
+
+        const SkBitmap& getSkBitmap() const
+        {
+            return m_bitmap.bitmap();
+        }
 #endif
 
-    private:
-#if USE(CG)
-        typedef RetainPtr<CFMutableDataRef> NativeBackingStore;
-#else
-        typedef Vector<PixelData> NativeBackingStore;
-#endif
-
-        int width() const;
-        int height() const;
+        // Use fix point multiplier instead of integer division or floating point math.
+        // This multipler produces exactly the same result for all values in range 0 - 255.
+        static const unsigned fixPointShift = 24;
+        static const unsigned fixPointMult = static_cast<unsigned>(1.0 / 255.0 * (1 << fixPointShift)) + 1;
+        // Multiplies unsigned value by fixpoint value and converts back to unsigned.
+        static unsigned fixPointUnsignedMultiply(unsigned fixed, unsigned v)
+        {
+            return  (fixed * v) >> fixPointShift;
+        }
 
         inline void setRGBA(PixelData* dest, unsigned r, unsigned g, unsigned b, unsigned a)
         {
-            if (m_premultiplyAlpha && !a)
-                *dest = 0;
-            else {
-                if (m_premultiplyAlpha && a < 255) {
-                    float alphaPercent = a / 255.0f;
-                    r = static_cast<unsigned>(r * alphaPercent);
-                    g = static_cast<unsigned>(g * alphaPercent);
-                    b = static_cast<unsigned>(b * alphaPercent);
+            if (m_premultiplyAlpha && a < 255) {
+                if (!a) {
+                    *dest = 0;
+                    return;
                 }
-#if USE(SKIA)
-#if !OS(ANDROID)
-                // we are sure to call the NoCheck version, since we may
-                // deliberately pass non-premultiplied values, and we don't want
-                // an assert.
-                *dest = SkPackARGB32NoCheck(a, r, g, b);
-#else
-                // NoCheck isn't available. This may assert in debug builds.
-                *dest = SkPackARGB32(a, r, g, b);
-#endif // OS(ANDROID)
-#else
-                *dest = (a << 24 | r << 16 | g << 8 | b);
-#endif
+
+                unsigned alphaMult = a * fixPointMult;
+                r = fixPointUnsignedMultiply(r, alphaMult);
+                g = fixPointUnsignedMultiply(g, alphaMult);
+                b = fixPointUnsignedMultiply(b, alphaMult);
             }
+#if USE(SKIA)
+            // Call the "NoCheck" version since we may deliberately pass non-premultiplied
+            // values, and we don't want an assert.
+            *dest = SkPackARGB32NoCheck(a, r, g, b);
+#else
+            *dest = (a << 24 | r << 16 | g << 8 | b);
+#endif
+        }
+
+    private:
+        int width() const
+        {
+#if USE(SKIA)
+            return m_bitmap.bitmap().width();
+#else
+            return m_size.width();
+#endif
+        }
+
+        int height() const
+        {
+#if USE(SKIA)
+            return m_bitmap.bitmap().height();
+#else
+            return m_size.height();
+#endif
         }
 
 #if USE(SKIA)
         NativeImageSkia m_bitmap;
-#if PLATFORM(CHROMIUM) && OS(DARWIN)
-        ColorProfile m_colorProfile;
-#endif
-#elif PLATFORM(QT)
-        mutable QPixmap m_pixmap;
-        mutable QImage m_image;
-        bool m_hasAlpha;
-        IntSize m_size;
 #else
-        NativeBackingStore m_backingStore;
+        Vector<PixelData> m_backingStore;
         PixelData* m_bytes; // The memory is backed by m_backingStore.
         IntSize m_size;
-        bool m_hasAlpha;
+        // FIXME: Do we need m_colorProfile anymore?
         ColorProfile m_colorProfile;
 #endif
+        bool m_hasAlpha;
         IntRect m_originalFrameRect; // This will always just be the entire
                                      // buffer except for GIF frames whose
                                      // original rect was smaller than the
@@ -302,24 +315,69 @@ namespace WebCore {
         // ImageDecoder-owned pointer.
         virtual ImageFrame* frameBufferAtIndex(size_t) = 0;
 
+        // Make the best effort guess to check if the requested frame has alpha channel.
+        virtual bool frameHasAlphaAtIndex(size_t) const;
+
+        // Number of bytes in the decoded frame requested. Return 0 if not yet decoded.
+        virtual unsigned frameBytesAtIndex(size_t) const;
+
         void setIgnoreGammaAndColorProfile(bool flag) { m_ignoreGammaAndColorProfile = flag; }
         bool ignoresGammaAndColorProfile() const { return m_ignoreGammaAndColorProfile; }
+
+        ImageOrientation orientation() const { return m_orientation; }
 
         enum { iccColorProfileHeaderLength = 128 };
 
         static bool rgbColorProfile(const char* profileData, unsigned profileLength)
         {
-            ASSERT(profileLength >= iccColorProfileHeaderLength);
+            ASSERT_UNUSED(profileLength, profileLength >= iccColorProfileHeaderLength);
 
             return !memcmp(&profileData[16], "RGB ", 4);
         }
 
         static bool inputDeviceColorProfile(const char* profileData, unsigned profileLength)
         {
-            ASSERT(profileLength >= iccColorProfileHeaderLength);
+            ASSERT_UNUSED(profileLength, profileLength >= iccColorProfileHeaderLength);
 
             return !memcmp(&profileData[12], "mntr", 4) || !memcmp(&profileData[12], "scnr", 4);
         }
+
+#if USE(QCMSLIB)
+        static qcms_profile* qcmsOutputDeviceProfile()
+        {
+            static qcms_profile* outputDeviceProfile = 0;
+
+            static bool qcmsInitialized = false;
+            if (!qcmsInitialized) {
+                qcmsInitialized = true;
+                // FIXME: Add optional ICCv4 support.
+#if OS(DARWIN)
+                RetainPtr<CGColorSpaceRef> monitorColorSpace(AdoptCF, CGDisplayCopyColorSpace(CGMainDisplayID()));
+                CFDataRef iccProfile(CGColorSpaceCopyICCProfile(monitorColorSpace.get()));
+                if (iccProfile) {
+                    size_t length = CFDataGetLength(iccProfile);
+                    const unsigned char* systemProfile = CFDataGetBytePtr(iccProfile);
+                    outputDeviceProfile = qcms_profile_from_memory(systemProfile, length);
+                }
+#else
+                // FIXME: add support for multiple monitors.
+                ColorProfile profile;
+                screenColorProfile(profile);
+                if (!profile.isEmpty())
+                    outputDeviceProfile = qcms_profile_from_memory(profile.data(), profile.size());
+#endif
+                if (outputDeviceProfile && qcms_profile_is_bogus(outputDeviceProfile)) {
+                    qcms_profile_release(outputDeviceProfile);
+                    outputDeviceProfile = 0;
+                }
+                if (!outputDeviceProfile)
+                    outputDeviceProfile = qcms_profile_sRGB();
+                if (outputDeviceProfile)
+                    qcms_profile_precache_output_transform(outputDeviceProfile);
+            }
+            return outputDeviceProfile;
+        }
+#endif
 
         // Sets the "decode failure" flag.  For caller convenience (since so
         // many callers want to return false after calling this), returns false
@@ -342,6 +400,12 @@ namespace WebCore {
         void setMaxNumPixels(int m) { m_maxNumPixels = m; }
 #endif
 
+        // If the image has a cursor hot-spot, stores it in the argument
+        // and returns true. Otherwise returns false.
+        virtual bool hotSpot(IntPoint&) const { return false; }
+
+        virtual void reportMemoryUsage(MemoryObjectInfo*) const;
+
     protected:
         void prepareScaleDataIfNecessary();
         int upperBoundScaledX(int origX, int searchStart = 0);
@@ -351,13 +415,15 @@ namespace WebCore {
         int scaledY(int origY, int searchStart = 0);
 
         RefPtr<SharedBuffer> m_data; // The encoded data.
-        Vector<ImageFrame> m_frameBufferCache;
+        Vector<ImageFrame, 1> m_frameBufferCache;
+        // FIXME: Do we need m_colorProfile any more, for any port?
         ColorProfile m_colorProfile;
         bool m_scaled;
         Vector<int> m_scaledColumns;
         Vector<int> m_scaledRows;
         bool m_premultiplyAlpha;
         bool m_ignoreGammaAndColorProfile;
+        ImageOrientation m_orientation;
 
     private:
         // Some code paths compute the size of the image as "width * height * 4"

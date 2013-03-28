@@ -30,6 +30,7 @@
 /**
  * @constructor
  * @extends {WebInspector.Section}
+ * @param {string|Element} title
  * @param {string=} subtitle
  */
 WebInspector.PropertiesSection = function(title, subtitle)
@@ -39,11 +40,13 @@ WebInspector.PropertiesSection = function(title, subtitle)
     this.headerElement.addStyleClass("monospace");
     this.propertiesElement = document.createElement("ol");
     this.propertiesElement.className = "properties properties-tree monospace";
-    this.propertiesElement.tabIndex = 0;
-    this.propertiesTreeOutline = new TreeOutline(this.propertiesElement);
+    this.propertiesTreeOutline = new TreeOutline(this.propertiesElement, true);
+    this.propertiesTreeOutline.setFocusable(false);
     this.propertiesTreeOutline.section = this;
 
     this.element.appendChild(this.propertiesElement);
 }
 
-WebInspector.PropertiesSection.prototype.__proto__ = WebInspector.Section.prototype;
+WebInspector.PropertiesSection.prototype = {
+    __proto__: WebInspector.Section.prototype
+}

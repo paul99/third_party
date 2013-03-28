@@ -28,6 +28,7 @@ namespace WebCore {
 
 class EllipsisBox;
 class HitTestResult;
+class RenderRegion;
 
 struct BidiStatus;
 struct GapRects;
@@ -53,17 +54,26 @@ public:
     LayoutUnit lineTopWithLeading() const { return m_lineTopWithLeading; }
     LayoutUnit lineBottomWithLeading() const { return m_lineBottomWithLeading; }
     
-    LayoutUnit paginationStrut() const { return m_paginationStrut; }
-    void setPaginationStrut(LayoutUnit s) { m_paginationStrut = s; }
+    LayoutUnit paginationStrut() const { return m_fragmentationData ? m_fragmentationData->m_paginationStrut : LayoutUnit(0); }
+    void setPaginationStrut(LayoutUnit strut) { ensureLineFragmentationData()->m_paginationStrut = strut; }
 
-    LayoutUnit paginatedLineWidth() const { return m_paginatedLineWidth; }
-    void setPaginatedLineWidth(LayoutUnit width) { m_paginatedLineWidth = width; }
+    bool isFirstAfterPageBreak() const { return m_fragmentationData ? m_fragmentationData->m_isFirstAfterPageBreak : false; }
+    void setIsFirstAfterPageBreak(bool isFirstAfterPageBreak) { ensureLineFragmentationData()->m_isFirstAfterPageBreak = isFirstAfterPageBreak; }
+
+    LayoutUnit paginatedLineWidth() const { return m_fragmentationData ? m_fragmentationData->m_paginatedLineWidth : LayoutUnit(0); }
+    void setPaginatedLineWidth(LayoutUnit width) { ensureLineFragmentationData()->m_paginatedLineWidth = width; }
+
+    RenderRegion* containingRegion() const;
+    void setContainingRegion(RenderRegion*);
 
     LayoutUnit selectionTop() const;
     LayoutUnit selectionBottom() const;
     LayoutUnit selectionHeight() const { return max<LayoutUnit>(0, selectionBottom() - selectionTop()); }
 
-    int blockDirectionPointInLine() const { return max(lineTop(), selectionTop()); }
+    LayoutUnit selectionTopAdjustedForPrecedingBlock() const;
+    LayoutUnit selectionHeightAdjustedForPrecedingBlock() const { return max<LayoutUnit>(0, selectionBottom() - selectionTopAdjustedForPrecedingBlock()); }
+
+    int blockDirectionPointInLine() const;
 
     LayoutUnit alignBoxesInBlockDirection(LayoutUnit heightOfBlock, GlyphOverflowAndFallbackFontsMap&, VerticalPositionCache&);
     void setLineTopBottomPositions(LayoutUnit top, LayoutUnit bottom, LayoutUnit topWithLeading, LayoutUnit bottomWithLeading)
@@ -83,26 +93,28 @@ public:
     unsigned lineBreakPos() const { return m_lineBreakPos; }
     void setLineBreakPos(unsigned p) { m_lineBreakPos = p; }
 
-    bool endsWithBreak() const { return m_endsWithBreak; }
-    void setEndsWithBreak(bool b) { m_endsWithBreak = b; }
+    using InlineBox::endsWithBreak;
+    using InlineBox::setEndsWithBreak;
 
     void childRemoved(InlineBox* box);
 
     bool lineCanAccommodateEllipsis(bool ltr, int blockEdge, int lineBoxEdge, int ellipsisWidth);
-    void placeEllipsis(const AtomicString& ellipsisStr, bool ltr, float blockLeftEdge, float blockRightEdge, float ellipsisWidth, InlineBox* markupBox = 0);
-    virtual float placeEllipsisBox(bool ltr, float blockLeftEdge, float blockRightEdge, float ellipsisWidth, bool& foundBox);
+    // Return the truncatedWidth, the width of the truncated text + ellipsis.
+    float placeEllipsis(const AtomicString& ellipsisStr, bool ltr, float blockLeftEdge, float blockRightEdge, float ellipsisWidth, InlineBox* markupBox = 0);
+    // Return the position of the EllipsisBox or -1.
+    virtual float placeEllipsisBox(bool ltr, float blockLeftEdge, float blockRightEdge, float ellipsisWidth, float &truncatedWidth, bool& foundBox) OVERRIDE;
 
-    bool hasEllipsisBox() const { return m_hasEllipsisBoxOrHyphen; }
+    using InlineBox::hasEllipsisBox;
     EllipsisBox* ellipsisBox() const;
 
     void paintEllipsisBox(PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom) const;
 
-    virtual void clearTruncation();
+    virtual void clearTruncation() OVERRIDE;
 
     bool isHyphenated() const;
 
-    virtual int baselinePosition(FontBaseline baselineType) const { return boxModelObject()->baselinePosition(baselineType, m_firstLine, isHorizontal() ? HorizontalLine : VerticalLine, PositionOfInteriorLineBoxes); }
-    virtual int lineHeight() const { return boxModelObject()->lineHeight(m_firstLine, isHorizontal() ? HorizontalLine : VerticalLine, PositionOfInteriorLineBoxes); }
+    virtual int baselinePosition(FontBaseline baselineType) const;
+    virtual LayoutUnit lineHeight() const;
 
 #if PLATFORM(MAC)
     void addHighlightOverflow();
@@ -110,10 +122,10 @@ public:
 #endif
 
     virtual void paint(PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom);
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom);
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom) OVERRIDE;
 
-    bool hasSelectedChildren() const { return m_hasSelectedChildrenOrCanHaveLeadingExpansion; }
-    void setHasSelectedChildren(bool hasSelectedChildren) { m_hasSelectedChildrenOrCanHaveLeadingExpansion = hasSelectedChildren; }
+    using InlineBox::hasSelectedChildren;
+    using InlineBox::setHasSelectedChildren;
 
     virtual RenderObject::SelectionState selectionState();
     InlineBox* firstSelectedBox();
@@ -148,7 +160,7 @@ public:
 
     LayoutRect paddedLayoutOverflowRect(LayoutUnit endPadding) const;
 
-    void ascentAndDescentForBox(InlineBox*, GlyphOverflowAndFallbackFontsMap&, LayoutUnit& ascent, LayoutUnit& descent, bool& affectsAscent, bool& affectsDescent) const;
+    void ascentAndDescentForBox(InlineBox*, GlyphOverflowAndFallbackFontsMap&, int& ascent, int& descent, bool& affectsAscent, bool& affectsDescent) const;
     LayoutUnit verticalPositionForBox(InlineBox*, VerticalPositionCache&);
     bool includeLeadingForBox(InlineBox*) const;
     bool includeFontForBox(InlineBox*) const;
@@ -181,11 +193,18 @@ public:
     virtual const char* boxName() const;
 #endif
 private:
-    void setHasEllipsisBox(bool hasEllipsisBox) { m_hasEllipsisBoxOrHyphen = hasEllipsisBox; }
-    
-    LayoutUnit lineGridSnapAdjustment(LayoutUnit delta = 0) const;
+    LayoutUnit lineSnapAdjustment(LayoutUnit delta = 0) const;
 
-    int beforeAnnotationsAdjustment() const;
+    LayoutUnit beforeAnnotationsAdjustment() const;
+
+    struct LineFragmentationData;
+    LineFragmentationData* ensureLineFragmentationData()
+    {
+        if (!m_fragmentationData)
+            m_fragmentationData = adoptPtr(new LineFragmentationData());
+
+        return m_fragmentationData.get();
+    }
 
     // This folds into the padding at the end of InlineFlowBox on 64-bit.
     unsigned m_lineBreakPos;
@@ -201,8 +220,27 @@ private:
     LayoutUnit m_lineTopWithLeading;
     LayoutUnit m_lineBottomWithLeading;
 
-    LayoutUnit m_paginationStrut;
-    LayoutUnit m_paginatedLineWidth;
+    struct LineFragmentationData {
+        WTF_MAKE_NONCOPYABLE(LineFragmentationData); WTF_MAKE_FAST_ALLOCATED;
+    public:
+        LineFragmentationData()
+            : m_containingRegion(0)
+            , m_paginationStrut(0)
+            , m_paginatedLineWidth(0)
+            , m_isFirstAfterPageBreak(false)
+        {
+
+        }
+
+        // It should not be assumed the |containingRegion| is always valid.
+        // It can also be 0 if the flow has no region chain.
+        RenderRegion* m_containingRegion;
+        LayoutUnit m_paginationStrut;
+        LayoutUnit m_paginatedLineWidth;
+        bool m_isFirstAfterPageBreak;
+    };
+
+    OwnPtr<LineFragmentationData> m_fragmentationData;
 
     // Floats hanging off the line are pushed into this vector during layout. It is only
     // good for as long as the line has not been marked dirty.

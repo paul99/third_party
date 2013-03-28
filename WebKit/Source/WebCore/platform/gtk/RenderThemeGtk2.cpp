@@ -32,6 +32,7 @@
 #undef GTK_DISABLE_DEPRECATED
 
 #include "CSSValueKeywords.h"
+#include "Font.h"
 #include "GraphicsContext.h"
 #include "GtkVersioning.h"
 #include "HTMLNames.h"
@@ -524,7 +525,7 @@ bool RenderThemeGtk::paintSliderThumb(RenderObject* object, const PaintInfo& inf
     return false;
 }
 
-void RenderThemeGtk::adjustSliderThumbSize(RenderStyle* style) const
+void RenderThemeGtk::adjustSliderThumbSize(RenderStyle* style, Element*) const
 {
     ControlPart part = style->appearance();
 #if ENABLE(VIDEO)
@@ -551,7 +552,7 @@ void RenderThemeGtk::adjustSliderThumbSize(RenderStyle* style) const
     style->setHeight(Length(length, Fixed));
 }
 
-#if ENABLE(PROGRESS_TAG)
+#if ENABLE(PROGRESS_ELEMENT)
 bool RenderThemeGtk::paintProgressBar(RenderObject* renderObject, const PaintInfo& paintInfo, const IntRect& rect)
 {
     GtkWidget* widget = gtkProgressBar();
@@ -574,7 +575,7 @@ bool RenderThemeGtk::paintProgressBar(RenderObject* renderObject, const PaintInf
 }
 #endif
 
-void RenderThemeGtk::adjustInnerSpinButtonStyle(CSSStyleSelector*, RenderStyle* style, Element*) const
+void RenderThemeGtk::adjustInnerSpinButtonStyle(StyleResolver*, RenderStyle* style, Element*) const
 {
     GtkStyle* gtkStyle = gtk_widget_get_style(gtkSpinButton());
     const PangoFontDescription* fontDescription = gtkStyle->font_desc;

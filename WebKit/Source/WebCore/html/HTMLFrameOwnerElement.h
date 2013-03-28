@@ -42,6 +42,11 @@ public:
     DOMWindow* contentWindow() const;
     Document* contentDocument() const;
 
+    void setContentFrame(Frame*);
+    void clearContentFrame() { m_contentFrame = 0; }
+
+    void disconnectContentFrame();
+
     // Most subclasses use RenderPart (either RenderEmbeddedObject or RenderIFrame)
     // except for HTMLObjectElement and HTMLEmbedElement which may return any
     // RenderObject when using fallback content.
@@ -57,19 +62,52 @@ public:
 
 protected:
     HTMLFrameOwnerElement(const QualifiedName& tagName, Document*);
-
     void setSandboxFlags(SandboxFlags);
 
-    virtual void willRemove();
-
 private:
-    friend class Frame;
-
-    virtual bool isFrameOwnerElement() const { return true; }
     virtual bool isKeyboardFocusable(KeyboardEvent*) const;
+    virtual bool isFrameOwnerElement() const OVERRIDE { return true; }
 
     Frame* m_contentFrame;
     SandboxFlags m_sandboxFlags;
+};
+
+inline HTMLFrameOwnerElement* toFrameOwnerElement(Node* node)
+{
+    ASSERT(!node || node->isFrameOwnerElement());
+    return static_cast<HTMLFrameOwnerElement*>(node);
+}
+
+class SubframeLoadingDisabler {
+public:
+    explicit SubframeLoadingDisabler(Node* root)
+        : m_root(root)
+    {
+        disabledSubtreeRoots().add(m_root);
+    }
+
+    ~SubframeLoadingDisabler()
+    {
+        disabledSubtreeRoots().remove(m_root);
+    }
+
+    static bool canLoadFrame(HTMLFrameOwnerElement* owner)
+    {
+        for (Node* node = owner; node; node = node->parentOrHostNode()) {
+            if (disabledSubtreeRoots().contains(node))
+                return false;
+        }
+        return true;
+    }
+
+private:
+    static HashSet<Node*>& disabledSubtreeRoots()
+    {
+        DEFINE_STATIC_LOCAL(HashSet<Node*>, nodes, ());
+        return nodes;
+    }
+
+    Node* m_root;
 };
 
 } // namespace WebCore

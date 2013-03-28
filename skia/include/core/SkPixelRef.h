@@ -13,34 +13,29 @@
 #include "SkBitmap.h"
 #include "SkRefCnt.h"
 #include "SkString.h"
+#include "SkFlattenable.h"
+
+#ifdef SK_DEBUG
+    /**
+     *  Defining SK_IGNORE_PIXELREF_SETPRELOCKED will force all pixelref
+     *  subclasses to correctly handle lock/unlock pixels. For performance
+     *  reasons, simple malloc-based subclasses call setPreLocked() to skip
+     *  the overhead of implementing these calls.
+     *
+     *  This build-flag disables that optimization, to add in debugging our
+     *  call-sites, to ensure that they correctly balance their calls of
+     *  lock and unlock.
+     */
+//    #define SK_IGNORE_PIXELREF_SETPRELOCKED
+#endif
 
 class SkColorTable;
+class SkData;
 struct SkIRect;
 class SkMutex;
-class SkFlattenableReadBuffer;
-class SkFlattenableWriteBuffer;
 
 // this is an opaque class, not interpreted by skia
 class SkGpuTexture;
-
-#if SK_ALLOW_STATIC_GLOBAL_INITIALIZERS
-
-#define SK_DECLARE_PIXEL_REF_REGISTRAR() 
-
-#define SK_DEFINE_PIXEL_REF_REGISTRAR(pixelRef) \
-    static SkPixelRef::Registrar g##pixelRef##Reg(#pixelRef, \
-                                                  pixelRef::Create);
-                                                      
-#else
-
-#define SK_DECLARE_PIXEL_REF_REGISTRAR() static void Init();
-
-#define SK_DEFINE_PIXEL_REF_REGISTRAR(pixelRef) \
-    void pixelRef::Init() { \
-        SkPixelRef::Registrar(#pixelRef, Create); \
-    }
-
-#endif
 
 /** \class SkPixelRef
 
@@ -50,8 +45,10 @@ class SkGpuTexture;
 
     This class can be shared/accessed between multiple threads.
 */
-class SkPixelRef : public SkRefCnt {
+class SK_API SkPixelRef : public SkFlattenable {
 public:
+    SK_DECLARE_INST_COUNT(SkPixelRef)
+
     explicit SkPixelRef(SkBaseMutex* mutex = NULL);
 
     /** Return the pixel memory returned from lockPixels, or null if the
@@ -63,9 +60,12 @@ public:
     */
     SkColorTable* colorTable() const { return fColorTable; }
 
-    /** Return the current lockcount (defaults to 0)
-    */
-    int getLockCount() const { return fLockCount; }
+    /**
+     *  Returns true if the lockcount > 0
+     */
+    bool isLocked() const { return fLockCount > 0; }
+
+    SkDEBUGCODE(int getLockCount() const { return fLockCount; })
 
     /** Call to access the pixel memory, which is returned. Balance with a call
         to unlockPixels().
@@ -130,24 +130,36 @@ public:
     */
     void setURI(const SkString& uri) { fURI = uri; }
 
+    /**
+     *  If the pixelRef has an encoded (i.e. compressed) representation,
+     *  return a ref to its data. If the pixelRef
+     *  is uncompressed or otherwise does not have this form, return NULL.
+     *
+     *  If non-null is returned, the caller is responsible for calling unref()
+     *  on the data when it is finished.
+     */
+    SkData* refEncodedData() {
+        return this->onRefEncodedData();
+    }
+
     /** Are we really wrapping a texture instead of a bitmap?
      */
     virtual SkGpuTexture* getTexture() { return NULL; }
 
     bool readPixels(SkBitmap* dst, const SkIRect* subset = NULL);
 
-    /** Makes a deep copy of this PixelRef, respecting the requested config.
-        Returns NULL if either there is an error (e.g. the destination could
-        not be created with the given config), or this PixelRef does not 
-        support deep copies.  */
-    virtual SkPixelRef* deepCopy(SkBitmap::Config config) { return NULL; }
-
-    // serialization
-
-    typedef SkPixelRef* (*Factory)(SkFlattenableReadBuffer&);
-
-    virtual Factory getFactory() const { return NULL; }
-    virtual void flatten(SkFlattenableWriteBuffer&) const;
+    /**
+     *  Makes a deep copy of this PixelRef, respecting the requested config.
+     *  @param config Desired config.
+     *  @param subset Subset of this PixelRef to copy. Must be fully contained within the bounds of
+     *         of this PixelRef.
+     *  @return A new SkPixelRef, or NULL if either there is an error (e.g. the destination could
+     *          not be created with the given config), or this PixelRef does not support deep
+     *          copies.
+     */
+    virtual SkPixelRef* deepCopy(SkBitmap::Config config, const SkIRect* subset = NULL) {
+        return NULL;
+    }
 
 #ifdef SK_BUILD_FOR_ANDROID
     /**
@@ -164,17 +176,6 @@ public:
      */
     virtual void globalUnref();
 #endif
-
-    static Factory NameToFactory(const char name[]);
-    static const char* FactoryToName(Factory);
-    static void Register(const char name[], Factory);
-
-    class Registrar {
-    public:
-        Registrar(const char name[], Factory factory) {
-            SkPixelRef::Register(name, factory);
-        }
-    };
 
 protected:
     /** Called when the lockCount goes from 0 to 1. The caller will have already
@@ -198,17 +199,24 @@ protected:
      */
     virtual bool onReadPixels(SkBitmap* dst, const SkIRect* subsetOrNull);
 
+    // default impl returns NULL.
+    virtual SkData* onRefEncodedData();
+
     /** Return the mutex associated with this pixelref. This value is assigned
         in the constructor, and cannot change during the lifetime of the object.
     */
     SkBaseMutex* mutex() const { return fMutex; }
 
+    // serialization
     SkPixelRef(SkFlattenableReadBuffer&, SkBaseMutex*);
+    virtual void flatten(SkFlattenableWriteBuffer&) const SK_OVERRIDE;
+
+    // only call from constructor. Flags this to always be locked, removing
+    // the need to grab the mutex and call onLockPixels/onUnlockPixels.
+    // Performance tweak to avoid those calls (esp. in multi-thread use case).
+    void setPreLocked(void* pixels, SkColorTable* ctable);
 
 private:
-#if !SK_ALLOW_STATIC_GLOBAL_INITIALIZERS
-    static void InitializeFlattenables();
-#endif
 
     SkBaseMutex*    fMutex; // must remain in scope for the life of this object
     void*           fPixels;
@@ -217,12 +225,20 @@ private:
 
     mutable uint32_t fGenerationID;
 
+    // SkBitmap is only a friend so that when copying, it can modify the new SkPixelRef to have the
+    // same fGenerationID as the original.
+    friend class SkBitmap;
+
     SkString    fURI;
 
     // can go from false to true, but never from true to false
     bool    fIsImmutable;
+    // only ever set in constructor, const after that
+    bool    fPreLocked;
 
-    friend class SkGraphics;
+    void setMutex(SkBaseMutex* mutex);
+
+    typedef SkFlattenable INHERITED;
 };
 
 #endif

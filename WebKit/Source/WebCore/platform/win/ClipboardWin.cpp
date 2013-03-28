@@ -147,9 +147,7 @@ static String filesystemPathFromUrlOrTitle(const String& url, const String& titl
         return String(static_cast<UChar*>(fsPathBuffer));
     }
 
-    String result(static_cast<UChar*>(fsPathBuffer));
-    result += String(extension);
-    return result;
+    return makeString(static_cast<const UChar*>(fsPathBuffer), extension);
 #endif
 }
 
@@ -357,6 +355,8 @@ ClipboardWin::ClipboardWin(ClipboardType clipboardType, const DragDataMap& dataM
 
 ClipboardWin::~ClipboardWin()
 {
+    if (m_dragImage)
+        m_dragImage->removeClient(this);
 }
 
 static bool writeURL(WCDataObject *data, const KURL& url, String title, bool withPlainText, bool withHTML)
@@ -435,22 +435,21 @@ void ClipboardWin::clearAllData()
     m_dataObject = m_writableDataObject;
 }
 
-String ClipboardWin::getData(const String& type, bool& success) const
+String ClipboardWin::getData(const String& type) const
 {     
-    success = false;
     if (policy() != ClipboardReadable || (!m_dataObject && m_dragDataMap.isEmpty()))
         return "";
 
     ClipboardDataType dataType = clipboardTypeFromMIMEType(type);
     if (dataType == ClipboardDataTypeText)
-        return m_dataObject ? getPlainText(m_dataObject.get(), success) : getPlainText(&m_dragDataMap);
+        return m_dataObject ? getPlainText(m_dataObject.get()) : getPlainText(&m_dragDataMap);
     if (dataType == ClipboardDataTypeURL)
-        return m_dataObject ? getURL(m_dataObject.get(), DragData::DoNotConvertFilenames, success) : getURL(&m_dragDataMap, DragData::DoNotConvertFilenames);
+        return m_dataObject ? getURL(m_dataObject.get(), DragData::DoNotConvertFilenames) : getURL(&m_dragDataMap, DragData::DoNotConvertFilenames);
     else if (dataType == ClipboardDataTypeTextHTML) {
-        String data = m_dataObject ? getTextHTML(m_dataObject.get(), success) : getTextHTML(&m_dragDataMap);
-        if (success)
+        String data = m_dataObject ? getTextHTML(m_dataObject.get()) : getTextHTML(&m_dragDataMap);
+        if (!data.isEmpty())
             return data;
-        return m_dataObject ? getCFHTML(m_dataObject.get(), success) : getCFHTML(&m_dragDataMap);
+        return m_dataObject ? getCFHTML(m_dataObject.get()) : getCFHTML(&m_dragDataMap);
     }
     
     return "";
@@ -485,7 +484,7 @@ bool ClipboardWin::setData(const String& type, const String& data)
     return false;
 }
 
-static void addMimeTypesForFormat(HashSet<String>& results, const FORMATETC& format)
+static void addMimeTypesForFormat(ListHashSet<String>& results, const FORMATETC& format)
 {
     // URL and Text are provided for compatibility with IE's model
     if (format.cfFormat == urlFormat()->cfFormat || format.cfFormat == urlWFormat()->cfFormat) {
@@ -500,9 +499,9 @@ static void addMimeTypesForFormat(HashSet<String>& results, const FORMATETC& for
 }
 
 // extensions beyond IE's API
-HashSet<String> ClipboardWin::types() const
+ListHashSet<String> ClipboardWin::types() const
 { 
-    HashSet<String> results; 
+    ListHashSet<String> results;
     if (policy() != ClipboardReadable && policy() != ClipboardTypesReadable)
         return results;
 
@@ -526,7 +525,7 @@ HashSet<String> ClipboardWin::types() const
     } else {
         for (DragDataMap::const_iterator it = m_dragDataMap.begin(); it != m_dragDataMap.end(); ++it) {
             FORMATETC data;
-            data.cfFormat = (*it).first;
+            data.cfFormat = (*it).key;
             addMimeTypesForFormat(results, data);
         }
     }
@@ -561,7 +560,7 @@ PassRefPtr<FileList> ClipboardWin::files() const
         for (UINT i = 0; i < fileCount; i++) {
             if (!DragQueryFileW(hdrop, i, filename, WTF_ARRAY_LENGTH(filename)))
                 continue;
-            files->append(File::create(reinterpret_cast<UChar*>(filename)));
+            files->append(File::create(reinterpret_cast<UChar*>(filename), File::AllContentTypes));
         }
 
         GlobalUnlock(medium.hGlobal);

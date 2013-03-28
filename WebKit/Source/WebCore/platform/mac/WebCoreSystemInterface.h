@@ -41,6 +41,7 @@ typedef struct CGColor *CGColorRef;
 typedef struct CGFont *CGFontRef;
 typedef struct CGColorSpace *CGColorSpaceRef;
 typedef struct CGPattern *CGPatternRef;
+typedef struct CGPath *CGMutablePathRef;
 typedef unsigned short CGGlyph;
 typedef struct __CFReadStream * CFReadStreamRef;
 typedef struct __CFRunLoop * CFRunLoopRef;
@@ -57,7 +58,7 @@ typedef UInt32 FMFont;
 typedef FMFont ATSUFontID;
 typedef UInt16 ATSGlyphRef;
 
-#if PLATFORM(MAC) && USE(CA) && !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#if PLATFORM(MAC) && USE(CA) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
 typedef struct __IOSurface *IOSurfaceRef;
 #endif
 
@@ -78,6 +79,7 @@ typedef const struct _CFURLRequest* CFURLRequestRef;
 #endif
 
 OBJC_CLASS AVAsset;
+OBJC_CLASS CALayer;
 OBJC_CLASS NSArray;
 OBJC_CLASS NSButtonCell;
 OBJC_CLASS NSControl;
@@ -100,18 +102,27 @@ OBJC_CLASS NSView;
 OBJC_CLASS NSWindow;
 OBJC_CLASS QTMovie;
 OBJC_CLASS QTMovieView;
+OBJC_CLASS WebFilterEvaluator;
 
 extern "C" {
 
 // In alphabetical order.
 
 extern void (*wkAdvanceDefaultButtonPulseAnimation)(NSButtonCell *);
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
+extern void (*wkCALayerEnumerateRectsBeingDrawnWithBlock)(CALayer *, CGContextRef, void (^block)(CGRect rect));
+#endif
+
 extern BOOL (*wkCGContextGetShouldSmoothFonts)(CGContextRef);
 typedef enum {
     wkPatternTilingNoDistortion,
     wkPatternTilingConstantSpacingMinimalDistortion,
     wkPatternTilingConstantSpacing
 } wkPatternTiling;
+extern void (*wkCGContextResetClip)(CGContextRef);
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
+extern bool (*wkCGContextDrawsWithCorrectShadowOffsets)(CGContextRef);
+#endif
 extern CGPatternRef (*wkCGPatternCreateWithImageAndTransform)(CGImageRef, CGAffineTransform, int);
 extern CFReadStreamRef (*wkCreateCustomCFReadStream)(void *(*formCreate)(CFReadStreamRef, void *), 
     void (*formFinalize)(CFReadStreamRef, void *), 
@@ -181,8 +192,11 @@ extern void (*wkQTMovieViewSetDrawSynchronously)(QTMovieView*, BOOL);
 extern NSArray *(*wkQTGetSitesInMediaDownloadCache)();
 extern void (*wkQTClearMediaDownloadCacheForSite)(NSString *site);
 extern void (*wkQTClearMediaDownloadCache)();
+#if PLATFORM(MAC)
+extern void (*wkSetCGFontRenderingMode)(CGContextRef, NSFont*, BOOL);
+#else
 extern void (*wkSetCGFontRenderingMode)(CGContextRef, NSFont*);
-extern void (*wkSetCookieStoragePrivateBrowsingEnabled)(BOOL);
+#endif
 extern void (*wkSetDragImage)(NSImage*, NSPoint offset);
 extern void (*wkSetNSURLConnectionDefersCallbacks)(NSURLConnection *, BOOL);
 extern void (*wkSetNSURLRequestShouldContentSniff)(NSMutableURLRequest *, BOOL);
@@ -207,7 +221,7 @@ extern bool (*wkGetVerticalGlyphsForCharacters)(CTFontRef, const UniChar[], CGGl
 
 extern BOOL (*wkUseSharedMediaUI)();
 
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
 extern void* wkGetHyphenationLocationBeforeIndex;
 #else
 extern CFIndex (*wkGetHyphenationLocationBeforeIndex)(CFStringRef string, CFIndex index);
@@ -224,7 +238,18 @@ extern int (*wkGetNSEventMomentumPhase)(NSEvent *);
 
 extern CTLineRef (*wkCreateCTLineWithUniCharProvider)(const UniChar* (*provide)(CFIndex stringIndex, CFIndex* charCount, CFDictionaryRef* attributes, void*), void (*dispose)(const UniChar* chars, void*), void*);
 
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1090
+enum {
+    wkCTFontTransformApplyShaping = (1 << 0),
+    wkCTFontTransformApplyPositioning = (1 << 1)
+};
+
+typedef int wkCTFontTransformOptions;
+
+extern bool (*wkCTFontTransformGlyphs)(CTFontRef font, CGGlyph glyphs[], CGSize advances[], CFIndex count, wkCTFontTransformOptions options);
+#endif
+
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
 
 extern CTTypesetterRef (*wkCreateCTTypesetterWithUniCharProviderAndOptions)(const UniChar* (*provide)(CFIndex stringIndex, CFIndex* charCount, CFDictionaryRef* attributes, void*), void (*dispose)(const UniChar* chars, void*), void*, CFDictionaryRef options);
 
@@ -238,6 +263,7 @@ extern int (*wkRecommendedScrollerStyle)(void);
 extern bool (*wkExecutableWasLinkedOnOrBeforeSnowLeopard)(void);
 
 extern CFStringRef (*wkCopyDefaultSearchProviderDisplayName)(void);
+extern void (*wkSetCrashReportApplicationSpecificInformation)(CFStringRef);
 
 extern NSURL *(*wkAVAssetResolvedURL)(AVAsset*);
 
@@ -256,7 +282,7 @@ extern CFTypeRef (*wkCreateAXTextMarker)(const void *bytes, size_t len);
 extern BOOL (*wkGetBytesFromAXTextMarker)(CFTypeRef textMarker, void *bytes, size_t length);
 extern AXUIElementRef (*wkCreateAXUIElementRef)(id element);
 
-#if defined(BUILDING_ON_SNOW_LEOPARD) || defined(BUILDING_ON_LEOPARD)
+#if __MAC_OS_X_VERSION_MIN_REQUIRED <= 1060
 typedef struct __CFURLStorageSession* CFURLStorageSessionRef;
 #else
 typedef const struct __CFURLStorageSession* CFURLStorageSessionRef;
@@ -268,9 +294,11 @@ typedef struct OpaqueCFHTTPCookieStorage* CFHTTPCookieStorageRef;
 extern CFHTTPCookieStorageRef (*wkCopyHTTPCookieStorage)(CFURLStorageSessionRef);
 extern unsigned (*wkGetHTTPCookieAcceptPolicy)(CFHTTPCookieStorageRef);
 extern void (*wkSetHTTPCookieAcceptPolicy)(CFHTTPCookieStorageRef, unsigned);
+extern NSArray *(*wkHTTPCookies)(CFHTTPCookieStorageRef);
 extern NSArray *(*wkHTTPCookiesForURL)(CFHTTPCookieStorageRef, NSURL *);
 extern void (*wkSetHTTPCookiesForURL)(CFHTTPCookieStorageRef, NSArray *, NSURL *, NSURL *);
 extern void (*wkDeleteHTTPCookie)(CFHTTPCookieStorageRef, NSHTTPCookie *);
+extern void (*wkDeleteAllHTTPCookies)(CFHTTPCookieStorageRef);
 
 extern CFStringRef (*wkGetCFURLResponseMIMEType)(CFURLResponseRef);
 extern CFURLRef (*wkGetCFURLResponseURL)(CFURLResponseRef);
@@ -286,19 +314,75 @@ extern CFArrayRef (*wkCFURLRequestCopyHTTPRequestBodyParts)(CFURLRequestRef);
 extern void (*wkCFURLRequestSetHTTPRequestBodyParts)(CFMutableURLRequestRef, CFArrayRef bodyParts);
 extern void (*wkSetRequestStorageSession)(CFURLStorageSessionRef, CFMutableURLRequestRef);
 #endif
-
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+extern void (*wkSetMetadataURL)(NSString *urlString, NSString *referrer, NSString *path);
+    
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
 #import <dispatch/dispatch.h>
 
 extern dispatch_source_t (*wkCreateVMPressureDispatchOnMainQueue)(void);
 
 #endif
 
-#if !defined(BUILDING_ON_SNOW_LEOPARD) && !defined(BUILDING_ON_LION)
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
 extern NSString *(*wkGetMacOSXVersionString)(void);
 extern bool (*wkExecutableWasLinkedOnOrBeforeLion)(void);
 #endif
 
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
+extern void (*wkCGPathAddRoundedRect)(CGMutablePathRef path, const CGAffineTransform* matrix, CGRect rect, CGFloat cornerWidth, CGFloat cornerHeight);
+#endif
+
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
+extern void (*wkCFURLRequestAllowAllPostCaching)(CFURLRequestRef);
+#endif
+
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080 && !PLATFORM(IOS)
+extern BOOL (*wkFilterIsManagedSession)(void);
+extern WebFilterEvaluator *(*wkFilterCreateInstance)(NSURLResponse *);
+extern void (*wkFilterRelease)(WebFilterEvaluator *);
+extern BOOL (*wkFilterWasBlocked)(WebFilterEvaluator *);
+extern const char* (*wkFilterAddData)(WebFilterEvaluator *, const char* data, int* length);
+extern const char* (*wkFilterDataComplete)(WebFilterEvaluator *, int* length);
+
+extern CGFloat (*wkNSElasticDeltaForTimeDelta)(CGFloat initialPosition, CGFloat initialVelocity, CGFloat elapsedTime);
+extern CGFloat (*wkNSElasticDeltaForReboundDelta)(CGFloat delta);
+extern CGFloat (*wkNSReboundDeltaForElasticDelta)(CGFloat delta);
+#endif
+
+typedef enum {
+    wkCaptionFontStyleDefault = 0,
+    wkCaptionFontStyleMonospacedWithSerif,
+    wkCaptionFontStyleProportionalWithSerif,
+    wkCaptionFontStyleMonospacedWithoutSerif,
+    wkCaptionFontStyleProportionalWithoutSerif,
+    wkCaptionFontStyleCasual,
+    wkCaptionFontStyleCursive,
+    wkCaptionFontStyleSmallCapital,
+    wkCaptionFontStyleMax
+} wkCaptionFontStyle;
+
+typedef enum {
+    wkCaptionTextEdgeStyleUndefined = 0,
+    wkCaptionTextEdgeStyleNone,
+    wkCaptionTextEdgeStyleRaised,
+    wkCaptionTextEdgeStyleDepressed,
+    wkCaptionTextEdgeStyleUniform,
+    wkCaptionTextEdgeStyleDropShadow,
+    wkCaptionTextEdgeStyleMax
+} wkCaptionTextEdgeStyle;
+
+extern bool (*wkCaptionAppearanceHasUserPreferences)(void);
+extern bool (*wkCaptionAppearanceShowCaptionsWhenAvailable)(void);
+extern CGColorRef(*wkCaptionAppearanceCopyForegroundColor)(void);
+extern CGColorRef(*wkCaptionAppearanceCopyBackgroundColor)(void);
+extern CGColorRef(*wkCaptionAppearanceCopyWindowColor)(void);
+extern bool(*wkCaptionAppearanceGetForegroundOpacity)(CGFloat*);
+extern bool(*wkCaptionAppearanceGetBackgroundOpacity)(CGFloat*);
+extern bool(*wkCaptionAppearanceGetWindowOpacity)(CGFloat*);
+extern CGFontRef(*wkCaptionAppearanceCopyFontForStyle)(int);
+extern bool(*wkCaptionAppearanceGetRelativeCharacterSize)(CGFloat*);
+extern int(*wkCaptionAppearanceGetTextEdgeStyle)(void);
+extern CFStringRef(*wkCaptionAppearanceGetSettingsChangedNotification)(void);
 }
 
 #endif

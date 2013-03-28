@@ -20,7 +20,7 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
 #ifndef HTMLMediaElement_h
@@ -40,6 +40,7 @@
 #endif
 
 #if ENABLE(VIDEO_TRACK)
+#include "CaptionUserPreferences.h"
 #include "PODIntervalTree.h"
 #include "TextTrack.h"
 #include "TextTrackCue.h"
@@ -68,21 +69,28 @@ class DisplaySleepDisabler;
 #endif
 
 #if ENABLE(VIDEO_TRACK)
+class InbandTextTrackPrivate;
+
 typedef PODIntervalTree<double, TextTrackCue*> CueIntervalTree;
-typedef Vector<CueIntervalTree::IntervalType> CueList;
+typedef CueIntervalTree::IntervalType CueInterval;
+typedef Vector<CueInterval> CueList;
 #endif
 
 // FIXME: The inheritance from MediaPlayerClient here should be private inheritance.
 // But it can't be until the Chromium WebMediaPlayerClientImpl class is fixed so it
 // no longer depends on typecasting a MediaPlayerClient to an HTMLMediaElement.
 
-class HTMLMediaElement : public HTMLElement, public MediaPlayerClient, private MediaCanStartListener, public ActiveDOMObject, public MediaControllerInterface
+class HTMLMediaElement : public HTMLElement, public MediaPlayerClient, public MediaPlayerSupportsTypeClient, private MediaCanStartListener, public ActiveDOMObject, public MediaControllerInterface
 #if ENABLE(VIDEO_TRACK)
-    , private TextTrackClient
+    , private TextTrackClient, private CaptionPreferencesChangedListener
 #endif
 {
 public:
     MediaPlayer* player() const { return m_player.get(); }
+
+    void createShadowSubtree();
+    virtual void willAddAuthorShadowRoot() OVERRIDE;
+    virtual bool areAuthorShadowsAllowed() const OVERRIDE { return false; }
 
     virtual bool isVideo() const = 0;
     virtual bool hasVideo() const { return false; }
@@ -96,7 +104,7 @@ public:
 
     virtual bool supportsSave() const;
     virtual bool supportsScanning() const;
-
+    
     PlatformMedia platformMedia() const;
 #if USE(ACCELERATED_COMPOSITING)
     PlatformLayer* platformLayer() const;
@@ -107,11 +115,11 @@ public:
         TextTrackResource = 1 << 1
     };
     void scheduleLoad(LoadType);
-
+    
     MediaPlayer::MovieLoadType movieLoadType() const;
-
+    
     bool inActiveDocument() const { return m_inActiveDocument; }
-
+    
 // DOM API
 // error state
     PassRefPtr<MediaError> error() const;
@@ -123,12 +131,12 @@ public:
     enum NetworkState { NETWORK_EMPTY, NETWORK_IDLE, NETWORK_LOADING, NETWORK_NO_SOURCE };
     NetworkState networkState() const;
 
-    String preload() const;
+    String preload() const;    
     void setPreload(const String&);
 
     PassRefPtr<TimeRanges> buffered() const;
-    void load(ExceptionCode&);
-    String canPlayType(const String& mimeType) const;
+    void load();
+    String canPlayType(const String& mimeType, const String& keySystem = String(), const KURL& = KURL()) const;
 
 // ready state
     ReadyState readyState() const;
@@ -151,9 +159,9 @@ public:
     PassRefPtr<TimeRanges> played();
     PassRefPtr<TimeRanges> seekable() const;
     bool ended() const;
-    bool autoplay() const;
+    bool autoplay() const;    
     void setAutoplay(bool b);
-    bool loop() const;
+    bool loop() const;    
     void setLoop(bool b);
     void play();
     void pause();
@@ -171,13 +179,20 @@ public:
 
 #if ENABLE(MEDIA_SOURCE)
 //  Media Source.
-    const KURL& webkitMediaSourceURL() const { return m_mediaSourceURL; }
-    void webkitSourceAppend(PassRefPtr<Uint8Array> data, ExceptionCode&);
-    enum EndOfStreamStatus { EOS_NO_ERROR, EOS_NETWORK_ERR, EOS_DECODE_ERR };
-    void webkitSourceEndOfStream(unsigned short, ExceptionCode&);
-    enum SourceState { SOURCE_CLOSED, SOURCE_OPEN, SOURCE_ENDED };
-    SourceState webkitSourceState() const;
-    void setSourceState(SourceState);
+    void setSourceState(const String&);
+#endif 
+
+#if ENABLE(ENCRYPTED_MEDIA)
+    void webkitGenerateKeyRequest(const String& keySystem, PassRefPtr<Uint8Array> initData, ExceptionCode&);
+    void webkitGenerateKeyRequest(const String& keySystem, ExceptionCode&);
+    void webkitAddKey(const String& keySystem, PassRefPtr<Uint8Array> key, PassRefPtr<Uint8Array> initData, const String& sessionId, ExceptionCode&);
+    void webkitAddKey(const String& keySystem, PassRefPtr<Uint8Array> key, ExceptionCode&);
+    void webkitCancelKeyRequest(const String& keySystem, const String& sessionId, ExceptionCode&);
+
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(webkitkeyadded);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(webkitkeyerror);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(webkitkeymessage);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(webkitneedkey);
 #endif
 
 // controls
@@ -191,26 +206,59 @@ public:
     void togglePlayState();
     void beginScrubbing();
     void endScrubbing();
-
+    
     bool canPlay() const;
 
     float percentLoaded() const;
 
 #if ENABLE(VIDEO_TRACK)
-    PassRefPtr<TextTrack> addTrack(const String& kind, const String& label, const String& language, ExceptionCode&);
-    PassRefPtr<TextTrack> addTrack(const String& kind, const String& label, ExceptionCode& ec) { return addTrack(kind, label, emptyString(), ec); }
-    PassRefPtr<TextTrack> addTrack(const String& kind, ExceptionCode& ec) { return addTrack(kind, emptyString(), emptyString(), ec); }
+    PassRefPtr<TextTrack> addTextTrack(const String& kind, const String& label, const String& language, ExceptionCode&);
+    PassRefPtr<TextTrack> addTextTrack(const String& kind, const String& label, ExceptionCode& ec) { return addTextTrack(kind, label, emptyString(), ec); }
+    PassRefPtr<TextTrack> addTextTrack(const String& kind, ExceptionCode& ec) { return addTextTrack(kind, emptyString(), emptyString(), ec); }
 
     TextTrackList* textTracks();
     CueList currentlyActiveCues() const { return m_currentlyActiveCues; }
 
-    virtual void trackWasAdded(HTMLTrackElement*);
-    virtual void trackWasRemoved(HTMLTrackElement*);
+    void removeTrack(TextTrack*);
+    void removeAllInbandTracks();
 
-    void configureTextTrack(HTMLTrackElement*);
+    virtual void didAddTrack(HTMLTrackElement*);
+    virtual void didRemoveTrack(HTMLTrackElement*);
+
+    virtual void mediaPlayerDidAddTrack(PassRefPtr<InbandTextTrackPrivate>) OVERRIDE;
+    virtual void mediaPlayerDidRemoveTrack(PassRefPtr<InbandTextTrackPrivate>) OVERRIDE;
+
+    struct TrackGroup {
+        enum GroupKind { CaptionsAndSubtitles, Description, Chapter, Metadata, Other };
+
+        TrackGroup(GroupKind kind)
+            : visibleTrack(0)
+            , defaultTrack(0)
+            , kind(kind)
+            , hasSrcLang(false)
+        {
+        }
+
+        Vector<RefPtr<TextTrack> > tracks;
+        RefPtr<TextTrack> visibleTrack;
+        RefPtr<TextTrack> defaultTrack;
+        GroupKind kind;
+        bool hasSrcLang;
+    };
+
+    void configureTextTrackGroupForLanguage(const TrackGroup&) const;
     void configureTextTracks();
+    void configureTextTrackGroup(const TrackGroup&) const;
+
+    void toggleTrackAtIndex(int index, bool exclusive = true);
+    static int textTracksOffIndex() { return -1; }
+    static int textTracksIndexNotFound() { return -2; }
+
+    bool userPrefersCaptions() const;
+    bool userIsInterestedInThisTrackKind(String) const;
     bool textTracksAreReady() const;
     void configureTextTrackDisplay();
+    void updateClosedCaptionsControls();
 
     // TextTrackClient
     virtual void textTrackReadyStateChanged(TextTrack*);
@@ -220,6 +268,9 @@ public:
     virtual void textTrackRemoveCues(TextTrack*, const TextTrackCueList*);
     virtual void textTrackAddCue(TextTrack*, PassRefPtr<TextTrackCue>);
     virtual void textTrackRemoveCue(TextTrack*, PassRefPtr<TextTrackCue>);
+
+    bool requiresTextTrackRepresentation() const;
+    void setTextTrackRepresentation(TextTrackRepresentation*);
 #endif
 
 #if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
@@ -232,8 +283,15 @@ public:
     void updateWidget(PluginCreationOption);
 #endif
 
-    bool hasSingleSecurityOrigin() const { return !m_player || m_player->hasSingleSecurityOrigin(); }
+    // EventTarget function.
+    // Both Node (via HTMLElement) and ActiveDOMObject define this method, which
+    // causes an ambiguity error at compile time. This class's constructor
+    // ensures that both implementations return document, so return the result
+    // of one of them here.
+    virtual ScriptExecutionContext* scriptExecutionContext() const OVERRIDE { return HTMLElement::scriptExecutionContext(); }
 
+    bool hasSingleSecurityOrigin() const { return !m_player || m_player->hasSingleSecurityOrigin(); }
+    
     bool isFullscreen() const;
     void enterFullscreen();
     void exitFullscreen();
@@ -242,9 +300,9 @@ public:
     bool closedCaptionsVisible() const;
     void setClosedCaptionsVisible(bool);
 
-    MediaControls* mediaControls();
+    MediaControls* mediaControls() const;
 
-    void sourceWillBeRemoved(HTMLSourceElement*);
+    void sourceWasRemoved(HTMLSourceElement*);
     void sourceWasAdded(HTMLSourceElement*);
 
     void privateBrowsingStateDidChange();
@@ -269,7 +327,6 @@ public:
     bool isSafeToLoadURL(const KURL&, InvalidURLAction);
 
     const String& mediaGroup() const;
-
     void setMediaGroup(const String&);
 
     MediaController* controller() const;
@@ -277,21 +334,26 @@ public:
 
     virtual bool dispatchEvent(PassRefPtr<Event>);
 
+    virtual bool willRespondToMouseClickEvents() OVERRIDE;
+
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const;
+
 protected:
     HTMLMediaElement(const QualifiedName&, Document*, bool);
     virtual ~HTMLMediaElement();
 
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
     virtual void finishParsingChildren();
-    virtual bool isURLAttribute(Attribute*) const;
-    virtual void attach();
+    virtual bool isURLAttribute(const Attribute&) const OVERRIDE;
+    virtual void attach() OVERRIDE;
+    virtual void detach() OVERRIDE;
 
     virtual void didMoveToNewDocument(Document* oldDocument) OVERRIDE;
 
     enum DisplayMode { Unknown, None, Poster, PosterWaitingForVideo, Video };
     DisplayMode displayMode() const { return m_displayMode; }
     virtual void setDisplayMode(DisplayMode mode) { m_displayMode = mode; }
-
+    
     virtual bool isMediaElement() const { return true; }
 
     // Restrictions to change default behaviors.
@@ -303,26 +365,28 @@ protected:
         RequirePageConsentToLoadMediaRestriction = 1 << 3,
     };
     typedef unsigned BehaviorRestrictions;
-
+    
     bool userGestureRequiredForLoad() const { return m_restrictions & RequireUserGestureForLoadRestriction; }
     bool userGestureRequiredForRateChange() const { return m_restrictions & RequireUserGestureForRateChangeRestriction; }
     bool userGestureRequiredForFullscreen() const { return m_restrictions & RequireUserGestureForFullscreenRestriction; }
     bool pageConsentRequiredForLoad() const { return m_restrictions & RequirePageConsentToLoadMediaRestriction; }
-
+    
     void addBehaviorRestriction(BehaviorRestrictions restriction) { m_restrictions |= restriction; }
     void removeBehaviorRestriction(BehaviorRestrictions restriction) { m_restrictions &= ~restriction; }
-
+    
 private:
     void createMediaPlayer();
 
+    virtual bool hasCustomFocusLogic() const OVERRIDE;
     virtual bool supportsFocus() const;
-    virtual void attributeChanged(Attribute*, bool preserveDecls);
+    virtual bool isMouseFocusable() const;
     virtual bool rendererIsNeeded(const NodeRenderingContext&);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
+    virtual bool childShouldCreateRenderer(const NodeRenderingContext&) const OVERRIDE;
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
+    virtual void removedFrom(ContainerNode*) OVERRIDE;
     virtual void didRecalcStyle(StyleChange);
-
+    
     virtual void defaultEventHandler(Event*);
 
     virtual void didBecomeFullscreenElement();
@@ -333,11 +397,11 @@ private:
     virtual void suspend(ReasonForSuspension);
     virtual void resume();
     virtual void stop();
-
+    
     virtual void mediaVolumeDidChange();
 
     virtual void updateDisplayState() { }
-
+    
     void setReadyState(MediaPlayer::ReadyState);
     void setNetworkState(MediaPlayer::NetworkState);
 
@@ -359,13 +423,46 @@ private:
     virtual void mediaPlayerRenderingModeChanged(MediaPlayer*);
 #endif
     virtual void mediaPlayerEngineUpdated(MediaPlayer*);
-
+    
     virtual void mediaPlayerFirstVideoFrameAvailable(MediaPlayer*);
     virtual void mediaPlayerCharacteristicChanged(MediaPlayer*);
 
 #if ENABLE(MEDIA_SOURCE)
     virtual void mediaPlayerSourceOpened();
     virtual String mediaPlayerSourceURL() const;
+#endif
+
+#if ENABLE(ENCRYPTED_MEDIA)
+    virtual void mediaPlayerKeyAdded(MediaPlayer*, const String& keySystem, const String& sessionId) OVERRIDE;
+    virtual void mediaPlayerKeyError(MediaPlayer*, const String& keySystem, const String& sessionId, MediaPlayerClient::MediaKeyErrorCode, unsigned short systemCode) OVERRIDE;
+    virtual void mediaPlayerKeyMessage(MediaPlayer*, const String& keySystem, const String& sessionId, const unsigned char* message, unsigned messageLength, const KURL& defaultURL) OVERRIDE;
+    virtual bool mediaPlayerKeyNeeded(MediaPlayer*, const String& keySystem, const String& sessionId, const unsigned char* initData, unsigned initDataLength) OVERRIDE;
+#endif
+
+    virtual String mediaPlayerReferrer() const OVERRIDE;
+    virtual String mediaPlayerUserAgent() const OVERRIDE;
+    virtual CORSMode mediaPlayerCORSMode() const OVERRIDE;
+
+    virtual bool mediaPlayerNeedsSiteSpecificHacks() const OVERRIDE;
+    virtual String mediaPlayerDocumentHost() const OVERRIDE;
+
+    virtual void mediaPlayerEnterFullscreen() OVERRIDE;
+    virtual void mediaPlayerExitFullscreen() OVERRIDE;
+    virtual bool mediaPlayerIsFullscreen() const OVERRIDE;
+    virtual bool mediaPlayerIsFullscreenPermitted() const OVERRIDE;
+    virtual bool mediaPlayerIsVideo() const OVERRIDE;
+    virtual LayoutRect mediaPlayerContentBoxRect() const OVERRIDE;
+    virtual void mediaPlayerSetSize(const IntSize&) OVERRIDE;
+    virtual void mediaPlayerPause() OVERRIDE;
+    virtual void mediaPlayerPlay() OVERRIDE;
+    virtual bool mediaPlayerIsPaused() const OVERRIDE;
+    virtual bool mediaPlayerIsLooping() const OVERRIDE;
+    virtual HostWindow* mediaPlayerHostWindow() OVERRIDE;
+    virtual IntRect mediaPlayerWindowClipRect() OVERRIDE;
+    virtual CachedResourceLoader* mediaPlayerCachedResourceLoader() OVERRIDE;
+
+#if PLATFORM(WIN) && USE(AVFOUNDATION)
+    virtual GraphicsDeviceAdapter* mediaPlayerGraphicsDeviceAdapter(const MediaPlayer*) const OVERRIDE;
 #endif
 
     void loadTimerFired(Timer<HTMLMediaElement>*);
@@ -379,16 +476,17 @@ private:
     void finishSeek();
     void checkIfSeekNeeded();
     void addPlayedRange(float start, float end);
-
+    
     void scheduleTimeupdateEvent(bool periodicEvent);
     void scheduleEvent(const AtomicString& eventName);
-
+    
     // loading
     void selectMediaResource();
-    void loadResource(const KURL&, ContentType&);
+    void loadResource(const KURL&, ContentType&, const String& keySystem);
     void scheduleNextSourceChild();
     void loadNextSourceChild();
     void userCancelledLoad();
+    void clearMediaPlayer(int flags);
     bool havePotentialSourceChild();
     void noneSupported();
     void mediaEngineError(PassRefPtr<MediaError> err);
@@ -396,18 +494,20 @@ private:
     void waitForSourceChange();
     void prepareToPlay();
 
-    KURL selectNextSourceChild(ContentType*, InvalidURLAction);
+    KURL selectNextSourceChild(ContentType*, String* keySystem, InvalidURLAction);
+
     void mediaLoadingFailed(MediaPlayer::NetworkState);
 
 #if ENABLE(VIDEO_TRACK)
     void updateActiveTextTrackCues(float);
-    bool userIsInterestedInThisLanguage(const String&) const;
-    bool userIsInterestedInThisTrack(HTMLTrackElement*) const;
     HTMLTrackElement* showingTrackWithSameKind(HTMLTrackElement*) const;
 
     bool ignoreTrackDisplayUpdateRequests() const { return m_ignoreTrackDisplayUpdate > 0; }
     void beginIgnoringTrackDisplayUpdateRequests() { ++m_ignoreTrackDisplayUpdate; }
     void endIgnoringTrackDisplayUpdateRequests() { ASSERT(m_ignoreTrackDisplayUpdate); --m_ignoreTrackDisplayUpdate; }
+
+    void markCaptionAndSubtitleTracksAsUnconfigured();
+    virtual void captionPreferencesChanged() OVERRIDE;
 #endif
 
     // These "internal" functions do not check user gesture restrictions.
@@ -444,7 +544,7 @@ private:
     void invalidateCachedTime();
     void refreshCachedTime() const;
 
-    bool hasMediaControls();
+    bool hasMediaControls() const;
     bool createMediaControls();
     void configureMediaControls();
 
@@ -454,6 +554,8 @@ private:
     virtual void* preDispatchEventHandler(Event*);
 
     void changeNetworkStateFromLoadingToIdle();
+
+    void removeBehaviorsRestrictionsAfterFirstUserGesture();
 
 #if ENABLE(MICRODATA)
     virtual String itemValueText() const;
@@ -490,7 +592,7 @@ private:
 
     float m_volume;
     float m_lastSeekTime;
-
+    
     unsigned m_previousProgress;
     double m_previousProgressTime;
 
@@ -499,7 +601,7 @@ private:
 
     // The last time a timeupdate event was sent in movie time.
     float m_lastTimeUpdateEventMovieTime;
-
+    
     // Loading state.
     enum LoadState { WaitingForSource, LoadingFromSrcAttr, LoadingFromSourceElement };
     LoadState m_loadState;
@@ -512,7 +614,7 @@ private:
 #endif
 
     BehaviorRestrictions m_restrictions;
-
+    
     MediaPlayer::Preload m_preload;
 
     DisplayMode m_displayMode;
@@ -523,7 +625,7 @@ private:
 
 #if ENABLE(MEDIA_SOURCE)
     KURL m_mediaSourceURL;
-    SourceState m_sourceState;
+    RefPtr<MediaSource> m_mediaSource;
 #endif
 
     mutable float m_cachedTime;
@@ -555,7 +657,7 @@ private:
     bool m_pausedInternal : 1;
 
     // Not all media engines provide enough information about a file to be able to
-    // support progress events so setting m_sendProgressEvents disables them
+    // support progress events so setting m_sendProgressEvents disables them 
     bool m_sendProgressEvents : 1;
 
     bool m_isFullscreen : 1;
@@ -574,12 +676,16 @@ private:
 #if ENABLE(VIDEO_TRACK)
     bool m_tracksAreReady : 1;
     bool m_haveVisibleTextTrack : 1;
+    float m_lastTextTrackUpdateTime;
 
     RefPtr<TextTrackList> m_textTracks;
     Vector<RefPtr<TextTrack> > m_textTracksWhenResourceSelectionBegan;
+
     CueIntervalTree m_cueTree;
+
     CueList m_currentlyActiveCues;
     int m_ignoreTrackDisplayUpdate;
+    bool m_disableCaptions;
 #endif
 
 #if ENABLE(WEB_AUDIO)
@@ -587,12 +693,6 @@ private:
     // The value is set just after the MediaElementAudioSourceNode is created.
     // The value is cleared in MediaElementAudioSourceNode::~MediaElementAudioSourceNode().
     MediaElementAudioSourceNode* m_audioSourceNode;
-#endif
-
-#if OS(ANDROID)
-    // Check whether user has initiated a user gesture on this element. Later
-    // calls to play/pause should work without user gesture.
-    bool m_userGestureInitiated : 1;
 #endif
 
     String m_mediaGroup;
@@ -624,6 +724,17 @@ struct ValueToString<TextTrackCue*> {
 };
 #endif
 #endif
+
+inline bool isMediaElement(Node* node)
+{
+    return node && node->isElementNode() && toElement(node)->isMediaElement();
+}
+
+inline HTMLMediaElement* toMediaElement(Node* node)
+{
+    ASSERT(!node || isMediaElement(node));
+    return static_cast<HTMLMediaElement*>(node);
+}
 
 } //namespace
 

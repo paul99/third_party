@@ -45,6 +45,7 @@
 #import <JavaScriptCore/Error.h>
 #import <JavaScriptCore/JSLock.h>
 #import <JavaScriptCore/PropertyNameArray.h>
+#import <JavaScriptCore/SourceCode.h>
 #import <JavaScriptCore/StrongInlines.h>
 #import <WebCore/CookieJar.h>
 #import <WebCore/DocumentLoader.h>
@@ -56,7 +57,6 @@
 #import <WebCore/SecurityOrigin.h>
 #import <WebCore/ScriptController.h>
 #import <WebCore/ScriptValue.h>
-#import <WebCore/StringSourceProvider.h>
 #import <WebCore/UserGestureIndicator.h>
 #import <WebCore/npruntime_impl.h>
 #import <WebCore/runtime_object.h>
@@ -145,7 +145,7 @@ uint32_t NetscapePluginInstanceProxy::LocalObjectMap::idForObject(JSGlobalData& 
     
     HashMap<JSC::JSObject*, pair<uint32_t, uint32_t> >::iterator iter = m_jsObjectToIDMap.find(object);
     if (iter != m_jsObjectToIDMap.end())
-        return iter->second.first;
+        return iter->value.first;
     
     do {
         objectID = ++m_objectIDCounter;
@@ -162,7 +162,7 @@ void NetscapePluginInstanceProxy::LocalObjectMap::retain(JSC::JSObject* object)
     HashMap<JSC::JSObject*, pair<uint32_t, uint32_t> >::iterator iter = m_jsObjectToIDMap.find(object);
     ASSERT(iter != m_jsObjectToIDMap.end());
 
-    iter->second.second = iter->second.second + 1;
+    iter->value.second = iter->value.second + 1;
 }
 
 void NetscapePluginInstanceProxy::LocalObjectMap::release(JSC::JSObject* object)
@@ -170,10 +170,10 @@ void NetscapePluginInstanceProxy::LocalObjectMap::release(JSC::JSObject* object)
     HashMap<JSC::JSObject*, pair<uint32_t, uint32_t> >::iterator iter = m_jsObjectToIDMap.find(object);
     ASSERT(iter != m_jsObjectToIDMap.end());
 
-    ASSERT(iter->second.second > 0);
-    iter->second.second = iter->second.second - 1;
-    if (!iter->second.second) {
-        m_idToJSObjectMap.remove(iter->second.first);
+    ASSERT(iter->value.second > 0);
+    iter->value.second = iter->value.second - 1;
+    if (!iter->value.second) {
+        m_idToJSObjectMap.remove(iter->value.first);
         m_jsObjectToIDMap.remove(iter);
     }
 }
@@ -197,10 +197,10 @@ bool NetscapePluginInstanceProxy::LocalObjectMap::forget(uint32_t objectID)
         return true;
     }
 
-    HashMap<JSC::JSObject*, pair<uint32_t, uint32_t> >::iterator rIter = m_jsObjectToIDMap.find(iter->second.get());
+    HashMap<JSC::JSObject*, pair<uint32_t, uint32_t> >::iterator rIter = m_jsObjectToIDMap.find(iter->value.get());
 
     // If the object is being sent to plug-in right now, then it's not the time to forget.
-    if (rIter->second.second != 1)
+    if (rIter->value.second != 1)
         return false;
 
     m_jsObjectToIDMap.remove(rIter);
@@ -330,7 +330,7 @@ void NetscapePluginInstanceProxy::destroy()
     
     FrameLoadMap::iterator end = m_pendingFrameLoads.end();
     for (FrameLoadMap::iterator it = m_pendingFrameLoads.begin(); it != end; ++it)
-        [(it->first) _setInternalLoadDelegate:nil];
+        [(it->key) _setInternalLoadDelegate:nil];
 
     _WKPHDestroyPluginInstance(m_pluginHostProxy->port(), m_pluginID, requestID);
  
@@ -678,7 +678,7 @@ void NetscapePluginInstanceProxy::webFrameDidFinishLoadWithReason(WebFrame* webF
     FrameLoadMap::iterator it = m_pendingFrameLoads.find(webFrame);
     ASSERT(it != m_pendingFrameLoads.end());
         
-    PluginRequest* pluginRequest = it->second.get();
+    PluginRequest* pluginRequest = it->value.get();
     _WKPHLoadURLNotify(m_pluginHostProxy->port(), m_pluginID, pluginRequest->requestID(), reason);
  
     m_pendingFrameLoads.remove(it);
@@ -867,8 +867,7 @@ bool NetscapePluginInstanceProxy::evaluate(uint32_t objectID, const String& scri
     if (!frame)
         return false;
 
-    JSLock lock(SilenceAssertionsOnly);
-    
+    JSLockHolder lock(pluginWorld()->globalData());
     Strong<JSGlobalObject> globalObject(*pluginWorld()->globalData(), frame->script()->globalObject(pluginWorld()));
     ExecState* exec = globalObject->globalExec();
 
@@ -876,7 +875,7 @@ bool NetscapePluginInstanceProxy::evaluate(uint32_t objectID, const String& scri
 
     UserGestureIndicator gestureIndicator(allowPopups ? DefinitelyProcessingUserGesture : PossiblyProcessingUserGesture);
     
-    JSValue result = JSC::evaluate(exec, globalObject->globalScopeChain(), makeSource(script));
+    JSValue result = JSC::evaluate(exec, makeSource(script));
     
     globalObject->globalData().timeoutChecker.stop();
     
@@ -904,7 +903,7 @@ bool NetscapePluginInstanceProxy::invoke(uint32_t objectID, const Identifier& me
         return false;
     
     ExecState* exec = frame->script()->globalObject(pluginWorld())->globalExec();
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
     JSValue function = object->get(exec, methodName);
     CallData callData;
     CallType callType = getCallData(function, callData);
@@ -914,10 +913,7 @@ bool NetscapePluginInstanceProxy::invoke(uint32_t objectID, const Identifier& me
     MarkedArgumentBuffer argList;
     demarshalValues(exec, argumentsData, argumentsLength, argList);
 
-    RefPtr<JSGlobalData> globalData = pluginWorld()->globalData();
-    globalData->timeoutChecker.start();
     JSValue value = call(exec, function, callType, callData, object->methodTable()->toThisObject(object, exec), argList);
-    globalData->timeoutChecker.stop();
         
     marshalValue(exec, value, resultData, resultLength);
     exec->clearException();
@@ -940,7 +936,7 @@ bool NetscapePluginInstanceProxy::invokeDefault(uint32_t objectID, data_t argume
         return false;
     
     ExecState* exec = frame->script()->globalObject(pluginWorld())->globalExec();
-    JSLock lock(SilenceAssertionsOnly);    
+    JSLockHolder lock(exec);    
     CallData callData;
     CallType callType = object->methodTable()->getCallData(object, callData);
     if (callType == CallTypeNone)
@@ -949,10 +945,7 @@ bool NetscapePluginInstanceProxy::invokeDefault(uint32_t objectID, data_t argume
     MarkedArgumentBuffer argList;
     demarshalValues(exec, argumentsData, argumentsLength, argList);
 
-    RefPtr<JSGlobalData> globalData = pluginWorld()->globalData();
-    globalData->timeoutChecker.start();
     JSValue value = call(exec, object, callType, callData, object->methodTable()->toThisObject(object, exec), argList);
-    globalData->timeoutChecker.stop();
     
     marshalValue(exec, value, resultData, resultLength);
     exec->clearException();
@@ -975,7 +968,7 @@ bool NetscapePluginInstanceProxy::construct(uint32_t objectID, data_t argumentsD
         return false;
     
     ExecState* exec = frame->script()->globalObject(pluginWorld())->globalExec();
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
 
     ConstructData constructData;
     ConstructType constructType = object->methodTable()->getConstructData(object, constructData);
@@ -985,10 +978,7 @@ bool NetscapePluginInstanceProxy::construct(uint32_t objectID, data_t argumentsD
     MarkedArgumentBuffer argList;
     demarshalValues(exec, argumentsData, argumentsLength, argList);
 
-    RefPtr<JSGlobalData> globalData = pluginWorld()->globalData();
-    globalData->timeoutChecker.start();
     JSValue value = JSC::construct(exec, object, constructType, constructData, argList);
-    globalData->timeoutChecker.stop();
     
     marshalValue(exec, value, resultData, resultLength);
     exec->clearException();
@@ -1011,7 +1001,7 @@ bool NetscapePluginInstanceProxy::getProperty(uint32_t objectID, const Identifie
         return false;
     
     ExecState* exec = frame->script()->globalObject(pluginWorld())->globalExec();
-    JSLock lock(SilenceAssertionsOnly);    
+    JSLockHolder lock(exec);    
     JSValue value = object->get(exec, propertyName);
     
     marshalValue(exec, value, resultData, resultLength);
@@ -1032,7 +1022,7 @@ bool NetscapePluginInstanceProxy::getProperty(uint32_t objectID, unsigned proper
         return false;
     
     ExecState* exec = frame->script()->globalObject(pluginWorld())->globalExec();
-    JSLock lock(SilenceAssertionsOnly);    
+    JSLockHolder lock(exec);    
     JSValue value = object->get(exec, propertyName);
     
     marshalValue(exec, value, resultData, resultLength);
@@ -1056,7 +1046,7 @@ bool NetscapePluginInstanceProxy::setProperty(uint32_t objectID, const Identifie
         return false;
     
     ExecState* exec = frame->script()->globalObject(pluginWorld())->globalExec();
-    JSLock lock(SilenceAssertionsOnly);    
+    JSLockHolder lock(exec);    
 
     JSValue value = demarshalValue(exec, valueData, valueLength);
     PutPropertySlot slot;
@@ -1082,10 +1072,10 @@ bool NetscapePluginInstanceProxy::setProperty(uint32_t objectID, unsigned proper
         return false;
     
     ExecState* exec = frame->script()->globalObject(pluginWorld())->globalExec();
-    JSLock lock(SilenceAssertionsOnly);    
+    JSLockHolder lock(exec);    
     
     JSValue value = demarshalValue(exec, valueData, valueLength);
-    object->methodTable()->putByIndex(object, exec, propertyName, value);
+    object->methodTable()->putByIndex(object, exec, propertyName, value, false);
     
     exec->clearException();
     return true;
@@ -1107,12 +1097,12 @@ bool NetscapePluginInstanceProxy::removeProperty(uint32_t objectID, const Identi
         return false;
 
     ExecState* exec = frame->script()->globalObject(pluginWorld())->globalExec();
+    JSLockHolder lock(exec);
     if (!object->hasProperty(exec, propertyName)) {
         exec->clearException();
         return false;
     }
     
-    JSLock lock(SilenceAssertionsOnly);
     object->methodTable()->deleteProperty(object, exec, propertyName);
     exec->clearException();    
     return true;
@@ -1134,12 +1124,12 @@ bool NetscapePluginInstanceProxy::removeProperty(uint32_t objectID, unsigned pro
         return false;
     
     ExecState* exec = frame->script()->globalObject(pluginWorld())->globalExec();
+    JSLockHolder lock(exec);
     if (!object->hasProperty(exec, propertyName)) {
         exec->clearException();
         return false;
     }
     
-    JSLock lock(SilenceAssertionsOnly);
     object->methodTable()->deletePropertyByIndex(object, exec, propertyName);
     exec->clearException();    
     return true;
@@ -1205,7 +1195,7 @@ bool NetscapePluginInstanceProxy::hasMethod(uint32_t objectID, const Identifier&
         return false;
     
     ExecState* exec = frame->script()->globalObject(pluginWorld())->globalExec();
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
     JSValue func = object->get(exec, methodName);
     exec->clearException();
     return !func.isUndefined();
@@ -1227,14 +1217,14 @@ bool NetscapePluginInstanceProxy::enumerate(uint32_t objectID, data_t& resultDat
         return false;
     
     ExecState* exec = frame->script()->globalObject(pluginWorld())->globalExec();
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
  
     PropertyNameArray propertyNames(exec);
     object->methodTable()->getPropertyNames(object, exec, propertyNames, ExcludeDontEnumProperties);
 
     RetainPtr<NSMutableArray*> array(AdoptNS, [[NSMutableArray alloc] init]);
     for (unsigned i = 0; i < propertyNames.size(); i++) {
-        uint64_t methodName = reinterpret_cast<uint64_t>(_NPN_GetStringIdentifier(propertyNames[i].ustring().utf8().data()));
+        uint64_t methodName = reinterpret_cast<uint64_t>(_NPN_GetStringIdentifier(propertyNames[i].string().utf8().data()));
 
         [array.get() addObject:[NSNumber numberWithLongLong:methodName]];
     }
@@ -1252,13 +1242,30 @@ bool NetscapePluginInstanceProxy::enumerate(uint32_t objectID, data_t& resultDat
     return true;
 }
 
+static bool getObjectID(NetscapePluginInstanceProxy* pluginInstanceProxy, JSObject* object, uint64_t& objectID)
+{
+    if (object->classInfo() != &ProxyRuntimeObject::s_info)
+        return false;
+
+    ProxyRuntimeObject* runtimeObject = static_cast<ProxyRuntimeObject*>(object);
+    ProxyInstance* instance = runtimeObject->getInternalProxyInstance();
+    if (!instance)
+        return false;
+
+    if (instance->instanceProxy() != pluginInstanceProxy)
+        return false;
+
+    objectID = instance->objectID();
+    return true;
+}
+    
 void NetscapePluginInstanceProxy::addValueToArray(NSMutableArray *array, ExecState* exec, JSValue value)
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
 
     if (value.isString()) {
         [array addObject:[NSNumber numberWithInt:StringValueType]];
-        [array addObject:ustringToString(value.toString(exec)->value(exec))];
+        [array addObject:value.toWTFString(exec)];
     } else if (value.isNumber()) {
         [array addObject:[NSNumber numberWithInt:DoubleValueType]];
         [array addObject:[NSNumber numberWithDouble:value.toNumber(exec)]];
@@ -1269,12 +1276,10 @@ void NetscapePluginInstanceProxy::addValueToArray(NSMutableArray *array, ExecSta
         [array addObject:[NSNumber numberWithInt:NullValueType]];
     else if (value.isObject()) {
         JSObject* object = asObject(value);
-        if (object->classInfo() == &ProxyRuntimeObject::s_info) {
-            ProxyRuntimeObject* runtimeObject = static_cast<ProxyRuntimeObject*>(object);
-            if (ProxyInstance* instance = runtimeObject->getInternalProxyInstance()) {
-                [array addObject:[NSNumber numberWithInt:NPObjectValueType]];
-                [array addObject:[NSNumber numberWithInt:instance->objectID()]];
-            }
+        uint64_t objectID;
+        if (getObjectID(this, object, objectID)) {
+            [array addObject:[NSNumber numberWithInt:NPObjectValueType]];
+            [array addObject:[NSNumber numberWithInt:objectID]];
         } else {
             [array addObject:[NSNumber numberWithInt:JSObjectValueType]];
             [array addObject:[NSNumber numberWithInt:m_localObjects.idForObject(exec->globalData(), object)]];
@@ -1623,7 +1628,7 @@ void NetscapePluginInstanceProxy::cancelCheckIfAllowedToLoadURL(uint32_t checkID
     if (it == m_urlChecks.end())
         return;
     
-    WebPluginContainerCheck *check = it->second.get();
+    WebPluginContainerCheck *check = it->value.get();
     [check cancel];
     m_urlChecks.remove(it);
 }
@@ -1666,8 +1671,8 @@ void NetscapePluginInstanceProxy::moveGlobalExceptionToExecState(ExecState* exec
         return;
 
     {
-        JSLock lock(SilenceAssertionsOnly);
-        throwError(exec, createError(exec, stringToUString(globalExceptionString())));
+        JSLockHolder lock(exec);
+        throwError(exec, createError(exec, globalExceptionString()));
     }
 
     globalExceptionString() = String();

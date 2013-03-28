@@ -32,16 +32,18 @@
 #include "ChromeClient.h"
 #include "FloatRect.h"
 #include "KURL.h"
-#include "PlatformString.h"
 #include "QtPlatformPlugin.h"
 #include <wtf/PassOwnPtr.h>
 #include <wtf/RefCounted.h>
+#include <wtf/text/WTFString.h>
 
 QT_BEGIN_NAMESPACE
 class QEventLoop;
 QT_END_NAMESPACE
 
 class QWebPage;
+class QWebPageAdapter;
+class QWebFullScreenVideoHandler;
 
 namespace WebCore {
 
@@ -49,16 +51,18 @@ class FileChooser;
 class FileIconLoader;
 class FloatRect;
 class Page;
+class RefreshAnimation;
 struct FrameLoadRequest;
 class QtAbstractWebPopup;
 struct ViewportArguments;
 #if ENABLE(VIDEO)
 class FullScreenVideoQt;
 #endif
+class TextureMapperLayerClientQt;
 
 class ChromeClientQt : public ChromeClient {
 public:
-    ChromeClientQt(QWebPage*);
+    ChromeClientQt(QWebPageAdapter*);
     virtual ~ChromeClientQt();
     virtual void chromeDestroyed();
 
@@ -97,7 +101,7 @@ public:
 
     virtual void setResizable(bool);
 
-    virtual void addMessageToConsole(MessageSource, MessageType, MessageLevel, const String& message, unsigned int lineNumber, const String& sourceID);
+    virtual void addMessageToConsole(MessageSource, MessageLevel, const String& message, unsigned lineNumber, const String& sourceID);
 
     virtual bool canRunBeforeUnloadConfirmPanel();
     virtual bool runBeforeUnloadConfirmPanel(const String& message, Frame*);
@@ -138,15 +142,12 @@ public:
 #endif
     virtual void reachedMaxAppCacheSize(int64_t spaceNeeded);
     virtual void reachedApplicationCacheOriginQuota(SecurityOrigin*, int64_t totalSpaceNeeded);
-#if ENABLE(CONTEXT_MENUS)
-    virtual void showContextMenu() { }
-#endif
 
 #if USE(ACCELERATED_COMPOSITING)
     // This is a hook for WebCore to tell us what we need to do with the GraphicsLayers.
     virtual void attachRootGraphicsLayer(Frame*, GraphicsLayer*);
     virtual void setNeedsOneShotDrawingSynchronization();
-    virtual void scheduleCompositingLayerSync();
+    virtual void scheduleCompositingLayerFlush();
     virtual CompositingTriggerFlags allowedCompositingTriggers() const;
 #endif
     virtual bool allowsAcceleratedCompositing() const;
@@ -158,7 +159,7 @@ public:
 #if ENABLE(TOUCH_EVENTS)
     virtual void needTouchEvents(bool) { }
 #endif
- 
+
 #if ENABLE(VIDEO) && (USE(GSTREAMER) || USE(QT_MULTIMEDIA) || USE(QTKIT))
     virtual bool supportsFullscreenForNode(const Node*);
     virtual void enterFullscreenForNode(Node*);
@@ -166,18 +167,25 @@ public:
     virtual bool requiresFullscreenForVideoPlayback();
     FullScreenVideoQt* fullScreenVideo();
 #endif
-     virtual void runOpenPanel(Frame*, PassRefPtr<FileChooser>);
-     virtual void loadIconForFiles(const Vector<String>&, FileIconLoader*);
+
+#if ENABLE(INPUT_TYPE_COLOR)
+    virtual PassOwnPtr<ColorChooser> createColorChooser(ColorChooserClient*, const Color&);
+#endif
+
+    virtual void runOpenPanel(Frame*, PassRefPtr<FileChooser>);
+    virtual void loadIconForFiles(const Vector<String>&, FileIconLoader*);
 
     virtual void formStateDidChange(const Node*) { }
 
     virtual void setCursor(const Cursor&);
     virtual void setCursorHiddenUntilMouseMoves(bool) { }
 
-    virtual void scrollRectIntoView(const IntRect&) const { }
+#if ENABLE(REQUEST_ANIMATION_FRAME) && !USE(REQUEST_ANIMATION_FRAME_TIMER)
+    virtual void scheduleAnimation();
+    virtual void serviceScriptedAnimations();
+#endif
 
-    virtual void requestGeolocationPermissionForFrame(Frame*, Geolocation*) { }
-    virtual void cancelGeolocationPermissionRequestForFrame(Frame*, Geolocation*) { }
+    virtual void scrollRectIntoView(const LayoutRect) const { }
 
     virtual bool selectItemWritingDirectionIsNatural();
     virtual bool selectItemAlignmentFollowsMenuWritingDirection();
@@ -193,7 +201,9 @@ public:
     virtual bool shouldRubberBandInDirection(WebCore::ScrollDirection) const { return true; }
     virtual void numWheelEventHandlersChanged(unsigned) { }
 
-    QWebPage* m_webPage;
+    QWebFullScreenVideoHandler* createFullScreenVideoHandler();
+
+    QWebPageAdapter* m_webPage;
     KURL lastHoverURL;
     String lastHoverTitle;
     String lastHoverContent;
@@ -202,6 +212,9 @@ public:
     bool statusBarVisible;
     bool menuBarVisible;
     QEventLoop* m_eventLoop;
+#if ENABLE(REQUEST_ANIMATION_FRAME) && !USE(REQUEST_ANIMATION_FRAME_TIMER)
+    OwnPtr<RefreshAnimation> m_refreshAnimation;
+#endif
 
 #if ENABLE(VIDEO) && (USE(GSTREAMER) || USE(QT_MULTIMEDIA) || USE(QTKIT))
     FullScreenVideoQt* m_fullScreenVideo;
@@ -210,6 +223,10 @@ public:
     static bool dumpVisitedLinksCallbacks;
 
     mutable QtPlatformPlugin m_platformPlugin;
+
+#if USE(ACCELERATED_COMPOSITING)
+    OwnPtr<TextureMapperLayerClientQt> m_textureMapperLayerClient;
+#endif
 };
 }
 

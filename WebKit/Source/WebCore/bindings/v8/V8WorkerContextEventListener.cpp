@@ -34,20 +34,17 @@
 
 #include "V8WorkerContextEventListener.h"
 
+#include "InspectorInstrumentation.h"
 #include "V8Binding.h"
 #include "V8DOMWrapper.h"
 #include "V8Event.h"
+#include "V8EventTarget.h"
+#include "V8GCController.h"
+#include "V8RecursionScope.h"
 #include "WorkerContext.h"
-#include "WorkerContextExecutionProxy.h"
+#include "WorkerScriptController.h"
 
 namespace WebCore {
-
-static WorkerContextExecutionProxy* workerProxy(ScriptExecutionContext* context)
-{
-    ASSERT(context->isWorkerContext());
-    WorkerContext* workerContext = static_cast<WorkerContext*>(context);
-    return workerContext->script()->proxy();
-}
 
 V8WorkerContextEventListener::V8WorkerContextEventListener(v8::Local<v8::Object> listener, bool isInline, const WorldContextHandle& worldContext)
     : V8EventListener(listener, isInline, worldContext)
@@ -65,11 +62,12 @@ void V8WorkerContextEventListener::handleEvent(ScriptExecutionContext* context, 
 
     v8::HandleScope handleScope;
 
-    WorkerContextExecutionProxy* proxy = workerProxy(context);
-    if (!proxy)
+    ASSERT(context->isWorkerContext());
+    WorkerScriptController* script = static_cast<WorkerContext*>(context)->script();
+    if (!script)
         return;
 
-    v8::Handle<v8::Context> v8Context = proxy->context();
+    v8::Handle<v8::Context> v8Context = script->context();
     if (v8Context.IsEmpty())
         return;
 
@@ -84,16 +82,30 @@ void V8WorkerContextEventListener::handleEvent(ScriptExecutionContext* context, 
 
 v8::Local<v8::Value> V8WorkerContextEventListener::callListenerFunction(ScriptExecutionContext* context, v8::Handle<v8::Value> jsEvent, Event* event)
 {
+    V8GCController::checkMemoryUsage();
+
     v8::Local<v8::Function> handlerFunction = getListenerFunction(context);
     v8::Local<v8::Object> receiver = getReceiverObject(context, event);
     if (handlerFunction.IsEmpty() || receiver.IsEmpty())
         return v8::Local<v8::Value>();
 
+    InspectorInstrumentationCookie cookie;
+    if (InspectorInstrumentation::timelineAgentEnabled(context)) {
+        String resourceName("undefined");
+        int lineNumber = 1;
+        v8::ScriptOrigin origin = handlerFunction->GetScriptOrigin();
+        if (!origin.ResourceName().IsEmpty()) {
+            resourceName = toWebCoreString(origin.ResourceName());
+            lineNumber = handlerFunction->GetScriptLineNumber() + 1;
+        }
+        cookie = InspectorInstrumentation::willCallFunction(context, resourceName, lineNumber);
+    }
+
     v8::Handle<v8::Value> parameters[1] = { jsEvent };
+    V8RecursionScope recursionScope(context);
     v8::Local<v8::Value> result = handlerFunction->Call(receiver, 1, parameters);
 
-    if (WorkerContextExecutionProxy* proxy = workerProxy(context))
-        proxy->trackEvent(event);
+    InspectorInstrumentation::didCallFunction(cookie);
 
     return result;
 }
@@ -106,7 +118,7 @@ v8::Local<v8::Object> V8WorkerContextEventListener::getReceiverObject(ScriptExec
         return listener;
 
     EventTarget* target = event->currentTarget();
-    v8::Handle<v8::Value> value = V8DOMWrapper::convertEventTargetToV8Object(target);
+    v8::Handle<v8::Value> value = toV8(target);
     if (value.IsEmpty())
         return v8::Local<v8::Object>();
     return v8::Local<v8::Object>::New(v8::Handle<v8::Object>::Cast(value));

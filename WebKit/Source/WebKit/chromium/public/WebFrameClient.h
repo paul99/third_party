@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Google Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -50,6 +50,7 @@ namespace WebKit {
 
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
+class WebCachedURLRequest;
 class WebCookieJar;
 class WebDataSource;
 class WebDOMEvent;
@@ -62,7 +63,10 @@ class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebNode;
 class WebPlugin;
+class WebRTCPeerConnectionHandler;
 class WebSharedWorker;
+class WebSharedWorkerClient;
+class WebSocketStreamHandle;
 class WebStorageQuotaCallbacks;
 class WebString;
 class WebURL;
@@ -70,7 +74,6 @@ class WebURLLoader;
 class WebURLRequest;
 class WebURLResponse;
 class WebWorker;
-class WebSharedWorkerClient;
 struct WebPluginParams;
 struct WebRect;
 struct WebSize;
@@ -87,12 +90,12 @@ public:
     virtual WebSharedWorker* createSharedWorker(WebFrame*, const WebURL&, const WebString&, unsigned long long) { return 0; }
 
     // May return null.
-    virtual WebMediaPlayer* createMediaPlayer(WebFrame*, WebMediaPlayerClient*) { return 0; }
+    virtual WebMediaPlayer* createMediaPlayer(WebFrame*, const WebURL&, WebMediaPlayerClient*) { return 0; }
 
     // May return null.
     virtual WebApplicationCacheHost* createApplicationCacheHost(WebFrame*, WebApplicationCacheHostClient*) { return 0; }
 
-    
+
     // Services ------------------------------------------------------------
 
     // A frame specific cookie jar.  May return null, in which case
@@ -102,14 +105,23 @@ public:
 
     // General notifications -----------------------------------------------
 
-    // This frame has been detached from the view.
-    //
-    // FIXME: Do not use this in new code. Currently this is used by code in
-    // Chromium that errantly caches WebKit objects.
+    // A child frame was created in this frame. This is called when the frame
+    // is created and initialized.
+    virtual void didCreateFrame(WebFrame* parent, WebFrame* child) { }
+
+    // This frame set its opener to null, disowning it.
+    // See http://html.spec.whatwg.org/#dom-opener.
+    virtual void didDisownOpener(WebFrame*) { }
+
+    // This frame has been detached from the view, but has not been closed yet.
     virtual void frameDetached(WebFrame*) { }
 
-    // This frame is about to be closed.
+    // This frame is about to be closed. This is called after frameDetached,
+    // when the document is being unloaded, due to new one committing.
     virtual void willClose(WebFrame*) { }
+
+    // This frame's name has changed.
+    virtual void didChangeName(WebFrame*, const WebString&) { }
 
     // Load commands -------------------------------------------------------
 
@@ -247,6 +259,9 @@ public:
      // the client keeps such an association.
      virtual void removeIdentifierForRequest(unsigned identifier) { }
 
+    // An element will request a resource.
+    virtual void willRequestResource(WebFrame*, const WebCachedURLRequest&) { }
+
     // A request is about to be sent out, and the client may modify it.  Request
     // is writable, and changes to the URL, for example, will change the request
     // made.  If this request is the result of a redirect, then redirectResponse
@@ -284,10 +299,6 @@ public:
     // A reflected XSS was encountered in the page and suppressed.
     virtual void didDetectXSS(WebFrame*, const WebURL&, bool didBlockEntirePage) { }
 
-    // This frame adopted the resource that is being loaded. This happens when
-    // an iframe, that is loading a subresource, is transferred between windows.
-    virtual void didAdoptURLLoader(WebURLLoader*) { }
-
     // Script notifications ------------------------------------------------
 
     // Script in the page tried to allocate too much memory.
@@ -297,7 +308,7 @@ public:
     // Notifies that a new script context has been created for this frame.
     // This is similar to didClearWindowObject but only called once per
     // frame context.
-    virtual void didCreateScriptContext(WebFrame*, v8::Handle<v8::Context>, int worldId) { }
+    virtual void didCreateScriptContext(WebFrame*, v8::Handle<v8::Context>, int extensionGroup, int worldId) { }
 
     // WebKit is about to release its reference to a v8 context for a frame.
     virtual void willReleaseScriptContext(WebFrame*, v8::Handle<v8::Context>, int worldId) { }
@@ -317,8 +328,6 @@ public:
     // The main frame scrolled.
     virtual void didChangeScrollOffset(WebFrame*) { }
 
-    // The page scale changed.
-    virtual void didChangePageScale(WebFrame*) { }
 
     // Find-in-page notifications ------------------------------------------
 
@@ -350,6 +359,15 @@ public:
     virtual void openFileSystem(
         WebFrame*, WebFileSystem::Type, long long size,
         bool create, WebFileSystemCallbacks*) { }
+
+    // Deletes FileSystem.
+    // WebFileSystemCallbacks::didSucceed() must be called when the operation
+    // is completed successfully. WebFileSystemCallbacks::didFail() must be
+    // called otherwise.
+    // All in-flight operations and following operations may fail after the
+    // FileSystem is deleted.
+    virtual void deleteFileSystem(
+        WebFrame*, WebFileSystem::Type, WebFileSystemCallbacks*) { }
 
     // Quota ---------------------------------------------------------
 
@@ -387,15 +405,44 @@ public:
     // object to coordinate replies to the intent invocation.
     virtual void dispatchIntent(WebFrame*, const WebIntentRequest&) { }
 
+    // WebSocket -----------------------------------------------------
+
+    // A WebSocket object is going to open new stream connection.
+    virtual void willOpenSocketStream(WebSocketStreamHandle*) { }
+
+    // MediaStream -----------------------------------------------------
+
+    // A new WebRTCPeerConnectionHandler is created.
+    virtual void willStartUsingPeerConnectionHandler(WebFrame*, WebRTCPeerConnectionHandler*) { }
+
     // Messages ------------------------------------------------------
 
     // Notifies the embedder that a postMessage was issued on this frame, and
     // gives the embedder a chance to handle it instead of WebKit. Returns true
     // if the embedder handled it.
     virtual bool willCheckAndDispatchMessageEvent(
-        WebFrame* source,
+        WebFrame* sourceFrame,
+        WebFrame* targetFrame,
         WebSecurityOrigin target,
-        WebDOMMessageEvent) { return false; }
+        WebDOMMessageEvent event) { return false; }
+
+    // Asks the embedder if a specific user agent should be used for the given
+    // URL. Non-empty strings indicate an override should be used. Otherwise,
+    // Platform::current()->userAgent() will be called to provide one.
+    virtual WebString userAgentOverride(WebFrame*, const WebURL& url) { return WebString(); }
+
+    // WebGL ------------------------------------------------------
+
+    // Asks the embedder whether WebGL is allowed for the given WebFrame.
+    // This call is placed here instead of WebPermissionClient because this
+    // class is implemented in content/, and putting it here avoids adding
+    // more public content/ APIs.
+    virtual bool allowWebGL(WebFrame*, bool defaultValue) { return defaultValue; }
+
+    // Notifies the client that a WebGL context was lost on this page with the
+    // given reason (one of the GL_ARB_robustness status codes; see
+    // Extensions3D.h in WebCore/platform/graphics).
+    virtual void didLoseWebGLContext(WebFrame*, int) { }
 
 protected:
     ~WebFrameClient() { }

@@ -31,8 +31,9 @@
 #include <wtf/PassRefPtr.h>
 #include <wtf/text/AtomicString.h>
 
-#if OS(ANDROID) && ENABLE(FONT_BOOSTING)
-#include "TextSizeAdjustment.h"
+#if ENABLE(CSS_VARIABLES)
+#include "DataRef.h"
+#include "StyleVariableData.h"
 #endif
 
 namespace WebCore {
@@ -40,6 +41,7 @@ namespace WebCore {
 class CursorList;
 class QuotesData;
 class ShadowData;
+class StyleImage;
 
 // This struct is for rarely used inherited CSS3, CSS2, and WebKit-specific properties.
 // By grouping them together, we save space, and only allocate this object when someone
@@ -57,18 +59,22 @@ public:
     }
     bool shadowDataEquivalent(const StyleRareInheritedData&) const;
 
+    void reportMemoryUsage(MemoryObjectInfo*) const;
+
+    RefPtr<StyleImage> listStyleImage;
+
     Color textStrokeColor;
     float textStrokeWidth;
     Color textFillColor;
     Color textEmphasisColor;
-
+    
     Color visitedLinkTextStrokeColor;
     Color visitedLinkTextFillColor;
-    Color visitedLinkTextEmphasisColor;
+    Color visitedLinkTextEmphasisColor;    
 
     OwnPtr<ShadowData> textShadow; // Our text shadow information for shadowed text drawing.
     AtomicString highlight; // Apple-specific extension for custom highlight rendering.
-
+    
     RefPtr<CursorList> cursorData;
     Length indent;
     float m_effectiveZoom;
@@ -76,32 +82,44 @@ public:
     // Paged media properties.
     short widows;
     short orphans;
-
+    unsigned m_hasAutoWidows : 1;
+    unsigned m_hasAutoOrphans : 1;
+    
     unsigned textSecurity : 2; // ETextSecurity
     unsigned userModify : 2; // EUserModify (editing)
     unsigned wordBreak : 2; // EWordBreak
-    unsigned wordWrap : 1; // EWordWrap
+    unsigned overflowWrap : 1; // EOverflowWrap
     unsigned nbspMode : 1; // ENBSPMode
-    unsigned khtmlLineBreak : 1; // EKHTMLLineBreak
+    unsigned lineBreak : 3; // LineBreak
+    unsigned textSizeAdjust : 1; // An Apple extension.
     unsigned resize : 2; // EResize
-    unsigned userSelect : 1;  // EUserSelect
+    unsigned userSelect : 2; // EUserSelect
     unsigned colorSpace : 1; // ColorSpace
     unsigned speak : 3; // ESpeak
     unsigned hyphens : 2; // Hyphens
     unsigned textEmphasisFill : 1; // TextEmphasisFill
     unsigned textEmphasisMark : 3; // TextEmphasisMark
     unsigned textEmphasisPosition : 1; // TextEmphasisPosition
+    unsigned m_textOrientation : 2; // TextOrientation
     unsigned m_lineBoxContain: 7; // LineBoxContain
     // CSS Image Values Level 3
-    unsigned m_imageRendering : 2; // EImageRendering
-    unsigned m_lineGridSnap : 2; // LineGridSnap
-    unsigned useTouchOverflowScrolling: 1;
-
-#if OS(ANDROID) && ENABLE(FONT_BOOSTING)
-    TextSizeAdjustment textSizeAdjust; // An Apple extension to an Apple extension.
-#else
-    bool textSizeAdjust : 1; // An Apple extension.
+#if ENABLE(CSS_IMAGE_ORIENTATION)
+    unsigned m_imageOrientation : 4; // ImageOrientationEnum
 #endif
+    unsigned m_imageRendering : 2; // EImageRendering
+    unsigned m_lineSnap : 2; // LineSnap
+    unsigned m_lineAlign : 1; // LineAlign
+#if ENABLE(ACCELERATED_OVERFLOW_SCROLLING)
+    unsigned useTouchOverflowScrolling: 1;
+#endif
+#if ENABLE(CSS_IMAGE_RESOLUTION)
+    unsigned m_imageResolutionSource : 1; // ImageResolutionSource
+    unsigned m_imageResolutionSnap : 1; // ImageResolutionSnap
+#endif
+#if ENABLE(CSS3_TEXT)
+    unsigned m_textAlignLast : 3; // ETextAlignLast
+#endif // CSS3_TEXT
+    unsigned m_rubyPosition : 1; // RubyPosition
 
     AtomicString hyphenationString;
     short hyphenationLimitBefore;
@@ -114,9 +132,18 @@ public:
     RefPtr<QuotesData> quotes;
 
     AtomicString m_lineGrid;
+    unsigned m_tabSize;
+
+#if ENABLE(CSS_IMAGE_RESOLUTION)
+    float m_imageResolution;
+#endif
 
 #if ENABLE(TOUCH_EVENTS)
     Color tapHighlightColor;
+#endif
+
+#if ENABLE(CSS_VARIABLES)
+    DataRef<StyleVariableData> m_variables;
 #endif
 
 private:

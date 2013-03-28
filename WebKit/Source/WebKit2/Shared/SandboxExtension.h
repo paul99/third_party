@@ -58,7 +58,7 @@ public:
         Handle();
         ~Handle();
 
-        void encode(CoreIPC::ArgumentEncoder*) const;
+        void encode(CoreIPC::ArgumentEncoder&) const;
         static bool decode(CoreIPC::ArgumentDecoder*, Handle&);
 
     private:
@@ -68,14 +68,39 @@ public:
 #endif
     };
 
+    class HandleArray {
+        WTF_MAKE_NONCOPYABLE(HandleArray);
+        
+    public:
+        HandleArray();
+        ~HandleArray();
+        void allocate(size_t);
+        Handle& operator[](size_t i);
+        const Handle& operator[](size_t i) const;
+        size_t size() const;
+        void encode(CoreIPC::ArgumentEncoder&) const;
+        static bool decode(CoreIPC::ArgumentDecoder*, HandleArray&);
+       
+    private:
+#if ENABLE(WEB_PROCESS_SANDBOX)
+        Handle* m_data;
+        size_t m_size;
+#else
+        Handle m_emptyHandle;
+#endif
+    };
+    
     static PassRefPtr<SandboxExtension> create(const Handle&);
     static void createHandle(const String& path, Type type, Handle&);
+    static void createHandleForReadWriteDirectory(const String& path, Handle&); // Will attempt to create the directory.
     static String createHandleForTemporaryFile(const String& prefix, Type type, Handle&);
     ~SandboxExtension();
 
     bool invalidate();
     bool consume();
     bool consumePermanently();
+
+    static bool consumePermanently(const Handle&);
 
 private:
     explicit SandboxExtension(const Handle&);
@@ -85,18 +110,29 @@ private:
 #endif
 };
 
+
 #if !ENABLE(WEB_PROCESS_SANDBOX)
 inline SandboxExtension::Handle::Handle() { }
 inline SandboxExtension::Handle::~Handle() { }
-inline void SandboxExtension::Handle::encode(CoreIPC::ArgumentEncoder*) const { }
+inline void SandboxExtension::Handle::encode(CoreIPC::ArgumentEncoder&) const { }
 inline bool SandboxExtension::Handle::decode(CoreIPC::ArgumentDecoder*, Handle&) { return true; }
+inline SandboxExtension::HandleArray::HandleArray() { }
+inline SandboxExtension::HandleArray::~HandleArray() { }
+inline void SandboxExtension::HandleArray::allocate(size_t) { }
+inline size_t SandboxExtension::HandleArray::size() const { return 0; }    
+inline const SandboxExtension::Handle& SandboxExtension::HandleArray::operator[](size_t) const { return m_emptyHandle; }
+inline SandboxExtension::Handle& SandboxExtension::HandleArray::operator[](size_t) { return m_emptyHandle; }
+inline void SandboxExtension::HandleArray::encode(CoreIPC::ArgumentEncoder&) const { }
+inline bool SandboxExtension::HandleArray::decode(CoreIPC::ArgumentDecoder*, HandleArray&) { return true; }
 inline PassRefPtr<SandboxExtension> SandboxExtension::create(const Handle&) { return 0; }
-inline void SandboxExtension::createHandle(const String& path, Type type, Handle&) { }
-inline String SandboxExtension::createHandleForTemporaryFile(const String& prefix, Type type, Handle&) {return String();}
+inline void SandboxExtension::createHandle(const String&, Type, Handle&) { }
+inline void SandboxExtension::createHandleForReadWriteDirectory(const String&, Handle&) { }
+inline String SandboxExtension::createHandleForTemporaryFile(const String& /*prefix*/, Type, Handle&) {return String();}
 inline SandboxExtension::~SandboxExtension() { }
 inline bool SandboxExtension::invalidate() { return true; }
 inline bool SandboxExtension::consume() { return true; }
 inline bool SandboxExtension::consumePermanently() { return true; }
+inline bool SandboxExtension::consumePermanently(const Handle&) { return true; }
 #endif
 
 } // namespace WebKit

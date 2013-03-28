@@ -35,10 +35,10 @@ void addChildNodesToDeletionQueue(GenericNode*& head, GenericNode*& tail, Generi
 
 class SVGUseElement;
 class SVGElementInstanceList;
+class SVGStyledElement;
 
 // SVGElementInstance mimics Node, but without providing all its functionality
-class SVGElementInstance : public TreeShared<SVGElementInstance>,
-                           public EventTarget {
+class SVGElementInstance : public EventTarget, public TreeShared<SVGElementInstance, SVGElementInstance> {
 public:
     static PassRefPtr<SVGElementInstance> create(SVGUseElement* correspondingUseElement, SVGUseElement* directUseElement, PassRefPtr<SVGElement> originalElement)
     {
@@ -46,6 +46,8 @@ public:
     }
 
     virtual ~SVGElementInstance();
+
+    void setParentOrHostNode(SVGElementInstance* instance) { setParent(instance); }
 
     virtual const AtomicString& interfaceName() const;
     virtual ScriptExecutionContext* scriptExecutionContext() const;
@@ -83,10 +85,20 @@ public:
         SVGElement* m_element;
     };
 
+    class InstanceUpdateBlocker {
+        WTF_MAKE_NONCOPYABLE(InstanceUpdateBlocker);
+    public:
+        InstanceUpdateBlocker(SVGElement* targetElement);
+        ~InstanceUpdateBlocker();
+
+    private:
+        SVGStyledElement* m_targetElement;
+    };
+    
     static void invalidateAllInstancesOfElement(SVGElement*);
 
-    using TreeShared<SVGElementInstance>::ref;
-    using TreeShared<SVGElementInstance>::deref;
+    using TreeShared<SVGElementInstance, SVGElementInstance>::ref;
+    using TreeShared<SVGElementInstance, SVGElementInstance>::deref;
 
     // EventTarget API
     DEFINE_FORWARDING_ATTRIBUTE_EVENT_LISTENER(correspondingElement(), abort);
@@ -132,8 +144,13 @@ public:
 
 private:
     friend class SVGUseElement;
+    friend class TreeShared<SVGElementInstance, SVGElementInstance>;
+
+    using TreeShared<SVGElementInstance, SVGElementInstance>::parent;
+    using TreeShared<SVGElementInstance, SVGElementInstance>::setParent;
 
     SVGElementInstance(SVGUseElement*, SVGUseElement*, PassRefPtr<SVGElement> originalElement);
+    void removedLastRef();
 
     virtual Node* toNode() { return shadowTreeElement(); }
 

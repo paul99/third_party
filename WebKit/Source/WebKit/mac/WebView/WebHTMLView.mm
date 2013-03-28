@@ -73,7 +73,6 @@
 #import "WebViewInternal.h"
 #import <AppKit/NSAccessibility.h>
 #import <ApplicationServices/ApplicationServices.h>
-#import <WebCore/CSSMutableStyleDeclaration.h>
 #import <WebCore/CachedImage.h>
 #import <WebCore/CachedResourceClient.h>
 #import <WebCore/CachedResourceLoader.h>
@@ -108,11 +107,14 @@
 #import <WebCore/Range.h>
 #import <WebCore/RenderWidget.h>
 #import <WebCore/RenderView.h>
+#import <WebCore/ResourceBuffer.h>
 #import <WebCore/RunLoop.h>
 #import <WebCore/RuntimeApplicationChecks.h>
 #import <WebCore/SharedBuffer.h>
 #import <WebCore/SimpleFontData.h>
+#import <WebCore/StylePropertySet.h>
 #import <WebCore/Text.h>
+#import <WebCore/TextAlternativeWithRange.h>
 #import <WebCore/WebCoreObjCExtras.h>
 #import <WebCore/WebFontCache.h>
 #import <WebCore/WebNSAttributedStringExtras.h>
@@ -125,6 +127,7 @@
 #import <limits>
 #import <runtime/InitializeThreading.h>
 #import <wtf/MainThread.h>
+#import <wtf/ObjcRuntimeExtras.h>
 
 #if USE(ACCELERATED_COMPOSITING)
 #import <QuartzCore/QuartzCore.h>
@@ -212,6 +215,20 @@ static WebMenuTarget* target;
 }
 @end
 
+@interface WebRootLayer : CALayer
+@end
+
+@implementation WebRootLayer
+- (void)renderInContext:(CGContextRef)ctx
+{
+    // AppKit calls -[CALayer renderInContext:] to render layer-backed views
+    // into bitmap contexts, but renderInContext: doesn't capture mask layers
+    // (<rdar://problem/9539526>), so we can't rely on it. Since our layer
+    // contents will have already been rendered by drawRect:, we can safely make
+    // this a NOOP.
+}
+@end
+
 // if YES, do the standard NSView hit test (which can't give the right result when HTML overlaps a view)
 static BOOL forceNSViewHitTest;
 
@@ -247,7 +264,7 @@ static IMP oldSetCursorForMouseLocationIMP;
 static void setCursor(NSWindow *self, SEL cmd, NSPoint point)
 {
     if (needsCursorRectsSupportAtPoint(self, point))
-        oldSetCursorForMouseLocationIMP(self, cmd, point);
+        wtfCallIMP<id>(oldSetCursorForMouseLocationIMP, self, cmd, point);
 }
 
 
@@ -270,7 +287,7 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
 - (void)_invalidateGStatesForTree;
 - (void)_propagateDirtyRectsToOpaqueAncestors;
 - (void)_windowChangedKeyState;
-#if USE(ACCELERATED_COMPOSITING) && defined(BUILDING_ON_LEOPARD)
+#if USE(ACCELERATED_COMPOSITING) && __MAC_OS_X_VERSION_MIN_REQUIRED == 1050
 - (void)_updateLayerGeometryFromView;
 #endif
 @end
@@ -281,7 +298,7 @@ static IMP oldSetNeedsDisplayInRectIMP;
 static void setNeedsDisplayInRect(NSView *self, SEL cmd, NSRect invalidRect)
 {
     if (![self _drawnByAncestor]) {
-        oldSetNeedsDisplayInRectIMP(self, cmd, invalidRect);
+        wtfCallIMP<id>(oldSetNeedsDisplayInRectIMP, self, cmd, invalidRect);
         return;
     }
 
@@ -291,14 +308,14 @@ static void setNeedsDisplayInRect(NSView *self, SEL cmd, NSRect invalidRect)
         enclosingWebFrameView = (WebFrameView *)[enclosingWebFrameView superview];
 
     if (!enclosingWebFrameView) {
-        oldSetNeedsDisplayInRectIMP(self, cmd, invalidRect);
+        wtfCallIMP<id>(oldSetNeedsDisplayInRectIMP, self, cmd, invalidRect);
         return;
     }
 
     Frame* coreFrame = core([enclosingWebFrameView webFrame]);
     FrameView* frameView = coreFrame ? coreFrame->view() : 0;
     if (!frameView || !frameView->isEnclosedInCompositingLayer()) {
-        oldSetNeedsDisplayInRectIMP(self, cmd, invalidRect);
+        wtfCallIMP<id>(oldSetNeedsDisplayInRectIMP, self, cmd, invalidRect);
         return;
     }
 
@@ -396,7 +413,7 @@ static CachedImageClient* promisedDataClient()
 - (void)_web_clearPrintingModeRecursive;
 @end
 
-#ifndef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
 
 @interface WebHTMLView (WebHTMLViewTextCheckingInternal)
 - (void)orderFrontSubstitutionsPanel:(id)sender;
@@ -779,7 +796,7 @@ static NSURL* uniqueURLWithRelativePart(NSString *relativePart)
                                              subresources:0]))
         return fragment;
 
-#ifdef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED == 1050
     if ([types containsObject:NSPICTPboardType] &&
         (fragment = [self _documentFragmentFromPasteboard:pasteboard 
                                                   forType:NSPICTPboardType
@@ -860,7 +877,7 @@ static NSURL* uniqueURLWithRelativePart(NSString *relativePart)
     DOMRange *range = [self _selectedRange];
     Frame* coreFrame = core([self _frame]);
     
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
     DOMDocumentFragment *fragment = [self _documentFragmentFromPasteboard:pasteboard inContext:range allowPlainText:allowPlainText];
     if (fragment && [self _shouldInsertFragment:fragment replacingDOMRange:range givenAction:WebViewInsertActionPasted])
         coreFrame->editor()->pasteAsFragment(core(fragment), [self _canSmartReplaceWithPasteboard:pasteboard], false);
@@ -1217,7 +1234,7 @@ static NSURL* uniqueURLWithRelativePart(NSString *relativePart)
     }
     _private->lastScrollPosition = origin;
 
-#if USE(ACCELERATED_COMPOSITING) && defined(BUILDING_ON_LEOPARD)
+#if USE(ACCELERATED_COMPOSITING) && __MAC_OS_X_VERSION_MIN_REQUIRED == 1050
     [self _updateLayerHostingViewPosition];
 #endif
 }
@@ -1372,6 +1389,16 @@ static NSURL* uniqueURLWithRelativePart(NSString *relativePart)
     return self != [self _topHTMLView];
 }
 
+static BOOL isQuickLookEvent(NSEvent *event)
+{
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
+    const int kCGSEventSystemSubtypeHotKeyCombinationReleased = 9;
+    return [event type] == NSSystemDefined && [event subtype] == kCGSEventSystemSubtypeHotKeyCombinationReleased && [event data1] == 'lkup';
+#else
+    return NO;
+#endif
+}
+
 - (NSView *)hitTest:(NSPoint)point
 {
     // WebHTMLView objects handle all events for objects inside them.
@@ -1412,7 +1439,8 @@ static NSURL* uniqueURLWithRelativePart(NSString *relativePart)
         captureHitsOnSubviews = !([event type] == NSMouseMoved
             || [event type] == NSRightMouseDown
             || ([event type] == NSLeftMouseDown && ([event modifierFlags] & NSControlKeyMask) != 0)
-            || [event type] == NSFlagsChanged);
+            || [event type] == NSFlagsChanged
+            || isQuickLookEvent(event));
     }
 
     if (!captureHitsOnSubviews) {
@@ -1632,7 +1660,7 @@ static bool mouseEventIsPartOfClickOrDrag(NSEvent *event)
     static NSArray *types = nil;
     if (!types) {
         types = [[NSArray alloc] initWithObjects:WebArchivePboardType, NSHTMLPboardType, NSFilenamesPboardType, NSTIFFPboardType, NSPDFPboardType,
-#ifdef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED == 1050
             NSPICTPboardType,
 #endif
             NSURLPboardType, NSRTFDPboardType, NSRTFPboardType, NSStringPboardType, NSColorPboardType, kUTTypePNG, nil];
@@ -2021,7 +2049,7 @@ static bool mouseEventIsPartOfClickOrDrag(NSEvent *event)
         [resource release];
         return fragment;
     }
-#ifdef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED == 1050
     if (pboardType == NSPICTPboardType) {
         WebResource *resource = [[WebResource alloc] initWithData:[pasteboard dataForType:NSPICTPboardType]
                                                               URL:uniqueURLWithRelativePart(@"image.pict")
@@ -2260,15 +2288,6 @@ static bool mouseEventIsPartOfClickOrDrag(NSEvent *event)
 
 @end
 
-static bool matchesExtensionOrEquivalent(NSString *filename, NSString *extension)
-{
-    NSString *extensionAsSuffix = [@"." stringByAppendingString:extension];
-    return [filename _webkit_hasCaseInsensitiveSuffix:extensionAsSuffix]
-        || ([extension _webkit_isCaseInsensitiveEqualToString:@"jpeg"]
-            && [filename _webkit_hasCaseInsensitiveSuffix:@".jpg"]);
-}
-
-
 @implementation WebHTMLView
 
 + (void)initialize
@@ -2359,7 +2378,7 @@ static String commandNameForSelector(SEL selector)
     static const SelectorNameMap* exceptionMap = createSelectorExceptionMap();
     SelectorNameMap::const_iterator it = exceptionMap->find(selector);
     if (it != exceptionMap->end())
-        return it->second;
+        return it->value;
 
     // Remove the trailing colon.
     // No need to capitalize the command name since Editor command names are
@@ -2682,7 +2701,7 @@ WEBCORE_COMMAND(yankAndSelect)
         return YES;
     }
 
-#ifndef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
     if (action == @selector(orderFrontSubstitutionsPanel:)) {
         NSMenuItem *menuItem = (NSMenuItem *)item;
         if ([menuItem isKindOfClass:[NSMenuItem class]]) {
@@ -2835,7 +2854,7 @@ WEBCORE_COMMAND(yankAndSelect)
         return;
 #endif
 
-#if !defined(BUILDING_ON_SNOW_LEOPARD)
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
     // Legacy scrollbars require tracking the mouse at all times.
     if (WKRecommendedScrollerStyle() == NSScrollerStyleLegacy)
         return;
@@ -3007,7 +3026,7 @@ WEBCORE_COMMAND(yankAndSelect)
 #endif
 
     if (Frame* coreFrame = core([self _frame]))
-        coreFrame->document()->styleSelectorChanged(RecalcStyleImmediately);
+        coreFrame->document()->styleResolverChanged(RecalcStyleImmediately);
     
 #ifdef LOG_TIMES        
     double thisTime = CFAbsoluteTimeGetCurrent() - start;
@@ -3357,9 +3376,8 @@ static void setMenuTargets(NSMenu* menu)
     // descendants, including plug-in views. This can result in calls out to plug-in code and back into
     // WebCore via JavaScript, which could normally mutate the NSView tree while it is being traversed.
     // Defer those mutations while descendants are being traveresed.
-    RenderWidget::suspendWidgetHierarchyUpdates();
+    WidgetHierarchyUpdatesSuspensionScope suspendWidgetHierarchyUpdates;
     [super _invalidateGStatesForTree];
-    RenderWidget::resumeWidgetHierarchyUpdates();
 }
 
 - (BOOL)isFlipped 
@@ -3374,7 +3392,7 @@ static void setMenuTargets(NSMenu* menu)
         return;
     }
 
-#if !defined(BUILDING_ON_SNOW_LEOPARD)
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
     if (_private->trackingAreaForNonKeyWindow) {
         [self removeTrackingArea:_private->trackingAreaForNonKeyWindow];
         [_private->trackingAreaForNonKeyWindow release];
@@ -3407,7 +3425,7 @@ static void setMenuTargets(NSMenu* menu)
         [_private->completionController endRevertingChange:NO moveLeft:NO];
     }
 
-#if !defined(BUILDING_ON_SNOW_LEOPARD)
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
     if (WKRecommendedScrollerStyle() == NSScrollerStyleLegacy) {
         // Legacy style scrollbars have design details that rely on tracking the mouse all the time.
         // It's easiest to do this with a tracking area, which we will remove when the window is key
@@ -3501,8 +3519,10 @@ static void setMenuTargets(NSMenu* menu)
             coreFrame->eventHandler()->setActivationEventNumber([event eventNumber]);
             [hitHTMLView _setMouseDownEvent:event];
             if ([hitHTMLView _isSelectionEvent:event]) {
+#if ENABLE(DRAG_SUPPORT)
                 if (Page* page = coreFrame->page())
                     result = coreFrame->eventHandler()->eventMayStartDrag(PlatformEventFactory::createPlatformMouseEvent(event, page->chrome()->platformPageClient()));
+#endif
             } else if ([hitHTMLView _isScrollBarEvent:event])
                 result = true;
             [hitHTMLView _setMouseDownEvent:nil];
@@ -3524,12 +3544,14 @@ static void setMenuTargets(NSMenu* menu)
     if (hitHTMLView) {
         bool result = false;
         if ([hitHTMLView _isSelectionEvent:event]) {
+            [hitHTMLView _setMouseDownEvent:event];
+#if ENABLE(DRAG_SUPPORT)
             if (Frame* coreFrame = core([hitHTMLView _frame])) {
-                [hitHTMLView _setMouseDownEvent:event];
                 if (Page* page = coreFrame->page())
                     result = coreFrame->eventHandler()->eventMayStartDrag(PlatformEventFactory::createPlatformMouseEvent(event, page->chrome()->platformPageClient()));
-                [hitHTMLView _setMouseDownEvent:nil];
             }
+#endif
+            [hitHTMLView _setMouseDownEvent:nil];
         }
         return result;
     }
@@ -3573,6 +3595,7 @@ done:
     _private->handlingMouseDownEvent = NO;
 }
 
+#if ENABLE(DRAG_SUPPORT)
 - (void)dragImage:(NSImage *)dragImage
                at:(NSPoint)at
            offset:(NSSize)offset
@@ -3649,6 +3672,14 @@ done:
     [self mouseUp:fakeEvent]; // This will also update the mouseover state.
 }
 
+static bool matchesExtensionOrEquivalent(NSString *filename, NSString *extension)
+{
+    NSString *extensionAsSuffix = [@"." stringByAppendingString:extension];
+    return [filename _webkit_hasCaseInsensitiveSuffix:extensionAsSuffix]
+    || ([extension _webkit_isCaseInsensitiveEqualToString:@"jpeg"]
+        && [filename _webkit_hasCaseInsensitiveSuffix:@".jpg"]);
+}
+
 - (NSArray *)namesOfPromisedFilesDroppedAtDestination:(NSURL *)dropDestination
 {
     NSFileWrapper *wrapper = nil;
@@ -3656,7 +3687,7 @@ done:
     
     if (WebCore::CachedImage* tiffResource = [self promisedDragTIFFDataSource]) {
         
-        SharedBuffer *buffer = static_cast<CachedResource*>(tiffResource)->data();
+        ResourceBuffer *buffer = static_cast<CachedResource*>(tiffResource)->resourceBuffer();
         if (!buffer)
             goto noPromisedData;
         
@@ -3706,6 +3737,7 @@ noPromisedData:
     
     return [NSArray arrayWithObject:[path lastPathComponent]];
 }
+#endif
 
 - (void)mouseUp:(NSEvent *)event
 {
@@ -3912,7 +3944,7 @@ static PassRefPtr<KeyboardEvent> currentKeyboardEvent(Frame* coreFrame)
 
             document->setPaginatedForScreen(_private->paginateScreenContent);
             document->setPrinting(_private->printing);
-            document->styleSelectorChanged(RecalcStyleImmediately);
+            document->styleResolverChanged(RecalcStyleImmediately);
         }
     }
 
@@ -4352,14 +4384,10 @@ static PassRefPtr<KeyboardEvent> currentKeyboardEvent(Frame* coreFrame)
 
 - (void)_applyStyleToSelection:(DOMCSSStyleDeclaration *)style withUndoAction:(EditAction)undoAction
 {
-    if (Frame* coreFrame = core([self _frame]))
-        coreFrame->editor()->applyStyleToSelection(core(style), undoAction);
-}
-
-- (void)_applyParagraphStyleToSelection:(DOMCSSStyleDeclaration *)style withUndoAction:(EditAction)undoAction
-{
-    if (Frame* coreFrame = core([self _frame]))
-        coreFrame->editor()->applyParagraphStyleToSelection(core(style), undoAction);
+    if (Frame* coreFrame = core([self _frame])) {
+        // FIXME: We shouldn't have to make a copy here. We want callers of this function to work directly with StylePropertySet eventually.
+        coreFrame->editor()->applyStyleToSelection(core(style)->copy().get(), undoAction);
+    }
 }
 
 - (BOOL)_handleStyleKeyEquivalent:(NSEvent *)event
@@ -4657,9 +4685,13 @@ static PassRefPtr<KeyboardEvent> currentKeyboardEvent(Frame* coreFrame)
 {
     DOMCSSStyleDeclaration *style = [self _styleFromColorPanelWithSelector:selector];
     WebView *webView = [self _webView];
-    if ([[webView _editingDelegateForwarder] webView:webView shouldApplyStyle:style toElementsInDOMRange:range])
-        if (Frame* coreFrame = core([self _frame]))
-            coreFrame->editor()->applyStyle(core(style), [self _undoActionFromColorPanelWithSelector:selector]);
+    if ([[webView _editingDelegateForwarder] webView:webView shouldApplyStyle:style toElementsInDOMRange:range]) {
+        if (Frame* coreFrame = core([self _frame])) {
+            // FIXME: We shouldn't have to make a copy here.
+            coreFrame->editor()->applyStyle(core(style)->copy().get(), [self _undoActionFromColorPanelWithSelector:selector]);
+        }
+    }
+
 }
 
 - (void)changeDocumentBackgroundColor:(id)sender
@@ -4867,7 +4899,7 @@ static PassRefPtr<KeyboardEvent> currentKeyboardEvent(Frame* coreFrame)
 
 static BOOL writingDirectionKeyBindingsEnabled()
 {
-#ifndef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
     return YES;
 #else
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -4905,7 +4937,7 @@ static BOOL writingDirectionKeyBindingsEnabled()
     [self _changeBaseWritingDirectionTo:NSWritingDirectionRightToLeft];
 }
 
-#ifdef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED == 1050
 - (void)changeBaseWritingDirectionToLTR:(id)sender
 {
     [self makeBaseWritingDirectionLeftToRight:sender];
@@ -5120,7 +5152,7 @@ static CGPoint coreGraphicsScreenPointForAppKitScreenPoint(NSPoint point)
 }
 
 
-#ifndef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
 
 - (void)orderFrontSubstitutionsPanel:(id)sender
 {
@@ -5255,7 +5287,7 @@ static CGPoint coreGraphicsScreenPointForAppKitScreenPoint(NSPoint point)
     if (font)
         rect.origin.y += [font ascender];
 
-#ifndef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
     [self showDefinitionForAttributedString:attrString atPoint:rect.origin];
     return;
 #endif
@@ -5445,7 +5477,7 @@ static CGPoint coreGraphicsScreenPointForAppKitScreenPoint(NSPoint point)
 {
     if (!_private->layerHostingView) {
         NSView* hostingView = [[WebLayerHostingFlippedView alloc] initWithFrame:[self bounds]];
-#ifndef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
         [hostingView setAutoresizingMask:(NSViewWidthSizable | NSViewHeightSizable)];
 #endif
         [self addSubview:hostingView];
@@ -5455,9 +5487,9 @@ static CGPoint coreGraphicsScreenPointForAppKitScreenPoint(NSPoint point)
     }
 
     // Make a container layer, which will get sized/positioned by AppKit and CA.
-    CALayer* viewLayer = [CALayer layer];
+    CALayer* viewLayer = [WebRootLayer layer];
 
-#ifdef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED == 1050
     // Turn off default animations.
     NSNull *nullValue = [NSNull null];
     NSDictionary *actions = [NSDictionary dictionaryWithObjectsAndKeys:
@@ -5491,10 +5523,10 @@ static CGPoint coreGraphicsScreenPointForAppKitScreenPoint(NSPoint point)
     if ([[self _webView] _postsAcceleratedCompositingNotifications])
         [[NSNotificationCenter defaultCenter] postNotificationName:_WebViewDidStartAcceleratedCompositingNotification object:[self _webView] userInfo:nil];
     
-#ifdef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED == 1050
     [viewLayer setSublayerTransform:CATransform3DMakeScale(1, -1, 1)]; // setGeometryFlipped: doesn't exist on Leopard.
     [self _updateLayerHostingViewPosition];
-#elif (defined(BUILDING_ON_SNOW_LEOPARD) || defined(BUILDING_ON_LION))
+#elif __MAC_OS_X_VERSION_MIN_REQUIRED <= 1070
     // Do geometry flipping here, which flips all the compositing layers so they are top-down.
     [viewLayer setGeometryFlipped:YES];
 #else
@@ -5513,7 +5545,7 @@ static CGPoint coreGraphicsScreenPointForAppKitScreenPoint(NSPoint point)
     }
 }
 
-#ifdef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED == 1050
 // This method is necessary on Leopard to work around <rdar://problem/7067892>.
 - (void)_updateLayerHostingViewPosition
 {
@@ -5541,7 +5573,7 @@ static CGPoint coreGraphicsScreenPointForAppKitScreenPoint(NSPoint point)
     [_private->layerHostingView _updateLayerGeometryFromView];  // Workaround for <rdar://problem/7071636>
     [_private->layerHostingView setFrame:layerViewFrame];
 }
-#endif // defined(BUILDING_ON_LEOPARD)
+#endif // __MAC_OS_X_VERSION_MIN_REQUIRED == 1050
 
 - (void)drawLayer:(CALayer *)layer inContext:(CGContextRef)ctx
 {
@@ -5573,7 +5605,11 @@ static CGPoint coreGraphicsScreenPointForAppKitScreenPoint(NSPoint point)
     if (!validAttributes) {
         validAttributes = [[NSArray alloc] initWithObjects:
             NSUnderlineStyleAttributeName, NSUnderlineColorAttributeName,
-            NSMarkedClauseSegmentAttributeName, NSTextInputReplacementRangeAttributeName, nil];
+            NSMarkedClauseSegmentAttributeName, NSTextInputReplacementRangeAttributeName,
+#if USE(DICTATION_ALTERNATIVES)
+                           NSTextAlternativesAttributeName,
+#endif
+                           nil];
         // NSText also supports the following attributes, but it's
         // hard to tell which are really required for text input to
         // work well; I have not seen any input method make use of them yet.
@@ -5893,7 +5929,14 @@ static void extractUnderlines(NSAttributedString *string, Vector<CompositionUnde
     NSRange replacementRange = { NSNotFound, 0 };
     bool isFromInputMethod = coreFrame && coreFrame->editor()->hasComposition();
 
+    Vector<DictationAlternative> dictationAlternativeLocations;
     if (isAttributedString) {
+#if USE(DICTATION_ALTERNATIVES)
+        Vector<WebCore::TextAlternativeWithRange> textAlternatives;
+        collectDictationTextAlternatives(string, textAlternatives);
+        if (!textAlternatives.isEmpty())
+            [[self _webView] _getWebCoreDictationAlternatives:dictationAlternativeLocations fromTextAlternatives:textAlternatives];
+#endif
         // FIXME: We ignore most attributes from the string, so for example inserting from Character Palette loses font and glyph variation data.
         // It does not look like any input methods ever use insertText: with attributes other than NSTextInputReplacementRangeAttributeName.
         text = [string string];
@@ -5932,7 +5975,11 @@ static void extractUnderlines(NSAttributedString *string, Vector<CompositionUnde
     if (!coreFrame->editor()->hasComposition()) {
         // An insertText: might be handled by other responders in the chain if we don't handle it.
         // One example is space bar that results in scrolling down the page.
-        eventHandled = coreFrame->editor()->insertText(eventText, event);
+
+        if (!dictationAlternativeLocations.isEmpty())
+            eventHandled = coreFrame->editor()->insertDictatedText(eventText, dictationAlternativeLocations, event);
+        else
+            eventHandled = coreFrame->editor()->insertText(eventText, event);
     } else {
         eventHandled = true;
         coreFrame->editor()->confirmComposition(eventText);
@@ -6094,7 +6141,7 @@ static void extractUnderlines(NSAttributedString *string, Vector<CompositionUnde
 - (NSAttributedString *)_attributeStringFromDOMRange:(DOMRange *)range
 {
     NSAttributedString *attributedString;
-#if !LOG_DISABLED        
+#if !LOG_DISABLED
     double start = CFAbsoluteTimeGetCurrent();
 #endif    
     attributedString = [[[NSAttributedString alloc] _initWithDOMRange:range] autorelease];

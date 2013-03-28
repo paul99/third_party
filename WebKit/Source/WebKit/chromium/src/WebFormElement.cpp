@@ -38,8 +38,8 @@
 #include "HTMLNames.h"
 #include "WebFormControlElement.h"
 #include "WebInputElement.h"
-#include "platform/WebString.h"
-#include "platform/WebURL.h"
+#include <public/WebString.h>
+#include <public/WebURL.h>
 #include <wtf/PassRefPtr.h>
 
 using namespace WebCore;
@@ -100,6 +100,13 @@ void WebFormElement::getFormControlElements(WebVector<WebFormControlElement>& re
             tempVector.append(element);
     }
     result.assign(tempVector);
+}
+
+void WebFormElement::finishRequestAutocomplete(WebFormElement::AutocompleteResult result)
+{
+#if ENABLE(REQUEST_AUTOCOMPLETE)
+    unwrap<HTMLFormElement>()->finishRequestAutocomplete(static_cast<HTMLFormElement::AutocompleteResult>(result));
+#endif
 }
 
 WebFormElement::WebFormElement(const PassRefPtr<HTMLFormElement>& e)

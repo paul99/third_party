@@ -27,13 +27,18 @@
 #define JSDictionary_h
 
 #include "MessagePort.h"
+#include <heap/Strong.h>
+#include <heap/StrongInlines.h>
 #include <interpreter/CallFrame.h>
 #include <wtf/Forward.h>
 
 namespace WebCore {
 
+class ArrayValue;
+class Dictionary;
 class DOMWindow;
 class EventTarget;
+class MediaKeyError;
 class Node;
 class ScriptValue;
 class SerializedScriptValue;
@@ -44,15 +49,25 @@ class JSDictionary {
 public:
     JSDictionary(JSC::ExecState* exec, JSC::JSObject* initializerObject)
         : m_exec(exec)
-        , m_initializerObject(initializerObject)
     {
+        if (exec && initializerObject)
+            m_initializerObject = JSC::Strong<JSC::JSObject>(exec->globalData(), initializerObject);
     }
 
+    // Returns false if any exceptions were thrown, regardless of whether the property was found.
     template <typename Result>
-    bool tryGetProperty(const char* propertyName, Result&);
-
+    bool tryGetProperty(const char* propertyName, Result&) const;
     template <typename T, typename Result>
-    bool tryGetProperty(const char* propertyName, T* context, void (*setter)(T* context, const Result&));
+    bool tryGetProperty(const char* propertyName, T* context, void (*setter)(T* context, const Result&)) const;
+
+    // Returns true if the property was found in the dictionary, and the value could be converted to the desired type.
+    template <typename Result>
+    bool get(const char* propertyName, Result&) const;
+    bool getWithUndefinedOrNullCheck(const String& propertyName, String& value) const;
+
+    JSC::ExecState* execState() const { return m_exec; }
+    JSC::JSObject* initializerObject() const { return m_initializerObject.get(); }
+    bool isValid() const { return m_exec && m_initializerObject; }
 
 private:
     template <typename Result>
@@ -68,16 +83,22 @@ private:
         NoPropertyFound,
         PropertyFound
     };
-    GetPropertyResult tryGetProperty(const char* propertyName, JSC::JSValue&);
+    
+    template <typename T, typename Result>
+    GetPropertyResult tryGetPropertyAndResult(const char* propertyName, T* context, void (*setter)(T* context, const Result&)) const;
+    GetPropertyResult tryGetProperty(const char* propertyName, JSC::JSValue&) const;
 
     static void convertValue(JSC::ExecState*, JSC::JSValue, bool& result);
     static void convertValue(JSC::ExecState*, JSC::JSValue, int& result);
     static void convertValue(JSC::ExecState*, JSC::JSValue, unsigned& result);
     static void convertValue(JSC::ExecState*, JSC::JSValue, unsigned short& result);
+    static void convertValue(JSC::ExecState*, JSC::JSValue, unsigned long& result);
     static void convertValue(JSC::ExecState*, JSC::JSValue, unsigned long long& result);
     static void convertValue(JSC::ExecState*, JSC::JSValue, double& result);
+    static void convertValue(JSC::ExecState*, JSC::JSValue, Dictionary& result);
     static void convertValue(JSC::ExecState*, JSC::JSValue, String& result);
     static void convertValue(JSC::ExecState*, JSC::JSValue, ScriptValue& result);
+    static void convertValue(JSC::ExecState*, JSC::JSValue, Vector<String>& result);
     static void convertValue(JSC::ExecState*, JSC::JSValue, RefPtr<SerializedScriptValue>& result);
     static void convertValue(JSC::ExecState*, JSC::JSValue, RefPtr<DOMWindow>& result);
     static void convertValue(JSC::ExecState*, JSC::JSValue, RefPtr<EventTarget>& result);
@@ -87,25 +108,51 @@ private:
 #if ENABLE(VIDEO_TRACK)
     static void convertValue(JSC::ExecState*, JSC::JSValue, RefPtr<TrackBase>& result);
 #endif
+#if ENABLE(MUTATION_OBSERVERS) || ENABLE(WEB_INTENTS)
+    static void convertValue(JSC::ExecState*, JSC::JSValue, HashSet<AtomicString>& result);
+#endif
+    static void convertValue(JSC::ExecState*, JSC::JSValue, ArrayValue& result);
+    static void convertValue(JSC::ExecState*, JSC::JSValue, RefPtr<Uint8Array>& result);
+#if ENABLE(ENCRYPTED_MEDIA)
+    static void convertValue(JSC::ExecState*, JSC::JSValue, RefPtr<MediaKeyError>& result);
+#endif
 
     JSC::ExecState* m_exec;
-    JSC::JSObject* m_initializerObject;
+    JSC::Strong<JSC::JSObject> m_initializerObject;
 };
 
+template <typename T, typename Result>
+bool JSDictionary::tryGetProperty(const char* propertyName, T* context, void (*setter)(T* context, const Result&)) const
+{
+    return tryGetPropertyAndResult(propertyName, context, setter) != ExceptionThrown;
+}
+
+template <typename Result>
+bool JSDictionary::tryGetProperty(const char* propertyName, Result& finalResult) const
+{
+    return tryGetPropertyAndResult(propertyName, &finalResult, IdentitySetter<Result>::identitySetter) != ExceptionThrown;
+}
+
+template <typename Result>
+bool JSDictionary::get(const char* propertyName, Result& finalResult) const
+{
+    return tryGetPropertyAndResult(propertyName, &finalResult, IdentitySetter<Result>::identitySetter) == PropertyFound;
+}
 
 template <typename T, typename Result>
-bool JSDictionary::tryGetProperty(const char* propertyName, T* context, void (*setter)(T* context, const Result&))
+JSDictionary::GetPropertyResult JSDictionary::tryGetPropertyAndResult(const char* propertyName, T* context, void (*setter)(T* context, const Result&)) const
 {
     JSC::JSValue value;
-    switch (tryGetProperty(propertyName, value)) {
+    GetPropertyResult getPropertyResult = tryGetProperty(propertyName, value);
+    switch (getPropertyResult) {
     case ExceptionThrown:
-        return false;
+        return getPropertyResult;
     case PropertyFound: {
         Result result;
         convertValue(m_exec, value, result);
 
         if (m_exec->hadException())
-            return false;
+            return ExceptionThrown;
 
         setter(context, result);
         break;
@@ -114,13 +161,7 @@ bool JSDictionary::tryGetProperty(const char* propertyName, T* context, void (*s
         break;
     }
 
-    return true;
-}
-
-template <typename Result>
-bool JSDictionary::tryGetProperty(const char* propertyName, Result& finalResult)
-{
-    return tryGetProperty(propertyName, &finalResult, IdentitySetter<Result>::identitySetter);
+    return getPropertyResult;
 }
 
 } // namespace WebCore

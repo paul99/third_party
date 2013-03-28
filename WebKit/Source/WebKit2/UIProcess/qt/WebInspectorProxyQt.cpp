@@ -54,6 +54,12 @@ void WebInspectorProxy::platformBringToFront()
     notImplemented();
 }
 
+bool WebInspectorProxy::platformIsFront()
+{
+    notImplemented();
+    return false;
+}
+
 void WebInspectorProxy::platformInspectedURLChanged(const String&)
 {
     notImplemented();
@@ -71,6 +77,11 @@ void WebInspectorProxy::platformAttach()
 }
 
 void WebInspectorProxy::platformDetach()
+{
+    notImplemented();
+}
+
+void WebInspectorProxy::platformAttachAvailabilityChanged(bool)
 {
     notImplemented();
 }

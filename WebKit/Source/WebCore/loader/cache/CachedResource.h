@@ -25,17 +25,18 @@
 
 #include "CachePolicy.h"
 #include "FrameLoaderTypes.h"
-#include "PlatformString.h"
 #include "PurgePriority.h"
-#include "ResourceLoaderOptions.h"
 #include "ResourceLoadPriority.h"
+#include "ResourceLoaderOptions.h"
 #include "ResourceRequest.h"
 #include "ResourceResponse.h"
+#include "Timer.h"
+#include <time.h>
 #include <wtf/HashCountedSet.h>
 #include <wtf/HashSet.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/Vector.h>
-#include <time.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -44,9 +45,9 @@ class CachedMetadata;
 class CachedResourceClient;
 class CachedResourceHandleBase;
 class CachedResourceLoader;
-class Frame;
 class InspectorResource;
 class PurgeableBuffer;
+class ResourceBuffer;
 class SecurityOrigin;
 class SubresourceLoader;
 
@@ -60,17 +61,20 @@ class CachedResource {
     
 public:
     enum Type {
+        MainResource,
         ImageResource,
         CSSStyleSheet,
         Script,
         FontResource,
         RawResource
+#if ENABLE(SVG)
+        , SVGDocumentResource
+#endif
 #if ENABLE(XSLT)
         , XSLStyleSheet
 #endif
 #if ENABLE(LINK_PREFETCH)
         , LinkPrefetch
-        , LinkPrerender
         , LinkSubresource
 #endif
 #if ENABLE(VIDEO_TRACK)
@@ -85,7 +89,6 @@ public:
         Unknown,      // let cache decide what to do with it
         Pending,      // only partially loaded
         Cached,       // regular case
-        Canceled,
         LoadError,
         DecodeError
     };
@@ -97,8 +100,11 @@ public:
 
     virtual void setEncoding(const String&) { }
     virtual String encoding() const { return String(); }
-    virtual void data(PassRefPtr<SharedBuffer> data, bool allDataReceived);
+    virtual void data(PassRefPtr<ResourceBuffer> data, bool allDataReceived);
     virtual void error(CachedResource::Status);
+
+    void setResourceError(const ResourceError& error) { m_error = error; }
+    const ResourceError& resourceError() const { return m_error; }
 
     virtual bool shouldIgnoreHTTPStatusCodeErrors() const { return false; }
 
@@ -111,8 +117,8 @@ public:
 
     void addClient(CachedResourceClient*);
     void removeClient(CachedResourceClient*);
-    bool hasClients() const { return !m_clients.isEmpty(); }
-    void deleteIfPossible();
+    bool hasClients() const { return !m_clients.isEmpty() || !m_clientsAwaitingCallback.isEmpty(); }
+    bool deleteIfPossible();
 
     enum PreloadResult {
         PreloadNotReferenced,
@@ -123,7 +129,9 @@ public:
     PreloadResult preloadResult() const { return static_cast<PreloadResult>(m_preloadResult); }
 
     virtual void didAddClient(CachedResourceClient*);
+    virtual void didRemoveClient(CachedResourceClient*) { }
     virtual void allClientsRemoved() { }
+    void destroyDecodedDataIfNeeded();
 
     unsigned count() const { return m_clients.size(); }
 
@@ -139,14 +147,16 @@ public:
 
     bool isLoading() const { return m_loading; }
     void setLoading(bool b) { m_loading = b; }
+    virtual bool stillNeedsLoad() const { return false; }
+
+    SubresourceLoader* loader() { return m_loader.get(); }
 
     virtual bool isImage() const { return false; }
     bool ignoreForRequestCount() const
     {
-        return false
+        return type() == MainResource
 #if ENABLE(LINK_PREFETCH)
             || type() == LinkPrefetch
-            || type() == LinkPrerender
             || type() == LinkSubresource
 #endif
             || type() == RawResource;
@@ -168,12 +178,11 @@ public:
     void setInCache(bool inCache) { m_inCache = inCache; }
     bool inCache() const { return m_inCache; }
     
-    void setInLiveDecodedResourcesList(bool b) { m_inLiveDecodedResourcesList = b; }
     bool inLiveDecodedResourcesList() { return m_inLiveDecodedResourcesList; }
     
     void stopLoading();
 
-    SharedBuffer* data() const { ASSERT(!m_purgeableData); return m_data.get(); }
+    ResourceBuffer* resourceBuffer() const { ASSERT(!m_purgeableData); return m_data.get(); }
 
     virtual void willSendRequest(ResourceRequest&, const ResourceResponse&) { m_requestedFromNetworkingLayer = true; }
     virtual void setResponse(const ResourceResponse&);
@@ -200,10 +209,12 @@ public:
     String accept() const { return m_accept; }
     void setAccept(const String& accept) { m_accept = accept; }
 
-    bool wasCanceled() const { return m_status == Canceled; }
-    bool errorOccurred() const { return (m_status == LoadError || m_status == DecodeError); }
+    bool wasCanceled() const { return m_error.isCancellation(); }
+    bool errorOccurred() const { return m_status == LoadError || m_status == DecodeError; }
+    bool loadFailedOrCanceled() { return !m_error.isNull(); }
 
-    bool sendResourceLoadCallbacks() const { return m_options.sendLoadCallbacks == SendCallbacks; }
+    bool shouldSendResourceLoadCallbacks() const { return m_options.sendLoadCallbacks == SendCallbacks; }
+    bool shouldBufferData() const { return m_options.shouldBufferData == BufferData; }
     
     virtual void destroyDecodedData() { }
 
@@ -243,8 +254,10 @@ public:
     void setLoadFinishTime(double finishTime) { m_loadFinishTime = finishTime; }
     double loadFinishTime() const { return m_loadFinishTime; }
 
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const;
+
 protected:
-    void checkNotify();
+    virtual void checkNotify();
 
     void setEncodedSize(unsigned);
     void setDecodedSize(unsigned);
@@ -253,6 +266,22 @@ protected:
     bool isSafeToMakePurgeable() const;
     
     HashCountedSet<CachedResourceClient*> m_clients;
+
+    class CachedResourceCallback {
+    public:
+        static PassOwnPtr<CachedResourceCallback> schedule(CachedResource* resource, CachedResourceClient* client) { return adoptPtr(new CachedResourceCallback(resource, client)); }
+        void cancel();
+    private:
+        CachedResourceCallback(CachedResource*, CachedResourceClient*);
+        void timerFired(Timer<CachedResourceCallback>*);
+
+        CachedResource* m_resource;
+        CachedResourceClient* m_client;
+        Timer<CachedResourceCallback> m_callbackTimer;
+    };
+    HashMap<CachedResourceClient*, OwnPtr<CachedResourceCallback> > m_clientsAwaitingCallback;
+
+    bool hasClient(CachedResourceClient* client) { return m_clients.contains(client) || m_clientsAwaitingCallback.contains(client); }
 
     ResourceRequest m_resourceRequest;
     String m_accept;
@@ -263,18 +292,27 @@ protected:
     ResourceResponse m_response;
     double m_responseTimestamp;
 
-    RefPtr<SharedBuffer> m_data;
+    RefPtr<ResourceBuffer> m_data;
     OwnPtr<PurgeableBuffer> m_purgeableData;
+    Timer<CachedResource> m_decodedDataDeletionTimer;
 
 private:
-    void addClientToSet(CachedResourceClient*);
+    bool addClientToSet(CachedResourceClient*);
+    void decodedDataDeletionTimerFired(Timer<CachedResource>*);
 
     virtual PurgePriority purgePriority() const { return PurgeDefault; }
 
     double currentAge() const;
     double freshnessLifetime() const;
 
+    void addAdditionalRequestHeaders(CachedResourceLoader*);
+    void failBeforeStarting();
+
+    String m_fragmentIdentifierForRequest;
+
     RefPtr<CachedMetadata> m_cachedMetadata;
+
+    ResourceError m_error;
 
     double m_lastDecodedAccessTime; // Used as a "thrash guard" in the cache
     double m_loadFinishTime;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2008, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,29 +26,30 @@
 #ifndef JITCode_h
 #define JITCode_h
 
-#if ENABLE(JIT)
+#if ENABLE(JIT) || ENABLE(LLINT)
 #include "CallFrame.h"
 #include "JSValue.h"
+#include "Disassembler.h"
+#include "LegacyProfiler.h"
 #include "MacroAssemblerCodeRef.h"
-#include "Profiler.h"
 #endif
 
 namespace JSC {
 
 #if ENABLE(JIT)
     class JSGlobalData;
-    class RegisterFile;
+    class JSStack;
 #endif
     
     class JITCode {
-#if ENABLE(JIT)
+#if ENABLE(JIT) || ENABLE(LLINT)
         typedef MacroAssemblerCodeRef CodeRef;
         typedef MacroAssemblerCodePtr CodePtr;
 #else
         JITCode() { }
 #endif
     public:
-        enum JITType { HostCallThunk, BaselineJIT, DFGJIT };
+        enum JITType { None, HostCallThunk, InterpreterThunk, BaselineJIT, DFGJIT };
         
         static JITType bottomTierJIT()
         {
@@ -66,8 +67,19 @@ namespace JSC {
             return DFGJIT;
         }
         
-#if ENABLE(JIT)
+        static bool isOptimizingJIT(JITType jitType)
+        {
+            return jitType == DFGJIT;
+        }
+        
+        static bool isBaselineCode(JITType jitType)
+        {
+            return jitType == InterpreterThunk || jitType == BaselineJIT;
+        }
+        
+#if ENABLE(JIT) || ENABLE(LLINT)
         JITCode()
+            : m_jitType(None)
         {
         }
 
@@ -75,6 +87,7 @@ namespace JSC {
             : m_ref(ref)
             , m_jitType(jitType)
         {
+            ASSERT(jitType != None);
         }
         
         bool operator !() const
@@ -93,9 +106,14 @@ namespace JSC {
             return reinterpret_cast<char*>(m_ref.code().executableAddress()) + offset;
         }
         
+        void* executableAddress() const
+        {
+            return executableAddressAtOffset(0);
+        }
+        
         void* dataAddressAtOffset(size_t offset) const
         {
-            ASSERT(offset < size());
+            ASSERT(offset <= size()); // use <= instead of < because it is valid to ask for an address at the exclusive end of the code.
             return reinterpret_cast<char*>(m_ref.code().dataLocation()) + offset;
         }
 
@@ -109,12 +127,14 @@ namespace JSC {
             return static_cast<unsigned>(result);
         }
 
+#if ENABLE(JIT)
         // Execute the code!
-        inline JSValue execute(RegisterFile* registerFile, CallFrame* callFrame, JSGlobalData* globalData)
+        inline JSValue execute(JSStack* stack, CallFrame* callFrame, JSGlobalData* globalData)
         {
-            JSValue result = JSValue::decode(ctiTrampoline(m_ref.code().executableAddress(), registerFile, callFrame, 0, Profiler::enabledProfilerReference(), globalData));
+            JSValue result = JSValue::decode(ctiTrampoline(m_ref.code().executableAddress(), stack, callFrame, 0, 0, globalData));
             return globalData->exception ? jsNull() : result;
         }
+#endif
 
         void* start() const
         {
@@ -126,13 +146,18 @@ namespace JSC {
             ASSERT(m_ref.code().executableAddress());
             return m_ref.size();
         }
+        
+        bool tryToDisassemble(const char* prefix) const
+        {
+            return m_ref.tryToDisassemble(prefix);
+        }
 
         ExecutableMemoryHandle* getExecutableMemory()
         {
             return m_ref.executableMemory();
         }
         
-        JITType jitType()
+        JITType jitType() const
         {
             return m_jitType;
         }
@@ -159,9 +184,16 @@ namespace JSC {
 
         CodeRef m_ref;
         JITType m_jitType;
-#endif // ENABLE(JIT)
+#endif // ENABLE(JIT) || ENABLE(LLINT)
     };
 
-};
+} // namespace JSC
+
+namespace WTF {
+
+class PrintStream;
+void printInternal(PrintStream&, JSC::JITCode::JITType);
+
+} // namespace WTF
 
 #endif

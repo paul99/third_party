@@ -1,5 +1,6 @@
 /*
    Copyright (C) 2011 Samsung Electronics
+   Copyright (C) 2012 Intel Corporation. All rights reserved.
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Library General Public
@@ -20,24 +21,62 @@
 #include "config.h"
 #include "ewk_view.h"
 
+#include "EwkViewImpl.h"
+#include "FindClientEfl.h"
+#include "FormClientEfl.h"
+#include "InputMethodContextEfl.h"
 #include "NativeWebKeyboardEvent.h"
 #include "NativeWebMouseEvent.h"
 #include "NativeWebWheelEvent.h"
-#include "PageClientImpl.h"
+#include "PageClientBase.h"
+#include "PageLoadClientEfl.h"
+#include "PagePolicyClientEfl.h"
+#include "PageUIClientEfl.h"
+#include "ResourceLoadClientEfl.h"
 #include "WKAPICast.h"
+#include "WKEinaSharedString.h"
+#include "WKFindOptions.h"
+#include "WKRetainPtr.h"
+#include "WKString.h"
+#include "WebContext.h"
+#include "WebFullScreenManagerProxy.h"
+#include "WebPageGroup.h"
+#include "WebPreferences.h"
+#include "ewk_back_forward_list_private.h"
+#include "ewk_context.h"
+#include "ewk_context_private.h"
+#include "ewk_favicon_database_private.h"
+#include "ewk_intent_private.h"
+#include "ewk_private.h"
+#include "ewk_settings_private.h"
+#include "ewk_view_private.h"
+#include <Ecore_Evas.h>
+#include <WebKit2/WKPageGroup.h>
+#include <wtf/UnusedParam.h>
+#include <wtf/text/CString.h>
+
+#if ENABLE(INSPECTOR)
+#include "WebInspectorProxy.h"
+#endif
+
+#if USE(TILED_BACKING_STORE)
+#include "PageViewportController.h"
+#include "PageViewportControllerClientEfl.h"
+#endif
 
 using namespace WebKit;
 using namespace WebCore;
 
 static const char EWK_VIEW_TYPE_STR[] = "EWK2_View";
 
-struct _Ewk_View_Private_Data {
-    OwnPtr<PageClientImpl> pageClient;
-};
-
 #define EWK_VIEW_TYPE_CHECK(ewkView, result)                                   \
     bool result = true;                                                        \
     do {                                                                       \
+        if (!ewkView) {                                                        \
+            EINA_LOG_CRIT("null is not a ewk_view");                           \
+            result = false;                                                    \
+            break;                                                             \
+        }                                                                      \
         const char* _tmp_otype = evas_object_type_get(ewkView);                \
         const Evas_Smart* _tmp_s = evas_object_smart_smart_get(ewkView);       \
         if (EINA_UNLIKELY(!_tmp_s)) {                                          \
@@ -45,6 +84,7 @@ struct _Ewk_View_Private_Data {
                 ("%p (%s) is not a smart object!",                             \
                  ewkView, _tmp_otype ? _tmp_otype : "(null)");                 \
             result = false;                                                    \
+            break;                                                             \
         }                                                                      \
         const Evas_Smart_Class* _tmp_sc = evas_smart_class_get(_tmp_s);        \
         if (EINA_UNLIKELY(!_tmp_sc)) {                                         \
@@ -52,6 +92,7 @@ struct _Ewk_View_Private_Data {
                 ("%p (%s) is not a smart object!",                             \
                  ewkView, _tmp_otype ? _tmp_otype : "(null)");                 \
             result = false;                                                    \
+            break;                                                             \
         }                                                                      \
         if (EINA_UNLIKELY(_tmp_sc->data != EWK_VIEW_TYPE_STR)) {               \
             EINA_LOG_CRIT                                                      \
@@ -66,30 +107,43 @@ struct _Ewk_View_Private_Data {
     EWK_VIEW_TYPE_CHECK(ewkView, _tmp_result);                                 \
     Ewk_View_Smart_Data* smartData = 0;                                        \
     if (_tmp_result)                                                           \
-        smartData = (Ewk_View_Smart_Data*)evas_object_smart_data_get(ewkView);
+        smartData = (Ewk_View_Smart_Data*)evas_object_smart_data_get(ewkView)
 
 #define EWK_VIEW_SD_GET_OR_RETURN(ewkView, smartData, ...)                     \
     EWK_VIEW_SD_GET(ewkView, smartData);                                       \
-    if (!smartData) {                                                          \
-        EINA_LOG_CRIT("no smart data for object %p (%s)",                      \
-                 ewkView, evas_object_type_get(ewkView));                      \
-        return __VA_ARGS__;                                                    \
-    }
+    do {                                                                       \
+        if (!smartData) {                                                      \
+            EINA_LOG_CRIT("no smart data for object %p (%s)",                  \
+                     ewkView, evas_object_type_get(ewkView));                  \
+            return __VA_ARGS__;                                                \
+        }                                                                      \
+    } while (0)
 
-#define EWK_VIEW_PRIV_GET(smartData, priv)                                     \
-    Ewk_View_Private_Data* priv = smartData->priv
-
-#define EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, ...)                      \
+#define EWK_VIEW_IMPL_GET_BY_SD_OR_RETURN(smartData, impl, ...)                \
     if (!smartData) {                                                          \
         EINA_LOG_CRIT("smart data is null");                                   \
         return __VA_ARGS__;                                                    \
     }                                                                          \
-    EWK_VIEW_PRIV_GET(smartData, priv);                                        \
-    if (!priv) {                                                               \
-        EINA_LOG_CRIT("no private data for object %p (%s)",                    \
-                 smartData->self, evas_object_type_get(smartData->self));      \
-        return __VA_ARGS__;                                                    \
-    }
+    EwkViewImpl* impl = smartData->priv;                                       \
+    do {                                                                       \
+        if (!impl) {                                                           \
+            EINA_LOG_CRIT("no private data for object %p (%s)",                \
+                smartData->self, evas_object_type_get(smartData->self));       \
+            return __VA_ARGS__;                                                \
+        }                                                                      \
+    } while (0)
+
+#define EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, ...)                        \
+    EwkViewImpl* impl = 0;                                                     \
+    do {                                                                       \
+        EWK_VIEW_SD_GET_OR_RETURN(ewkView, smartData, __VA_ARGS__);            \
+        impl = smartData->priv;                                                \
+        if (!impl) {                                                           \
+            EINA_LOG_CRIT("no private data for object %p (%s)",                \
+                smartData->self, evas_object_type_get(smartData->self));       \
+            return __VA_ARGS__;                                                \
+        }                                                                      \
+    } while (0)
 
 static void _ewk_view_smart_changed(Ewk_View_Smart_Data* smartData)
 {
@@ -102,74 +156,80 @@ static void _ewk_view_smart_changed(Ewk_View_Smart_Data* smartData)
 // Default Event Handling.
 static Eina_Bool _ewk_view_smart_focus_in(Ewk_View_Smart_Data* smartData)
 {
-    EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, false)
+    EWK_VIEW_IMPL_GET_BY_SD_OR_RETURN(smartData, impl, false);
 
-    priv->pageClient->page()->viewStateDidChange(WebPageProxy::ViewIsFocused | WebPageProxy::ViewWindowIsActive);
+    impl->page()->viewStateDidChange(WebPageProxy::ViewIsFocused | WebPageProxy::ViewWindowIsActive);
     return true;
 }
 
 static Eina_Bool _ewk_view_smart_focus_out(Ewk_View_Smart_Data* smartData)
 {
-    EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, false)
+    EWK_VIEW_IMPL_GET_BY_SD_OR_RETURN(smartData, impl, false);
 
-    priv->pageClient->page()->viewStateDidChange(WebPageProxy::ViewWindowIsActive);
+    impl->page()->viewStateDidChange(WebPageProxy::ViewIsFocused | WebPageProxy::ViewWindowIsActive);
     return true;
 }
 
 static Eina_Bool _ewk_view_smart_mouse_wheel(Ewk_View_Smart_Data* smartData, const Evas_Event_Mouse_Wheel* wheelEvent)
 {
-    EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, false)
+    EWK_VIEW_IMPL_GET_BY_SD_OR_RETURN(smartData, impl, false);
 
-    Evas_Point position = {smartData->view.x, smartData->view.y};
-    priv->pageClient->page()->handleWheelEvent(NativeWebWheelEvent(wheelEvent, &position));
+    impl->page()->handleWheelEvent(NativeWebWheelEvent(wheelEvent, impl->transformFromScene(), impl->transformToScreen()));
     return true;
 }
 
 static Eina_Bool _ewk_view_smart_mouse_down(Ewk_View_Smart_Data* smartData, const Evas_Event_Mouse_Down* downEvent)
 {
-    EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, false)
+    EWK_VIEW_IMPL_GET_BY_SD_OR_RETURN(smartData, impl, false);
 
-    Evas_Point position = {smartData->view.x, smartData->view.y};
-    priv->pageClient->page()->handleMouseEvent(NativeWebMouseEvent(downEvent, &position));
+    impl->page()->handleMouseEvent(NativeWebMouseEvent(downEvent, impl->transformFromScene(), impl->transformToScreen()));
     return true;
 }
 
 static Eina_Bool _ewk_view_smart_mouse_up(Ewk_View_Smart_Data* smartData, const Evas_Event_Mouse_Up* upEvent)
 {
-    EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, false)
+    EWK_VIEW_IMPL_GET_BY_SD_OR_RETURN(smartData, impl, false);
 
-    Evas_Point position = {smartData->view.x, smartData->view.y};
-    priv->pageClient->page()->handleMouseEvent(NativeWebMouseEvent(upEvent, &position));
+    impl->page()->handleMouseEvent(NativeWebMouseEvent(upEvent, impl->transformFromScene(), impl->transformToScreen()));
+
+    InputMethodContextEfl* inputMethodContext = impl->inputMethodContext();
+    if (inputMethodContext)
+        inputMethodContext->handleMouseUpEvent(upEvent);
+
     return true;
 }
 
 static Eina_Bool _ewk_view_smart_mouse_move(Ewk_View_Smart_Data* smartData, const Evas_Event_Mouse_Move* moveEvent)
 {
-    EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, false)
+    EWK_VIEW_IMPL_GET_BY_SD_OR_RETURN(smartData, impl, false);
 
-    Evas_Point position = {smartData->view.x, smartData->view.y};
-    priv->pageClient->page()->handleMouseEvent(NativeWebMouseEvent(moveEvent, &position));
+    impl->page()->handleMouseEvent(NativeWebMouseEvent(moveEvent, impl->transformFromScene(), impl->transformToScreen()));
     return true;
 }
 
 static Eina_Bool _ewk_view_smart_key_down(Ewk_View_Smart_Data* smartData, const Evas_Event_Key_Down* downEvent)
 {
-    EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, false)
+    EWK_VIEW_IMPL_GET_BY_SD_OR_RETURN(smartData, impl, false);
 
-    priv->pageClient->page()->handleKeyboardEvent(NativeWebKeyboardEvent(downEvent));
+    bool isFiltered = false;
+    InputMethodContextEfl* inputMethodContext = impl->inputMethodContext();
+    if (inputMethodContext)
+        inputMethodContext->handleKeyDownEvent(downEvent, &isFiltered);
+
+    impl->page()->handleKeyboardEvent(NativeWebKeyboardEvent(downEvent, isFiltered));
     return true;
 }
 
 static Eina_Bool _ewk_view_smart_key_up(Ewk_View_Smart_Data* smartData, const Evas_Event_Key_Up* upEvent)
 {
-    EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, false)
+    EWK_VIEW_IMPL_GET_BY_SD_OR_RETURN(smartData, impl, false);
 
-    priv->pageClient->page()->handleKeyboardEvent(NativeWebKeyboardEvent(upEvent));
+    impl->page()->handleKeyboardEvent(NativeWebKeyboardEvent(upEvent));
     return true;
 }
 
 // Event Handling.
-static void _ewk_view_on_focus_in(void* data, Evas* canvas, Evas_Object* ewkView, void* eventInfo)
+static void _ewk_view_on_focus_in(void* data, Evas*, Evas_Object*, void* /*eventInfo*/)
 {
     Ewk_View_Smart_Data* smartData = static_cast<Ewk_View_Smart_Data*>(data);
     EINA_SAFETY_ON_NULL_RETURN(smartData->api);
@@ -177,7 +237,7 @@ static void _ewk_view_on_focus_in(void* data, Evas* canvas, Evas_Object* ewkView
     smartData->api->focus_in(smartData);
 }
 
-static void _ewk_view_on_focus_out(void* data, Evas* canvas, Evas_Object* ewkView, void* eventInfo)
+static void _ewk_view_on_focus_out(void* data, Evas*, Evas_Object*, void* /*eventInfo*/)
 {
     Ewk_View_Smart_Data* smartData = static_cast<Ewk_View_Smart_Data*>(data);
     EINA_SAFETY_ON_NULL_RETURN(smartData->api);
@@ -185,7 +245,7 @@ static void _ewk_view_on_focus_out(void* data, Evas* canvas, Evas_Object* ewkVie
     smartData->api->focus_out(smartData);
 }
 
-static void _ewk_view_on_mouse_wheel(void* data, Evas* canvas, Evas_Object* ewkView, void* eventInfo)
+static void _ewk_view_on_mouse_wheel(void* data, Evas*, Evas_Object*, void* eventInfo)
 {
     Evas_Event_Mouse_Wheel* wheelEvent = static_cast<Evas_Event_Mouse_Wheel*>(eventInfo);
     Ewk_View_Smart_Data* smartData = static_cast<Ewk_View_Smart_Data*>(data);
@@ -194,34 +254,7 @@ static void _ewk_view_on_mouse_wheel(void* data, Evas* canvas, Evas_Object* ewkV
     smartData->api->mouse_wheel(smartData, wheelEvent);
 }
 
-static void _ewk_view_on_mouse_down(void* data, Evas* canvas, Evas_Object* ewkView, void* eventInfo)
-{
-    Evas_Event_Mouse_Down* downEvent = static_cast<Evas_Event_Mouse_Down*>(eventInfo);
-    Ewk_View_Smart_Data* smartData = static_cast<Ewk_View_Smart_Data*>(data);
-    EINA_SAFETY_ON_NULL_RETURN(smartData->api);
-    EINA_SAFETY_ON_NULL_RETURN(smartData->api->mouse_down);
-    smartData->api->mouse_down(smartData, downEvent);
-}
-
-static void _ewk_view_on_mouse_up(void* data, Evas* canvas, Evas_Object* ewkView, void* eventInfo)
-{
-    Evas_Event_Mouse_Up* upEvent = static_cast<Evas_Event_Mouse_Up*>(eventInfo);
-    Ewk_View_Smart_Data* smartData = static_cast<Ewk_View_Smart_Data*>(data);
-    EINA_SAFETY_ON_NULL_RETURN(smartData->api);
-    EINA_SAFETY_ON_NULL_RETURN(smartData->api->mouse_up);
-    smartData->api->mouse_up(smartData, upEvent);
-}
-
-static void _ewk_view_on_mouse_move(void* data, Evas* canvas, Evas_Object* ewkView, void* eventInfo)
-{
-    Evas_Event_Mouse_Move* moveEvent = static_cast<Evas_Event_Mouse_Move*>(eventInfo);
-    Ewk_View_Smart_Data* smartData = static_cast<Ewk_View_Smart_Data*>(data);
-    EINA_SAFETY_ON_NULL_RETURN(smartData->api);
-    EINA_SAFETY_ON_NULL_RETURN(smartData->api->mouse_move);
-    smartData->api->mouse_move(smartData, moveEvent);
-}
-
-static void _ewk_view_on_key_down(void* data, Evas* canvas, Evas_Object* ewkView, void* eventInfo)
+static void _ewk_view_on_key_down(void* data, Evas*, Evas_Object*, void* eventInfo)
 {
     Evas_Event_Key_Down* downEvent = static_cast<Evas_Event_Key_Down*>(eventInfo);
     Ewk_View_Smart_Data* smartData = static_cast<Ewk_View_Smart_Data*>(data);
@@ -230,7 +263,7 @@ static void _ewk_view_on_key_down(void* data, Evas* canvas, Evas_Object* ewkView
     smartData->api->key_down(smartData, downEvent);
 }
 
-static void _ewk_view_on_key_up(void* data, Evas* canvas, Evas_Object* ewkView, void* eventInfo)
+static void _ewk_view_on_key_up(void* data, Evas*, Evas_Object*, void* eventInfo)
 {
     Evas_Event_Key_Up* upEvent = static_cast<Evas_Event_Key_Up*>(eventInfo);
     Ewk_View_Smart_Data* smartData = static_cast<Ewk_View_Smart_Data*>(data);
@@ -239,28 +272,25 @@ static void _ewk_view_on_key_up(void* data, Evas* canvas, Evas_Object* ewkView, 
     smartData->api->key_up(smartData, upEvent);
 }
 
+static void _ewk_view_on_show(void* data, Evas*, Evas_Object*, void* /*eventInfo*/)
+{
+    Ewk_View_Smart_Data* smartData = static_cast<Ewk_View_Smart_Data*>(data);
+    EWK_VIEW_IMPL_GET_BY_SD_OR_RETURN(smartData, impl);
+    impl->page()->viewStateDidChange(WebPageProxy::ViewIsVisible);
+}
+
+static void _ewk_view_on_hide(void* data, Evas*, Evas_Object*, void* /*eventInfo*/)
+{
+    Ewk_View_Smart_Data* smartData = static_cast<Ewk_View_Smart_Data*>(data);
+    EWK_VIEW_IMPL_GET_BY_SD_OR_RETURN(smartData, impl);
+
+    // This call may look wrong, but we really need to pass ViewIsVisible here.
+    // viewStateDidChange() itself is responsible for actually setting the visibility to Visible or Hidden
+    // depending on what WebPageProxy::isViewVisible() returns, this simply triggers the process.
+    impl->page()->viewStateDidChange(WebPageProxy::ViewIsVisible);
+}
+
 static Evas_Smart_Class g_parentSmartClass = EVAS_SMART_CLASS_INIT_NULL;
-
-static Ewk_View_Private_Data* _ewk_view_priv_new(Ewk_View_Smart_Data* smartData)
-{
-    Ewk_View_Private_Data* priv =
-        static_cast<Ewk_View_Private_Data*>(calloc(1, sizeof(Ewk_View_Private_Data)));
-    if (!priv) {
-        EINA_LOG_CRIT("could not allocate Ewk_View_Private_Data");
-        return 0;
-    }
-
-    return priv;
-}
-
-static void _ewk_view_priv_del(Ewk_View_Private_Data* priv)
-{
-    if (!priv)
-        return;
-
-    priv->pageClient = nullptr;
-    free(priv);
-}
 
 static void _ewk_view_smart_add(Evas_Object* ewkView)
 {
@@ -279,17 +309,11 @@ static void _ewk_view_smart_add(Evas_Object* ewkView)
     }
 
     smartData->self = ewkView;
-    smartData->priv = _ewk_view_priv_new(smartData);
     smartData->api = api;
 
-    if (!smartData->priv) {
-        EINA_LOG_CRIT("could not allocate _Ewk_View_Private_Data");
-        evas_object_smart_data_set(ewkView, 0);
-        free(smartData);
-        return;
-    }
-
     g_parentSmartClass.add(ewkView);
+
+    smartData->priv = 0;
 
     // Create evas_object_image to draw web contents.
     smartData->image = evas_object_image_add(smartData->base.evas);
@@ -302,19 +326,18 @@ static void _ewk_view_smart_add(Evas_Object* ewkView)
     CONNECT(EVAS_CALLBACK_FOCUS_IN, _ewk_view_on_focus_in);
     CONNECT(EVAS_CALLBACK_FOCUS_OUT, _ewk_view_on_focus_out);
     CONNECT(EVAS_CALLBACK_MOUSE_WHEEL, _ewk_view_on_mouse_wheel);
-    CONNECT(EVAS_CALLBACK_MOUSE_DOWN, _ewk_view_on_mouse_down);
-    CONNECT(EVAS_CALLBACK_MOUSE_UP, _ewk_view_on_mouse_up);
-    CONNECT(EVAS_CALLBACK_MOUSE_MOVE, _ewk_view_on_mouse_move);
     CONNECT(EVAS_CALLBACK_KEY_DOWN, _ewk_view_on_key_down);
     CONNECT(EVAS_CALLBACK_KEY_UP, _ewk_view_on_key_up);
+    CONNECT(EVAS_CALLBACK_SHOW, _ewk_view_on_show);
+    CONNECT(EVAS_CALLBACK_HIDE, _ewk_view_on_hide);
 #undef CONNECT
 }
 
 static void _ewk_view_smart_del(Evas_Object* ewkView)
 {
     EWK_VIEW_SD_GET(ewkView, smartData);
-    if (smartData && smartData->priv)
-        _ewk_view_priv_del(smartData->priv);
+    if (smartData)
+        delete smartData->priv;
 
     g_parentSmartClass.del(ewkView);
 }
@@ -331,7 +354,7 @@ static void _ewk_view_smart_resize(Evas_Object* ewkView, Evas_Coord width, Evas_
     _ewk_view_smart_changed(smartData);
 }
 
-static void _ewk_view_smart_move(Evas_Object* ewkView, Evas_Coord x, Evas_Coord y)
+static void _ewk_view_smart_move(Evas_Object* ewkView, Evas_Coord /*x*/, Evas_Coord /*y*/)
 {
     EWK_VIEW_SD_GET_OR_RETURN(ewkView, smartData);
 
@@ -342,26 +365,34 @@ static void _ewk_view_smart_move(Evas_Object* ewkView, Evas_Coord x, Evas_Coord 
 static void _ewk_view_smart_calculate(Evas_Object* ewkView)
 {
     EWK_VIEW_SD_GET_OR_RETURN(ewkView, smartData);
-    EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv);
-    Evas_Coord x, y, width, height;
+    EWK_VIEW_IMPL_GET_BY_SD_OR_RETURN(smartData, impl);
 
     smartData->changed.any = false;
 
+    Evas_Coord x, y, width, height;
     evas_object_geometry_get(ewkView, &x, &y, &width, &height);
 
-    if (smartData->changed.size) {
-        if (priv->pageClient->page()->drawingArea())
-            priv->pageClient->page()->drawingArea()->setSize(IntSize(width, height), IntSize());
-        smartData->view.w = width;
-        smartData->view.h = height;
-        smartData->changed.size = false;
-    }
-
     if (smartData->changed.position) {
-        evas_object_move(smartData->image, x, y);
+        smartData->changed.position = false;
         smartData->view.x = x;
         smartData->view.y = y;
-        smartData->changed.position = false;
+        evas_object_move(smartData->image, x, y);
+    }
+
+    if (smartData->changed.size) {
+        smartData->changed.size = false;
+        smartData->view.w = width;
+        smartData->view.h = height;
+
+        if (impl->page()->drawingArea())
+            impl->page()->drawingArea()->setSize(IntSize(width, height), IntSize());
+
+#if USE(ACCELERATED_COMPOSITING)
+        impl->setNeedsSurfaceResize();
+#endif
+#if USE(TILED_BACKING_STORE)
+        impl->pageClient()->updateViewportSize();
+#endif
     }
 }
 
@@ -385,7 +416,7 @@ static void _ewk_view_smart_hide(Evas_Object* ewkView)
 static void _ewk_view_smart_color_set(Evas_Object* ewkView, int red, int green, int blue, int alpha)
 {
     EWK_VIEW_SD_GET_OR_RETURN(ewkView, smartData);
-    EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv);
+    EWK_VIEW_IMPL_GET_BY_SD_OR_RETURN(smartData, impl);
 
     if (alpha < 0)
         alpha = 0;
@@ -403,13 +434,13 @@ static void _ewk_view_smart_color_set(Evas_Object* ewkView, int red, int green, 
 #undef CHECK_COLOR
 
     evas_object_image_alpha_set(smartData->image, alpha < 255);
-    priv->pageClient->page()->setDrawsBackground(red || green || blue);
-    priv->pageClient->page()->setDrawsTransparentBackground(alpha < 255);
+    impl->page()->setDrawsBackground(red || green || blue);
+    impl->page()->setDrawsTransparentBackground(alpha < 255);
 
     g_parentSmartClass.color_set(ewkView, red, green, blue, alpha);
 }
 
-Eina_Bool ewk_view_smart_class_init(Ewk_View_Smart_Class* api)
+Eina_Bool ewk_view_smart_class_set(Ewk_View_Smart_Class* api)
 {
     EINA_SAFETY_ON_NULL_RETURN_VAL(api, false);
 
@@ -448,24 +479,27 @@ Eina_Bool ewk_view_smart_class_init(Ewk_View_Smart_Class* api)
     return true;
 }
 
-static inline Evas_Smart* _ewk_view_smart_class_new(void)
+static inline Evas_Smart* createEwkViewSmartClass(void)
 {
     static Ewk_View_Smart_Class api = EWK_VIEW_SMART_CLASS_INIT_NAME_VERSION("Ewk_View");
     static Evas_Smart* smart = 0;
 
     if (EINA_UNLIKELY(!smart)) {
-        ewk_view_smart_class_init(&api);
+        ewk_view_smart_class_set(&api);
         smart = evas_smart_class_new(&api.sc);
     }
 
     return smart;
 }
 
-Evas_Object* ewk_view_add(Evas* canvas, WKContextRef contextRef, WKPageGroupRef pageGroupRef)
+static inline Evas_Object* createEwkView(Evas* canvas, Evas_Smart* smart, PassRefPtr<EwkContext> context, WKPageGroupRef pageGroupRef = 0, EwkViewImpl::ViewBehavior behavior = EwkViewImpl::DefaultBehavior)
 {
-    Evas_Object* ewkView = evas_object_smart_add(canvas, _ewk_view_smart_class_new());
-    if (!ewkView)
-        return 0;
+    EINA_SAFETY_ON_NULL_RETURN_VAL(canvas, 0);
+    EINA_SAFETY_ON_NULL_RETURN_VAL(smart, 0);
+    EINA_SAFETY_ON_NULL_RETURN_VAL(context, 0);
+
+    Evas_Object* ewkView = evas_object_smart_add(canvas, smart);
+    EINA_SAFETY_ON_NULL_RETURN_VAL(ewkView, 0);
 
     EWK_VIEW_SD_GET(ewkView, smartData);
     if (!smartData) {
@@ -473,41 +507,424 @@ Evas_Object* ewk_view_add(Evas* canvas, WKContextRef contextRef, WKPageGroupRef 
         return 0;
     }
 
-    EWK_VIEW_PRIV_GET(smartData, priv);
-    if (!priv) {
-        evas_object_del(ewkView);
-        return 0;
-    }
+    ASSERT(!smartData->priv);
 
-    priv->pageClient = PageClientImpl::create(toImpl(contextRef), toImpl(pageGroupRef), ewkView);
-
+    // Default WebPageGroup is created in WebContext constructor if the pageGroupRef is 0,
+    // so we do not need to create it here.
+    smartData->priv = new EwkViewImpl(ewkView, context, toImpl(pageGroupRef), behavior);
     return ewkView;
 }
 
-WKPageRef ewk_view_page_get(Evas_Object* ewkView)
+/**
+ * @internal
+ * Constructs a ewk_view Evas_Object with WKType parameters.
+ */
+Evas_Object* ewk_view_base_add(Evas* canvas, WKContextRef contextRef, WKPageGroupRef pageGroupRef, EwkViewImpl::ViewBehavior behavior)
 {
-    EWK_VIEW_SD_GET_OR_RETURN(ewkView, smartData, 0);
-    EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, 0);
-
-    return toAPI(priv->pageClient->page());
+    return createEwkView(canvas, createEwkViewSmartClass(), contextRef ? EwkContext::create(toImpl(contextRef)) : EwkContext::defaultContext(), pageGroupRef, behavior);
 }
 
-void ewk_view_display(Evas_Object* ewkView, const IntRect& rect)
+Evas_Object* ewk_view_smart_add(Evas* canvas, Evas_Smart* smart, Ewk_Context* context)
 {
-    EWK_VIEW_SD_GET_OR_RETURN(ewkView, smartData);
-    if (!smartData->image)
-        return;
-
-    evas_object_image_data_update_add(smartData->image, rect.x(), rect.y(), rect.width(), rect.height());
+    return createEwkView(canvas, smart, ewk_object_cast<EwkContext*>(context));
 }
 
-void ewk_view_image_data_set(Evas_Object* ewkView, void* imageData, const IntSize& size)
+Evas_Object* ewk_view_add_with_context(Evas* canvas, Ewk_Context* context)
 {
-    EWK_VIEW_SD_GET_OR_RETURN(ewkView, smartData);
-    if (!imageData || !smartData->image)
-        return;
+    return ewk_view_smart_add(canvas, createEwkViewSmartClass(), ewk_object_cast<EwkContext*>(context));
+}
 
-    evas_object_resize(smartData->image, size.width(), size.height());
-    evas_object_image_size_set(smartData->image, size.width(), size.height());
-    evas_object_image_data_copy_set(smartData->image, imageData);
+Evas_Object* ewk_view_add(Evas* canvas)
+{
+    return ewk_view_add_with_context(canvas, ewk_context_default_get());
+}
+
+Ewk_Context* ewk_view_context_get(const Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, 0);
+
+    return impl->ewkContext();
+}
+
+Eina_Bool ewk_view_url_set(Evas_Object* ewkView, const char* url)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+    EINA_SAFETY_ON_NULL_RETURN_VAL(url, false);
+
+    impl->page()->loadURL(url);
+    impl->informURLChange();
+
+    return true;
+}
+
+const char* ewk_view_url_get(const Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, 0);
+
+    return impl->url();
+}
+
+const char *ewk_view_icon_url_get(const Evas_Object *ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, 0);
+
+    return impl->faviconURL();
+}
+
+Eina_Bool ewk_view_reload(Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    impl->page()->reload(/*reloadFromOrigin*/ false);
+    impl->informURLChange();
+
+    return true;
+}
+
+Eina_Bool ewk_view_reload_bypass_cache(Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    impl->page()->reload(/*reloadFromOrigin*/ true);
+    impl->informURLChange();
+
+    return true;
+}
+
+Eina_Bool ewk_view_stop(Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    impl->page()->stopLoading();
+
+    return true;
+}
+
+Ewk_Settings* ewk_view_settings_get(const Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, 0);
+
+    return impl->settings();
+}
+
+const char* ewk_view_title_get(const Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, 0);
+
+    return impl->title();
+}
+
+double ewk_view_load_progress_get(const Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, -1.0);
+
+    return impl->page()->estimatedProgress();
+}
+
+Eina_Bool ewk_view_scale_set(Evas_Object* ewkView, double scaleFactor, int x, int y)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    impl->page()->scalePage(scaleFactor, IntPoint(x, y));
+    return true;
+}
+
+double ewk_view_scale_get(const Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, -1);
+
+    return impl->page()->pageScaleFactor();
+}
+
+Eina_Bool ewk_view_device_pixel_ratio_set(Evas_Object* ewkView, float ratio)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    impl->page()->setIntrinsicDeviceScaleFactor(ratio);
+
+    return true;
+}
+
+float ewk_view_device_pixel_ratio_get(const Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, -1.0);
+
+    return impl->page()->deviceScaleFactor();
+}
+
+void ewk_view_theme_set(Evas_Object* ewkView, const char* path)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl);
+
+    impl->setThemePath(path);
+}
+
+const char* ewk_view_theme_get(const Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, 0);
+
+    return impl->themePath();
+}
+
+Eina_Bool ewk_view_back(Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    WebPageProxy* page = impl->page();
+    if (page->canGoBack()) {
+        page->goBack();
+        return true;
+    }
+
+    return false;
+}
+
+Eina_Bool ewk_view_forward(Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    WebPageProxy* page = impl->page();
+    if (page->canGoForward()) {
+        page->goForward();
+        return true;
+    }
+
+    return false;
+}
+
+Eina_Bool ewk_view_intent_deliver(Evas_Object* ewkView, Ewk_Intent* intent)
+{
+#if ENABLE(WEB_INTENTS)
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+    EwkIntent* intentImpl = ewk_object_cast<EwkIntent*>(intent);
+    EINA_SAFETY_ON_NULL_RETURN_VAL(intentImpl, false);
+
+    WebPageProxy* page = impl->page();
+    page->deliverIntentToFrame(page->mainFrame(), intentImpl->webIntentData());
+
+    return true;
+#else
+    return false;
+#endif
+}
+
+Eina_Bool ewk_view_back_possible(Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    return impl->page()->canGoBack();
+}
+
+Eina_Bool ewk_view_forward_possible(Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    return impl->page()->canGoForward();
+}
+
+Ewk_Back_Forward_List* ewk_view_back_forward_list_get(const Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, 0);
+
+    return impl->backForwardList();
+}
+
+Eina_Bool ewk_view_html_string_load(Evas_Object* ewkView, const char* html, const char* baseUrl, const char* unreachableUrl)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+    EINA_SAFETY_ON_NULL_RETURN_VAL(html, false);
+
+    if (unreachableUrl && *unreachableUrl)
+        impl->page()->loadAlternateHTMLString(String::fromUTF8(html), baseUrl ? String::fromUTF8(baseUrl) : "", String::fromUTF8(unreachableUrl));
+    else
+        impl->page()->loadHTMLString(String::fromUTF8(html), baseUrl ? String::fromUTF8(baseUrl) : "");
+
+    impl->informURLChange();
+
+    return true;
+}
+
+const char* ewk_view_custom_encoding_get(const Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, 0);
+
+    return impl->customTextEncodingName();
+}
+
+Eina_Bool ewk_view_custom_encoding_set(Evas_Object* ewkView, const char* encoding)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    impl->setCustomTextEncodingName(encoding ? encoding : String());
+
+    return true;
+}
+
+// EwkFindOptions should be matched up orders with WkFindOptions.
+COMPILE_ASSERT_MATCHING_ENUM(EWK_FIND_OPTIONS_CASE_INSENSITIVE, kWKFindOptionsCaseInsensitive);
+COMPILE_ASSERT_MATCHING_ENUM(EWK_FIND_OPTIONS_AT_WORD_STARTS, kWKFindOptionsAtWordStarts);
+COMPILE_ASSERT_MATCHING_ENUM(EWK_FIND_OPTIONS_TREAT_MEDIAL_CAPITAL_AS_WORD_START, kWKFindOptionsTreatMedialCapitalAsWordStart);
+COMPILE_ASSERT_MATCHING_ENUM(EWK_FIND_OPTIONS_BACKWARDS, kWKFindOptionsBackwards);
+COMPILE_ASSERT_MATCHING_ENUM(EWK_FIND_OPTIONS_WRAP_AROUND, kWKFindOptionsWrapAround);
+COMPILE_ASSERT_MATCHING_ENUM(EWK_FIND_OPTIONS_SHOW_OVERLAY, kWKFindOptionsShowOverlay);
+COMPILE_ASSERT_MATCHING_ENUM(EWK_FIND_OPTIONS_SHOW_FIND_INDICATOR, kWKFindOptionsShowFindIndicator);
+COMPILE_ASSERT_MATCHING_ENUM(EWK_FIND_OPTIONS_SHOW_HIGHLIGHT, kWKFindOptionsShowHighlight);
+
+Eina_Bool ewk_view_text_find(Evas_Object* ewkView, const char* text, Ewk_Find_Options options, unsigned maxMatchCount)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+    EINA_SAFETY_ON_NULL_RETURN_VAL(text, false);
+
+    impl->page()->findString(String::fromUTF8(text), static_cast<WebKit::FindOptions>(options), maxMatchCount);
+
+    return true;
+}
+
+Eina_Bool ewk_view_text_find_highlight_clear(Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    impl->page()->hideFindUI();
+
+    return true;
+}
+
+Eina_Bool ewk_view_text_matches_count(Evas_Object* ewkView, const char* text, Ewk_Find_Options options, unsigned maxMatchCount)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+    EINA_SAFETY_ON_NULL_RETURN_VAL(text, false);
+
+    impl->page()->countStringMatches(String::fromUTF8(text), static_cast<WebKit::FindOptions>(options), maxMatchCount);
+
+    return true;
+}
+
+Eina_Bool ewk_view_mouse_events_enabled_set(Evas_Object* ewkView, Eina_Bool enabled)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    impl->setMouseEventsEnabled(!!enabled);
+
+    return true;
+}
+
+Eina_Bool ewk_view_mouse_events_enabled_get(const Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    return impl->mouseEventsEnabled();
+}
+
+Eina_Bool ewk_view_feed_touch_event(Evas_Object* ewkView, Ewk_Touch_Event_Type type, const Eina_List* points, const Evas_Modifier* modifiers)
+{
+#if ENABLE(TOUCH_EVENTS)
+    EINA_SAFETY_ON_NULL_RETURN_VAL(points, false);
+    EWK_VIEW_SD_GET_OR_RETURN(ewkView, smartData, false);
+    EWK_VIEW_IMPL_GET_BY_SD_OR_RETURN(smartData, impl, false);
+
+    impl->page()->handleTouchEvent(NativeWebTouchEvent(type, points, modifiers, impl->transformFromScene(), impl->transformToScreen(), ecore_time_get()));
+
+    return true;
+#else
+    return false;
+#endif
+}
+
+Eina_Bool ewk_view_touch_events_enabled_set(Evas_Object* ewkView, Eina_Bool enabled)
+{
+#if ENABLE(TOUCH_EVENTS)
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    impl->setTouchEventsEnabled(!!enabled);
+
+    return true;
+#else
+    return false;
+#endif
+}
+
+Eina_Bool ewk_view_touch_events_enabled_get(const Evas_Object* ewkView)
+{
+#if ENABLE(TOUCH_EVENTS)
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    return impl->touchEventsEnabled();
+#else
+    return false;
+#endif
+}
+
+Eina_Bool ewk_view_inspector_show(Evas_Object* ewkView)
+{
+#if ENABLE(INSPECTOR)
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    WebInspectorProxy* inspector = impl->page()->inspector();
+    if (inspector)
+        inspector->show();
+
+    return true;
+#else
+    UNUSED_PARAM(ewkView);
+    return false;
+#endif
+}
+
+Eina_Bool ewk_view_inspector_close(Evas_Object* ewkView)
+{
+#if ENABLE(INSPECTOR)
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    WebInspectorProxy* inspector = impl->page()->inspector();
+    if (inspector)
+        inspector->close();
+
+    return true;
+#else
+    UNUSED_PARAM(ewkView);
+    return false;
+#endif
+}
+
+// Ewk_Pagination_Mode should be matched up orders with WebCore::Pagination::Mode.
+COMPILE_ASSERT_MATCHING_ENUM(EWK_PAGINATION_MODE_UNPAGINATED, WebCore::Pagination::Unpaginated);
+COMPILE_ASSERT_MATCHING_ENUM(EWK_PAGINATION_MODE_LEFT_TO_RIGHT, WebCore::Pagination::LeftToRightPaginated);
+COMPILE_ASSERT_MATCHING_ENUM(EWK_PAGINATION_MODE_RIGHT_TO_LEFT, WebCore::Pagination::RightToLeftPaginated);
+COMPILE_ASSERT_MATCHING_ENUM(EWK_PAGINATION_MODE_TOP_TO_BOTTOM, WebCore::Pagination::TopToBottomPaginated);
+COMPILE_ASSERT_MATCHING_ENUM(EWK_PAGINATION_MODE_BOTTOM_TO_TOP, WebCore::Pagination::BottomToTopPaginated);
+
+Eina_Bool ewk_view_pagination_mode_set(Evas_Object* ewkView, Ewk_Pagination_Mode mode)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+    
+    impl->page()->setPaginationMode(static_cast<WebCore::Pagination::Mode>(mode));
+
+    return true;
+}
+
+Ewk_Pagination_Mode ewk_view_pagination_mode_get(const Evas_Object* ewkView)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, EWK_PAGINATION_MODE_INVALID);
+
+    return static_cast<Ewk_Pagination_Mode>(impl->page()->paginationMode());
+}
+
+Eina_Bool ewk_view_fullscreen_exit(Evas_Object* ewkView)
+{
+#if ENABLE(FULLSCREEN_API)
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl, false);
+
+    impl->page()->fullScreenManager()->requestExitFullScreen();
+
+    return true;
+#else
+    return false;
+#endif
+}
+
+void ewk_view_draws_page_background_set(Evas_Object *ewkView, Eina_Bool enabled)
+{
+    EWK_VIEW_IMPL_GET_OR_RETURN(ewkView, impl);
+
+    impl->setDrawsBackground(enabled);
 }

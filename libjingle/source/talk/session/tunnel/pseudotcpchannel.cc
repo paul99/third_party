@@ -120,7 +120,8 @@ PseudoTcpChannel::~PseudoTcpChannel() {
 }
 
 bool PseudoTcpChannel::Connect(const std::string& content_name,
-                               const std::string& channel_name) {
+                               const std::string& channel_name,
+                               int component) {
   ASSERT(signal_thread_->IsCurrent());
   CritScope lock(&cs_);
 
@@ -130,7 +131,8 @@ bool PseudoTcpChannel::Connect(const std::string& content_name,
   ASSERT(session_ != NULL);
   worker_thread_ = session_->session_manager()->worker_thread();
   content_name_ = content_name;
-  channel_ = session_->CreateChannel(content_name, channel_name);
+  channel_ = session_->CreateChannel(
+      content_name, channel_name, component);
   channel_name_ = channel_name;
   channel_->SetOption(Socket::OPT_DONTFRAGMENT, 1);
 
@@ -166,7 +168,7 @@ StreamInterface* PseudoTcpChannel::GetStream() {
 }
 
 void PseudoTcpChannel::OnChannelDestroyed(TransportChannel* channel) {
-  LOG_F(LS_INFO) << "(" << channel->name() << ")";
+  LOG_F(LS_INFO) << "(" << channel->component() << ")";
   ASSERT(signal_thread_->IsCurrent());
   CritScope lock(&cs_);
   ASSERT(channel == channel_);
@@ -338,7 +340,7 @@ void PseudoTcpChannel::OnChannelWritableState(TransportChannel* channel) {
 }
 
 void PseudoTcpChannel::OnChannelRead(TransportChannel* channel,
-                                     const char* data, size_t size) {
+                                     const char* data, size_t size, int flags) {
   //LOG_F(LS_VERBOSE) << "(" << size << ")";
   ASSERT(worker_thread_->IsCurrent());
   CritScope lock(&cs_);
@@ -371,12 +373,18 @@ void PseudoTcpChannel::OnChannelConnectionChanged(TransportChannel* channel,
   }
 
   uint16 mtu = 1280;  // safe default
-  talk_base::scoped_ptr<Socket> mtu_socket(
-      worker_thread_->socketserver()->CreateSocket(SOCK_DGRAM));
-  if (mtu_socket->Connect(candidate.address()) < 0 ||
-      mtu_socket->EstimateMTU(&mtu) < 0) {
-    LOG_F(LS_WARNING) << "Failed to estimate MTU, error="
-                      << mtu_socket->GetError();
+  int family = candidate.address().family();
+  Socket* socket =
+      worker_thread_->socketserver()->CreateAsyncSocket(family, SOCK_DGRAM);
+  talk_base::scoped_ptr<Socket> mtu_socket(socket);
+  if (socket == NULL) {
+    LOG_F(LS_WARNING) << "Couldn't create socket while estimating MTU.";
+  } else {
+    if (mtu_socket->Connect(candidate.address()) < 0 ||
+        mtu_socket->EstimateMTU(&mtu) < 0) {
+      LOG_F(LS_WARNING) << "Failed to estimate MTU, error="
+                        << mtu_socket->GetError();
+    }
   }
 
   LOG_F(LS_VERBOSE) << "Using MTU of " << mtu << " bytes";
@@ -475,7 +483,7 @@ void PseudoTcpChannel::OnMessage(Message* pmsg) {
     LOG_F(LS_INFO) << "(MSG_SI_DESTROYCHANNEL)";
     ASSERT(session_ != NULL);
     ASSERT(channel_ != NULL);
-    session_->DestroyChannel(content_name_, channel_->name());
+    session_->DestroyChannel(content_name_, channel_->component());
 
   } else if (pmsg->message_id == MSG_SI_DESTROY) {
 

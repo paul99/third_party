@@ -28,6 +28,7 @@
 #include "ProcessLauncher.h"
 
 #include "Connection.h"
+#include "ProcessExecutablePath.h"
 #include <WebCore/FileSystem.h>
 #include <WebCore/ResourceHandle.h>
 #include <WebCore/RunLoop.h>
@@ -52,9 +53,6 @@ using namespace WebCore;
 
 namespace WebKit {
 
-const char* gWebKitWebProcessName = "WebKitWebProcess";
-const char* gWebKitPluginProcessName = "WebKitPluginProcess";
-
 static void childSetupFunction(gpointer userData)
 {
     int socket = GPOINTER_TO_INT(userData);
@@ -62,11 +60,6 @@ static void childSetupFunction(gpointer userData)
 
     // Make child process inherit parent's locale.
     g_setenv("LC_ALL", setlocale(LC_ALL, 0), TRUE);
-
-#if OS(LINUX)
-    // Kill child process when parent dies.
-    prctl(PR_SET_PDEATHSIG, SIGKILL);
-#endif
 }
 
 static void childFinishedFunction(GPid, gint status, gpointer userData)
@@ -75,34 +68,6 @@ static void childFinishedFunction(GPid, gint status, gpointer userData)
         return;
 
     close(GPOINTER_TO_INT(userData));
-}
-
-static CString findWebKitProcess(const char* processName)
-{
-    const char* execDirectory = g_getenv("WEBKIT_EXEC_PATH");
-    if (execDirectory) {
-        String processPath = pathByAppendingComponent(filenameToString(execDirectory), processName);
-        if (fileExists(processPath))
-            return fileSystemRepresentation(processPath);
-    }
-
-    static bool gotExecutablePath = false;
-    static String executablePath;
-    if (!gotExecutablePath) {
-        gotExecutablePath = true;
-
-        CString executableFile = getCurrentExecutablePath();
-        if (!executableFile.isNull())
-            executablePath = directoryName(filenameToString(executableFile.data()));
-    }
-
-    if (!executablePath.isNull()) {
-        String processPath = pathByAppendingComponent(executablePath, processName);
-        if (fileExists(processPath))
-            return fileSystemRepresentation(processPath);
-    }
-
-    return fileSystemRepresentation(pathByAppendingComponent(filenameToString(LIBEXECDIR), processName));
 }
 
 void ProcessLauncher::launchProcess()
@@ -116,7 +81,9 @@ void ProcessLauncher::launchProcess()
         return;
     }
 
-    CString binaryPath = findWebKitProcess(m_launchOptions.processType == ProcessLauncher::WebProcess ? gWebKitWebProcessName : gWebKitPluginProcessName);
+    String executablePath = m_launchOptions.processType == WebProcess ?
+                            executablePathOfWebProcess() : executablePathOfPluginProcess();
+    CString binaryPath = fileSystemRepresentation(executablePath);
     GOwnPtr<gchar> socket(g_strdup_printf("%d", sockets[0]));
     char* argv[3];
     argv[0] = const_cast<char*>(binaryPath.data());

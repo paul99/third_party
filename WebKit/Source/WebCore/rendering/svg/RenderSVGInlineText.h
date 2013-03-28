@@ -23,6 +23,7 @@
 #define RenderSVGInlineText_h
 
 #if ENABLE(SVG)
+#include "Font.h"
 #include "RenderText.h"
 #include "SVGTextLayoutAttributes.h"
 
@@ -48,8 +49,7 @@ public:
 private:
     virtual const char* renderName() const { return "RenderSVGInlineText"; }
 
-    virtual void willBeDestroyed();
-    virtual void setTextInternal(PassRefPtr<StringImpl>, int delta = 0);
+    virtual void setTextInternal(PassRefPtr<StringImpl>);
     virtual void styleDidChange(StyleDifference, const RenderStyle*);
 
     virtual FloatRect objectBoundingBox() const { return floatLinesBoundingBox(); }
@@ -59,7 +59,7 @@ private:
 
     virtual VisiblePosition positionForPoint(const LayoutPoint&);
     virtual LayoutRect localCaretRect(InlineBox*, int caretOffset, LayoutUnit* extraWidthToEndOfLine = 0);
-    virtual LayoutRect linesBoundingBox() const;
+    virtual IntRect linesBoundingBox() const;
     virtual InlineTextBox* createTextBox();
 
     float m_scalingFactor;

@@ -49,7 +49,7 @@ namespace WebCore {
     class WorkerMessagingProxy : public WorkerContextProxy, public WorkerObjectProxy, public WorkerLoaderProxy {
         WTF_MAKE_NONCOPYABLE(WorkerMessagingProxy); WTF_MAKE_FAST_ALLOCATED;
     public:
-        WorkerMessagingProxy(Worker*);
+        explicit WorkerMessagingProxy(Worker*);
 
         // Implementations of WorkerContextProxy.
         // (Only use these methods in the worker object thread.)
@@ -68,7 +68,7 @@ namespace WebCore {
         // (Only use these methods in the worker context thread.)
         virtual void postMessageToWorkerObject(PassRefPtr<SerializedScriptValue>, PassOwnPtr<MessagePortChannelArray>);
         virtual void postExceptionToWorkerObject(const String& errorMessage, int lineNumber, const String& sourceURL);
-        virtual void postConsoleMessageToWorkerObject(MessageSource, MessageType, MessageLevel, const String& message, int lineNumber, const String& sourceURL);
+        virtual void postConsoleMessageToWorkerObject(MessageSource, MessageLevel, const String& message, int lineNumber, const String& sourceURL);
 #if ENABLE(INSPECTOR)
         virtual void postMessageToPageInspector(const String&);
         virtual void updateInspectorStateCookie(const String&);
@@ -82,7 +82,7 @@ namespace WebCore {
         // These methods are called on different threads to schedule loading
         // requests and to send callbacks back to WorkerContext.
         virtual void postTaskToLoader(PassOwnPtr<ScriptExecutionContext::Task>);
-        virtual void postTaskForModeToWorkerContext(PassOwnPtr<ScriptExecutionContext::Task>, const String& mode);
+        virtual bool postTaskForModeToWorkerContext(PassOwnPtr<ScriptExecutionContext::Task>, const String& mode);
 
         void workerThreadCreated(PassRefPtr<DedicatedWorkerThread>);
 
@@ -99,11 +99,13 @@ namespace WebCore {
         virtual ~WorkerMessagingProxy();
 
         void workerContextDestroyedInternal();
+        static void workerObjectDestroyedInternal(ScriptExecutionContext*, WorkerMessagingProxy*);
         void reportPendingActivityInternal(bool confirmingMessage, bool hasPendingActivity);
         Worker* workerObject() const { return m_workerObject; }
 
         RefPtr<ScriptExecutionContext> m_scriptExecutionContext;
         Worker* m_workerObject;
+        bool m_mayBeDestroyed;
         RefPtr<DedicatedWorkerThread> m_workerThread;
 
         unsigned m_unconfirmedMessageCount; // Unconfirmed messages from worker object to worker thread.

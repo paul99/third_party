@@ -31,16 +31,16 @@
 #include "config.h"
 #include "WebHistoryItem.h"
 
+#include "FormController.h"
 #include "FormData.h"
 #include "HistoryItem.h"
 #include "KURL.h"
 #include "SerializedScriptValue.h"
-
-#include "platform/WebHTTPBody.h"
-#include "platform/WebPoint.h"
 #include "platform/WebSerializedScriptValue.h"
-#include "platform/WebString.h"
-#include "platform/WebVector.h"
+#include <public/WebHTTPBody.h>
+#include <public/WebPoint.h>
+#include <public/WebString.h>
+#include <public/WebVector.h>
 
 using namespace WebCore;
 
@@ -173,19 +173,8 @@ float WebHistoryItem::pageScaleFactor() const
 void WebHistoryItem::setPageScaleFactor(float scale)
 {
     ensureMutable();
-    return m_private->setPageScaleFactor(scale);
+    m_private->setPageScaleFactor(scale);
 }
-
-#if OS(ANDROID)
-bool WebHistoryItem::loadComplete() const {
-    return m_private->loadComplete();
-}
-
-void WebHistoryItem::setLoadComplete(bool loadComplete) {
-    ensureMutable();
-    m_private->setLoadComplete(loadComplete);
-}
-#endif
 
 bool WebHistoryItem::isTargetItem() const
 {
@@ -296,6 +285,23 @@ void WebHistoryItem::appendToChildren(const WebHistoryItem& item)
 {
     ensureMutable();
     m_private->addChildItem(item);
+}
+
+WebVector<WebString> WebHistoryItem::getReferencedFilePaths() const
+{
+    Vector<WebString> filePaths;
+    const FormData* formData = m_private->formData();
+    if (formData) {
+        for (size_t i = 0; i < formData->elements().size(); ++i) {
+            const FormDataElement& element = formData->elements()[i];
+            if (element.m_type == FormDataElement::encodedFile)
+                filePaths.append(element.m_filename);
+        }
+    }
+    const Vector<String>& selectedFilePaths = WebCore::FormController::getReferencedFilePaths(m_private->documentState());
+    for (size_t i = 0; i < selectedFilePaths.size(); ++i)
+        filePaths.append(selectedFilePaths[i]);
+    return filePaths;
 }
 
 WebHistoryItem::WebHistoryItem(const PassRefPtr<HistoryItem>& item)

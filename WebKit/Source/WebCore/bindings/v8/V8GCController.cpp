@@ -31,499 +31,404 @@
 #include "config.h"
 #include "V8GCController.h"
 
-#include "ActiveDOMObject.h"
 #include "Attr.h"
-#include "DOMDataStore.h"
-#include "DOMImplementation.h"
 #include "HTMLImageElement.h"
-#include "HTMLNames.h"
-#include "MessagePort.h"
-#include "PlatformSupport.h"
-#include "RetainedDOMInfo.h"
-#include "RetainedObjectInfo.h"
+#include "MemoryUsageSupport.h"
+#include "TraceEvent.h"
+#include "V8AbstractEventListener.h"
 #include "V8Binding.h"
-#include "V8CSSRule.h"
-#include "V8CSSRuleList.h"
-#include "V8CSSStyleDeclaration.h"
-#include "V8DOMImplementation.h"
 #include "V8MessagePort.h"
-#include "V8StyleSheet.h"
-#include "V8StyleSheetList.h"
+#include "V8MutationObserver.h"
+#include "V8Node.h"
+#include "V8RecursionScope.h"
 #include "WrapperTypeInfo.h"
-
 #include <algorithm>
-#include <utility>
-#include <v8-debug.h>
-#include <wtf/HashMap.h>
-#include <wtf/StdLibExtras.h>
-#include <wtf/UnusedParam.h>
 
 namespace WebCore {
 
-#ifndef NDEBUG
-// Keeps track of global handles created (not JS wrappers
-// of DOM objects). Often these global handles are source
-// of leaks.
-//
-// If you want to let a C++ object hold a persistent handle
-// to a JS object, you should register the handle here to
-// keep track of leaks.
-//
-// When creating a persistent handle, call:
-//
-// #ifndef NDEBUG
-//    V8GCController::registerGlobalHandle(type, host, handle);
-// #endif
-//
-// When releasing the handle, call:
-//
-// #ifndef NDEBUG
-//    V8GCController::unregisterGlobalHandle(type, host, handle);
-// #endif
-//
-
-static GlobalHandleMap& currentGlobalHandleMap()
-{
-    return V8BindingPerIsolateData::current()->globalHandleMap();
-}
-
-// The function is the place to set the break point to inspect
-// live global handles. Leaks are often come from leaked global handles.
-static void enumerateGlobalHandles()
-{
-    GlobalHandleMap& globalHandleMap = currentGlobalHandleMap();
-    for (GlobalHandleMap::iterator it = globalHandleMap.begin(), end = globalHandleMap.end(); it != end; ++it) {
-        GlobalHandleInfo* info = it->second;
-        UNUSED_PARAM(info);
-        v8::Value* handle = it->first;
-        UNUSED_PARAM(handle);
-    }
-}
-
-void V8GCController::registerGlobalHandle(GlobalHandleType type, void* host, v8::Persistent<v8::Value> handle)
-{
-    GlobalHandleMap& globalHandleMap = currentGlobalHandleMap();
-    ASSERT(!globalHandleMap.contains(*handle));
-    globalHandleMap.set(*handle, new GlobalHandleInfo(host, type));
-}
-
-void V8GCController::unregisterGlobalHandle(void* host, v8::Persistent<v8::Value> handle)
-{
-    GlobalHandleMap& globalHandleMap = currentGlobalHandleMap();
-    ASSERT(globalHandleMap.contains(*handle));
-    GlobalHandleInfo* info = globalHandleMap.take(*handle);
-    ASSERT(info->m_host == host);
-    delete info;
-}
-#endif // ifndef NDEBUG
-
-typedef HashMap<Node*, v8::Object*> DOMNodeMap;
-typedef HashMap<void*, v8::Object*> DOMObjectMap;
-
-#ifndef NDEBUG
-
-class DOMObjectVisitor : public DOMWrapperMap<void>::Visitor {
+class ImplicitConnection {
 public:
-    void visitDOMWrapper(DOMDataStore* store, void* object, v8::Persistent<v8::Object> wrapper)
+    ImplicitConnection(void* root, v8::Persistent<v8::Value> wrapper)
+        : m_root(root)
+        , m_wrapper(wrapper)
     {
-        WrapperTypeInfo* type = V8DOMWrapper::domWrapperType(wrapper);
-        UNUSED_PARAM(type);
-        UNUSED_PARAM(object);
-    }
-};
-
-class EnsureWeakDOMNodeVisitor : public DOMWrapperMap<Node>::Visitor {
-public:
-    void visitDOMWrapper(DOMDataStore* store, Node* object, v8::Persistent<v8::Object> wrapper)
-    {
-        UNUSED_PARAM(object);
-        ASSERT(wrapper.IsWeak());
-    }
-};
-
-#endif // NDEBUG
-
-class SpecialCasePrologueObjectHandler {
-public:
-    static bool process(void* object, v8::Persistent<v8::Object> wrapper, WrapperTypeInfo* typeInfo)
-    {
-        // Additional handling of message port ensuring that entangled ports also
-        // have their wrappers entangled. This should ideally be handled when the
-        // ports are actually entangled in MessagePort::entangle, but to avoid
-        // forking MessagePort.* this is postponed to GC time. Having this postponed
-        // has the drawback that the wrappers are "entangled/unentangled" for each
-        // GC even though their entaglement most likely is still the same.
-        if (V8MessagePort::info.equals(typeInfo)) {
-            // Mark each port as in-use if it's entangled. For simplicity's sake, we assume all ports are remotely entangled,
-            // since the Chromium port implementation can't tell the difference.
-            MessagePort* port1 = static_cast<MessagePort*>(object);
-            if (port1->isEntangled() || port1->hasPendingActivity())
-                wrapper.ClearWeak();
-            return true;
-        }
-        return false;
-    }
-};
-
-class SpecialCasePrologueNodeHandler {
-public:
-    static bool process(Node* object, v8::Persistent<v8::Object> wrapper, WrapperTypeInfo* typeInfo)
-    {
-        UNUSED_PARAM(object);
-        UNUSED_PARAM(wrapper);
-        UNUSED_PARAM(typeInfo);
-        return false;
-    }
-};
-
-template<typename T, typename S>
-class GCPrologueVisitor : public DOMWrapperMap<T>::Visitor {
-public:
-    void visitDOMWrapper(DOMDataStore* store, T* object, v8::Persistent<v8::Object> wrapper)
-    {
-        WrapperTypeInfo* typeInfo = V8DOMWrapper::domWrapperType(wrapper);  
-
-        if (!S::process(object, wrapper, typeInfo)) {
-            ActiveDOMObject* activeDOMObject = typeInfo->toActiveDOMObject(wrapper);
-            if (activeDOMObject && activeDOMObject->hasPendingActivity())
-                wrapper.ClearWeak();
-        }
-    }
-};
-
-// Implements v8::RetainedObjectInfo.
-class UnspecifiedGroup : public RetainedObjectInfo {
-public:
-    explicit UnspecifiedGroup(void* object)
-        : m_object(object)
-    {
-        ASSERT(m_object);
-    }
-    
-    virtual void Dispose() { delete this; }
-  
-    virtual bool IsEquivalent(v8::RetainedObjectInfo* other)
-    {
-        ASSERT(other);
-        return other == this || static_cast<WebCore::RetainedObjectInfo*>(other)->GetEquivalenceClass() == this->GetEquivalenceClass();
     }
 
-    virtual intptr_t GetHash()
-    {
-        return reinterpret_cast<intptr_t>(m_object);
-    }
-    
-    virtual const char* GetLabel()
-    {
-        return "Object group";
-    }
-
-    virtual intptr_t GetEquivalenceClass()
-    {
-        return reinterpret_cast<intptr_t>(m_object);
-    }
+    void* root() const { return m_root; }
+    v8::Persistent<v8::Value> wrapper() const { return m_wrapper; }
 
 private:
-    void* m_object;
+    void* m_root;
+    v8::Persistent<v8::Value> m_wrapper;
 };
 
-class GroupId {
-public:
-    GroupId() : m_type(NullType), m_groupId(0) {}
-    GroupId(Node* node) : m_type(NodeType), m_node(node) {}
-    GroupId(void* other) : m_type(OtherType), m_other(other) {}
-    bool operator!() const { return m_type == NullType; }
-    uintptr_t groupId() const { return m_groupId; }
-    RetainedObjectInfo* createRetainedObjectInfo() const
-    {
-        switch (m_type) {
-        case NullType:
-            return 0;
-        case NodeType:
-            return new RetainedDOMInfo(m_node);
-        case OtherType:
-            return new UnspecifiedGroup(m_other);
-        default:
-            return 0;
-        }
-    }
-    
-private:
-    enum Type {
-        NullType,
-        NodeType,
-        OtherType
-    };
-    Type m_type;
-    union {
-        uintptr_t m_groupId;
-        Node* m_node;
-        void* m_other;
-    };
-};
-
-class GrouperItem {
-public:
-    GrouperItem(GroupId groupId, v8::Persistent<v8::Object> wrapper) : m_groupId(groupId), m_wrapper(wrapper) {}
-    uintptr_t groupId() const { return m_groupId.groupId(); }
-    RetainedObjectInfo* createRetainedObjectInfo() const { return m_groupId.createRetainedObjectInfo(); }
-    v8::Persistent<v8::Object> wrapper() const { return m_wrapper; }
-
-private:
-    GroupId m_groupId;
-    v8::Persistent<v8::Object> m_wrapper;
-};
-
-bool operator<(const GrouperItem& a, const GrouperItem& b)
+bool operator<(const ImplicitConnection& left, const ImplicitConnection& right)
 {
-    return a.groupId() < b.groupId();
+    return left.root() < right.root();
 }
 
-typedef Vector<GrouperItem> GrouperList;
-
-// If the node is in document, put it in the ownerDocument's object group.
-//
-// If an image element was created by JavaScript "new Image",
-// it is not in a document. However, if the load event has not
-// been fired (still onloading), it is treated as in the document.
-//
-// Otherwise, the node is put in an object group identified by the root
-// element of the tree to which it belongs.
-static GroupId calculateGroupId(Node* node)
-{
-    if (node->inDocument() || (node->hasTagName(HTMLNames::imgTag) && !static_cast<HTMLImageElement*>(node)->haveFiredLoadEvent()))
-        return GroupId(node->document());
-
-    Node* root = node;
-    if (node->isAttributeNode()) {
-        root = static_cast<Attr*>(node)->ownerElement();
-        // If the attribute has no element, no need to put it in the group,
-        // because it'll always be a group of 1.
-        if (!root)
-            return GroupId();
-    } else {
-        while (Node* parent = root->parentOrHostNode())
-            root = parent;
-    }
-
-    return GroupId(root);
-}
-
-class GrouperVisitor : public DOMWrapperMap<Node>::Visitor, public DOMWrapperMap<void>::Visitor {
+class WrapperGrouper {
 public:
-    void visitDOMWrapper(DOMDataStore* store, Node* node, v8::Persistent<v8::Object> wrapper)
+    WrapperGrouper()
     {
-        if (node->hasEventListeners()) {
-            Vector<v8::Persistent<v8::Value> > listeners;
-            EventListenerIterator iterator(node);
-            while (EventListener* listener = iterator.nextListener()) {
-                if (listener->type() != EventListener::JSEventListenerType)
-                    continue;
-                V8AbstractEventListener* v8listener = static_cast<V8AbstractEventListener*>(listener);
-                if (!v8listener->hasExistingListenerObject())
-                    continue;
-                listeners.append(v8listener->existingListenerObjectPersistentHandle());
-            }
-            if (!listeners.isEmpty())
-                v8::V8::AddImplicitReferences(wrapper, listeners.data(), listeners.size());
-        }
-
-        GroupId groupId = calculateGroupId(node);
-        if (!groupId)
-            return;
-        m_grouper.append(GrouperItem(groupId, wrapper));
+        m_liveObjects.append(V8PerIsolateData::current()->ensureLiveRoot());
     }
 
-    void visitDOMWrapper(DOMDataStore* store, void* object, v8::Persistent<v8::Object> wrapper)
+    void addToGroup(void* root, v8::Persistent<v8::Value> wrapper)
     {
+        m_connections.append(ImplicitConnection(root, wrapper));
     }
 
-    void applyGrouping()
+    void keepAlive(v8::Persistent<v8::Value> wrapper)
     {
-        // Group by sorting by the group id.
-        std::sort(m_grouper.begin(), m_grouper.end());
+        m_liveObjects.append(wrapper);
+    }
 
-        for (size_t i = 0; i < m_grouper.size(); ) {
-            // Seek to the next key (or the end of the list).
-            size_t nextKeyIndex = m_grouper.size();
-            for (size_t j = i; j < m_grouper.size(); ++j) {
-                if (m_grouper[i].groupId() != m_grouper[j].groupId()) {
-                    nextKeyIndex = j;
-                    break;
-                }
-            }
+    void apply()
+    {
+        if (m_liveObjects.size() > 1)
+            v8::V8::AddObjectGroup(m_liveObjects.data(), m_liveObjects.size());
 
-            ASSERT(nextKeyIndex > i);
+        std::sort(m_connections.begin(), m_connections.end());
+        Vector<v8::Persistent<v8::Value> > group;
+        size_t i = 0;
+        while (i < m_connections.size()) {
+            void* root = m_connections[i].root();
 
-            // We only care about a group if it has more than one object. If it only
-            // has one object, it has nothing else that needs to be kept alive.
-            if (nextKeyIndex - i <= 1) {
-                i = nextKeyIndex;
-                continue;
-            }
-
-            size_t rootIndex = i;
-            
-            Vector<v8::Persistent<v8::Value> > group;
-            group.reserveCapacity(nextKeyIndex - i);
-            for (; i < nextKeyIndex; ++i) {
-                v8::Persistent<v8::Value> wrapper = m_grouper[i].wrapper();
-                if (!wrapper.IsEmpty())
-                    group.append(wrapper);
-            }
+            do {
+                group.append(m_connections[i++].wrapper());
+            } while (i < m_connections.size() && root == m_connections[i].root());
 
             if (group.size() > 1)
-                v8::V8::AddObjectGroup(&group[0], group.size(), m_grouper[rootIndex].createRetainedObjectInfo());
+                v8::V8::AddObjectGroup(group.data(), group.size(), 0);
 
-            ASSERT(i == nextKeyIndex);
+            group.shrink(0);
         }
     }
 
 private:
-    GrouperList m_grouper;
+    Vector<v8::Persistent<v8::Value> > m_liveObjects;
+    Vector<ImplicitConnection> m_connections;
 };
 
-// Create object groups for DOM tree nodes.
-void V8GCController::gcPrologue()
+// FIXME: This should use opaque GC roots.
+static void addImplicitReferencesForNodeWithEventListeners(Node* node, v8::Persistent<v8::Object> wrapper)
 {
+    ASSERT(node->hasEventListeners());
+
+    Vector<v8::Persistent<v8::Value> > listeners;
+
+    EventListenerIterator iterator(node);
+    while (EventListener* listener = iterator.nextListener()) {
+        if (listener->type() != EventListener::JSEventListenerType)
+            continue;
+        V8AbstractEventListener* v8listener = static_cast<V8AbstractEventListener*>(listener);
+        if (!v8listener->hasExistingListenerObject())
+            continue;
+        listeners.append(v8listener->existingListenerObjectPersistentHandle());
+    }
+
+    if (listeners.isEmpty())
+        return;
+
+    v8::V8::AddImplicitReferences(wrapper, listeners.data(), listeners.size());
+}
+
+void* V8GCController::opaqueRootForGC(Node* node)
+{
+    // FIXME: Remove the special handling for image elements.
+    // The same special handling is in V8GCController::gcTree().
+    // Maybe should image elements be active DOM nodes?
+    // See https://code.google.com/p/chromium/issues/detail?id=164882
+    if (node->inDocument() || (node->hasTagName(HTMLNames::imgTag) && static_cast<HTMLImageElement*>(node)->hasPendingActivity()))
+        return node->document();
+
+    if (node->isAttributeNode()) {
+        Node* ownerElement = static_cast<Attr*>(node)->ownerElement();
+        if (!ownerElement)
+            return node;
+        node = ownerElement;
+    }
+
+    while (Node* parent = node->parentOrHostNode())
+        node = parent;
+
+    return node;
+}
+
+class WrapperVisitor : public v8::PersistentHandleVisitor {
+public:
+    virtual void VisitPersistentHandle(v8::Persistent<v8::Value> value, uint16_t classId) OVERRIDE
+    {
+        ASSERT(value->IsObject());
+        v8::Persistent<v8::Object> wrapper = v8::Persistent<v8::Object>::Cast(value);
+
+        if (classId != v8DOMNodeClassId && classId != v8DOMObjectClassId)
+            return;
+
+        ASSERT(V8DOMWrapper::maybeDOMWrapper(value));
+
+        if (value.IsIndependent())
+            return;
+
+        WrapperTypeInfo* type = toWrapperTypeInfo(wrapper);
+        void* object = toNative(wrapper);
+
+        if (V8MessagePort::info.equals(type)) {
+            // Mark each port as in-use if it's entangled. For simplicity's sake,
+            // we assume all ports are remotely entangled, since the Chromium port
+            // implementation can't tell the difference.
+            MessagePort* port = static_cast<MessagePort*>(object);
+            if (port->isEntangled() || port->hasPendingActivity())
+                m_grouper.keepAlive(wrapper);
+#if ENABLE(MUTATION_OBSERVERS)
+        } else if (V8MutationObserver::info.equals(type)) {
+            // FIXME: Allow opaqueRootForGC to operate on multiple roots and move this logic into V8MutationObserverCustom.
+            MutationObserver* observer = static_cast<MutationObserver*>(object);
+            HashSet<Node*> observedNodes = observer->getObservedNodes();
+            for (HashSet<Node*>::iterator it = observedNodes.begin(); it != observedNodes.end(); ++it)
+                m_grouper.addToGroup(V8GCController::opaqueRootForGC(*it), wrapper);
+#endif // ENABLE(MUTATION_OBSERVERS)
+        } else {
+            ActiveDOMObject* activeDOMObject = type->toActiveDOMObject(wrapper);
+            if (activeDOMObject && activeDOMObject->hasPendingActivity())
+                m_grouper.keepAlive(wrapper);
+        }
+
+        if (classId == v8DOMNodeClassId) {
+            ASSERT(V8Node::HasInstance(wrapper));
+            ASSERT(!wrapper.IsIndependent());
+
+            Node* node = static_cast<Node*>(object);
+
+            if (node->hasEventListeners())
+                addImplicitReferencesForNodeWithEventListeners(node, wrapper);
+
+            m_grouper.addToGroup(V8GCController::opaqueRootForGC(node), wrapper);
+        } else if (classId == v8DOMObjectClassId) {
+            m_grouper.addToGroup(type->opaqueRootForGC(object, wrapper), wrapper);
+        } else {
+            ASSERT_NOT_REACHED();
+        }
+    }
+
+    void notifyFinished()
+    {
+        m_grouper.apply();
+    }
+
+private:
+    WrapperGrouper m_grouper;
+};
+
+// Regarding a minor GC algorithm for DOM nodes, see this document:
+// https://docs.google.com/a/google.com/presentation/d/1uifwVYGNYTZDoGLyCb7sXa7g49mWNMW2gaWvMN5NLk8/edit#slide=id.p
+//
+// m_edenNodes stores nodes that have wrappers that have been created since the last minor/major GC.
+Vector<Node*>* V8GCController::m_edenNodes = 0;
+
+static void gcTree(Node* startNode)
+{
+    Vector<v8::Persistent<v8::Value>, initialNodeVectorSize> newSpaceWrappers;
+
+    // We traverse a DOM tree in the DFS order starting from startNode.
+    // The traversal order does not matter for correctness but does matter for performance.
+    Node* node = startNode;
+    // To make each minor GC time bounded, we might need to give up
+    // traversing at some point for a large DOM tree. That being said,
+    // I could not observe the need even in pathological test cases.
+    do {
+        ASSERT(node);
+        if (!node->wrapper().IsEmpty()) {
+            // FIXME: Remove the special handling for image elements.
+            // The same special handling is in V8GCController::opaqueRootForGC().
+            // Maybe should image elements be active DOM nodes?
+            // See https://code.google.com/p/chromium/issues/detail?id=164882
+            if (!node->isV8CollectableDuringMinorGC() || (node->hasTagName(HTMLNames::imgTag) && static_cast<HTMLImageElement*>(node)->hasPendingActivity())) {
+                // The fact that we encounter a node that is not in the Eden space
+                // implies that its wrapper might be in the old space of V8.
+                // This indicates that the minor GC cannot anyway judge reachability
+                // of this DOM tree. Thus we give up traversing the DOM tree.
+                return;
+            }
+            // A once traversed node is removed from the Eden space.
+            node->setV8CollectableDuringMinorGC(false);
+            newSpaceWrappers.append(node->wrapper());
+        }
+        if (node->firstChild()) {
+            node = node->firstChild();
+            continue;
+        }
+        while (!node->nextSibling()) {
+            if (!node->parentNode())
+                break;
+            node = node->parentNode();
+        }
+        if (node->parentNode())
+            node = node->nextSibling();
+    } while (node != startNode);
+
+    // We completed the DOM tree traversal. All wrappers in the DOM tree are
+    // stored in newSpaceWrappers and are expected to exist in the new space of V8.
+    // We report those wrappers to V8 as an object group.
+    for (size_t i = 0; i < newSpaceWrappers.size(); i++)
+        newSpaceWrappers[i].MarkPartiallyDependent();
+    if (newSpaceWrappers.size() > 0)
+        v8::V8::AddObjectGroup(&newSpaceWrappers[0], newSpaceWrappers.size());
+}
+
+void V8GCController::didCreateWrapperForNode(Node* node)
+{
+    // To make minor GC cycle time bounded, we limit the number of wrappers handled
+    // by each minor GC cycle to 10000. This value was selected so that the minor
+    // GC cycle time is bounded to 20 ms in a case where the new space size
+    // is 16 MB and it is full of wrappers (which is almost the worst case).
+    // Practically speaking, as far as I crawled real web applications,
+    // the number of wrappers handled by each minor GC cycle is at most 3000.
+    // So this limit is mainly for pathological micro benchmarks.
+    const unsigned wrappersHandledByEachMinorGC = 10000;
+    ASSERT(!node->wrapper().IsEmpty());
+    if (!m_edenNodes)
+        m_edenNodes = adoptPtr(new Vector<Node*>).leakPtr();
+    if (m_edenNodes->size() <= wrappersHandledByEachMinorGC) {
+        // A node of a newly created wrapper is put into the Eden space.
+        m_edenNodes->append(node);
+        node->setV8CollectableDuringMinorGC(true);
+    }
+}
+
+void V8GCController::gcPrologue(v8::GCType type, v8::GCCallbackFlags flags)
+{
+    if (type == v8::kGCTypeScavenge)
+        minorGCPrologue();
+    else if (type == v8::kGCTypeMarkSweepCompact)
+        majorGCPrologue();
+
+    if (isMainThreadOrGCThread() && m_edenNodes) {
+        // The Eden space is cleared at every minor/major GC.
+        m_edenNodes->clear();
+    }
+}
+
+void V8GCController::minorGCPrologue()
+{
+    if (isMainThreadOrGCThread() && m_edenNodes) {
+        for (size_t i = 0; i < m_edenNodes->size(); i++) {
+            ASSERT(!m_edenNodes->at(i)->wrapper().IsEmpty());
+            if (m_edenNodes->at(i)->isV8CollectableDuringMinorGC()) // This branch is just for performance.
+                gcTree(m_edenNodes->at(i));
+        }
+    }
+}
+
+// Create object groups for DOM tree nodes.
+void V8GCController::majorGCPrologue()
+{
+    TRACE_EVENT_BEGIN0("v8", "GC");
+
     v8::HandleScope scope;
 
-    PlatformSupport::traceEventBegin("V8::GC", 0, 0);
+    WrapperVisitor visitor;
+    v8::V8::VisitHandlesWithClassIds(&visitor);
+    visitor.notifyFinished();
 
-#ifndef NDEBUG
-    DOMObjectVisitor domObjectVisitor;
-    visitDOMObjects(&domObjectVisitor);
-#endif
-
-    // Run through all objects with possible pending activity making their
-    // wrappers non weak if there is pending activity.
-    GCPrologueVisitor<void, SpecialCasePrologueObjectHandler> prologueObjectVisitor;
-    visitActiveDOMObjects(&prologueObjectVisitor);
-    GCPrologueVisitor<Node, SpecialCasePrologueNodeHandler> prologueNodeVisitor;
-    visitActiveDOMNodes(&prologueNodeVisitor);
-
-    // Create object groups.
-    GrouperVisitor grouperVisitor;
-    visitDOMNodes(&grouperVisitor);
-    visitActiveDOMNodes(&grouperVisitor);
-    visitDOMObjects(&grouperVisitor);
-    grouperVisitor.applyGrouping();
-
-    // Clean single element cache for string conversions.
-    V8BindingPerIsolateData* data = V8BindingPerIsolateData::current();
+    V8PerIsolateData* data = V8PerIsolateData::current();
     data->stringCache()->clearOnGC();
 }
 
-class SpecialCaseEpilogueObjectHandler {
-public:
-    static bool process(void* object, v8::Persistent<v8::Object> wrapper, WrapperTypeInfo* typeInfo)
-    {
-        if (V8MessagePort::info.equals(typeInfo)) {
-            MessagePort* port1 = static_cast<MessagePort*>(object);
-            // We marked this port as reachable in GCPrologueVisitor.  Undo this now since the
-            // port could be not reachable in the future if it gets disentangled (and also
-            // GCPrologueVisitor expects to see all handles marked as weak).
-            if ((!wrapper.IsWeak() && !wrapper.IsNearDeath()) || port1->hasPendingActivity())
-                wrapper.MakeWeak(port1, &DOMDataStore::weakActiveDOMObjectCallback);
-            return true;
-        }
-        return false;
-    }
-};
+static int workingSetEstimateMB = 0;
 
-class SpecialCaseEpilogueNodeHandler {
-public:
-    static bool process(Node* object, v8::Persistent<v8::Object> wrapper, WrapperTypeInfo* typeInfo)
-    {
-        UNUSED_PARAM(object);
-        UNUSED_PARAM(wrapper);
-        UNUSED_PARAM(typeInfo);
-        return false;
-    }
-};
-
-template<typename T, typename S, v8::WeakReferenceCallback callback>
-class GCEpilogueVisitor : public DOMWrapperMap<T>::Visitor {
-public:
-    void visitDOMWrapper(DOMDataStore* store, T* object, v8::Persistent<v8::Object> wrapper)
-    {
-        WrapperTypeInfo* typeInfo = V8DOMWrapper::domWrapperType(wrapper);
-        if (!S::process(object, wrapper, typeInfo)) {
-            ActiveDOMObject* activeDOMObject = typeInfo->toActiveDOMObject(wrapper);
-            if (activeDOMObject && activeDOMObject->hasPendingActivity()) {
-                ASSERT(!wrapper.IsWeak());
-                // NOTE: To re-enable weak status of the active object we use
-                // |object| from the map and not |activeDOMObject|. The latter
-                // may be a different pointer (in case ActiveDOMObject is not
-                // the main base class of the object's class) and pointer
-                // identity is required by DOM map functions.
-                wrapper.MakeWeak(object, callback);
-            }
-        }
-    }
-};
-
-int V8GCController::workingSetEstimateMB = 0;
-
-namespace {
-
-int getMemoryUsageInMB()
+static Mutex& workingSetEstimateMBMutex()
 {
-#if PLATFORM(CHROMIUM)
-    return PlatformSupport::memoryUsageMB();
-#else
-    return 0;
-#endif
+    AtomicallyInitializedStatic(Mutex&, mutex = *new Mutex);
+    return mutex;
 }
 
-int getActualMemoryUsageInMB()
+void V8GCController::gcEpilogue(v8::GCType type, v8::GCCallbackFlags flags)
 {
-#if PLATFORM(CHROMIUM)
-    return PlatformSupport::actualMemoryUsageMB();
-#else
-    return 0;
-#endif
+    if (type == v8::kGCTypeScavenge)
+        minorGCEpilogue();
+    else if (type == v8::kGCTypeMarkSweepCompact)
+        majorGCEpilogue();
 }
 
-}  // anonymous namespace
+void V8GCController::minorGCEpilogue()
+{
+}
 
-void V8GCController::gcEpilogue()
+void V8GCController::majorGCEpilogue()
 {
     v8::HandleScope scope;
 
-    // Run through all objects with pending activity making their wrappers weak
-    // again.
-    GCEpilogueVisitor<void, SpecialCaseEpilogueObjectHandler, &DOMDataStore::weakActiveDOMObjectCallback> epilogueObjectVisitor;
-    visitActiveDOMObjects(&epilogueObjectVisitor);
-    GCEpilogueVisitor<Node, SpecialCaseEpilogueNodeHandler, &DOMDataStore::weakNodeCallback> epilogueNodeVisitor;
-    visitActiveDOMNodes(&epilogueNodeVisitor);
+    // The GC can happen on multiple threads in case of dedicated workers which run in-process.
+    {
+        MutexLocker locker(workingSetEstimateMBMutex());
+        workingSetEstimateMB = MemoryUsageSupport::actualMemoryUsageMB();
+    }
 
-    workingSetEstimateMB = getActualMemoryUsageInMB();
-
-#ifndef NDEBUG
-    // Check all survivals are weak.
-    DOMObjectVisitor domObjectVisitor;
-    visitDOMObjects(&domObjectVisitor);
-
-    EnsureWeakDOMNodeVisitor weakDOMNodeVisitor;
-    visitDOMNodes(&weakDOMNodeVisitor);
-
-    enumerateGlobalHandles();
-#endif
-    PlatformSupport::traceEventEnd("V8::GC", 0, 0);
+    TRACE_EVENT_END0("v8", "GC");
 }
 
 void V8GCController::checkMemoryUsage()
 {
-#if PLATFORM(CHROMIUM) || PLATFORM(QT)
-    const int lowMemoryUsageMB = PlatformSupport::lowMemoryUsageMB();
-    const int highMemoryUsageMB = PlatformSupport::highMemoryUsageMB();
-    const int highUsageDeltaMB = PlatformSupport::highUsageDeltaMB();
-    int memoryUsageMB = getMemoryUsageInMB();
-    if ((memoryUsageMB > lowMemoryUsageMB && memoryUsageMB > 2 * workingSetEstimateMB) || (memoryUsageMB > highMemoryUsageMB && memoryUsageMB > workingSetEstimateMB + highUsageDeltaMB))
+    const int lowMemoryUsageMB = MemoryUsageSupport::lowMemoryUsageMB();
+    const int highMemoryUsageMB = MemoryUsageSupport::highMemoryUsageMB();
+    const int highUsageDeltaMB = MemoryUsageSupport::highUsageDeltaMB();
+    int memoryUsageMB = MemoryUsageSupport::memoryUsageMB();
+    int workingSetEstimateMBCopy;
+    {
+        MutexLocker locker(workingSetEstimateMBMutex());
+        workingSetEstimateMBCopy = workingSetEstimateMB;
+    }
+    if (memoryUsageMB > lowMemoryUsageMB && memoryUsageMB > 2 * workingSetEstimateMBCopy) {
+        // Memory usage is large and doubled since the last GC.
+        // Check if we need to send low memory notification.
+        v8::HeapStatistics heapStatistics;
+        v8::V8::GetHeapStatistics(&heapStatistics);
+        int heapSizeMB = heapStatistics.total_heap_size() >> 20;
+        // Do not send low memory notification if V8 heap size is more than 7/8
+        // of total memory usage. Let V8 to schedule GC itself in this case.
+        if (heapSizeMB < memoryUsageMB / 8 * 7)
+            v8::V8::LowMemoryNotification();
+    } else if (memoryUsageMB > highMemoryUsageMB && memoryUsageMB > workingSetEstimateMBCopy + highUsageDeltaMB) {
+        // We are approaching OOM and memory usage increased by highUsageDeltaMB since the last GC.
         v8::V8::LowMemoryNotification();
-#endif
+    }
 }
 
+void V8GCController::hintForCollectGarbage()
+{
+    V8PerIsolateData* data = V8PerIsolateData::current();
+    if (!data->shouldCollectGarbageSoon())
+        return;
+    const int longIdlePauseInMS = 1000;
+    data->clearShouldCollectGarbageSoon();
+    v8::V8::ContextDisposedNotification();
+    v8::V8::IdleNotification(longIdlePauseInMS);
+}
+
+void V8GCController::collectGarbage()
+{
+    v8::HandleScope handleScope;
+
+    ScopedPersistent<v8::Context> context;
+
+    context.adopt(v8::Context::New());
+    if (context.isEmpty())
+        return;
+
+    {
+        v8::Context::Scope scope(context.get());
+        v8::Local<v8::String> source = v8::String::New("if (gc) gc();");
+        v8::Local<v8::String> name = v8::String::New("gc");
+        v8::Handle<v8::Script> script = v8::Script::Compile(source, name);
+        if (!script.IsEmpty()) {
+            V8RecursionScope::MicrotaskSuppression scope;
+            script->Run();
+        }
+    }
+
+    context.clear();
+}
 
 }  // namespace WebCore

@@ -34,6 +34,7 @@ class RenderTextControl;
 class VisiblePosition;
 
 enum TextFieldSelectionDirection { SelectionHasNoDirection, SelectionHasForwardDirection, SelectionHasBackwardDirection };
+enum TextFieldEventBehavior { DispatchNoEvent, DispatchChangeEvent, DispatchInputAndChangeEvent };
 
 class HTMLTextFormControlElement : public HTMLFormControlElementWithState {
 public:
@@ -44,7 +45,8 @@ public:
 
     void forwardEvent(Event*);
 
-    virtual void insertedIntoDocument();
+
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
 
     // The derived class should return true if placeholder processing is needed.
     virtual bool supportsPlaceholder() const = 0;
@@ -52,6 +54,7 @@ public:
     bool placeholderShouldBeVisible() const;
     virtual HTMLElement* placeholderElement() const = 0;
     void updatePlaceholderVisibility(bool);
+    static void fixPlaceholderRenderer(HTMLElement* placeholder, HTMLElement* siblingElement);
 
     int indexForVisiblePosition(const VisiblePosition&) const;
     int selectionStart() const;
@@ -61,6 +64,8 @@ public:
     void setSelectionEnd(int);
     void setSelectionDirection(const String&);
     void select();
+    virtual void setRangeText(const String& replacement, ExceptionCode&);
+    virtual void setRangeText(const String& replacement, unsigned start, unsigned end, const String& selectionMode, ExceptionCode&);
     void setSelectionRange(int start, int end, const String& direction);
     void setSelectionRange(int start, int end, TextFieldSelectionDirection = SelectionHasNoDirection);
     PassRefPtr<Range> selection() const;
@@ -74,21 +79,23 @@ public:
     virtual HTMLElement* innerTextElement() const = 0;
 
     void selectionChanged(bool userTriggered);
-    void notifyFormStateChanged();
     bool lastChangeWasUserEdit() const;
     void setInnerTextValue(const String&);
     String innerTextValue() const;
 
     String directionForFormData() const;
 
+    void setTextAsOfLastFormControlChangeEvent(const String& text) { m_textAsOfLastFormControlChangeEvent = text; }
+
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
+
 protected:
     HTMLTextFormControlElement(const QualifiedName&, Document*, HTMLFormElement*);
+    bool isPlaceholderEmpty() const;
     virtual void updatePlaceholderText() = 0;
 
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
 
-    void setTextAsOfLastFormControlChangeEvent(const String& text) { m_textAsOfLastFormControlChangeEvent = text; }
-    
     void cacheSelection(int start, int end, TextFieldSelectionDirection direction)
     {
         m_cachedSelectionStart = start;
@@ -113,8 +120,7 @@ private:
 
     virtual void dispatchFocusEvent(PassRefPtr<Node> oldFocusedNode);
     virtual void dispatchBlurEvent(PassRefPtr<Node> newFocusedNode);
-
-    bool isPlaceholderEmpty() const;
+    virtual bool childShouldCreateRenderer(const NodeRenderingContext&) const OVERRIDE;
 
     // Returns true if user-editable value is empty. Used to check placeholder visibility.
     virtual bool isEmptyValue() const = 0;

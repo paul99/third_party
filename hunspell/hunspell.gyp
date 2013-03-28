@@ -64,11 +64,26 @@
         ],
       },
       'conditions': [
-        ['OS=="linux" or OS=="freebsd"', {
+        ['os_posix == 1 and OS != "mac"', {
           'cflags': [
             '-Wno-unused-value',
             '-Wno-unused-variable',
             '-Wno-write-strings',
+          ],
+        }],
+        ['clang == 1', {
+          'xcode_settings': {
+            'WARNING_CFLAGS': [
+              # affentry.cxx has one `while ((p = nextchar(p)));` parsing loop.
+              '-Wno-empty-body',
+              # affentry.hxx has NULL as default parameter for a FLAG in two
+              # places.
+              '-Wno-null-conversion',
+            ],
+          },
+          'cflags': [
+            '-Wno-empty-body',
+            '-Wno-null-conversion',
           ],
         }],
       ],

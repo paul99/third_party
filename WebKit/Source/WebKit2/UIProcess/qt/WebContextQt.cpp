@@ -29,46 +29,48 @@
 
 #include "ApplicationCacheStorage.h"
 #include "FileSystem.h"
+#include "QtDefaultDataLocation.h"
+#include "QtWebContext.h"
 #include "WKSharedAPICast.h"
 #if ENABLE(GEOLOCATION)
 #include "WebGeolocationProviderQt.h"
 #endif
 #include "WebProcessCreationParameters.h"
-
 #include <QCoreApplication>
-#include <QStandardPaths>
 #include <QDir>
 #include <QProcess>
 
 namespace WebKit {
 
-static QString defaultDataLocation()
-{
-    static QString s_dataLocation;
-
-    if (!s_dataLocation.isEmpty())
-        return s_dataLocation;
-
-    QString dataLocation = QStandardPaths::writableLocation(QStandardPaths::DataLocation);
-    if (dataLocation.isEmpty())
-        dataLocation = WebCore::pathByAppendingComponent(QDir::homePath(), QCoreApplication::applicationName());
-    s_dataLocation = WebCore::pathByAppendingComponent(dataLocation, ".QtWebKit/");
-    WebCore::makeAllDirectories(s_dataLocation);
-    return s_dataLocation;
-}
-
 static QString s_defaultDatabaseDirectory;
 static QString s_defaultLocalStorageDirectory;
+static QString s_defaultCookieStorageDirectory;
+
+String WebContext::platformDefaultDiskCacheDirectory() const
+{
+    static String s_defaultDiskCacheDirectory;
+
+    if (!s_defaultDiskCacheDirectory.isEmpty())
+        return s_defaultDiskCacheDirectory;
+
+    s_defaultDiskCacheDirectory = WebCore::pathByAppendingComponent(defaultDataLocation(), "cache/");
+    WebCore::makeAllDirectories(s_defaultDiskCacheDirectory);
+    return s_defaultDiskCacheDirectory;
+}
 
 String WebContext::applicationCacheDirectory()
 {
-    return WebCore::cacheStorage().cacheDirectory();
+    const String cacheDirectory = WebCore::cacheStorage().cacheDirectory();
+
+    if (cacheDirectory.isEmpty())
+        return platformDefaultDiskCacheDirectory();
+
+    return cacheDirectory;
 }
 
 void WebContext::platformInitializeWebProcess(WebProcessCreationParameters& parameters)
 {
     qRegisterMetaType<QProcess::ExitStatus>("QProcess::ExitStatus");
-    parameters.cookieStorageDirectory = defaultDataLocation();
 #if ENABLE(GEOLOCATION)
     static WebGeolocationProviderQt* location = WebGeolocationProviderQt::create(toAPI(geolocationManagerProxy()));
     WKGeolocationManagerSetProvider(toAPI(geolocationManagerProxy()), WebGeolocationProviderQt::provider(location));
@@ -77,6 +79,9 @@ void WebContext::platformInitializeWebProcess(WebProcessCreationParameters& para
 
 void WebContext::platformInvalidateContext()
 {
+#if HAVE(QTQUICK)
+    QtWebContext::invalidateContext(this);
+#endif
 }
 
 String WebContext::platformDefaultDatabaseDirectory() const
@@ -102,6 +107,15 @@ String WebContext::platformDefaultLocalStorageDirectory() const
     s_defaultLocalStorageDirectory = defaultDataLocation() + QLatin1String("LocalStorage");
     QDir().mkpath(s_defaultLocalStorageDirectory);
     return s_defaultLocalStorageDirectory;
+}
+
+String WebContext::platformDefaultCookieStorageDirectory() const
+{
+    if (!s_defaultCookieStorageDirectory.isEmpty())
+        return s_defaultCookieStorageDirectory;
+
+    s_defaultCookieStorageDirectory = defaultDataLocation();
+    return s_defaultCookieStorageDirectory;
 }
 
 } // namespace WebKit

@@ -26,25 +26,29 @@
 #include "config.h"
 #include "Executable.h"
 
+#include "BatchedTransitionOptimizer.h"
 #include "BytecodeGenerator.h"
 #include "CodeBlock.h"
 #include "DFGDriver.h"
+#include "ExecutionHarness.h"
 #include "JIT.h"
 #include "JITDriver.h"
 #include "Parser.h"
-#include "UStringBuilder.h"
-#include "Vector.h"
+#include <wtf/Vector.h>
+#include <wtf/text/StringBuilder.h>
 
 namespace JSC {
 
 const ClassInfo ExecutableBase::s_info = { "Executable", 0, 0, 0, CREATE_METHOD_TABLE(ExecutableBase) };
 
+#if ENABLE(JIT)
 void ExecutableBase::destroy(JSCell* cell)
 {
-    jsCast<ExecutableBase*>(cell)->ExecutableBase::~ExecutableBase();
+    static_cast<ExecutableBase*>(cell)->ExecutableBase::~ExecutableBase();
 }
+#endif
 
-inline void ExecutableBase::clearCode()
+void ExecutableBase::clearCode()
 {
 #if ENABLE(JIT)
     m_jitCodeForCall.clear();
@@ -67,10 +71,12 @@ Intrinsic ExecutableBase::intrinsic() const
 
 const ClassInfo NativeExecutable::s_info = { "NativeExecutable", &ExecutableBase::s_info, 0, 0, CREATE_METHOD_TABLE(NativeExecutable) };
 
+#if ENABLE(JIT)
 void NativeExecutable::destroy(JSCell* cell)
 {
-    jsCast<NativeExecutable*>(cell)->NativeExecutable::~NativeExecutable();
+    static_cast<NativeExecutable*>(cell)->NativeExecutable::~NativeExecutable();
 }
+#endif
 
 #if ENABLE(DFG_JIT)
 Intrinsic NativeExecutable::intrinsic() const
@@ -84,7 +90,7 @@ Intrinsic NativeExecutable::intrinsic() const
 template<typename T>
 static void jettisonCodeBlock(JSGlobalData& globalData, OwnPtr<T>& codeBlock)
 {
-    ASSERT(codeBlock->getJITType() != JITCode::BaselineJIT);
+    ASSERT(JITCode::isOptimizingJIT(codeBlock->getJITType()));
     ASSERT(codeBlock->alternative());
     OwnPtr<T> codeBlockToJettison = codeBlock.release();
     codeBlock = static_pointer_cast<T>(codeBlockToJettison->releaseAlternative());
@@ -93,17 +99,14 @@ static void jettisonCodeBlock(JSGlobalData& globalData, OwnPtr<T>& codeBlock)
 }
 #endif
 
-void NativeExecutable::finalize(JSCell* cell)
-{
-    jsCast<NativeExecutable*>(cell)->clearCode();
-}
-
 const ClassInfo ScriptExecutable::s_info = { "ScriptExecutable", &ExecutableBase::s_info, 0, 0, CREATE_METHOD_TABLE(ScriptExecutable) };
 
+#if ENABLE(JIT)
 void ScriptExecutable::destroy(JSCell* cell)
 {
-    jsCast<ScriptExecutable*>(cell)->ScriptExecutable::~ScriptExecutable();
+    static_cast<ScriptExecutable*>(cell)->ScriptExecutable::~ScriptExecutable();
 }
+#endif
 
 const ClassInfo EvalExecutable::s_info = { "EvalExecutable", &ScriptExecutable::s_info, 0, 0, CREATE_METHOD_TABLE(EvalExecutable) };
 
@@ -114,7 +117,7 @@ EvalExecutable::EvalExecutable(ExecState* exec, const SourceCode& source, bool i
 
 void EvalExecutable::destroy(JSCell* cell)
 {
-    jsCast<EvalExecutable*>(cell)->EvalExecutable::~EvalExecutable();
+    static_cast<EvalExecutable*>(cell)->EvalExecutable::~EvalExecutable();
 }
 
 const ClassInfo ProgramExecutable::s_info = { "ProgramExecutable", &ScriptExecutable::s_info, 0, 0, CREATE_METHOD_TABLE(ProgramExecutable) };
@@ -126,100 +129,99 @@ ProgramExecutable::ProgramExecutable(ExecState* exec, const SourceCode& source)
 
 void ProgramExecutable::destroy(JSCell* cell)
 {
-    jsCast<ProgramExecutable*>(cell)->ProgramExecutable::~ProgramExecutable();
+    static_cast<ProgramExecutable*>(cell)->ProgramExecutable::~ProgramExecutable();
 }
 
 const ClassInfo FunctionExecutable::s_info = { "FunctionExecutable", &ScriptExecutable::s_info, 0, 0, CREATE_METHOD_TABLE(FunctionExecutable) };
 
-FunctionExecutable::FunctionExecutable(JSGlobalData& globalData, const Identifier& name, const SourceCode& source, bool forceUsesArguments, FunctionParameters* parameters, bool inStrictContext)
-    : ScriptExecutable(globalData.functionExecutableStructure.get(), globalData, source, inStrictContext)
-    , m_numCapturedVariables(0)
-    , m_forceUsesArguments(forceUsesArguments)
-    , m_parameters(parameters)
-    , m_name(name)
-    , m_symbolTable(0)
+FunctionExecutable::FunctionExecutable(JSGlobalData& globalData, const SourceCode& source, UnlinkedFunctionExecutable* unlinkedExecutable, unsigned firstLine, unsigned lastLine)
+    : ScriptExecutable(globalData.functionExecutableStructure.get(), globalData, source, unlinkedExecutable->isInStrictContext())
+    , m_unlinkedExecutable(globalData, this, unlinkedExecutable)
 {
-}
-
-FunctionExecutable::FunctionExecutable(ExecState* exec, const Identifier& name, const SourceCode& source, bool forceUsesArguments, FunctionParameters* parameters, bool inStrictContext)
-    : ScriptExecutable(exec->globalData().functionExecutableStructure.get(), exec, source, inStrictContext)
-    , m_numCapturedVariables(0)
-    , m_forceUsesArguments(forceUsesArguments)
-    , m_parameters(parameters)
-    , m_name(name)
-    , m_symbolTable(0)
-{
+    ASSERT(!source.isNull());
+    ASSERT(source.length());
+    m_firstLine = firstLine;
+    m_lastLine = lastLine;
 }
 
 void FunctionExecutable::destroy(JSCell* cell)
 {
-    jsCast<FunctionExecutable*>(cell)->FunctionExecutable::~FunctionExecutable();
+    static_cast<FunctionExecutable*>(cell)->FunctionExecutable::~FunctionExecutable();
 }
 
-JSObject* EvalExecutable::compileOptimized(ExecState* exec, ScopeChainNode* scopeChainNode)
+JSObject* EvalExecutable::compileOptimized(ExecState* exec, JSScope* scope, unsigned bytecodeIndex)
 {
     ASSERT(exec->globalData().dynamicGlobalObject);
     ASSERT(!!m_evalCodeBlock);
     JSObject* error = 0;
     if (m_evalCodeBlock->getJITType() != JITCode::topTierJIT())
-        error = compileInternal(exec, scopeChainNode, JITCode::nextTierJIT(m_evalCodeBlock->getJITType()));
+        error = compileInternal(exec, scope, JITCode::nextTierJIT(m_evalCodeBlock->getJITType()), bytecodeIndex);
     ASSERT(!!m_evalCodeBlock);
     return error;
 }
 
-JSObject* EvalExecutable::compileInternal(ExecState* exec, ScopeChainNode* scopeChainNode, JITCode::JITType jitType)
+#if ENABLE(JIT)
+bool EvalExecutable::jitCompile(ExecState* exec)
 {
-    SamplingRegion samplingRegion(jitType == JITCode::BaselineJIT ? "Baseline Compilation (TOTAL)" : "DFG Compilation (TOTAL)");
+    return jitCompileIfAppropriate(exec, m_evalCodeBlock, m_jitCodeForCall, JITCode::bottomTierJIT(), UINT_MAX, JITCompilationCanFail);
+}
+#endif
+
+inline const char* samplingDescription(JITCode::JITType jitType)
+{
+    switch (jitType) {
+    case JITCode::InterpreterThunk:
+        return "Interpreter Compilation (TOTAL)";
+    case JITCode::BaselineJIT:
+        return "Baseline Compilation (TOTAL)";
+    case JITCode::DFGJIT:
+        return "DFG Compilation (TOTAL)";
+    default:
+        ASSERT_NOT_REACHED();
+        return 0;
+    }
+}
+
+JSObject* EvalExecutable::compileInternal(ExecState* exec, JSScope* scope, JITCode::JITType jitType, unsigned bytecodeIndex)
+{
+    SamplingRegion samplingRegion(samplingDescription(jitType));
     
 #if !ENABLE(JIT)
     UNUSED_PARAM(jitType);
+    UNUSED_PARAM(bytecodeIndex);
 #endif
-    JSObject* exception = 0;
     JSGlobalData* globalData = &exec->globalData();
     JSGlobalObject* lexicalGlobalObject = exec->lexicalGlobalObject();
     
-    if (!!m_evalCodeBlock && m_evalCodeBlock->canProduceCopyWithBytecode()) {
-        BytecodeDestructionBlocker blocker(m_evalCodeBlock.get());
+    if (!!m_evalCodeBlock) {
         OwnPtr<EvalCodeBlock> newCodeBlock = adoptPtr(new EvalCodeBlock(CodeBlock::CopyParsedBlock, *m_evalCodeBlock));
         newCodeBlock->setAlternative(static_pointer_cast<CodeBlock>(m_evalCodeBlock.release()));
         m_evalCodeBlock = newCodeBlock.release();
     } else {
+        UNUSED_PARAM(scope);
+        UNUSED_PARAM(globalData);
+        UNUSED_PARAM(lexicalGlobalObject);
         if (!lexicalGlobalObject->evalEnabled())
-            return throwError(exec, createEvalError(exec, "Eval is disabled"));
-        RefPtr<EvalNode> evalNode = parse<EvalNode>(globalData, lexicalGlobalObject, m_source, 0, isStrictMode() ? JSParseStrict : JSParseNormal, EvalNode::isFunctionNode ? JSParseFunctionCode : JSParseProgramCode, lexicalGlobalObject->debugger(), exec, &exception);
-        if (!evalNode) {
-            ASSERT(exception);
+            return throwError(exec, createEvalError(exec, lexicalGlobalObject->evalDisabledErrorMessage()));
+
+        JSObject* exception = 0;
+        UnlinkedEvalCodeBlock* unlinkedEvalCode = lexicalGlobalObject->createEvalCodeBlock(exec, this, &exception);
+        if (!unlinkedEvalCode)
             return exception;
-        }
-        recordParse(evalNode->features(), evalNode->hasCapturedVariables(), evalNode->lineNo(), evalNode->lastLine());
-        
-        JSGlobalObject* globalObject = scopeChainNode->globalObject.get();
-        
+
         OwnPtr<CodeBlock> previousCodeBlock = m_evalCodeBlock.release();
         ASSERT((jitType == JITCode::bottomTierJIT()) == !previousCodeBlock);
-        m_evalCodeBlock = adoptPtr(new EvalCodeBlock(this, globalObject, source().provider(), scopeChainNode->localDepth(), previousCodeBlock.release()));
-        OwnPtr<BytecodeGenerator> generator(adoptPtr(new BytecodeGenerator(evalNode.get(), scopeChainNode, m_evalCodeBlock->symbolTable(), m_evalCodeBlock.get(), !!m_evalCodeBlock->alternative() ? OptimizingCompilation : FirstCompilation)));
-        if ((exception = generator->generate())) {
-            m_evalCodeBlock = static_pointer_cast<EvalCodeBlock>(m_evalCodeBlock->releaseAlternative());
-            evalNode->destroyData();
-            return exception;
-        }
-        
-        evalNode->destroyData();
+        m_unlinkedEvalCodeBlock.set(*globalData, this, unlinkedEvalCode);
+        m_evalCodeBlock = adoptPtr(new EvalCodeBlock(this, unlinkedEvalCode, lexicalGlobalObject, source().provider(), scope->localDepth(), previousCodeBlock.release()));
         m_evalCodeBlock->copyPostParseDataFromAlternative();
     }
 
 #if ENABLE(JIT)
-    if (!jitCompileIfAppropriate(*globalData, m_evalCodeBlock, m_jitCodeForCall, jitType))
+    if (!prepareForExecution(exec, m_evalCodeBlock, m_jitCodeForCall, jitType, bytecodeIndex))
         return 0;
 #endif
 
 #if ENABLE(JIT)
-#if ENABLE(INTERPRETER)
-    if (!m_jitCodeForCall)
-        Heap::heap(this)->reportExtraMemoryCost(sizeof(*m_evalCodeBlock));
-    else
-#endif
     Heap::heap(this)->reportExtraMemoryCost(sizeof(*m_evalCodeBlock) + m_jitCodeForCall.size());
 #else
     Heap::heap(this)->reportExtraMemoryCost(sizeof(*m_evalCodeBlock));
@@ -246,6 +248,7 @@ void EvalExecutable::visitChildren(JSCell* cell, SlotVisitor& visitor)
     ScriptExecutable::visitChildren(thisObject, visitor);
     if (thisObject->m_evalCodeBlock)
         thisObject->m_evalCodeBlock->visitAggregate(visitor);
+    visitor.append(&thisObject->m_unlinkedEvalCodeBlock);
 }
 
 void EvalExecutable::unlinkCalls()
@@ -258,95 +261,69 @@ void EvalExecutable::unlinkCalls()
 #endif
 }
 
-void EvalExecutable::finalize(JSCell* cell)
+void EvalExecutable::clearCode()
 {
-    jsCast<EvalExecutable*>(cell)->clearCode();
-}
-
-inline void EvalExecutable::clearCode()
-{
-    if (m_evalCodeBlock) {
-        m_evalCodeBlock->clearEvalCache();
-        m_evalCodeBlock.clear();
-    }
+    m_evalCodeBlock.clear();
+    m_unlinkedEvalCodeBlock.clear();
     Base::clearCode();
 }
 
 JSObject* ProgramExecutable::checkSyntax(ExecState* exec)
 {
-    JSObject* exception = 0;
+    ParserError error;
     JSGlobalData* globalData = &exec->globalData();
     JSGlobalObject* lexicalGlobalObject = exec->lexicalGlobalObject();
-    RefPtr<ProgramNode> programNode = parse<ProgramNode>(globalData, lexicalGlobalObject, m_source, 0, JSParseNormal, ProgramNode::isFunctionNode ? JSParseFunctionCode : JSParseProgramCode, lexicalGlobalObject->debugger(), exec, &exception);
+    RefPtr<ProgramNode> programNode = parse<ProgramNode>(globalData, m_source, 0, Identifier(), JSParseNormal, ProgramNode::isFunctionNode ? JSParseFunctionCode : JSParseProgramCode, error);
     if (programNode)
         return 0;
-    ASSERT(exception);
-    return exception;
+    ASSERT(error.m_type != ParserError::ErrorNone);
+    return error.toErrorObject(lexicalGlobalObject, m_source);
 }
 
-JSObject* ProgramExecutable::compileOptimized(ExecState* exec, ScopeChainNode* scopeChainNode)
+JSObject* ProgramExecutable::compileOptimized(ExecState* exec, JSScope* scope, unsigned bytecodeIndex)
 {
     ASSERT(exec->globalData().dynamicGlobalObject);
     ASSERT(!!m_programCodeBlock);
     JSObject* error = 0;
     if (m_programCodeBlock->getJITType() != JITCode::topTierJIT())
-        error = compileInternal(exec, scopeChainNode, JITCode::nextTierJIT(m_programCodeBlock->getJITType()));
+        error = compileInternal(exec, scope, JITCode::nextTierJIT(m_programCodeBlock->getJITType()), bytecodeIndex);
     ASSERT(!!m_programCodeBlock);
     return error;
 }
 
-JSObject* ProgramExecutable::compileInternal(ExecState* exec, ScopeChainNode* scopeChainNode, JITCode::JITType jitType)
+#if ENABLE(JIT)
+bool ProgramExecutable::jitCompile(ExecState* exec)
 {
-    SamplingRegion samplingRegion(jitType == JITCode::BaselineJIT ? "Baseline Compilation (TOTAL)" : "DFG Compilation (TOTAL)");
+    return jitCompileIfAppropriate(exec, m_programCodeBlock, m_jitCodeForCall, JITCode::bottomTierJIT(), UINT_MAX, JITCompilationCanFail);
+}
+#endif
+
+JSObject* ProgramExecutable::compileInternal(ExecState* exec, JSScope* scope, JITCode::JITType jitType, unsigned bytecodeIndex)
+{
+    SamplingRegion samplingRegion(samplingDescription(jitType));
     
 #if !ENABLE(JIT)
+    UNUSED_PARAM(exec);
     UNUSED_PARAM(jitType);
+    UNUSED_PARAM(bytecodeIndex);
 #endif
-    JSObject* exception = 0;
-    JSGlobalData* globalData = &exec->globalData();
-    JSGlobalObject* lexicalGlobalObject = exec->lexicalGlobalObject();
-    
-    if (!!m_programCodeBlock && m_programCodeBlock->canProduceCopyWithBytecode()) {
-        BytecodeDestructionBlocker blocker(m_programCodeBlock.get());
+    if (!!m_programCodeBlock) {
         OwnPtr<ProgramCodeBlock> newCodeBlock = adoptPtr(new ProgramCodeBlock(CodeBlock::CopyParsedBlock, *m_programCodeBlock));
         newCodeBlock->setAlternative(static_pointer_cast<CodeBlock>(m_programCodeBlock.release()));
         m_programCodeBlock = newCodeBlock.release();
     } else {
-        RefPtr<ProgramNode> programNode = parse<ProgramNode>(globalData, lexicalGlobalObject, m_source, 0, isStrictMode() ? JSParseStrict : JSParseNormal, ProgramNode::isFunctionNode ? JSParseFunctionCode : JSParseProgramCode, lexicalGlobalObject->debugger(), exec, &exception);
-        if (!programNode) {
-            ASSERT(exception);
-            return exception;
-        }
-        recordParse(programNode->features(), programNode->hasCapturedVariables(), programNode->lineNo(), programNode->lastLine());
-
-        JSGlobalObject* globalObject = scopeChainNode->globalObject.get();
-    
-        OwnPtr<CodeBlock> previousCodeBlock = m_programCodeBlock.release();
-        ASSERT((jitType == JITCode::bottomTierJIT()) == !previousCodeBlock);
-        m_programCodeBlock = adoptPtr(new ProgramCodeBlock(this, GlobalCode, globalObject, source().provider(), previousCodeBlock.release()));
-        OwnPtr<BytecodeGenerator> generator(adoptPtr(new BytecodeGenerator(programNode.get(), scopeChainNode, &globalObject->symbolTable(), m_programCodeBlock.get(), !!m_programCodeBlock->alternative() ? OptimizingCompilation : FirstCompilation)));
-        if ((exception = generator->generate())) {
-            m_programCodeBlock = static_pointer_cast<ProgramCodeBlock>(m_programCodeBlock->releaseAlternative());
-            programNode->destroyData();
-            return exception;
-        }
-
-        programNode->destroyData();
+        JSGlobalObject* globalObject = scope->globalObject();
+        m_programCodeBlock = adoptPtr(new ProgramCodeBlock(this, m_unlinkedProgramCodeBlock.get(), globalObject, source().provider(), m_programCodeBlock.release()));
         m_programCodeBlock->copyPostParseDataFromAlternative();
     }
 
 #if ENABLE(JIT)
-    if (!jitCompileIfAppropriate(*globalData, m_programCodeBlock, m_jitCodeForCall, jitType))
+    if (!prepareForExecution(exec, m_programCodeBlock, m_jitCodeForCall, jitType, bytecodeIndex))
         return 0;
 #endif
 
 #if ENABLE(JIT)
-#if ENABLE(INTERPRETER)
-    if (!m_jitCodeForCall)
-        Heap::heap(this)->reportExtraMemoryCost(sizeof(*m_programCodeBlock));
-    else
-#endif
-        Heap::heap(this)->reportExtraMemoryCost(sizeof(*m_programCodeBlock) + m_jitCodeForCall.size());
+    Heap::heap(this)->reportExtraMemoryCost(sizeof(*m_programCodeBlock) + m_jitCodeForCall.size());
 #else
     Heap::heap(this)->reportExtraMemoryCost(sizeof(*m_programCodeBlock));
 #endif
@@ -373,6 +350,67 @@ void ProgramExecutable::unlinkCalls()
 #endif
 }
 
+int ProgramExecutable::addGlobalVar(JSGlobalObject* globalObject, const Identifier& ident, ConstantMode constantMode, FunctionMode functionMode)
+{
+    // Try to share the symbolTable if possible
+    SharedSymbolTable* symbolTable = globalObject->symbolTable();
+    UNUSED_PARAM(functionMode);
+    int index = symbolTable->size();
+    SymbolTableEntry newEntry(index, (constantMode == IsConstant) ? ReadOnly : 0);
+    if (functionMode == IsFunctionToSpecialize)
+        newEntry.attemptToWatch();
+    SymbolTable::AddResult result = symbolTable->add(ident.impl(), newEntry);
+    if (!result.isNewEntry) {
+        result.iterator->value.notifyWrite();
+        index = result.iterator->value.getIndex();
+    }
+    return index;
+}
+
+JSObject* ProgramExecutable::initalizeGlobalProperties(JSGlobalData& globalData, CallFrame* callFrame, JSScope* scope)
+{
+    ASSERT(scope);
+    JSGlobalObject* globalObject = scope->globalObject();
+    ASSERT(globalObject);
+    ASSERT(&globalObject->globalData() == &globalData);
+
+    JSObject* exception = 0;
+    UnlinkedProgramCodeBlock* unlinkedCode = globalObject->createProgramCodeBlock(callFrame, this, &exception);
+    if (exception)
+        return exception;
+
+    m_unlinkedProgramCodeBlock.set(globalData, this, unlinkedCode);
+
+    BatchedTransitionOptimizer optimizer(globalData, globalObject);
+
+    const UnlinkedProgramCodeBlock::VariableDeclations& variableDeclarations = unlinkedCode->variableDeclarations();
+    const UnlinkedProgramCodeBlock::FunctionDeclations& functionDeclarations = unlinkedCode->functionDeclarations();
+
+    size_t newGlobals = variableDeclarations.size() + functionDeclarations.size();
+    if (!newGlobals)
+        return 0;
+    globalObject->addRegisters(newGlobals);
+    CallFrame* globalExec = globalObject->globalExec();
+
+    for (size_t i = 0; i < functionDeclarations.size(); ++i) {
+        bool propertyDidExist = globalObject->removeDirect(globalData, functionDeclarations[i].first); // Newly declared functions overwrite existing properties.
+        UnlinkedFunctionExecutable* unlinkedFunctionExecutable = functionDeclarations[i].second.get();
+        JSValue value = JSFunction::create(globalExec, unlinkedFunctionExecutable->link(globalData, m_source, lineNo(), 0), scope);
+        int index = addGlobalVar(globalObject, functionDeclarations[i].first, IsVariable,
+            !propertyDidExist ? IsFunctionToSpecialize : NotFunctionOrNotSpecializable);
+        globalObject->registerAt(index).set(globalData, globalObject, value);
+    }
+
+    for (size_t i = 0; i < variableDeclarations.size(); ++i) {
+        if (globalObject->hasProperty(globalExec, variableDeclarations[i].first))
+            continue;
+        addGlobalVar(globalObject, variableDeclarations[i].first,
+            (variableDeclarations[i].second & DeclarationStacks::IsConstant) ? IsConstant : IsVariable,
+            NotFunctionOrNotSpecializable);
+    }
+    return 0;
+}
+
 void ProgramExecutable::visitChildren(JSCell* cell, SlotVisitor& visitor)
 {
     ProgramExecutable* thisObject = jsCast<ProgramExecutable*>(cell);
@@ -380,21 +418,15 @@ void ProgramExecutable::visitChildren(JSCell* cell, SlotVisitor& visitor)
     COMPILE_ASSERT(StructureFlags & OverridesVisitChildren, OverridesVisitChildrenWithoutSettingFlag);
     ASSERT(thisObject->structure()->typeInfo().overridesVisitChildren());
     ScriptExecutable::visitChildren(thisObject, visitor);
+    visitor.append(&thisObject->m_unlinkedProgramCodeBlock);
     if (thisObject->m_programCodeBlock)
         thisObject->m_programCodeBlock->visitAggregate(visitor);
 }
 
-void ProgramExecutable::finalize(JSCell* cell)
+void ProgramExecutable::clearCode()
 {
-    jsCast<ProgramExecutable*>(cell)->clearCode();
-}
-
-inline void ProgramExecutable::clearCode()
-{
-    if (m_programCodeBlock) {
-        m_programCodeBlock->clearEvalCache();
-        m_programCodeBlock.clear();
-    }
+    m_programCodeBlock.clear();
+    m_unlinkedProgramCodeBlock.clear();
     Base::clearCode();
 }
 
@@ -412,86 +444,86 @@ FunctionCodeBlock* FunctionExecutable::baselineCodeBlockFor(CodeSpecializationKi
     while (result->alternative())
         result = static_cast<FunctionCodeBlock*>(result->alternative());
     ASSERT(result);
-    ASSERT(result->getJITType() == JITCode::BaselineJIT);
+    ASSERT(JITCode::isBaselineCode(result->getJITType()));
     return result;
 }
 
-JSObject* FunctionExecutable::compileOptimizedForCall(ExecState* exec, ScopeChainNode* scopeChainNode)
+JSObject* FunctionExecutable::compileOptimizedForCall(ExecState* exec, JSScope* scope, unsigned bytecodeIndex)
 {
     ASSERT(exec->globalData().dynamicGlobalObject);
     ASSERT(!!m_codeBlockForCall);
     JSObject* error = 0;
     if (m_codeBlockForCall->getJITType() != JITCode::topTierJIT())
-        error = compileForCallInternal(exec, scopeChainNode, JITCode::nextTierJIT(m_codeBlockForCall->getJITType()));
+        error = compileForCallInternal(exec, scope, JITCode::nextTierJIT(m_codeBlockForCall->getJITType()), bytecodeIndex);
     ASSERT(!!m_codeBlockForCall);
     return error;
 }
 
-JSObject* FunctionExecutable::compileOptimizedForConstruct(ExecState* exec, ScopeChainNode* scopeChainNode)
+JSObject* FunctionExecutable::compileOptimizedForConstruct(ExecState* exec, JSScope* scope, unsigned bytecodeIndex)
 {
     ASSERT(exec->globalData().dynamicGlobalObject);
     ASSERT(!!m_codeBlockForConstruct);
     JSObject* error = 0;
     if (m_codeBlockForConstruct->getJITType() != JITCode::topTierJIT())
-        error = compileForConstructInternal(exec, scopeChainNode, JITCode::nextTierJIT(m_codeBlockForConstruct->getJITType()));
+        error = compileForConstructInternal(exec, scope, JITCode::nextTierJIT(m_codeBlockForConstruct->getJITType()), bytecodeIndex);
     ASSERT(!!m_codeBlockForConstruct);
     return error;
 }
 
-FunctionCodeBlock* FunctionExecutable::codeBlockWithBytecodeFor(CodeSpecializationKind kind)
+#if ENABLE(JIT)
+bool FunctionExecutable::jitCompileForCall(ExecState* exec)
 {
-    FunctionCodeBlock* codeBlock = baselineCodeBlockFor(kind);
-    if (codeBlock->canProduceCopyWithBytecode())
-        return codeBlock;
-    return 0;
+    return jitCompileFunctionIfAppropriate(exec, m_codeBlockForCall, m_jitCodeForCall, m_jitCodeForCallWithArityCheck, JITCode::bottomTierJIT(), UINT_MAX, JITCompilationCanFail);
 }
 
-PassOwnPtr<FunctionCodeBlock> FunctionExecutable::produceCodeBlockFor(ScopeChainNode* scopeChainNode, CompilationKind compilationKind, CodeSpecializationKind specializationKind, JSObject*& exception)
+bool FunctionExecutable::jitCompileForConstruct(ExecState* exec)
 {
-    if (!!codeBlockFor(specializationKind) && codeBlockFor(specializationKind)->canProduceCopyWithBytecode()) {
-        BytecodeDestructionBlocker blocker(codeBlockFor(specializationKind).get());
+    return jitCompileFunctionIfAppropriate(exec, m_codeBlockForConstruct, m_jitCodeForConstruct, m_jitCodeForConstructWithArityCheck, JITCode::bottomTierJIT(), UINT_MAX, JITCompilationCanFail);
+}
+#endif
+
+FunctionCodeBlock* FunctionExecutable::codeBlockWithBytecodeFor(CodeSpecializationKind kind)
+{
+    return baselineCodeBlockFor(kind);
+}
+
+PassOwnPtr<FunctionCodeBlock> FunctionExecutable::produceCodeBlockFor(JSScope* scope, CodeSpecializationKind specializationKind, JSObject*& exception)
+{
+    if (!!codeBlockFor(specializationKind))
         return adoptPtr(new FunctionCodeBlock(CodeBlock::CopyParsedBlock, *codeBlockFor(specializationKind)));
-    }
-    
-    exception = 0;
-    JSGlobalData* globalData = scopeChainNode->globalData;
-    JSGlobalObject* globalObject = scopeChainNode->globalObject.get();
-    RefPtr<FunctionBodyNode> body = parse<FunctionBodyNode>(globalData, globalObject, m_source, m_parameters.get(), isStrictMode() ? JSParseStrict : JSParseNormal, FunctionBodyNode::isFunctionNode ? JSParseFunctionCode : JSParseProgramCode, 0, 0, &exception);
 
-    if (!body) {
-        ASSERT(exception);
+    JSGlobalData* globalData = scope->globalData();
+    JSGlobalObject* globalObject = scope->globalObject();
+    ParserError error;
+    DebuggerMode debuggerMode = globalObject->hasDebugger() ? DebuggerOn : DebuggerOff;
+    ProfilerMode profilerMode = globalObject->hasProfiler() ? ProfilerOn : ProfilerOff;
+    UnlinkedFunctionCodeBlock* unlinkedCodeBlock = m_unlinkedExecutable->codeBlockFor(*globalData, m_source, specializationKind, debuggerMode, profilerMode, error);
+    recordParse(m_unlinkedExecutable->features(), m_unlinkedExecutable->hasCapturedVariables(), lineNo(), lastLine());
+
+    if (!unlinkedCodeBlock) {
+        exception = error.toErrorObject(globalObject, m_source);
         return nullptr;
     }
-    if (m_forceUsesArguments)
-        body->setUsesArguments();
-    body->finishParsing(m_parameters, m_name);
-    recordParse(body->features(), body->hasCapturedVariables(), body->lineNo(), body->lastLine());
 
-    OwnPtr<FunctionCodeBlock> result;
-    ASSERT((compilationKind == FirstCompilation) == !codeBlockFor(specializationKind));
-    result = adoptPtr(new FunctionCodeBlock(this, FunctionCode, globalObject, source().provider(), source().startOffset(), specializationKind == CodeForConstruct));
-    OwnPtr<BytecodeGenerator> generator(adoptPtr(new BytecodeGenerator(body.get(), scopeChainNode, result->symbolTable(), result.get(), compilationKind)));
-    exception = generator->generate();
-    body->destroyData();
-    if (exception)
-        return nullptr;
-
+    OwnPtr<FunctionCodeBlock> result = adoptPtr(new FunctionCodeBlock(this, unlinkedCodeBlock, globalObject, source().provider(), source().startOffset()));
     result->copyPostParseDataFrom(codeBlockFor(specializationKind).get());
     return result.release();
 }
 
-JSObject* FunctionExecutable::compileForCallInternal(ExecState* exec, ScopeChainNode* scopeChainNode, JITCode::JITType jitType)
+
+JSObject* FunctionExecutable::compileForCallInternal(ExecState* exec, JSScope* scope, JITCode::JITType jitType, unsigned bytecodeIndex)
 {
-    SamplingRegion samplingRegion(jitType == JITCode::BaselineJIT ? "Baseline Compilation (TOTAL)" : "DFG Compilation (TOTAL)");
+    SamplingRegion samplingRegion(samplingDescription(jitType));
     
 #if !ENABLE(JIT)
     UNUSED_PARAM(exec);
     UNUSED_PARAM(jitType);
     UNUSED_PARAM(exec);
+    UNUSED_PARAM(bytecodeIndex);
 #endif
     ASSERT((jitType == JITCode::bottomTierJIT()) == !m_codeBlockForCall);
     JSObject* exception;
-    OwnPtr<FunctionCodeBlock> newCodeBlock = produceCodeBlockFor(scopeChainNode, !!m_codeBlockForCall ? OptimizingCompilation : FirstCompilation, CodeForCall, exception);
+    OwnPtr<FunctionCodeBlock> newCodeBlock = produceCodeBlockFor(scope, CodeForCall, exception);
     if (!newCodeBlock)
         return exception;
 
@@ -500,21 +532,14 @@ JSObject* FunctionExecutable::compileForCallInternal(ExecState* exec, ScopeChain
     
     m_numParametersForCall = m_codeBlockForCall->numParameters();
     ASSERT(m_numParametersForCall);
-    m_numCapturedVariables = m_codeBlockForCall->m_numCapturedVars;
-    m_symbolTable = m_codeBlockForCall->sharedSymbolTable();
 
 #if ENABLE(JIT)
-    if (!jitCompileFunctionIfAppropriate(exec->globalData(), m_codeBlockForCall, m_jitCodeForCall, m_jitCodeForCallWithArityCheck, m_symbolTable, jitType))
+    if (!prepareFunctionForExecution(exec, m_codeBlockForCall, m_jitCodeForCall, m_jitCodeForCallWithArityCheck, jitType, bytecodeIndex, CodeForCall))
         return 0;
 #endif
 
 #if ENABLE(JIT)
-#if ENABLE(INTERPRETER)
-    if (!m_jitCodeForCall)
-        Heap::heap(this)->reportExtraMemoryCost(sizeof(*m_codeBlockForCall));
-    else
-#endif
-        Heap::heap(this)->reportExtraMemoryCost(sizeof(*m_codeBlockForCall) + m_jitCodeForCall.size());
+    Heap::heap(this)->reportExtraMemoryCost(sizeof(*m_codeBlockForCall) + m_jitCodeForCall.size());
 #else
     Heap::heap(this)->reportExtraMemoryCost(sizeof(*m_codeBlockForCall));
 #endif
@@ -522,18 +547,19 @@ JSObject* FunctionExecutable::compileForCallInternal(ExecState* exec, ScopeChain
     return 0;
 }
 
-JSObject* FunctionExecutable::compileForConstructInternal(ExecState* exec, ScopeChainNode* scopeChainNode, JITCode::JITType jitType)
+JSObject* FunctionExecutable::compileForConstructInternal(ExecState* exec, JSScope* scope, JITCode::JITType jitType, unsigned bytecodeIndex)
 {
-    SamplingRegion samplingRegion(jitType == JITCode::BaselineJIT ? "Baseline Compilation (TOTAL)" : "DFG Compilation (TOTAL)");
+    SamplingRegion samplingRegion(samplingDescription(jitType));
     
 #if !ENABLE(JIT)
     UNUSED_PARAM(jitType);
     UNUSED_PARAM(exec);
+    UNUSED_PARAM(bytecodeIndex);
 #endif
     
     ASSERT((jitType == JITCode::bottomTierJIT()) == !m_codeBlockForConstruct);
     JSObject* exception;
-    OwnPtr<FunctionCodeBlock> newCodeBlock = produceCodeBlockFor(scopeChainNode, !!m_codeBlockForConstruct ? OptimizingCompilation : FirstCompilation, CodeForConstruct, exception);
+    OwnPtr<FunctionCodeBlock> newCodeBlock = produceCodeBlockFor(scope, CodeForConstruct, exception);
     if (!newCodeBlock)
         return exception;
 
@@ -542,20 +568,13 @@ JSObject* FunctionExecutable::compileForConstructInternal(ExecState* exec, Scope
     
     m_numParametersForConstruct = m_codeBlockForConstruct->numParameters();
     ASSERT(m_numParametersForConstruct);
-    m_numCapturedVariables = m_codeBlockForConstruct->m_numCapturedVars;
-    m_symbolTable = m_codeBlockForConstruct->sharedSymbolTable();
 
 #if ENABLE(JIT)
-    if (!jitCompileFunctionIfAppropriate(exec->globalData(), m_codeBlockForConstruct, m_jitCodeForConstruct, m_jitCodeForConstructWithArityCheck, m_symbolTable, jitType))
+    if (!prepareFunctionForExecution(exec, m_codeBlockForConstruct, m_jitCodeForConstruct, m_jitCodeForConstructWithArityCheck, jitType, bytecodeIndex, CodeForConstruct))
         return 0;
 #endif
 
 #if ENABLE(JIT)
-#if ENABLE(INTERPRETER)
-    if (!m_jitCodeForConstruct)
-        Heap::heap(this)->reportExtraMemoryCost(sizeof(*m_codeBlockForConstruct));
-    else
-#endif
     Heap::heap(this)->reportExtraMemoryCost(sizeof(*m_codeBlockForConstruct) + m_jitCodeForConstruct.size());
 #else
     Heap::heap(this)->reportExtraMemoryCost(sizeof(*m_codeBlockForConstruct));
@@ -587,43 +606,31 @@ void FunctionExecutable::visitChildren(JSCell* cell, SlotVisitor& visitor)
     COMPILE_ASSERT(StructureFlags & OverridesVisitChildren, OverridesVisitChildrenWithoutSettingFlag);
     ASSERT(thisObject->structure()->typeInfo().overridesVisitChildren());
     ScriptExecutable::visitChildren(thisObject, visitor);
-    if (thisObject->m_nameValue)
-        visitor.append(&thisObject->m_nameValue);
     if (thisObject->m_codeBlockForCall)
         thisObject->m_codeBlockForCall->visitAggregate(visitor);
     if (thisObject->m_codeBlockForConstruct)
         thisObject->m_codeBlockForConstruct->visitAggregate(visitor);
+    visitor.append(&thisObject->m_unlinkedExecutable);
 }
 
-void FunctionExecutable::discardCode()
+void FunctionExecutable::clearCodeIfNotCompiling()
 {
-#if ENABLE(JIT)
-    // These first two checks are to handle the rare case where
-    // we are trying to evict code for a function during its
-    // codegen.
-    if (!m_jitCodeForCall && m_codeBlockForCall)
+    if (isCompiling())
         return;
-    if (!m_jitCodeForConstruct && m_codeBlockForConstruct)
-        return;
-#endif
     clearCode();
 }
 
-void FunctionExecutable::finalize(JSCell* cell)
+void FunctionExecutable::clearUnlinkedCodeForRecompilationIfNotCompiling()
 {
-    jsCast<FunctionExecutable*>(cell)->clearCode();
+    if (isCompiling())
+        return;
+    m_unlinkedExecutable->clearCodeForRecompilation();
 }
 
-inline void FunctionExecutable::clearCode()
+void FunctionExecutable::clearCode()
 {
-    if (m_codeBlockForCall) {
-        m_codeBlockForCall->clearEvalCache();
-        m_codeBlockForCall.clear();
-    }
-    if (m_codeBlockForConstruct) {
-        m_codeBlockForConstruct->clearEvalCache();
-        m_codeBlockForConstruct.clear();
-    }
+    m_codeBlockForCall.clear();
+    m_codeBlockForConstruct.clear();
     Base::clearCode();
 }
 
@@ -641,38 +648,43 @@ void FunctionExecutable::unlinkCalls()
 #endif
 }
 
-FunctionExecutable* FunctionExecutable::fromGlobalCode(const Identifier& functionName, ExecState* exec, Debugger* debugger, const SourceCode& source, JSObject** exception)
+FunctionExecutable* FunctionExecutable::fromGlobalCode(const Identifier& name, ExecState* exec, Debugger* debugger, const SourceCode& source, JSObject** exception)
 {
-    JSGlobalObject* lexicalGlobalObject = exec->lexicalGlobalObject();
-    RefPtr<ProgramNode> program = parse<ProgramNode>(&exec->globalData(), lexicalGlobalObject, source, 0, JSParseNormal, ProgramNode::isFunctionNode ? JSParseFunctionCode : JSParseProgramCode, debugger, exec, exception);
-    if (!program) {
-        ASSERT(*exception);
+    UnlinkedFunctionExecutable* unlinkedFunction = UnlinkedFunctionExecutable::fromGlobalCode(name, exec, debugger, source, exception);
+    if (!unlinkedFunction)
         return 0;
-    }
-
-    // Uses of this function that would not result in a single function expression are invalid.
-    StatementNode* exprStatement = program->singleStatement();
-    ASSERT(exprStatement);
-    ASSERT(exprStatement->isExprStatement());
-    ExpressionNode* funcExpr = static_cast<ExprStatementNode*>(exprStatement)->expr();
-    ASSERT(funcExpr);
-    ASSERT(funcExpr->isFuncExprNode());
-    FunctionBodyNode* body = static_cast<FuncExprNode*>(funcExpr)->body();
-    ASSERT(body);
-
-    return FunctionExecutable::create(exec->globalData(), functionName, body->source(), body->usesArguments(), body->parameters(), body->isStrictMode(), body->lineNo(), body->lastLine());
+    unsigned firstLine = source.firstLine() + unlinkedFunction->firstLineOffset();
+    unsigned startOffset = source.startOffset() + unlinkedFunction->startOffset();
+    unsigned sourceLength = unlinkedFunction->sourceLength();
+    SourceCode functionSource(source.provider(), startOffset, startOffset + sourceLength, firstLine);
+    return FunctionExecutable::create(exec->globalData(), functionSource, unlinkedFunction, firstLine, unlinkedFunction->lineCount());
 }
 
-UString FunctionExecutable::paramString() const
+String FunctionExecutable::paramString() const
 {
-    FunctionParameters& parameters = *m_parameters;
-    UStringBuilder builder;
-    for (size_t pos = 0; pos < parameters.size(); ++pos) {
-        if (!builder.isEmpty())
-            builder.append(", ");
-        builder.append(parameters[pos].ustring());
-    }
-    return builder.toUString();
+    return m_unlinkedExecutable->paramString();
+}
+
+CodeBlockHash ExecutableBase::hashFor(CodeSpecializationKind kind) const
+{
+    if (this->classInfo() == &NativeExecutable::s_info)
+        return jsCast<const NativeExecutable*>(this)->hashFor(kind);
+    
+    return jsCast<const ScriptExecutable*>(this)->hashFor(kind);
+}
+
+CodeBlockHash NativeExecutable::hashFor(CodeSpecializationKind kind) const
+{
+    if (kind == CodeForCall)
+        return CodeBlockHash(static_cast<unsigned>(bitwise_cast<size_t>(m_function)));
+    
+    ASSERT(kind == CodeForConstruct);
+    return CodeBlockHash(static_cast<unsigned>(bitwise_cast<size_t>(m_constructor)));
+}
+
+CodeBlockHash ScriptExecutable::hashFor(CodeSpecializationKind kind) const
+{
+    return CodeBlockHash(source(), kind);
 }
 
 }

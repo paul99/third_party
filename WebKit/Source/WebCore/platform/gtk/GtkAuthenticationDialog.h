@@ -20,9 +20,7 @@
 #ifndef GtkAuthenticationDialog_h
 #define GtkAuthenticationDialog_h
 
-#define LIBSOUP_I_HAVE_READ_BUG_594377_AND_KNOW_SOUP_PASSWORD_MANAGER_MIGHT_GO_AWAY
-
-#include "GOwnPtr.h"
+#include "AuthenticationChallenge.h"
 #include "GRefPtrGtk.h"
 #include <libsoup/soup.h>
 #include <wtf/FastAllocBase.h>
@@ -36,37 +34,31 @@ class GtkAuthenticationDialog {
     WTF_MAKE_FAST_ALLOCATED;
 
 public:
-    GtkAuthenticationDialog(GtkWindow*, SoupSession*, SoupMessage*, SoupAuth*);
-    ~GtkAuthenticationDialog();
+    enum CredentialStorageMode {
+        AllowPersistentStorage, // The user is asked whether to store credential information.
+        DisallowPersistentStorage // Credential information is only kept in the session.
+    };
 
+    GtkAuthenticationDialog(const AuthenticationChallenge&, CredentialStorageMode);
+    GtkAuthenticationDialog(GtkWindow*, const AuthenticationChallenge&, CredentialStorageMode);
+    virtual ~GtkAuthenticationDialog() { }
     void show();
-
-private:
     void destroy();
-    void authenticate();
 
-#ifdef SOUP_TYPE_PASSWORD_MANAGER
-    void savePassword();
-    static void savePasswordCallback(SoupMessage*, GtkAuthenticationDialog*);
-#endif
-
-    static void authenticationDialogResponseCallback(GtkWidget*, gint responseID, GtkAuthenticationDialog*);
-
+protected:
+    void createContentsInContainer(GtkWidget* container);
+    virtual void authenticate(const Credential&);
     GtkWidget* m_dialog;
-    SoupSession* m_session;
-    GRefPtr<SoupMessage> m_message;
-    SoupAuth* m_auth;
-
     GtkWidget* m_loginEntry;
     GtkWidget* m_passwordEntry;
     GtkWidget* m_rememberCheckButton;
+    GtkWidget* m_okayButton;
+    GtkWidget* m_cancelButton;
 
-#ifdef SOUP_TYPE_PASSWORD_MANAGER
-    bool m_isSavingPassword;
-    unsigned long m_savePasswordHandler;
-    CString m_username;
-    CString m_password;
-#endif
+private:
+    static void buttonClickedCallback(GtkWidget*, GtkAuthenticationDialog*);
+    AuthenticationChallenge m_challenge;
+    CredentialStorageMode m_credentialStorageMode;
 };
 
 } // namespace WebCore

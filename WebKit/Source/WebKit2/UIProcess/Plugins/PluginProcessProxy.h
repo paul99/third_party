@@ -30,6 +30,7 @@
 
 #include "Connection.h"
 #include "PluginModuleInfo.h"
+#include "PluginProcess.h"
 #include "ProcessLauncher.h"
 #include "WebProcessProxyMessages.h"
 #include <wtf/Deque.h>
@@ -52,9 +53,17 @@ class WebPluginSiteDataManager;
 class WebProcessProxy;
 struct PluginProcessCreationParameters;
 
-class PluginProcessProxy : CoreIPC::Connection::Client, ProcessLauncher::Client {
+#if PLUGIN_ARCHITECTURE(X11)
+struct RawPluginMetaData {
+    String name;
+    String description;
+    String mimeDescription;
+};
+#endif
+
+class PluginProcessProxy : public RefCounted<PluginProcessProxy>, CoreIPC::Connection::Client, ProcessLauncher::Client {
 public:
-    static PassOwnPtr<PluginProcessProxy> create(PluginProcessManager*, const PluginModuleInfo&);
+    static PassRefPtr<PluginProcessProxy> create(PluginProcessManager*, const PluginModuleInfo&, PluginProcess::Type);
     ~PluginProcessProxy();
 
     const PluginModuleInfo& pluginInfo() const { return m_pluginInfo; }
@@ -72,7 +81,13 @@ public:
     // Terminates the plug-in process.
     void terminate();
 
+    bool isValid() const { return m_connection; }
+
+    PluginProcess::Type processType() const { return m_processType; }
+
 #if PLATFORM(MAC)
+    void setApplicationIsOccluded(bool);
+
     // Returns whether the plug-in needs the heap to be marked executable.
     static bool pluginNeedsExecutableHeap(const PluginModuleInfo&);
 
@@ -80,23 +95,26 @@ public:
     static bool createPropertyListFile(const PluginModuleInfo&);
 #endif
 
+#if PLUGIN_ARCHITECTURE(X11)
+    static bool scanPlugin(const String& pluginPath, RawPluginMetaData& result);
+#endif
+
 private:
-    PluginProcessProxy(PluginProcessManager*, const PluginModuleInfo&);
+    PluginProcessProxy(PluginProcessManager*, const PluginModuleInfo&, PluginProcess::Type);
 
     void pluginProcessCrashedOrFailedToLaunch();
 
     // CoreIPC::Connection::Client
-    virtual void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
-    virtual void didClose(CoreIPC::Connection*);
-    virtual void didReceiveInvalidMessage(CoreIPC::Connection*, CoreIPC::MessageID);
-    virtual void syncMessageSendTimedOut(CoreIPC::Connection*);
+    virtual void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&) OVERRIDE;
+    virtual void didClose(CoreIPC::Connection*) OVERRIDE;
+    virtual void didReceiveInvalidMessage(CoreIPC::Connection*, CoreIPC::StringReference messageReceiverName, CoreIPC::StringReference messageName) OVERRIDE;
 
     // ProcessLauncher::Client
     virtual void didFinishLaunching(ProcessLauncher*, CoreIPC::Connection::Identifier);
 
     // Message handlers
-    void didReceivePluginProcessProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
-    void didCreateWebProcessConnection(const CoreIPC::Attachment&);
+    void didReceivePluginProcessProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
+    void didCreateWebProcessConnection(const CoreIPC::Attachment&, bool supportsAsynchronousPluginInitialization);
     void didGetSitesWithData(const Vector<String>& sites, uint64_t callbackID);
     void didClearSiteData(uint64_t callbackID);
 
@@ -116,6 +134,7 @@ private:
     void applicationDidBecomeActive();
 #endif
 
+    static void platformInitializeLaunchOptions(ProcessLauncher::LaunchOptions&, const PluginModuleInfo& pluginInfo);
     void platformInitializePluginProcess(PluginProcessCreationParameters& parameters);
 
     // The plug-in host process manager.
@@ -155,6 +174,8 @@ private:
     bool m_fullscreenWindowIsShowing;
     unsigned m_preFullscreenAppPresentationOptions;
 #endif
+
+    PluginProcess::Type m_processType;
 };
 
 } // namespace WebKit

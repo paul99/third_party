@@ -33,17 +33,17 @@
 #if ENABLE(WORKERS)
 #include "V8WorkerContext.h"
 
+#include "ContentSecurityPolicy.h"
 #include "DOMTimer.h"
 #include "ExceptionCode.h"
 #include "ScheduledAction.h"
+#include "ScriptCallStack.h"
 #include "V8Binding.h"
-#include "V8BindingMacros.h"
-#include "V8Proxy.h"
 #include "V8Utilities.h"
 #include "V8WorkerContextEventListener.h"
 #include "WebSocket.h"
 #include "WorkerContext.h"
-#include "WorkerContextExecutionProxy.h"
+#include "WorkerScriptController.h"
 
 namespace WebCore {
 
@@ -59,12 +59,16 @@ v8::Handle<v8::Value> SetTimeoutOrInterval(const v8::Arguments& args, bool singl
     int32_t timeout = argumentCount >= 2 ? args[1]->Int32Value() : 0;
     int timerId;
 
-    WorkerContextExecutionProxy* proxy = workerContext->script()->proxy();
-    if (!proxy)
+    WorkerScriptController* script = workerContext->script();
+    if (!script)
         return v8::Undefined();
 
-    v8::Handle<v8::Context> v8Context = proxy->context();
+    v8::Handle<v8::Context> v8Context = script->context();
     if (function->IsString()) {
+        if (ContentSecurityPolicy* policy = workerContext->contentSecurityPolicy()) {
+            if (!policy->allowEval())
+                return v8Integer(0, args.GetIsolate());
+        }
         WTF::String stringFunction = toWebCoreString(function);
         timerId = DOMTimer::install(workerContext, adoptPtr(new ScheduledAction(v8Context, stringFunction, workerContext->url())), timeout, singleShot);
     } else if (function->IsFunction()) {
@@ -83,20 +87,19 @@ v8::Handle<v8::Value> SetTimeoutOrInterval(const v8::Arguments& args, bool singl
     } else
         return v8::Undefined();
 
-    return v8::Integer::New(timerId);
+    return v8Integer(timerId, args.GetIsolate());
 }
 
 v8::Handle<v8::Value> V8WorkerContext::importScriptsCallback(const v8::Arguments& args)
 {
-    INC_STATS(L"DOM.WorkerContext.importScripts()");
+    INC_STATS("DOM.WorkerContext.importScripts()");
     if (!args.Length())
         return v8::Undefined();
 
     Vector<String> urls;
     for (int i = 0; i < args.Length(); i++) {
-        v8::TryCatch tryCatch;
-        v8::Handle<v8::String> scriptUrl = args[i]->ToString();
-        if (tryCatch.HasCaught() || scriptUrl.IsEmpty())
+        V8TRYCATCH(v8::Handle<v8::String>, scriptUrl, args[i]->ToString());
+        if (scriptUrl.IsEmpty())
             return v8::Undefined();
         urls.append(toWebCoreString(scriptUrl));
     }
@@ -107,33 +110,35 @@ v8::Handle<v8::Value> V8WorkerContext::importScriptsCallback(const v8::Arguments
     workerContext->importScripts(urls, ec);
 
     if (ec)
-        return throwError(ec);
+        return setDOMException(ec, args.GetIsolate());
 
     return v8::Undefined();
 }
 
 v8::Handle<v8::Value> V8WorkerContext::setTimeoutCallback(const v8::Arguments& args)
 {
-    INC_STATS(L"DOM.WorkerContext.setTimeout()");
+    INC_STATS("DOM.WorkerContext.setTimeout()");
     return SetTimeoutOrInterval(args, true);
 }
 
 v8::Handle<v8::Value> V8WorkerContext::setIntervalCallback(const v8::Arguments& args)
 {
-    INC_STATS(L"DOM.WorkerContext.setInterval()");
+    INC_STATS("DOM.WorkerContext.setInterval()");
     return SetTimeoutOrInterval(args, false);
 }
 
-v8::Handle<v8::Value> toV8(WorkerContext* impl)
+v8::Handle<v8::Value> toV8(WorkerContext* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
 {
+    // Notice that we explicitly ignore creationContext because the WorkerContext is its own creationContext.
+
     if (!impl)
-        return v8::Null();
+        return v8NullWithCheck(isolate);
 
-    WorkerContextExecutionProxy* proxy = impl->script()->proxy();
-    if (!proxy)
-        return v8::Null();
+    WorkerScriptController* script = impl->script();
+    if (!script)
+        return v8NullWithCheck(isolate);
 
-    v8::Handle<v8::Object> global = proxy->context()->Global();
+    v8::Handle<v8::Object> global = script->context()->Global();
     ASSERT(!global.IsEmpty());
     return global;
 }

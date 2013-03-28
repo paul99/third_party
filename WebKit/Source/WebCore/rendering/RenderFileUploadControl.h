@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2009, 2012 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -44,6 +44,7 @@ public:
 private:
     virtual const char* renderName() const { return "RenderFileUploadControl"; }
 
+    virtual bool canBeReplacedWithInlineRunIn() const OVERRIDE;
     virtual void updateFromElement();
     virtual void computePreferredLogicalWidths();
     virtual void paintObject(PaintInfo&, const LayoutPoint&);
@@ -55,6 +56,8 @@ private:
     virtual VisiblePosition positionForPoint(const LayoutPoint&);
 
     HTMLInputElement* uploadButton() const;
+
+    bool m_canReceiveDroppedFiles;
 };
 
 inline RenderFileUploadControl* toRenderFileUploadControl(RenderObject* object)

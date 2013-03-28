@@ -33,19 +33,20 @@ class DocumentFragment : public ContainerNode {
 public:
     static PassRefPtr<DocumentFragment> create(Document*);
 
-    void parseHTML(const String&, Element* contextElement, FragmentScriptingPermission = FragmentScriptingAllowed);
-    bool parseXML(const String&, Element* contextElement, FragmentScriptingPermission = FragmentScriptingAllowed);
+    void parseHTML(const String&, Element* contextElement, FragmentScriptingPermission = AllowScriptingContent);
+    bool parseXML(const String&, Element* contextElement, FragmentScriptingPermission = AllowScriptingContent);
     
     virtual bool canContainRangeEndPoint() const { return true; }
 
 protected:
-    DocumentFragment(Document*);
+    DocumentFragment(Document*, ConstructionType = CreateContainer);
     virtual String nodeName() const;
 
 private:
     virtual NodeType nodeType() const;
     virtual PassRefPtr<Node> cloneNode(bool deep);
     virtual bool childTypeAllowed(NodeType) const;
+    virtual bool documentFragmentIsShadowRoot() const OVERRIDE { return false; }
 };
 
 } //namespace

@@ -26,37 +26,46 @@
 #include "LayoutState.h"
 #include "PODFreeListArena.h"
 #include "RenderBlock.h"
-#include <wtf/ListHashSet.h>
 #include <wtf/OwnPtr.h>
 
 namespace WebCore {
 
-class RenderFlowThread;
+class FlowThreadController;
 class RenderWidget;
+class RenderQuote;
 
 #if USE(ACCELERATED_COMPOSITING)
 class RenderLayerCompositor;
 #endif
 
-typedef ListHashSet<RenderFlowThread*> RenderFlowThreadList;
+#if ENABLE(CSS_SHADERS) && USE(3D_GRAPHICS)
+class CustomFilterGlobalContext;
+#endif
 
 class RenderView : public RenderBlock {
 public:
     RenderView(Node*, FrameView*);
     virtual ~RenderView();
 
-    virtual const char* renderName() const { return "RenderView"; }
+    bool hitTest(const HitTestRequest&, HitTestResult&);
+    bool hitTest(const HitTestRequest&, const HitTestLocation&, HitTestResult&);
 
-    virtual bool isRenderView() const { return true; }
+    virtual const char* renderName() const OVERRIDE { return "RenderView"; }
 
-    virtual bool requiresLayer() const { return true; }
+    virtual bool isRenderView() const OVERRIDE { return true; }
 
-    virtual bool isChildAllowed(RenderObject*, RenderStyle*) const;
+    virtual bool requiresLayer() const OVERRIDE { return true; }
 
-    virtual void layout();
-    virtual void computeLogicalWidth();
-    virtual void computeLogicalHeight();
-    virtual void computePreferredLogicalWidths();
+    virtual bool isChildAllowed(RenderObject*, RenderStyle*) const OVERRIDE;
+
+    virtual void layout() OVERRIDE;
+    virtual void updateLogicalWidth() OVERRIDE;
+    virtual void computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues&) const OVERRIDE;
+    // FIXME: This override is not needed and should be removed
+    // it only exists to make computePreferredLogicalWidths public.
+    virtual void computePreferredLogicalWidths() OVERRIDE;
+
+    virtual LayoutUnit availableLogicalHeight() const OVERRIDE;
 
     // The same as the FrameView's layoutHeight/layoutWidth but with null check guards.
     int viewHeight() const;
@@ -68,14 +77,15 @@ public:
 
     FrameView* frameView() const { return m_frameView; }
 
-    virtual void computeRectForRepaint(RenderBoxModelObject* repaintContainer, IntRect&, bool fixed = false) const;
-    virtual void repaintViewRectangle(const IntRect&, bool immediate = false);
+    virtual void computeRectForRepaint(const RenderLayerModelObject* repaintContainer, LayoutRect&, bool fixed = false) const OVERRIDE;
+    void repaintViewRectangle(const LayoutRect&, bool immediate = false) const;
     // Repaint the view, and all composited layers that intersect the given absolute rectangle.
     // FIXME: ideally we'd never have to do this, if all repaints are container-relative.
-    virtual void repaintRectangleInViewAndCompositedLayers(const IntRect&, bool immediate = false);
+    void repaintRectangleInViewAndCompositedLayers(const LayoutRect&, bool immediate = false);
+    void repaintViewAndCompositedLayers();
 
     virtual void paint(PaintInfo&, const LayoutPoint&);
-    virtual void paintBoxDecorations(PaintInfo&, const IntPoint&);
+    virtual void paintBoxDecorations(PaintInfo&, const LayoutPoint&) OVERRIDE;
 
     enum SelectionRepaintMode { RepaintNewXOROld, RepaintNewMinusOld, RepaintNothing };
     void setSelection(RenderObject* start, int startPos, RenderObject* end, int endPos, SelectionRepaintMode = RepaintNewXOROld);
@@ -85,10 +95,11 @@ public:
     RenderObject* selectionEnd() const { return m_selectionEnd; }
     IntRect selectionBounds(bool clipToVisibleContent = true) const;
     void selectionStartEnd(int& startPos, int& endPos) const;
+    void repaintSelection() const;
 
     bool printing() const;
 
-    virtual void absoluteRects(Vector<LayoutRect>&, const LayoutPoint& accumulatedOffset) const;
+    virtual void absoluteRects(Vector<IntRect>&, const LayoutPoint& accumulatedOffset) const;
     virtual void absoluteQuads(Vector<FloatQuad>&, bool* wasFixed) const;
 
 #if USE(ACCELERATED_COMPOSITING)
@@ -98,8 +109,7 @@ public:
 #endif
     int maximalOutlineSize() const { return m_maximalOutlineSize; }
 
-    virtual IntRect viewRect() const;
-    virtual IntRect unscaledViewRect() const;
+    virtual LayoutRect viewRect() const OVERRIDE;
 
     void updateWidgetPositions();
     void addWidget(RenderWidget*);
@@ -116,9 +126,27 @@ public:
     }
     void addLayoutDelta(const LayoutSize& delta) 
     {
-        if (m_layoutState)
+        if (m_layoutState) {
             m_layoutState->m_layoutDelta += delta;
+#if !ASSERT_DISABLED && ENABLE(SATURATED_LAYOUT_ARITHMETIC)
+            m_layoutState->m_layoutDeltaXSaturated |= m_layoutState->m_layoutDelta.width() == LayoutUnit::max() || m_layoutState->m_layoutDelta.width() == LayoutUnit::min();
+            m_layoutState->m_layoutDeltaYSaturated |= m_layoutState->m_layoutDelta.height() == LayoutUnit::max() || m_layoutState->m_layoutDelta.height() == LayoutUnit::min();
+#endif
+        }
     }
+    
+#if !ASSERT_DISABLED
+    bool layoutDeltaMatches(const LayoutSize& delta)
+    {
+        if (!m_layoutState)
+            return false;
+#if ENABLE(SATURATED_LAYOUT_ARITHMETIC)
+        return (delta.width() == m_layoutState->m_layoutDelta.width() || m_layoutState->m_layoutDeltaXSaturated) && (delta.height() == m_layoutState->m_layoutDelta.height() || m_layoutState->m_layoutDeltaYSaturated);
+#else
+        return delta == m_layoutState->m_layoutDelta;
+#endif
+    }
+#endif
 
     bool doingFullRepaint() const { return m_frameView->needsFullRepaint(); }
 
@@ -168,39 +196,50 @@ public:
     bool usesCompositing() const;
 #endif
 
+#if ENABLE(CSS_SHADERS) && USE(3D_GRAPHICS)
+    CustomFilterGlobalContext* customFilterGlobalContext();
+#endif
+
     IntRect unscaledDocumentRect() const;
     LayoutRect backgroundRect(RenderBox* backgroundRenderer) const;
 
     IntRect documentRect() const;
 
-    RenderFlowThread* ensureRenderFlowThreadWithName(const AtomicString& flowThread);
-    bool hasRenderFlowThreads() const { return m_renderFlowThreadList && !m_renderFlowThreadList->isEmpty(); }
-    void layoutRenderFlowThreads();
-    bool isRenderFlowThreadOrderDirty() const { return m_isRenderFlowThreadOrderDirty; }
-    void setIsRenderFlowThreadOrderDirty(bool dirty)
-    {
-        m_isRenderFlowThreadOrderDirty = dirty;
-        if (dirty)
-            setNeedsLayout(true);
-    }
-    const RenderFlowThreadList* renderFlowThreadList() const { return m_renderFlowThreadList.get(); }
+    bool hasRenderNamedFlowThreads() const;
+    FlowThreadController* flowThreadController();
 
-    RenderFlowThread* currentRenderFlowThread() const { return m_currentRenderFlowThread; }
-    void setCurrentRenderFlowThread(RenderFlowThread* flowThread) { m_currentRenderFlowThread = flowThread; }
+    enum RenderViewLayoutPhase { RenderViewNormalLayout, ConstrainedFlowThreadsLayoutInAutoLogicalHeightRegions };
+    bool normalLayoutPhase() const { return m_layoutPhase == RenderViewNormalLayout; }
+    bool constrainedFlowThreadsLayoutPhase() const { return m_layoutPhase == ConstrainedFlowThreadsLayoutInAutoLogicalHeightRegions; }
 
     void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
 
     IntervalArena* intervalArena();
 
+    IntSize viewportSize() const { return document()->viewportSize(); }
+
+    void setRenderQuoteHead(RenderQuote* head) { m_renderQuoteHead = head; }
+    RenderQuote* renderQuoteHead() const { return m_renderQuoteHead; }
+
+    // FIXME: This is a work around because the current implementation of counters
+    // requires walking the entire tree repeatedly and most pages don't actually use either
+    // feature so we shouldn't take the performance hit when not needed. Long term we should
+    // rewrite the counter and quotes code.
+    void addRenderCounter() { m_renderCounterCount++; }
+    void removeRenderCounter() { ASSERT(m_renderCounterCount > 0); m_renderCounterCount--; }
+    bool hasRenderCounters() { return m_renderCounterCount; }
+
 protected:
-    virtual void mapLocalToContainer(RenderBoxModelObject* repaintContainer, bool useTransforms, bool fixed, TransformState&, bool* wasFixed = 0) const;
-    virtual void mapAbsoluteToLocalPoint(bool fixed, bool useTransforms, TransformState&) const;
+    virtual void mapLocalToContainer(const RenderLayerModelObject* repaintContainer, TransformState&, MapCoordinatesFlags = ApplyContainerFlip, bool* wasFixed = 0) const OVERRIDE;
+    virtual const RenderObject* pushMappingToContainer(const RenderLayerModelObject* ancestorToStopAt, RenderGeometryMap&) const OVERRIDE;
+    virtual void mapAbsoluteToLocalPoint(MapCoordinatesFlags, TransformState&) const;
     virtual bool requiresColumns(int desiredColumnCount) const OVERRIDE;
 
 private:
     virtual void calcColumnWidth() OVERRIDE;
+    virtual ColumnInfo::PaginationUnit paginationUnit() const OVERRIDE;
 
-    bool shouldRepaint(const IntRect& r) const;
+    bool shouldRepaint(const LayoutRect&) const;
 
     // These functions may only be accessed by LayoutStateMaintainer.
     void pushLayoutState(RenderFlowThread*, bool regionsChanged);
@@ -208,7 +247,11 @@ private:
     {
         // We push LayoutState even if layoutState is disabled because it stores layoutDelta too.
         if (!doingFullRepaint() || m_layoutState->isPaginated() || renderer->hasColumns() || renderer->inRenderFlowThread()
-            || m_layoutState->currentLineGrid() || (renderer->style()->lineGrid() != RenderStyle::initialLineGrid() && renderer->isBlockFlow())) {
+            || m_layoutState->lineGrid() || (renderer->style()->lineGrid() != RenderStyle::initialLineGrid() && renderer->isBlockFlow())
+#if ENABLE(CSS_EXCLUSIONS)
+            || (renderer->isRenderBlock() && toRenderBlock(renderer)->exclusionShapeInsideInfo())
+#endif
+            ) {
             m_layoutState = new (renderArena()) LayoutState(m_layoutState, renderer, offset, pageHeight, pageHeightChanged, colInfo);
             return true;
         }
@@ -230,11 +273,18 @@ private:
     void disableLayoutState() { m_layoutStateDisableCount++; }
     void enableLayoutState() { ASSERT(m_layoutStateDisableCount > 0); m_layoutStateDisableCount--; }
 
+    void layoutContent(const LayoutState&);
+#ifndef NDEBUG
+    void checkLayoutState(const LayoutState&);
+#endif
+
     size_t getRetainedWidgets(Vector<RenderWidget*>&);
     void releaseWidgets(Vector<RenderWidget*>&);
     
     friend class LayoutStateMaintainer;
     friend class LayoutStateDisabler;
+
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
 
 protected:
     FrameView* m_frameView;
@@ -266,19 +316,26 @@ protected:
 
     typedef HashSet<RenderWidget*> RenderWidgetSet;
     RenderWidgetSet m_widgets;
-    
+
 private:
+    bool shouldUsePrintingLayout() const;
+
     unsigned m_pageLogicalHeight;
     bool m_pageLogicalHeightChanged;
-    bool m_isRenderFlowThreadOrderDirty;
     LayoutState* m_layoutState;
     unsigned m_layoutStateDisableCount;
 #if USE(ACCELERATED_COMPOSITING)
     OwnPtr<RenderLayerCompositor> m_compositor;
 #endif
-    OwnPtr<RenderFlowThreadList> m_renderFlowThreadList;
-    RenderFlowThread* m_currentRenderFlowThread;
+#if ENABLE(CSS_SHADERS) && USE(3D_GRAPHICS)
+    OwnPtr<CustomFilterGlobalContext> m_customFilterGlobalContext;
+#endif
+    OwnPtr<FlowThreadController> m_flowThreadController;
     RefPtr<IntervalArena> m_intervalArena;
+
+    RenderQuote* m_renderQuoteHead;
+    unsigned m_renderCounterCount;
+    RenderViewLayoutPhase m_layoutPhase;
 };
 
 inline RenderView* toRenderView(RenderObject* object)
@@ -296,10 +353,9 @@ inline const RenderView* toRenderView(const RenderObject* object)
 // This will catch anyone doing an unnecessary cast.
 void toRenderView(const RenderView*);
 
-
-ALWAYS_INLINE RenderView* RenderObject::view() const
+ALWAYS_INLINE RenderView* Document::renderView() const
 {
-    return toRenderView(document()->renderer());
+    return toRenderView(renderer());
 }
 
 // Stack-based class to assist with LayoutState push/pop
@@ -326,17 +382,7 @@ public:
         , m_didCreateLayoutState(false)
     {
     }
-    
-    LayoutStateMaintainer(RenderView* view, RenderFlowThread* flowThread, bool regionsChanged)
-        : m_view(view)
-        , m_disabled(false)
-        , m_didStart(false)
-        , m_didEnd(false)
-        , m_didCreateLayoutState(false)
-    {
-        push(flowThread, regionsChanged);
-    }
-    
+
     ~LayoutStateMaintainer()
     {
         ASSERT(m_didStart == m_didEnd);   // if this fires, it means that someone did a push(), but forgot to pop().
@@ -349,14 +395,6 @@ public:
         m_didCreateLayoutState = m_view->pushLayoutState(root, offset, pageHeight, pageHeightChanged, colInfo);
         if (m_disabled && m_didCreateLayoutState)
             m_view->disableLayoutState();
-        m_didStart = true;
-    }
-    
-    void push(RenderFlowThread* flowThread, bool regionsChanged)
-    {
-        ASSERT(!m_didStart);
-        m_view->pushLayoutState(flowThread, regionsChanged);
-        m_didCreateLayoutState = true;
         m_didStart = true;
     }
 

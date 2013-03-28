@@ -213,6 +213,8 @@ void IconController::continueLoadWithDecision(IconLoadDecision iconLoadDecision)
     if (iconLoadDecision == IconLoadNo) {
         KURL iconURL(url());
         String urlString(iconURL.string());
+        if (urlString.isEmpty())
+            return;
 
         LOG(IconDatabase, "IconController::startLoader() - Told not to load this icon, committing iconURL %s to database for pageURL mapping", urlString.ascii().data());
         commitToDatabase(iconURL);
@@ -257,7 +259,7 @@ IconURL IconController::defaultURL(IconType iconType)
 {
     // Don't return a favicon iconURL unless we're http or https
     KURL documentURL = m_frame->document()->url();
-    if (!documentURL.protocolInHTTPFamily())
+    if (!documentURL.protocolIsInHTTPFamily())
         return IconURL();
 
     KURL url;

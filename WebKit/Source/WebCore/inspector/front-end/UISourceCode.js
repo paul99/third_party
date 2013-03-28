@@ -28,40 +28,57 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+
 /**
  * @constructor
  * @extends {WebInspector.Object}
- * @param {string} id
+ * @implements {WebInspector.ContentProvider}
+ * @param {WebInspector.Workspace} workspace
  * @param {string} url
- * @param {WebInspector.RawSourceCode} rawSourceCode
- * @param {WebInspector.ContentProvider} contentProvider
+ * @param {WebInspector.ResourceType} contentType
+ * @param {boolean} isEditable
  */
-WebInspector.UISourceCode = function(id, url, rawSourceCode, contentProvider)
+WebInspector.UISourceCode = function(workspace, url, contentType, isEditable)
 {
-    this._id = id;
+    this._workspace = workspace;
     this._url = url;
-    this._rawSourceCode = rawSourceCode;
-    this._contentProvider = contentProvider;
-    this.isContentScript = false;
+    this._parsedURL = new WebInspector.ParsedURL(url);
+    this._contentType = contentType;
+    this._isEditable = isEditable;
     /**
-     * @type Array.<function(string,string)>
+     * @type Array.<function(?string,boolean,string)>
      */
     this._requestContentCallbacks = [];
+    /**
+     * @type Array.<WebInspector.LiveLocation>
+     */
+    this._liveLocations = [];
+    /**
+     * @type {Array.<WebInspector.PresentationConsoleMessage>}
+     */
+    this._consoleMessages = [];
+    
+    /**
+     * @type {Array.<WebInspector.Revision>}
+     */
+    this.history = [];
+    if (this.isEditable() && this._url)
+        this._restoreRevisionHistory();
+    this._formatterMapping = new WebInspector.IdentityFormatterSourceMapping();
 }
 
 WebInspector.UISourceCode.Events = {
-    ContentChanged: "content-changed"
+    FormattedChanged: "FormattedChanged",
+    WorkingCopyChanged: "WorkingCopyChanged",
+    WorkingCopyCommitted: "WorkingCopyCommitted",
+    TitleChanged: "TitleChanged",
+    ConsoleMessageAdded: "ConsoleMessageAdded",
+    ConsoleMessageRemoved: "ConsoleMessageRemoved",
+    ConsoleMessagesCleared: "ConsoleMessagesCleared",
+    SourceMappingChanged: "SourceMappingChanged",
 }
 
 WebInspector.UISourceCode.prototype = {
-    /**
-     * @return {string}
-     */
-    get id()
-    {
-        return this._id;
-    },
-
     /**
      * @return {string}
      */
@@ -71,36 +88,295 @@ WebInspector.UISourceCode.prototype = {
     },
 
     /**
-     * @return {WebInspector.RawSourceCode}
+     * @param {string} url
      */
-    get rawSourceCode()
+    urlChanged: function(url)
     {
-        return this._rawSourceCode;
+        this._url = url;
+        this._parsedURL = new WebInspector.ParsedURL(this._url);
+        this.dispatchEventToListeners(WebInspector.UISourceCode.Events.TitleChanged, null);
     },
 
     /**
-     * @param {function(string,string)} callback
+     * @return {WebInspector.ParsedURL}
+     */
+    get parsedURL()
+    {
+        return this._parsedURL;
+    },
+
+    /**
+     * @return {string}
+     */
+    contentURL: function()
+    {
+        return this._url;
+    },
+
+    /**
+     * @return {WebInspector.ResourceType}
+     */
+    contentType: function()
+    {
+        return this._contentType;
+    },
+
+    /**
+     * @return {WebInspector.ScriptFile}
+     */
+    scriptFile: function()
+    {
+        return this._scriptFile;
+    },
+
+    /**
+     * @param {WebInspector.ScriptFile} scriptFile
+     */
+    setScriptFile: function(scriptFile)
+    {
+        this._scriptFile = scriptFile;
+    },
+
+    /**
+     * @return {WebInspector.StyleFile}
+     */
+    styleFile: function()
+    {
+        return this._styleFile;
+    },
+
+    /**
+     * @param {WebInspector.StyleFile} styleFile
+     */
+    setStyleFile: function(styleFile)
+    {
+        this._styleFile = styleFile;
+    },
+
+    /**
+     * @param {function(?string,boolean,string)} callback
      */
     requestContent: function(callback)
     {
-        if (this._contentLoaded) {
-            callback(this._mimeType, this._content);
+        if (this._content || this._contentLoaded) {
+            callback(this._content, false, this._mimeType);
             return;
         }
-
         this._requestContentCallbacks.push(callback);
         if (this._requestContentCallbacks.length === 1)
-            this._contentProvider.requestContent(this._didRequestContent.bind(this));
+            this._workspace.requestFileContent(this, this._fireContentAvailable.bind(this));
     },
 
     /**
-     * @param {string} newContent
+     * @param {function(?string,boolean,string)} callback
      */
-    contentChanged: function(newContent)
+    requestOriginalContent: function(callback)
     {
-        console.assert(this._contentLoaded);
-        this._content = newContent;
-        this.dispatchEventToListeners(WebInspector.UISourceCode.Events.ContentChanged);
+        this._workspace.requestFileContent(this, callback);
+    },
+
+    /**
+     * @param {string} content
+     */
+    _commitContent: function(content)
+    {
+        this._content = content;
+        this._contentLoaded = true;
+        
+        var lastRevision = this.history.length ? this.history[this.history.length - 1] : null;
+        if (!lastRevision || lastRevision._content !== this._content) {
+            var revision = new WebInspector.Revision(this, this._content, new Date());
+            this.history.push(revision);
+            revision._persist();
+        }
+
+        var oldWorkingCopy = this._workingCopy;
+        delete this._workingCopy;
+        this.dispatchEventToListeners(WebInspector.UISourceCode.Events.WorkingCopyCommitted, {oldWorkingCopy: oldWorkingCopy, workingCopy: this.workingCopy()});
+        this._workspace.dispatchEventToListeners(WebInspector.Workspace.Events.UISourceCodeContentCommitted, { uiSourceCode: this, content: this._content });
+        if (this._url && WebInspector.fileManager.isURLSaved(this._url)) {
+            WebInspector.fileManager.save(this._url, this._content, false);
+            WebInspector.fileManager.close(this._url);
+        }
+    },
+
+    /**
+     * @param {string} content
+     */
+    addRevision: function(content)
+    {
+        this._commitContent(content);
+    },
+
+    _restoreRevisionHistory: function()
+    {
+        if (!window.localStorage)
+            return;
+
+        var registry = WebInspector.Revision._revisionHistoryRegistry();
+        var historyItems = registry[this.url];
+        if (!historyItems || !historyItems.length)
+            return;
+        for (var i = 0; i < historyItems.length; ++i) {
+            var content = window.localStorage[historyItems[i].key];
+            var timestamp = new Date(historyItems[i].timestamp);
+            var revision = new WebInspector.Revision(this, content, timestamp);
+            this.history.push(revision);
+        }
+        this._content = this.history[this.history.length - 1].content;
+        this._contentLoaded = true;
+        this._mimeType = this.canonicalMimeType();
+    },
+
+    _clearRevisionHistory: function()
+    {
+        if (!window.localStorage)
+            return;
+
+        var registry = WebInspector.Revision._revisionHistoryRegistry();
+        var historyItems = registry[this.url];
+        for (var i = 0; historyItems && i < historyItems.length; ++i)
+            delete window.localStorage[historyItems[i].key];
+        delete registry[this.url];
+        window.localStorage["revision-history"] = JSON.stringify(registry);
+    },
+   
+    revertToOriginal: function()
+    {
+        /**
+         * @this {WebInspector.UISourceCode}
+         * @param {?string} content
+         * @param {boolean} contentEncoded
+         * @param {string} mimeType
+         */
+        function callback(content, contentEncoded, mimeType)
+        {
+            if (typeof content !== "string")
+                return;
+
+            this.addRevision(content);
+        }
+
+        this.requestOriginalContent(callback.bind(this));
+
+        WebInspector.notifications.dispatchEventToListeners(WebInspector.UserMetrics.UserAction, {
+            action: WebInspector.UserMetrics.UserActionNames.ApplyOriginalContent,
+            url: this.url
+        });
+    },
+
+    /**
+     * @param {function(WebInspector.UISourceCode)} callback
+     */
+    revertAndClearHistory: function(callback)
+    {
+        /**
+         * @this {WebInspector.UISourceCode}
+         * @param {?string} content
+         * @param {boolean} contentEncoded
+         * @param {string} mimeType
+         */
+        function revert(content, contentEncoded, mimeType)
+        {
+            if (typeof content !== "string")
+                return;
+
+            this.addRevision(content);
+            this._clearRevisionHistory();
+            this.history = [];
+            callback(this);
+        }
+
+        this.requestOriginalContent(revert.bind(this));
+
+        WebInspector.notifications.dispatchEventToListeners(WebInspector.UserMetrics.UserAction, {
+            action: WebInspector.UserMetrics.UserActionNames.RevertRevision,
+            url: this.url
+        });
+    },
+
+    /**
+     * @return {boolean}
+     */
+    isEditable: function()
+    {
+        return this._isEditable;
+    },
+
+    /**
+     * @return {string}
+     */
+    workingCopy: function()
+    {
+        if (this.isDirty())
+            return this._workingCopy;
+        return this._content;
+    },
+
+    /**
+     * @param {string} newWorkingCopy
+     */
+    setWorkingCopy: function(newWorkingCopy)
+    {
+        var wasDirty = this.isDirty();        
+        this._mimeType = this.canonicalMimeType();
+        var oldWorkingCopy = this._workingCopy;
+        if (this._content === newWorkingCopy)
+            delete this._workingCopy;
+        else
+            this._workingCopy = newWorkingCopy;
+        this.dispatchEventToListeners(WebInspector.UISourceCode.Events.WorkingCopyChanged, {oldWorkingCopy: oldWorkingCopy, workingCopy: this.workingCopy(), wasDirty: wasDirty});
+    },
+
+    /**
+     * @param {function(?string)} callback
+     */
+    commitWorkingCopy: function(callback)
+    {
+        if (!this.isDirty()) {
+            callback(null);
+            return;
+        }
+
+        this._commitContent(this._workingCopy);
+        callback(null);
+
+        WebInspector.notifications.dispatchEventToListeners(WebInspector.UserMetrics.UserAction, {
+            action: WebInspector.UserMetrics.UserActionNames.FileSaved,
+            url: this.url
+        });
+    },
+
+    /**
+     * @return {boolean}
+     */
+    isDirty: function()
+    {
+        return typeof this._workingCopy !== "undefined" && this._workingCopy !== this._content;
+    },
+
+    /**
+     * @return {string}
+     */
+    mimeType: function()
+    {
+        return this._mimeType;
+    },
+
+    /**
+     * @return {string}
+     */
+    canonicalMimeType: function()
+    {
+        return this.contentType().canonicalMimeType() || this._mimeType;
+    },
+
+    /**
+     * @return {?string}
+     */
+    content: function()
+    {
+        return this._content;
     },
 
     /**
@@ -111,123 +387,448 @@ WebInspector.UISourceCode.prototype = {
      */
     searchInContent: function(query, caseSensitive, isRegex, callback)
     {
-        this._contentProvider.searchInContent(query, caseSensitive, isRegex, callback);
-    },
-
-    /**
-     * @type {string}
-     */
-    get domain()
-    {
-        if (typeof(this._domain) === "undefined")
-            this._parseURL();
-        
-        return this._domain;
-    },
-    
-    /**
-     * @type {string}
-     */
-    get folderName()
-    {
-        if (typeof(this._folderName) === "undefined")
-            this._parseURL();
-        
-        return this._folderName;
-    },
-    
-    /**
-     * @type {string}
-     */
-    get fileName()
-    {
-        if (typeof(this._fileName) === "undefined")
-            this._parseURL();
-        
-        return this._fileName;
-    },
-    
-    /**
-     * @type {string}
-     */
-    get displayName()
-    {
-        if (typeof(this._displayName) === "undefined")
-            this._parseURL();
-        
-        return this._displayName;
-    },
-    
-    _parseURL: function()
-    {
-        var parsedURL = this.url.asParsedURL();
-        var url = parsedURL ? parsedURL.path : this.url;
-
-        var folderName = "";
-        var fileName = url;
-
-        var pathLength = fileName.indexOf("?");
-        if (pathLength === -1)
-            pathLength = fileName.length;
-
-        var fromIndex = fileName.lastIndexOf("/", pathLength - 2);
-        if (fromIndex !== -1) {
-            folderName = fileName.substring(0, fromIndex);
-            fileName = fileName.substring(fromIndex + 1);
+        var content = this.content();
+        if (content) {
+            var provider = new WebInspector.StaticContentProvider(this.contentType(), content);
+            provider.searchInContent(query, caseSensitive, isRegex, callback);
+            return;
         }
 
-        var indexOfQuery = fileName.indexOf("?");
-        if (indexOfQuery === -1)
-            indexOfQuery = fileName.length;
-        var lastPathComponent = fileName.substring(0, indexOfQuery);
-        var queryParams = fileName.substring(indexOfQuery, fileName.length);
-        
-        const maxDisplayNameLength = 30;
-        const minDisplayQueryParamLength = 5;
-        
-        var maxDisplayQueryParamLength = Math.max(minDisplayQueryParamLength, maxDisplayNameLength - lastPathComponent.length);
-        var displayQueryParams = queryParams.trimEnd(maxDisplayQueryParamLength);
-        var displayLastPathComponent = lastPathComponent.trimMiddle(maxDisplayNameLength - displayQueryParams.length);
-        var displayName = displayLastPathComponent + displayQueryParams;
-        if (!displayName)
-            displayName = WebInspector.UIString("(program)");
-
-        if (folderName.length > 80)
-            folderName = "\u2026" + folderName.substring(folderName.length - 80);
-
-        this._domain = parsedURL ? parsedURL.host : "";
-        this._folderName = folderName;
-        this._fileName = fileName;
-        this._displayName = displayName;
+        this._workspace.searchInFileContent(this, query, caseSensitive, isRegex, callback);
     },
 
     /**
+     * @param {?string} content
+     * @param {boolean} contentEncoded
      * @param {string} mimeType
-     * @param {string} content
      */
-    _didRequestContent: function(mimeType, content)
+    _fireContentAvailable: function(content, contentEncoded, mimeType)
     {
         this._contentLoaded = true;
         this._mimeType = mimeType;
         this._content = content;
 
-        for (var i = 0; i < this._requestContentCallbacks.length; ++i)
-            this._requestContentCallbacks[i](mimeType, content);
+        var callbacks = this._requestContentCallbacks.slice();
         this._requestContentCallbacks = [];
-    }
-}
+        for (var i = 0; i < callbacks.length; ++i)
+            callbacks[i](content, contentEncoded, mimeType);
 
-WebInspector.UISourceCode.prototype.__proto__ = WebInspector.Object.prototype;
+        if (this._formatOnLoad) {
+            delete this._formatOnLoad;
+            this.setFormatted(true);
+        }
+    },
+
+    /**
+     * @return {boolean}
+     */
+    contentLoaded: function()
+    {
+        return this._contentLoaded;
+    },
+
+    /**
+     * @param {number} lineNumber
+     * @param {number} columnNumber
+     * @return {WebInspector.RawLocation}
+     */
+    uiLocationToRawLocation: function(lineNumber, columnNumber)
+    {
+        if (!this._sourceMapping)
+            return null;
+        var location = this._formatterMapping.formattedToOriginal(lineNumber, columnNumber);
+        return this._sourceMapping.uiLocationToRawLocation(this, location[0], location[1]);
+    },
+
+    /**
+     * @param {WebInspector.LiveLocation} liveLocation
+     */
+    addLiveLocation: function(liveLocation)
+    {
+        this._liveLocations.push(liveLocation);
+    },
+
+    /**
+     * @param {WebInspector.LiveLocation} liveLocation
+     */
+    removeLiveLocation: function(liveLocation)
+    {
+        this._liveLocations.remove(liveLocation);
+    },
+
+    updateLiveLocations: function()
+    {
+        var locationsCopy = this._liveLocations.slice();
+        for (var i = 0; i < locationsCopy.length; ++i)
+            locationsCopy[i].update();
+    },
+
+    /**
+     * @param {WebInspector.UILocation} uiLocation
+     */
+    overrideLocation: function(uiLocation)
+    {
+        var location = this._formatterMapping.originalToFormatted(uiLocation.lineNumber, uiLocation.columnNumber);
+        uiLocation.lineNumber = location[0];
+        uiLocation.columnNumber = location[1];
+        return uiLocation;
+    },
+
+    /**
+     * @return {Array.<WebInspector.PresentationConsoleMessage>}
+     */
+    consoleMessages: function()
+    {
+        return this._consoleMessages;
+    },
+
+    /**
+     * @param {WebInspector.PresentationConsoleMessage} message
+     */
+    consoleMessageAdded: function(message)
+    {
+        this._consoleMessages.push(message);
+        this.dispatchEventToListeners(WebInspector.UISourceCode.Events.ConsoleMessageAdded, message);
+    },
+
+    /**
+     * @param {WebInspector.PresentationConsoleMessage} message
+     */
+    consoleMessageRemoved: function(message)
+    {
+        this._consoleMessages.remove(message);
+        this.dispatchEventToListeners(WebInspector.UISourceCode.Events.ConsoleMessageRemoved, message);
+    },
+
+    consoleMessagesCleared: function()
+    {
+        this._consoleMessages = [];
+        this.dispatchEventToListeners(WebInspector.UISourceCode.Events.ConsoleMessagesCleared);
+    },
+
+    /**
+     * @return {boolean}
+     */
+    formatted: function()
+    {
+        return !!this._formatted;
+    },
+
+    /**
+     * @param {boolean} formatted
+     */
+    setFormatted: function(formatted)
+    {
+        if (!this.contentLoaded()) {
+            this._formatOnLoad = formatted;
+            return;
+        }
+
+        if (this._formatted === formatted)
+            return;
+
+        this._formatted = formatted;
+
+        // Re-request content
+        this._contentLoaded = false;
+        this._content = false;
+        WebInspector.UISourceCode.prototype.requestContent.call(this, didGetContent.bind(this));
+  
+        /**
+         * @this {WebInspector.UISourceCode}
+         * @param {?string} content
+         * @param {boolean} contentEncoded
+         * @param {string} mimeType
+         */
+        function didGetContent(content, contentEncoded, mimeType)
+        {
+            var formatter;
+            if (!formatted)
+                formatter = new WebInspector.IdentityFormatter();
+            else
+                formatter = WebInspector.Formatter.createFormatter(this.contentType());
+            formatter.formatContent(mimeType, content || "", formattedChanged.bind(this));
+  
+            /**
+             * @this {WebInspector.UISourceCode}
+             * @param {string} content
+             * @param {WebInspector.FormatterSourceMapping} formatterMapping
+             */
+            function formattedChanged(content, formatterMapping)
+            {
+                this._content = content;
+                delete this._workingCopy;
+                this._formatterMapping = formatterMapping;
+                this.dispatchEventToListeners(WebInspector.UISourceCode.Events.FormattedChanged, {content: content});
+                this.updateLiveLocations();
+            }
+        }
+    },
+
+    /**
+     * @return {WebInspector.Formatter} formatter
+     */
+    createFormatter: function()
+    {
+        // overridden by subclasses.
+        return null;
+    },
+
+    /**
+     * @param {WebInspector.SourceMapping} sourceMapping
+     */
+    setSourceMapping: function(sourceMapping)
+    {
+        this._sourceMapping = sourceMapping;
+        this.dispatchEventToListeners(WebInspector.UISourceCode.Events.SourceMappingChanged, null);
+    },
+
+    __proto__: WebInspector.Object.prototype
+}
 
 /**
  * @interface
  */
-WebInspector.ContentProvider = function() { }
-WebInspector.ContentProvider.prototype = {
+WebInspector.UISourceCodeProvider = function()
+{
+}
+
+WebInspector.UISourceCodeProvider.Events = {
+    UISourceCodeAdded: "UISourceCodeAdded",
+    TemporaryUISourceCodeAdded: "TemporaryUISourceCodeAdded",
+    TemporaryUISourceCodeRemoved: "TemporaryUISourceCodeRemoved",
+    UISourceCodeRemoved: "UISourceCodeRemoved"
+}
+
+WebInspector.UISourceCodeProvider.prototype = {
     /**
-     * @param {function(string,string)} callback
+     * @return {Array.<WebInspector.UISourceCode>}
      */
-    requestContent: function(callback) { },
+    uiSourceCodes: function() {},
+
+    /**
+     * @param {string} eventType
+     * @param {function(WebInspector.Event)} listener
+     * @param {Object=} thisObject
+     */
+    addEventListener: function(eventType, listener, thisObject) { },
+
+    /**
+     * @param {string} eventType
+     * @param {function(WebInspector.Event)} listener
+     * @param {Object=} thisObject
+     */
+    removeEventListener: function(eventType, listener, thisObject) { }
+}
+
+/**
+ * @constructor
+ * @param {WebInspector.UISourceCode} uiSourceCode
+ * @param {number} lineNumber
+ * @param {number} columnNumber
+ */
+WebInspector.UILocation = function(uiSourceCode, lineNumber, columnNumber)
+{
+    this.uiSourceCode = uiSourceCode;
+    this.lineNumber = lineNumber;
+    this.columnNumber = columnNumber;
+}
+
+WebInspector.UILocation.prototype = {
+    /**
+     * @return {WebInspector.RawLocation}
+     */
+    uiLocationToRawLocation: function()
+    {
+        return this.uiSourceCode.uiLocationToRawLocation(this.lineNumber, this.columnNumber);
+    },
+
+    /**
+     * @return {?string}
+     */
+    url: function()
+    {
+        return this.uiSourceCode.contentURL();
+    }
+}
+
+/**
+ * @interface
+ */
+WebInspector.RawLocation = function()
+{
+}
+
+/**
+ * @constructor
+ * @param {WebInspector.RawLocation} rawLocation
+ * @param {function(WebInspector.UILocation):(boolean|undefined)} updateDelegate
+ */
+WebInspector.LiveLocation = function(rawLocation, updateDelegate)
+{
+    this._rawLocation = rawLocation;
+    this._updateDelegate = updateDelegate;
+    this._uiSourceCodes = [];
+}
+
+WebInspector.LiveLocation.prototype = {
+    update: function()
+    {
+        var uiLocation = this.uiLocation();
+        if (uiLocation) {
+            var uiSourceCode = uiLocation.uiSourceCode;
+            if (this._uiSourceCodes.indexOf(uiSourceCode) === -1) {
+                uiSourceCode.addLiveLocation(this);
+                this._uiSourceCodes.push(uiSourceCode);
+            }
+            var oneTime = this._updateDelegate(uiLocation);
+            if (oneTime)
+                this.dispose();
+        }
+    },
+
+    /**
+     * @return {WebInspector.RawLocation}
+     */
+    rawLocation: function()
+    {
+        return this._rawLocation;
+    },
+
+    /**
+     * @return {WebInspector.UILocation}
+     */
+    uiLocation: function()
+    {
+        // Should be overridden by subclasses.
+    },
+
+    dispose: function()
+    {
+        for (var i = 0; i < this._uiSourceCodes.length; ++i)
+            this._uiSourceCodes[i].removeLiveLocation(this);
+        this._uiSourceCodes = [];
+    }
+}
+
+/**
+ * @constructor
+ * @implements {WebInspector.ContentProvider}
+ * @param {WebInspector.UISourceCode} uiSourceCode
+ * @param {?string|undefined} content
+ * @param {Date} timestamp
+ */
+WebInspector.Revision = function(uiSourceCode, content, timestamp)
+{
+    this._uiSourceCode = uiSourceCode;
+    this._content = content;
+    this._timestamp = timestamp;
+}
+
+WebInspector.Revision._revisionHistoryRegistry = function()
+{
+    if (!WebInspector.Revision._revisionHistoryRegistryObject) {
+        if (window.localStorage) {
+            var revisionHistory = window.localStorage["revision-history"];
+            try {
+                WebInspector.Revision._revisionHistoryRegistryObject = revisionHistory ? JSON.parse(revisionHistory) : {};
+            } catch (e) {
+                WebInspector.Revision._revisionHistoryRegistryObject = {};
+            }
+        } else
+            WebInspector.Revision._revisionHistoryRegistryObject = {};
+    }
+    return WebInspector.Revision._revisionHistoryRegistryObject;
+}
+
+WebInspector.Revision.filterOutStaleRevisions = function()
+{
+    if (!window.localStorage)
+        return;
+
+    var registry = WebInspector.Revision._revisionHistoryRegistry();
+    var filteredRegistry = {};
+    for (var url in registry) {
+        var historyItems = registry[url];
+        var filteredHistoryItems = [];
+        for (var i = 0; historyItems && i < historyItems.length; ++i) {
+            var historyItem = historyItems[i];
+            if (historyItem.loaderId === WebInspector.resourceTreeModel.mainFrame.loaderId) {
+                filteredHistoryItems.push(historyItem);
+                filteredRegistry[url] = filteredHistoryItems;
+            } else
+                delete window.localStorage[historyItem.key];
+        }
+    }
+    WebInspector.Revision._revisionHistoryRegistryObject = filteredRegistry;
+
+    function persist()
+    {
+        window.localStorage["revision-history"] = JSON.stringify(filteredRegistry);
+    }
+
+    // Schedule async storage.
+    setTimeout(persist, 0);
+}
+
+WebInspector.Revision.prototype = {
+    /**
+     * @return {WebInspector.UISourceCode}
+     */
+    get uiSourceCode()
+    {
+        return this._uiSourceCode;
+    },
+
+    /**
+     * @return {Date}
+     */
+    get timestamp()
+    {
+        return this._timestamp;
+    },
+
+    /**
+     * @return {?string}
+     */
+    get content()
+    {
+        return this._content || null;
+    },
+
+    revertToThis: function()
+    {
+        function revert(content)
+        {
+            if (this._uiSourceCode._content !== content)
+                this._uiSourceCode.addRevision(content);
+        }
+        this.requestContent(revert.bind(this));
+    },
+
+    /**
+     * @return {string}
+     */
+    contentURL: function()
+    {
+        return this._uiSourceCode.url;
+    },
+
+    /**
+     * @return {WebInspector.ResourceType}
+     */
+    contentType: function()
+    {
+        return this._uiSourceCode.contentType();
+    },
+
+    /**
+     * @param {function(?string, boolean, string)} callback
+     */
+    requestContent: function(callback)
+    {
+        callback(this._content || "", false, this.uiSourceCode.canonicalMimeType());
+    },
 
     /**
      * @param {string} query
@@ -235,15 +836,40 @@ WebInspector.ContentProvider.prototype = {
      * @param {boolean} isRegex
      * @param {function(Array.<WebInspector.ContentProvider.SearchMatch>)} callback
      */
-    searchInContent: function(query, caseSensitive, isRegex, callback) { }
-}
+    searchInContent: function(query, caseSensitive, isRegex, callback)
+    {
+        callback([]);
+    },
 
-/**
- * @constructor
- * @param {number} lineNumber
- * @param {string} lineContent
- */
-WebInspector.ContentProvider.SearchMatch = function(lineNumber, lineContent) {
-    this.lineNumber = lineNumber;
-    this.lineContent = lineContent;
+    _persist: function()
+    {
+        if (!window.localStorage)
+            return;
+
+        var url = this.contentURL();
+        if (!url || url.startsWith("inspector://"))
+            return;
+
+        var loaderId = WebInspector.resourceTreeModel.mainFrame.loaderId;
+        var timestamp = this.timestamp.getTime();
+        var key = "revision-history|" + url + "|" + loaderId + "|" + timestamp;
+
+        var registry = WebInspector.Revision._revisionHistoryRegistry();
+
+        var historyItems = registry[url];
+        if (!historyItems) {
+            historyItems = [];
+            registry[url] = historyItems;
+        }
+        historyItems.push({url: url, loaderId: loaderId, timestamp: timestamp, key: key});
+
+        function persist()
+        {
+            window.localStorage[key] = this._content;
+            window.localStorage["revision-history"] = JSON.stringify(registry);
+        }
+
+        // Schedule async storage.
+        setTimeout(persist.bind(this), 0);
+    }
 }

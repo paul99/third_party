@@ -18,27 +18,25 @@
  * Boston, MA 02110-1301, USA.
  */
 
-module css {
+[
+    CustomToJSObject,
+    JSCustomIsReachable,
+    JSCustomFinalize,
+    ObjCPolymorphic,
+    V8DependentLifetime,
+    ImplementationLacksVTable
+] interface CSSValue {
 
-    interface [
-        CustomToJS,
-        CustomIsReachable,
-        CustomFinalize,
-        Polymorphic,
-        V8DependentLifetime
-    ] CSSValue {
+    // UnitTypes
+    const unsigned short CSS_INHERIT         = 0;
+    const unsigned short CSS_PRIMITIVE_VALUE = 1;
+    const unsigned short CSS_VALUE_LIST      = 2;
+    const unsigned short CSS_CUSTOM          = 3;
 
-        // UnitTypes
-        const unsigned short CSS_INHERIT         = 0;
-        const unsigned short CSS_PRIMITIVE_VALUE = 1;
-        const unsigned short CSS_VALUE_LIST      = 2;
-        const unsigned short CSS_CUSTOM          = 3;
+             [TreatReturnedNullStringAs=Null, TreatNullAs=NullString] attribute DOMString cssText
+                 setter raises(DOMException);
 
-                 attribute [ConvertNullStringTo=Null, ConvertNullToNullString] DOMString cssText
-                     setter raises(DOMException);
+    readonly attribute unsigned short cssValueType;
 
-        readonly attribute unsigned short cssValueType;
+};
 
-    };
-
-}

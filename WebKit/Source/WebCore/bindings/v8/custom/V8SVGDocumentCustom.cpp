@@ -33,21 +33,20 @@
 #if ENABLE(SVG)
 #include "V8SVGDocument.h"
 
-#include "V8IsolatedContext.h"
-#include "V8Proxy.h"
+#include "Frame.h"
+#include "V8DOMWindowShell.h"
 
 namespace WebCore {
 
-v8::Handle<v8::Value> toV8(SVGDocument* impl, bool forceNewObject)
+v8::Handle<v8::Object> wrap(SVGDocument* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
 {
-    if (!impl)
-        return v8::Null();
-    v8::Handle<v8::Object> wrapper = V8SVGDocument::wrap(impl, forceNewObject);
+    ASSERT(impl);
+    v8::Handle<v8::Object> wrapper = V8SVGDocument::createWrapper(impl, creationContext, isolate);
     if (wrapper.IsEmpty())
         return wrapper;
-    if (!V8IsolatedContext::getEntered()) {
-        if (V8Proxy* proxy = V8Proxy::retrieve(impl->frame()))
-            proxy->windowShell()->updateDocumentWrapper(wrapper);
+    if (!worldForEnteredContextIfIsolated()) {
+        if (Frame* frame = impl->frame())
+            frame->script()->windowShell(mainThreadNormalWorld())->updateDocumentWrapper(wrapper);
     }
     return wrapper;
 }

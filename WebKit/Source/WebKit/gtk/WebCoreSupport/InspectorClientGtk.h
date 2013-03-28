@@ -29,12 +29,14 @@
 #ifndef InspectorClientGtk_h
 #define InspectorClientGtk_h
 
-#include "GOwnPtr.h"
 #include "InspectorClient.h"
+#include "InspectorFrontendChannel.h"
 #include "InspectorFrontendClientLocal.h"
 #include "webkitwebview.h"
 #include "webkitwebinspector.h"
 #include <wtf/Forward.h>
+#include <wtf/gobject/GOwnPtr.h>
+#include <wtf/gobject/GRefPtr.h>
 
 namespace WebCore {
     class Page;
@@ -44,7 +46,7 @@ namespace WebKit {
 
     class InspectorFrontendClient;
 
-    class InspectorClient : public WebCore::InspectorClient {
+    class InspectorClient : public WebCore::InspectorClient, public WebCore::InspectorFrontendChannel {
     public:
         InspectorClient(WebKitWebView* webView);
         ~InspectorClient();
@@ -53,7 +55,7 @@ namespace WebKit {
 
         virtual void inspectorDestroyed();
 
-        virtual void openInspectorFrontend(WebCore::InspectorController*);
+        virtual WebCore::InspectorFrontendChannel* openInspectorFrontend(WebCore::InspectorController*);
         virtual void closeInspectorFrontend();
         virtual void bringFrontendToFront();
 
@@ -98,7 +100,7 @@ namespace WebKit {
     private:
         WebKitWebView* m_inspectorWebView;
         WebKitWebView* m_inspectedWebView;
-        WebKitWebInspector* m_webInspector;
+        GRefPtr<WebKitWebInspector> m_webInspector;
         InspectorClient* m_inspectorClient;
     };
 }

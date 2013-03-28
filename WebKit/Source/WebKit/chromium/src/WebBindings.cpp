@@ -35,18 +35,19 @@
 #include "npruntime_priv.h"
 
 #if USE(V8)
-#include "ArrayBufferView.h"
+#include "BindingState.h"
 #include "DOMWindow.h"
+#include "Frame.h"
 #include "NPV8Object.h"  // for PrivateIdentifier
 #include "Range.h"
 #include "V8ArrayBuffer.h"
 #include "V8ArrayBufferView.h"
-#include "V8BindingState.h"
 #include "V8DOMWrapper.h"
 #include "V8Element.h"
 #include "V8NPUtils.h"
-#include "V8Proxy.h"
 #include "V8Range.h"
+#include <wtf/ArrayBufferView.h>
+// FIXME: Remove the USE(JSC) ifdefs because we don't support USE(JSC) anymore.
 #elif USE(JSC)
 #include "bridge/c/c_utility.h"
 #endif
@@ -210,7 +211,7 @@ static bool getRangeImpl(NPObject* object, WebRange* webRange)
 
     V8NPObject* v8NPObject = reinterpret_cast<V8NPObject*>(object);
     v8::Handle<v8::Object> v8Object(v8NPObject->v8Object);
-    if (!V8Range::info.equals(V8DOMWrapper::domWrapperType(v8Object)))
+    if (!V8Range::info.equals(toWrapperTypeInfo(v8Object)))
         return false;
 
     Range* native = V8Range::HasInstance(v8Object) ? V8Range::toNative(v8Object) : 0;
@@ -218,6 +219,21 @@ static bool getRangeImpl(NPObject* object, WebRange* webRange)
         return false;
 
     *webRange = WebRange(native);
+    return true;
+}
+
+static bool getNodeImpl(NPObject* object, WebNode* webNode)
+{
+    if (!object || (object->_class != npScriptObjectClass))
+        return false;
+
+    V8NPObject* v8NPObject = reinterpret_cast<V8NPObject*>(object);
+    v8::Handle<v8::Object> v8Object(v8NPObject->v8Object);
+    Node* native = V8Node::HasInstance(v8Object) ? V8Node::toNative(v8Object) : 0;
+    if (!native)
+        return false;
+
+    *webNode = WebNode(native);
     return true;
 }
 
@@ -273,7 +289,7 @@ static NPObject* makeIntArrayImpl(const WebVector<int>& data)
     for (size_t i = 0; i < data.size(); ++i)
         result->Set(i, v8::Number::New(data[i]));
 
-    DOMWindow* window = V8Proxy::retrieveWindow(V8Proxy::currentContext());
+    DOMWindow* window = toDOMWindow(v8::Context::GetCurrent());
     return npCreateV8ScriptObject(0, result, window);
 }
 
@@ -284,7 +300,7 @@ static NPObject* makeStringArrayImpl(const WebVector<WebString>& data)
     for (size_t i = 0; i < data.size(); ++i)
         result->Set(i, data[i].data() ? v8::String::New(reinterpret_cast<const uint16_t*>((data[i].data())), data[i].length()) : v8::String::New(""));
 
-    DOMWindow* window = V8Proxy::retrieveWindow(V8Proxy::currentContext());
+    DOMWindow* window = toDOMWindow(v8::Context::GetCurrent());
     return npCreateV8ScriptObject(0, result, window);
 }
 
@@ -316,6 +332,16 @@ bool WebBindings::getArrayBufferView(NPObject* arrayBufferView, WebArrayBufferVi
     return getArrayBufferViewImpl(arrayBufferView, webArrayBufferView);
 #else
     // Not supported on other ports (JSC, etc).
+    return false;
+#endif
+}
+
+bool WebBindings::getNode(NPObject* node, WebNode* webNode)
+{
+#if USE(V8)
+    return getNodeImpl(node, webNode);
+#else
+    // Not supported on other ports (JSC, etc.).
     return false;
 #endif
 }

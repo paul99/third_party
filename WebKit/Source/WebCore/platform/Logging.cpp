@@ -25,7 +25,10 @@
 
 #include "config.h"
 #include "Logging.h"
-#include "PlatformString.h"
+
+#include <wtf/text/WTFString.h>
+
+#if !LOG_DISABLED
 
 namespace WebCore {
 
@@ -62,6 +65,9 @@ WTFLogChannel LogProgress =          { 0x08000000, "WebCoreLogLevel", WTFLogChan
 WTFLogChannel LogFileAPI =           { 0x10000000, "WebCoreLogLevel", WTFLogChannelOff };
 
 WTFLogChannel LogWebAudio =          { 0x20000000, "WebCoreLogLevel", WTFLogChannelOff };
+WTFLogChannel LogCompositing =       { 0x40000000, "WebCoreLogLevel", WTFLogChannelOff };
+WTFLogChannel LogGamepad =           { 0x80000000, "WebCoreLogLevel", WTFLogChannelOff };
+
 
 WTFLogChannel* getChannelFromName(const String& channelName)
 {
@@ -140,7 +146,15 @@ WTFLogChannel* getChannelFromName(const String& channelName)
     if (equalIgnoringCase(channelName, String("WebAudio")))
         return &LogWebAudio;
 
+    if (equalIgnoringCase(channelName, String("Compositing")))
+        return &LogCompositing;
+
+    if (equalIgnoringCase(channelName, String("Gamepad")))
+        return &LogGamepad;
+
     return 0;
 }
 
 }
+
+#endif // !LOG_DISABLED

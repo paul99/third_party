@@ -40,7 +40,7 @@ enum SVGLengthAdjustType {
 
 template<>
 struct SVGPropertyTraits<SVGLengthAdjustType> {
-    static SVGLengthAdjustType highestEnumValue() { return SVGLengthAdjustSpacingAndGlyphs; }
+    static unsigned highestEnumValue() { return SVGLengthAdjustSpacingAndGlyphs; }
 
     static String toString(SVGLengthAdjustType type)
     {
@@ -103,11 +103,12 @@ protected:
     virtual bool isValid() const { return SVGTests::isValid(); }
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForPresentationAttribute(const Attribute&, StylePropertySet*) OVERRIDE;
     virtual void svgAttributeChanged(const QualifiedName&);
 
     virtual bool selfHasRelativeLengths() const;
-    virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
 
 private:
     virtual bool isTextContent() const { return true; }

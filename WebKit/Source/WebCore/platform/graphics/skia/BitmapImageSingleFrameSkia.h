@@ -49,46 +49,34 @@ public:
     // Creates a new Image from the given SkBitmap.  If "copyPixels" is true, a
     // deep copy is done.  Otherwise, a shallow copy is done (pixel data is
     // ref'ed).
-    static PassRefPtr<BitmapImageSingleFrameSkia> create(const SkBitmap&, bool copyPixels);
+    static PassRefPtr<BitmapImageSingleFrameSkia> create(const SkBitmap&, bool copyPixels, float resolutionScale = 1);
 
-    virtual bool isBitmapImage() const { return true; }
+    virtual bool isBitmapImage() const;
 
-    virtual bool currentFrameHasAlpha() { return !m_nativeImage.bitmap().isOpaque(); }
+    virtual bool currentFrameHasAlpha();
 
-    virtual IntSize size() const
-    {
-        return IntSize(m_nativeImage.bitmap().width(), m_nativeImage.bitmap().height());
-    }
+    virtual IntSize size() const;
 
     // Do nothing, as we only have the one representation of data (decoded).
-    virtual void destroyDecodedData(bool destroyAll = true) { }
+    virtual void destroyDecodedData(bool destroyAll = true);
 
-    virtual unsigned decodedSize() const
-    {
-        return m_nativeImage.decodedSize();
-    }
+    virtual unsigned decodedSize() const;
 
     // We only have a single frame.
-    virtual NativeImagePtr nativeImageForCurrentFrame()
-    {
-        return &m_nativeImage;
-    }
+    virtual NativeImagePtr nativeImageForCurrentFrame();
 
 #if !ASSERT_DISABLED
-    virtual bool notSolidColor()
-    {
-        return m_nativeImage.bitmap().width() != 1 || m_nativeImage.bitmap().height() != 1;
-    }
+    virtual bool notSolidColor();
 #endif
 
 protected:
-    virtual void draw(GraphicsContext*, const FloatRect& dstRect, const FloatRect& srcRect, ColorSpace styleColorSpace, CompositeOperator);
+    virtual void draw(GraphicsContext*, const FloatRect& dstRect, const FloatRect& srcRect, ColorSpace styleColorSpace, CompositeOperator, BlendMode);
 
 private:
     NativeImageSkia m_nativeImage;
 
     // Creates a new Image from the given SkBitmap, using a shallow copy.
-    explicit BitmapImageSingleFrameSkia(const SkBitmap&);
+    BitmapImageSingleFrameSkia(const SkBitmap&, float resolutionScale);
 };
 
 FloatRect normalizeRect(const FloatRect&);

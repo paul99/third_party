@@ -31,10 +31,16 @@
 
 #if ENABLE(WEB_INTENTS)
 
+#include "Dictionary.h"
+#include "KURL.h"
+#include "MessagePort.h"
+#include "MessagePortChannel.h"
+#include "ScriptState.h"
 #include <wtf/Forward.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+#include <wtf/Vector.h>
 #include <wtf/text/WTFString.h>
 
 namespace WebCore {
@@ -45,21 +51,35 @@ typedef int ExceptionCode;
 
 class Intent : public RefCounted<Intent> {
 public:
-    static PassRefPtr<Intent> create(const String& action, const String& type, PassRefPtr<SerializedScriptValue> data, ExceptionCode&);
+    static PassRefPtr<Intent> create(const String& action, const String& type, PassRefPtr<SerializedScriptValue> data, const MessagePortArray& ports, ExceptionCode&);
+    static PassRefPtr<Intent> create(ScriptState*, const Dictionary&, ExceptionCode&);
 
-    const String& action() const;
-    const String& type() const;
-    SerializedScriptValue* data() const;
+    virtual ~Intent() { }
 
-    int identifier() const;
-    void setIdentifier(int);
+    const String& action() const { return m_action; }
+    const String& type() const { return m_type; }
+    SerializedScriptValue* data() const { return m_data.get(); }
+
+    MessagePortChannelArray* messagePorts() const { return m_ports.get(); }
+    const KURL& service() const { return m_service; }
+    const HashMap<String, String>& extras() const { return m_extras; }
+    const Vector<KURL>& suggestions() const { return m_suggestions; }
+
+    void setExtras(const WTF::HashMap<String, String>&);
+
+protected:
+    Intent(const String& action, const String& type,
+           PassRefPtr<SerializedScriptValue> data, PassOwnPtr<MessagePortChannelArray> ports,
+           const HashMap<String, String>& extras, const KURL& service, const Vector<KURL>& suggestions);
 
 private:
-    Intent(const String& action, const String& type, PassRefPtr<SerializedScriptValue> data);
-
     String m_action;
     String m_type;
     RefPtr<SerializedScriptValue> m_data;
+    OwnPtr<MessagePortChannelArray> m_ports;
+    KURL m_service;
+    HashMap<String, String> m_extras;
+    Vector<KURL> m_suggestions;
 };
 
 } // namespace WebCore

@@ -63,7 +63,7 @@ public:
 
     WEBKIT_EXPORT static void enableApplicationCache(bool);
     WEBKIT_EXPORT static bool isApplicationCacheEnabled();
-    
+
     WEBKIT_EXPORT static void enableDataTransferItems(bool);
     WEBKIT_EXPORT static bool isDataTransferItemsEnabled();
 
@@ -75,9 +75,6 @@ public:
 
     WEBKIT_EXPORT static void enableWebAudio(bool);
     WEBKIT_EXPORT static bool isWebAudioEnabled();
-
-    WEBKIT_EXPORT static void enablePushState(bool);
-    WEBKIT_EXPORT static bool isPushStateEnabled(bool);
 
     WEBKIT_EXPORT static void enableTouch(bool);
     WEBKIT_EXPORT static bool isTouchEnabled();
@@ -91,12 +88,15 @@ public:
     WEBKIT_EXPORT static void enableSpeechInput(bool);
     WEBKIT_EXPORT static bool isSpeechInputEnabled();
 
+    WEBKIT_EXPORT static void enableScriptedSpeech(bool);
+    WEBKIT_EXPORT static bool isScriptedSpeechEnabled();
+
     WEBKIT_EXPORT static void enableXHRResponseBlob(bool);
     WEBKIT_EXPORT static bool isXHRResponseBlobEnabled();
 
     WEBKIT_EXPORT static void enableFileSystem(bool);
     WEBKIT_EXPORT static bool isFileSystemEnabled();
-    
+
     WEBKIT_EXPORT static void enableJavaScriptI18NAPI(bool);
     WEBKIT_EXPORT static bool isJavaScriptI18NAPIEnabled();
 
@@ -106,14 +106,17 @@ public:
     WEBKIT_EXPORT static void enableMediaStream(bool);
     WEBKIT_EXPORT static bool isMediaStreamEnabled();
 
+    WEBKIT_EXPORT static void enablePeerConnection(bool);
+    WEBKIT_EXPORT static bool isPeerConnectionEnabled();
+
     WEBKIT_EXPORT static void enableFullScreenAPI(bool);
     WEBKIT_EXPORT static bool isFullScreenAPIEnabled();
 
-    WEBKIT_EXPORT static void enablePointerLock(bool);
-    WEBKIT_EXPORT static bool isPointerLockEnabled();
-
     WEBKIT_EXPORT static void enableMediaSource(bool);
     WEBKIT_EXPORT static bool isMediaSourceEnabled();
+
+    WEBKIT_EXPORT static void enableEncryptedMedia(bool);
+    WEBKIT_EXPORT static bool isEncryptedMediaEnabled();
 
     WEBKIT_EXPORT static void enableVideoTrack(bool);
     WEBKIT_EXPORT static bool isVideoTrackEnabled();
@@ -123,6 +126,45 @@ public:
 
     WEBKIT_EXPORT static void enableShadowDOM(bool);
     WEBKIT_EXPORT static bool isShadowDOMEnabled();
+
+    WEBKIT_EXPORT static void enableStyleScoped(bool);
+    WEBKIT_EXPORT static bool isStyleScopedEnabled();
+
+    WEBKIT_EXPORT static void enableInputTypeDate(bool);
+    WEBKIT_EXPORT static bool isInputTypeDateEnabled();
+
+    WEBKIT_EXPORT static void enableInputTypeDateTime(bool);
+    WEBKIT_EXPORT static bool isInputTypeDateTimeEnabled();
+
+    WEBKIT_EXPORT static void enableInputTypeDateTimeLocal(bool);
+    WEBKIT_EXPORT static bool isInputTypeDateTimeLocalEnabled();
+
+    WEBKIT_EXPORT static void enableInputTypeMonth(bool);
+    WEBKIT_EXPORT static bool isInputTypeMonthEnabled();
+
+    WEBKIT_EXPORT static void enableInputTypeTime(bool);
+    WEBKIT_EXPORT static bool isInputTypeTimeEnabled();
+
+    WEBKIT_EXPORT static void enableInputTypeWeek(bool);
+    WEBKIT_EXPORT static bool isInputTypeWeekEnabled();
+
+    WEBKIT_EXPORT static void enableDialogElement(bool);
+    WEBKIT_EXPORT static bool isDialogElementEnabled();
+
+    WEBKIT_EXPORT static void enableCSSExclusions(bool);
+    WEBKIT_EXPORT static bool isCSSExclusionsEnabled();
+
+    WEBKIT_EXPORT static void enableRequestAutocomplete(bool);
+    WEBKIT_EXPORT static bool isRequestAutocompleteEnabled();
+
+    WEBKIT_EXPORT static void enableCSSRegions(bool);
+    WEBKIT_EXPORT static bool isCSSRegionsEnabled();
+
+    WEBKIT_EXPORT static void enableExperimentalContentSecurityPolicyFeatures(bool);
+    WEBKIT_EXPORT static bool isExperimentalContentSecurityPolicyFeaturesEnabled();
+
+    WEBKIT_EXPORT static void enableWebIntents(bool);
+    WEBKIT_EXPORT static bool isWebIntentsEnabled();
 
 private:
     WebRuntimeFeatures();

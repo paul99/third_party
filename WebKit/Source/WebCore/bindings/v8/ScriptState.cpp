@@ -37,64 +37,56 @@
 #include "ScriptController.h"
 #include "V8DOMWindow.h"
 #include "V8HiddenPropertyName.h"
-
+#include "V8WorkerContext.h"
 #include "WorkerContext.h"
-#include "WorkerContextExecutionProxy.h"
 #include "WorkerScriptController.h"
-
 #include <v8.h>
 #include <wtf/Assertions.h>
 
 namespace WebCore {
 
 ScriptState::ScriptState(v8::Handle<v8::Context> context)
-    : m_context(v8::Persistent<v8::Context>::New(context))
+    : m_context(context)
 {
-    m_context.MakeWeak(this, &ScriptState::weakReferenceCallback);
+    m_context.get().MakeWeak(this, &ScriptState::weakReferenceCallback);
 }
 
 ScriptState::~ScriptState()
 {
-    m_context.Dispose();
-    m_context.Clear();
 }
 
 DOMWindow* ScriptState::domWindow() const
 {
     v8::HandleScope handleScope;
-    v8::Handle<v8::Object> v8RealGlobal = v8::Handle<v8::Object>::Cast(m_context->Global()->GetPrototype());
-    if (!V8DOMWrapper::isWrapperOfType(v8RealGlobal, &V8DOMWindow::info))
-        return 0;
-    return V8DOMWindow::toNative(v8RealGlobal);
+    return toDOMWindow(m_context.get());
+}
+
+ScriptExecutionContext* ScriptState::scriptExecutionContext() const
+{
+    v8::HandleScope handleScope;
+    return toScriptExecutionContext(m_context.get());
 }
 
 ScriptState* ScriptState::forContext(v8::Local<v8::Context> context)
 {
     v8::Context::Scope contextScope(context);
 
-    v8::Local<v8::Object> global = context->Global();
-    // Skip proxy object. The proxy object will survive page navigation while we need
-    // an object whose lifetime consides with that of the inspected context.
-    global = v8::Local<v8::Object>::Cast(global->GetPrototype());
+    v8::Local<v8::Object> innerGlobal = v8::Local<v8::Object>::Cast(context->Global()->GetPrototype());
 
-    v8::Handle<v8::String> key = V8HiddenPropertyName::scriptState();
-    v8::Local<v8::Value> val = global->GetHiddenValue(key);
-    if (!val.IsEmpty() && val->IsExternal())
-        return static_cast<ScriptState*>(v8::External::Cast(*val)->Value());
+    v8::Local<v8::Value> scriptStateWrapper = innerGlobal->GetHiddenValue(V8HiddenPropertyName::scriptState());
+    if (!scriptStateWrapper.IsEmpty() && scriptStateWrapper->IsExternal())
+        return static_cast<ScriptState*>(v8::External::Cast(*scriptStateWrapper)->Value());
 
-    ScriptState* state = new ScriptState(context);
-    global->SetHiddenValue(key, v8::External::New(state));
-    return state;
+    ScriptState* scriptState = new ScriptState(context);
+    innerGlobal->SetHiddenValue(V8HiddenPropertyName::scriptState(), v8::External::New(scriptState));
+    return scriptState;
 }
 
 ScriptState* ScriptState::current()
 {
     v8::HandleScope handleScope;
     v8::Local<v8::Context> context = v8::Context::GetCurrent();
-    if (context.IsEmpty()) {
-        ASSERT_NOT_REACHED();
-        return 0;
-    }
+    ASSERT(!context.IsEmpty());
     return ScriptState::forContext(context);
 }
 
@@ -109,11 +101,27 @@ DOMWindow* domWindowFromScriptState(ScriptState* scriptState)
     return scriptState->domWindow();
 }
 
+ScriptExecutionContext* scriptExecutionContextFromScriptState(ScriptState* scriptState)
+{
+    return scriptState->scriptExecutionContext();
+}
+
+bool evalEnabled(ScriptState* scriptState)
+{
+    v8::HandleScope handleScope;
+    return scriptState->context()->IsCodeGenerationFromStringsAllowed();
+}
+
+void setEvalEnabled(ScriptState* scriptState, bool enabled)
+{
+    v8::HandleScope handleScope;
+    return scriptState->context()->AllowCodeGenerationFromStrings(enabled);
+}
+
 ScriptState* mainWorldScriptState(Frame* frame)
 {
     v8::HandleScope handleScope;
-    V8Proxy* proxy = frame->script()->proxy();
-    return ScriptState::forContext(proxy->mainWorldContext());
+    return ScriptState::forContext(frame->script()->mainWorldContext());
 }
 
 ScriptState* scriptStateFromNode(DOMWrapperWorld*, Node* node)
@@ -133,13 +141,12 @@ ScriptState* scriptStateFromPage(DOMWrapperWorld*, Page* page)
 #if ENABLE(WORKERS)
 ScriptState* scriptStateFromWorkerContext(WorkerContext* workerContext)
 {
-    WorkerContextExecutionProxy* proxy = workerContext->script()->proxy();
-    if (!proxy)
+    WorkerScriptController* script = workerContext->script();
+    if (!script)
         return 0;
 
     v8::HandleScope handleScope;
-    v8::Local<v8::Context> context = proxy->context();
-    return ScriptState::forContext(context);
+    return ScriptState::forContext(script->context());
 }
 #endif
 

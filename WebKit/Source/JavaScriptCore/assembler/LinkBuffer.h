@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2009, 2010, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,7 +34,9 @@
 #define GLOBAL_THUNK_ID reinterpret_cast<void*>(static_cast<intptr_t>(-1))
 #define REGEXP_CODE_ID reinterpret_cast<void*>(static_cast<intptr_t>(-2))
 
-#include <MacroAssembler.h>
+#include "JITCompilationEffort.h"
+#include "MacroAssembler.h"
+#include <wtf/DataLog.h>
 #include <wtf/Noncopyable.h>
 
 namespace JSC {
@@ -61,34 +63,50 @@ class LinkBuffer {
     typedef MacroAssemblerCodePtr CodePtr;
     typedef MacroAssembler::Label Label;
     typedef MacroAssembler::Jump Jump;
+    typedef MacroAssembler::PatchableJump PatchableJump;
     typedef MacroAssembler::JumpList JumpList;
     typedef MacroAssembler::Call Call;
     typedef MacroAssembler::DataLabelCompact DataLabelCompact;
     typedef MacroAssembler::DataLabel32 DataLabel32;
     typedef MacroAssembler::DataLabelPtr DataLabelPtr;
+    typedef MacroAssembler::ConvertibleLoadLabel ConvertibleLoadLabel;
 #if ENABLE(BRANCH_COMPACTION)
     typedef MacroAssembler::LinkRecord LinkRecord;
     typedef MacroAssembler::JumpLinkType JumpLinkType;
 #endif
 
 public:
-    LinkBuffer(JSGlobalData& globalData, MacroAssembler* masm, void* ownerUID)
+    LinkBuffer(JSGlobalData& globalData, MacroAssembler* masm, void* ownerUID, JITCompilationEffort effort = JITCompilationMustSucceed)
         : m_size(0)
+#if ENABLE(BRANCH_COMPACTION)
+        , m_initialSize(0)
+#endif
         , m_code(0)
         , m_assembler(masm)
         , m_globalData(&globalData)
 #ifndef NDEBUG
         , m_completed(false)
+        , m_effort(effort)
 #endif
     {
-        linkCode(ownerUID);
+        linkCode(ownerUID, effort);
     }
 
     ~LinkBuffer()
     {
-        ASSERT(m_completed);
+        ASSERT(m_completed || (!m_executableMemory && m_effort == JITCompilationCanFail));
+    }
+    
+    bool didFailToAllocate() const
+    {
+        return !m_executableMemory;
     }
 
+    bool isValid() const
+    {
+        return !didFailToAllocate();
+    }
+    
     // These methods are used to link or set values at code generation time.
 
     void link(Call call, FunctionPtr function)
@@ -138,9 +156,9 @@ public:
         return CodeLocationNearCall(MacroAssembler::getLinkerAddress(code(), applyOffset(call.m_label)));
     }
 
-    CodeLocationLabel locationOf(Jump jump)
+    CodeLocationLabel locationOf(PatchableJump jump)
     {
-        return CodeLocationLabel(MacroAssembler::getLinkerAddress(code(), applyOffset(jump.m_label)));
+        return CodeLocationLabel(MacroAssembler::getLinkerAddress(code(), applyOffset(jump.m_jump.m_label)));
     }
 
     CodeLocationLabel locationOf(Label label)
@@ -163,6 +181,11 @@ public:
         return CodeLocationDataLabelCompact(MacroAssembler::getLinkerAddress(code(), applyOffset(label.m_label)));
     }
 
+    CodeLocationConvertibleLoad locationOf(ConvertibleLoadLabel label)
+    {
+        return CodeLocationConvertibleLoad(MacroAssembler::getLinkerAddress(code(), applyOffset(label.m_label)));
+    }
+
     // This method obtains the return address of the call, given as an offset from
     // the start of the code.
     unsigned returnAddressOffset(Call call)
@@ -176,20 +199,19 @@ public:
         return applyOffset(label.m_label).m_offset;
     }
 
-    // Upon completion of all patching 'finalizeCode()' should be called once to complete generation of the code.
-    CodeRef finalizeCode()
-    {
-        performFinalization();
-
-        return CodeRef(m_executableMemory);
-    }
+    // Upon completion of all patching 'FINALIZE_CODE()' should be called once to
+    // complete generation of the code. Alternatively, call
+    // finalizeCodeWithoutDisassembly() directly if you have your own way of
+    // displaying disassembly.
+    
+    CodeRef finalizeCodeWithoutDisassembly();
+    CodeRef finalizeCodeWithDisassembly(const char* format, ...) WTF_ATTRIBUTE_PRINTF(2, 3);
 
     CodePtr trampolineAt(Label label)
     {
         return CodePtr(MacroAssembler::AssemblerType_T::getRelocatedAddress(code(), applyOffset(label.m_label)));
     }
 
-#ifndef NDEBUG
     void* debugAddress()
     {
         return m_code;
@@ -199,7 +221,6 @@ public:
     {
         return m_size;
     }
-#endif
 
 private:
     template <typename T> T applyOffset(T src)
@@ -216,158 +237,58 @@ private:
         return m_code;
     }
 
-    void linkCode(void* ownerUID)
-    {
-        ASSERT(!m_code);
-#if !ENABLE(BRANCH_COMPACTION)
-        m_executableMemory = m_assembler->m_assembler.executableCopy(*m_globalData, ownerUID);
-        if (!m_executableMemory)
-            return;
-        m_code = m_executableMemory->start();
-        m_size = m_assembler->m_assembler.codeSize();
-        ASSERT(m_code);
-#else
-        size_t initialSize = m_assembler->m_assembler.codeSize();
-        m_executableMemory = m_globalData->executableAllocator.allocate(*m_globalData, initialSize, ownerUID);
-        if (!m_executableMemory)
-            return;
-        m_code = (uint8_t*)m_executableMemory->start();
-        ASSERT(m_code);
-        ExecutableAllocator::makeWritable(m_code, initialSize);
-        uint8_t* inData = (uint8_t*)m_assembler->unlinkedCode();
-        uint8_t* outData = reinterpret_cast<uint8_t*>(m_code);
-        int readPtr = 0;
-        int writePtr = 0;
-        Vector<LinkRecord>& jumpsToLink = m_assembler->jumpsToLink();
-        unsigned jumpCount = jumpsToLink.size();
-        for (unsigned i = 0; i < jumpCount; ++i) {
-            int offset = readPtr - writePtr;
-            ASSERT(!(offset & 1));
-            
-            // Copy the instructions from the last jump to the current one.
-            size_t regionSize = jumpsToLink[i].from() - readPtr;
-            uint16_t* copySource = reinterpret_cast<uint16_t*>(inData + readPtr);
-            uint16_t* copyEnd = reinterpret_cast<uint16_t*>(inData + readPtr + regionSize);
-            uint16_t* copyDst = reinterpret_cast<uint16_t*>(outData + writePtr);
-            ASSERT(!(regionSize % 2));
-            ASSERT(!(readPtr % 2));
-            ASSERT(!(writePtr % 2));
-            while (copySource != copyEnd)
-                *copyDst++ = *copySource++;
-            m_assembler->recordLinkOffsets(readPtr, jumpsToLink[i].from(), offset);
-            readPtr += regionSize;
-            writePtr += regionSize;
-            
-            // Calculate absolute address of the jump target, in the case of backwards
-            // branches we need to be precise, forward branches we are pessimistic
-            const uint8_t* target;
-            if (jumpsToLink[i].to() >= jumpsToLink[i].from())
-                target = outData + jumpsToLink[i].to() - offset; // Compensate for what we have collapsed so far
-            else
-                target = outData + jumpsToLink[i].to() - m_assembler->executableOffsetFor(jumpsToLink[i].to());
-            
-            JumpLinkType jumpLinkType = m_assembler->computeJumpType(jumpsToLink[i], outData + writePtr, target);
-            // Compact branch if we can...
-            if (m_assembler->canCompact(jumpsToLink[i].type())) {
-                // Step back in the write stream
-                int32_t delta = m_assembler->jumpSizeDelta(jumpsToLink[i].type(), jumpLinkType);
-                if (delta) {
-                    writePtr -= delta;
-                    m_assembler->recordLinkOffsets(jumpsToLink[i].from() - delta, readPtr, readPtr - writePtr);
-                }
-            }
-            jumpsToLink[i].setFrom(writePtr);
-        }
-        // Copy everything after the last jump
-        memcpy(outData + writePtr, inData + readPtr, initialSize - readPtr);
-        m_assembler->recordLinkOffsets(readPtr, initialSize, readPtr - writePtr);
-        
-        for (unsigned i = 0; i < jumpCount; ++i) {
-            uint8_t* location = outData + jumpsToLink[i].from();
-            uint8_t* target = outData + jumpsToLink[i].to() - m_assembler->executableOffsetFor(jumpsToLink[i].to());
-            m_assembler->link(jumpsToLink[i], location, target);
-        }
+    void linkCode(void* ownerUID, JITCompilationEffort);
 
-        jumpsToLink.clear();
-        m_size = writePtr + initialSize - readPtr;
-        m_executableMemory->shrink(m_size);
+    void performFinalization();
 
 #if DUMP_LINK_STATISTICS
-        dumpLinkStatistics(m_code, initialSize, m_size);
-#endif
-#if DUMP_CODE
-        dumpCode(m_code, m_size);
-#endif
-#endif
-    }
-
-    void performFinalization()
-    {
-#ifndef NDEBUG
-        ASSERT(!m_completed);
-        m_completed = true;
-#endif
-
-        ExecutableAllocator::makeExecutable(code(), m_size);
-        ExecutableAllocator::cacheFlush(code(), m_size);
-    }
-
-#if DUMP_LINK_STATISTICS
-    static void dumpLinkStatistics(void* code, size_t initialSize, size_t finalSize)
-    {
-        static unsigned linkCount = 0;
-        static unsigned totalInitialSize = 0;
-        static unsigned totalFinalSize = 0;
-        linkCount++;
-        totalInitialSize += initialSize;
-        totalFinalSize += finalSize;
-        printf("link %p: orig %u, compact %u (delta %u, %.2f%%)\n", 
-               code, static_cast<unsigned>(initialSize), static_cast<unsigned>(finalSize),
-               static_cast<unsigned>(initialSize - finalSize),
-               100.0 * (initialSize - finalSize) / initialSize);
-        printf("\ttotal %u: orig %u, compact %u (delta %u, %.2f%%)\n", 
-               linkCount, totalInitialSize, totalFinalSize, totalInitialSize - totalFinalSize,
-               100.0 * (totalInitialSize - totalFinalSize) / totalInitialSize);
-    }
+    static void dumpLinkStatistics(void* code, size_t initialSize, size_t finalSize);
 #endif
     
 #if DUMP_CODE
-    static void dumpCode(void* code, size_t size)
-    {
-#if CPU(ARM_THUMB2)
-        // Dump the generated code in an asm file format that can be assembled and then disassembled
-        // for debugging purposes. For example, save this output as jit.s:
-        //   gcc -arch armv7 -c jit.s
-        //   otool -tv jit.o
-        static unsigned codeCount = 0;
-        unsigned short* tcode = static_cast<unsigned short*>(code);
-        size_t tsize = size / sizeof(short);
-        char nameBuf[128];
-        snprintf(nameBuf, sizeof(nameBuf), "_jsc_jit%u", codeCount++);
-        printf("\t.syntax unified\n"
-               "\t.section\t__TEXT,__text,regular,pure_instructions\n"
-               "\t.globl\t%s\n"
-               "\t.align 2\n"
-               "\t.code 16\n"
-               "\t.thumb_func\t%s\n"
-               "# %p\n"
-               "%s:\n", nameBuf, nameBuf, code, nameBuf);
-        
-        for (unsigned i = 0; i < tsize; i++)
-            printf("\t.short\t0x%x\n", tcode[i]);
-#endif
-    }
+    static void dumpCode(void* code, size_t);
 #endif
     
     RefPtr<ExecutableMemoryHandle> m_executableMemory;
     size_t m_size;
+#if ENABLE(BRANCH_COMPACTION)
+    size_t m_initialSize;
+#endif
     void* m_code;
     MacroAssembler* m_assembler;
     JSGlobalData* m_globalData;
 #ifndef NDEBUG
     bool m_completed;
+    JITCompilationEffort m_effort;
 #endif
 };
+
+#define FINALIZE_CODE_IF(condition, linkBufferReference, dataLogFArgumentsForHeading)  \
+    (UNLIKELY((condition))                                              \
+     ? ((linkBufferReference).finalizeCodeWithDisassembly dataLogFArgumentsForHeading) \
+     : (linkBufferReference).finalizeCodeWithoutDisassembly())
+
+// Use this to finalize code, like so:
+//
+// CodeRef code = FINALIZE_CODE(linkBuffer, ("my super thingy number %d", number));
+//
+// Which, in disassembly mode, will print:
+//
+// Generated JIT code for my super thingy number 42:
+//     Code at [0x123456, 0x234567]:
+//         0x123456: mov $0, 0
+//         0x12345a: ret
+//
+// ... and so on.
+//
+// Note that the dataLogFArgumentsForHeading are only evaluated when showDisassembly
+// is true, so you can hide expensive disassembly-only computations inside there.
+
+#define FINALIZE_CODE(linkBufferReference, dataLogFArgumentsForHeading)  \
+    FINALIZE_CODE_IF(Options::showDisassembly(), linkBufferReference, dataLogFArgumentsForHeading)
+
+#define FINALIZE_DFG_CODE(linkBufferReference, dataLogFArgumentsForHeading)  \
+    FINALIZE_CODE_IF((Options::showDisassembly() || Options::showDFGDisassembly()), linkBufferReference, dataLogFArgumentsForHeading)
 
 } // namespace JSC
 

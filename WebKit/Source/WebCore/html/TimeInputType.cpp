@@ -34,6 +34,7 @@
 #include "DateComponents.h"
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
+#include "InputTypeNames.h"
 #include <wtf/CurrentTime.h>
 #include <wtf/DateMath.h>
 #include <wtf/MathExtras.h>
@@ -41,12 +42,24 @@
 
 #if ENABLE(INPUT_TYPE_TIME)
 
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+#include "DateTimeFieldsState.h"
+#include "PlatformLocale.h"
+#include <wtf/text/WTFString.h>
+#endif
+
 namespace WebCore {
 
 using namespace HTMLNames;
 
-static const double timeDefaultStep = 60.0;
-static const double timeStepScaleFactor = 1000.0;
+static const int timeDefaultStep = 60;
+static const int timeDefaultStepBase = 0;
+static const int timeStepScaleFactor = 1000;
+
+TimeInputType::TimeInputType(HTMLInputElement*  element)
+    : BaseTimeInputType(element)
+{
+}
 
 PassOwnPtr<InputType> TimeInputType::create(HTMLInputElement* element)
 {
@@ -63,7 +76,7 @@ DateComponents::Type TimeInputType::dateType() const
     return DateComponents::Time;
 }
 
-double TimeInputType::defaultValueForStepUp() const
+Decimal TimeInputType::defaultValueForStepUp() const
 {
     double current = currentTimeMS();
     double utcOffset = calculateUTCOffset();
@@ -75,32 +88,18 @@ double TimeInputType::defaultValueForStepUp() const
     date.setMillisecondsSinceMidnight(current);
     double milliseconds = date.millisecondsSinceEpoch();
     ASSERT(isfinite(milliseconds));
-    return milliseconds;
+    return Decimal::fromDouble(milliseconds);
 }
 
-double TimeInputType::minimum() const
+StepRange TimeInputType::createStepRange(AnyStepHandling anyStepHandling) const
 {
-    return parseToDouble(element()->fastGetAttribute(minAttr), DateComponents::minimumTime());
-}
+    DEFINE_STATIC_LOCAL(const StepRange::StepDescription, stepDescription, (timeDefaultStep, timeDefaultStepBase, timeStepScaleFactor, StepRange::ScaledStepValueShouldBeInteger));
 
-double TimeInputType::maximum() const
-{
-    return parseToDouble(element()->fastGetAttribute(maxAttr), DateComponents::maximumTime());
-}
-
-double TimeInputType::defaultStep() const
-{
-    return timeDefaultStep;
-}
-
-double TimeInputType::stepScaleFactor() const
-{
-    return timeStepScaleFactor;
-}
-
-bool TimeInputType::scaledStepValueShouldBeInteger() const
-{
-    return true;
+    const Decimal stepBase = parseToNumber(element()->fastGetAttribute(minAttr), 0);
+    const Decimal minimum = parseToNumber(element()->fastGetAttribute(minAttr), Decimal::fromDouble(DateComponents::minimumTime()));
+    const Decimal maximum = parseToNumber(element()->fastGetAttribute(maxAttr), Decimal::fromDouble(DateComponents::maximumTime()));
+    const Decimal step = StepRange::parseStep(anyStepHandling, stepDescription, element()->fastGetAttribute(stepAttr));
+    return StepRange(stepBase, minimum, maximum, step, stepDescription);
 }
 
 bool TimeInputType::parseToDateComponentsInternal(const UChar* characters, unsigned length, DateComponents* out) const
@@ -116,10 +115,52 @@ bool TimeInputType::setMillisecondToDateComponents(double value, DateComponents*
     return date->setMillisecondsSinceMidnight(value);
 }
 
-#if OS(ANDROID)
 bool TimeInputType::isTimeField() const
 {
     return true;
+}
+
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+
+String TimeInputType::localizeValue(const String& proposedValue) const
+{
+    DateComponents date;
+    if (!parseToDateComponents(proposedValue, &date))
+        return proposedValue;
+
+    Locale::FormatType formatType = shouldHaveSecondField(date) ? Locale::FormatTypeMedium : Locale::FormatTypeShort;
+
+    String localized = element()->locale().formatDateTime(date, formatType);
+    return localized.isEmpty() ? proposedValue : localized;
+}
+
+String TimeInputType::formatDateTimeFieldsState(const DateTimeFieldsState& dateTimeFieldsState) const
+{
+    if (!dateTimeFieldsState.hasHour() || !dateTimeFieldsState.hasMinute() || !dateTimeFieldsState.hasAMPM())
+        return emptyString();
+    if (dateTimeFieldsState.hasMillisecond() && dateTimeFieldsState.millisecond())
+        return String::format("%02u:%02u:%02u.%03u",
+                dateTimeFieldsState.hour23(),
+                dateTimeFieldsState.minute(),
+                dateTimeFieldsState.hasSecond() ? dateTimeFieldsState.second() : 0,
+                dateTimeFieldsState.millisecond());
+    if (dateTimeFieldsState.hasSecond() && dateTimeFieldsState.second())
+        return String::format("%02u:%02u:%02u",
+                dateTimeFieldsState.hour23(),
+                dateTimeFieldsState.minute(),
+                dateTimeFieldsState.second());
+    return String::format("%02u:%02u", dateTimeFieldsState.hour23(), dateTimeFieldsState.minute());
+}
+
+void TimeInputType::setupLayoutParameters(DateTimeEditElement::LayoutParameters& layoutParameters, const DateComponents& date) const
+{
+    if (shouldHaveSecondField(date)) {
+        layoutParameters.dateTimeFormat = layoutParameters.locale.timeFormat();
+        layoutParameters.fallbackDateTimeFormat = "HH:mm:ss";
+    } else {
+        layoutParameters.dateTimeFormat = layoutParameters.locale.shortTimeFormat();
+        layoutParameters.fallbackDateTimeFormat = "HH:mm";
+    }
 }
 #endif
 

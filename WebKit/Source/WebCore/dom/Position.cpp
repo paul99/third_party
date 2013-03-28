@@ -33,6 +33,7 @@
 #include "PositionIterator.h"
 #include "RenderBlock.h"
 #include "RenderText.h"
+#include "RuntimeEnabledFeatures.h"
 #include "Text.h"
 #include "TextIterator.h"
 #include "VisiblePosition.h"
@@ -80,7 +81,13 @@ Position::Position(PassRefPtr<Node> anchorNode, LegacyEditingOffset offset)
     , m_anchorType(anchorTypeForLegacyEditingPosition(m_anchorNode.get(), m_offset))
     , m_isLegacyEditingPosition(true)
 {
+#if ENABLE(SHADOW_DOM)
+    ASSERT((m_anchorNode && RuntimeEnabledFeatures::shadowDOMEnabled())
+           || !m_anchorNode || !m_anchorNode->isShadowRoot());
+#else
     ASSERT(!m_anchorNode || !m_anchorNode->isShadowRoot());
+#endif
+    ASSERT(!m_anchorNode || !m_anchorNode->isPseudoElement());
 }
 
 Position::Position(PassRefPtr<Node> anchorNode, AnchorType anchorType)
@@ -89,7 +96,15 @@ Position::Position(PassRefPtr<Node> anchorNode, AnchorType anchorType)
     , m_anchorType(anchorType)
     , m_isLegacyEditingPosition(false)
 {
+#if ENABLE(SHADOW_DOM)
+    ASSERT((m_anchorNode && RuntimeEnabledFeatures::shadowDOMEnabled())
+           || !m_anchorNode || !m_anchorNode->isShadowRoot());
+#else
     ASSERT(!m_anchorNode || !m_anchorNode->isShadowRoot());
+#endif
+
+    ASSERT(!m_anchorNode || !m_anchorNode->isPseudoElement());
+
     ASSERT(anchorType != PositionIsOffsetInAnchor);
     ASSERT(!((anchorType == PositionIsBeforeChildren || anchorType == PositionIsAfterChildren)
         && (m_anchorNode->isTextNode() || editingIgnoresContent(m_anchorNode.get()))));
@@ -101,7 +116,15 @@ Position::Position(PassRefPtr<Node> anchorNode, int offset, AnchorType anchorTyp
     , m_anchorType(anchorType)
     , m_isLegacyEditingPosition(false)
 {
+#if ENABLE(SHADOW_DOM)
+    ASSERT((m_anchorNode && RuntimeEnabledFeatures::shadowDOMEnabled())
+           || !m_anchorNode || !editingIgnoresContent(m_anchorNode.get()) || !m_anchorNode->isShadowRoot());
+#else
     ASSERT(!m_anchorNode || !editingIgnoresContent(m_anchorNode.get()) || !m_anchorNode->isShadowRoot());
+#endif
+
+    ASSERT(!m_anchorNode || !m_anchorNode->isPseudoElement());
+
     ASSERT(anchorType == PositionIsOffsetInAnchor);
 }
 
@@ -143,7 +166,7 @@ Node* Position::containerNode() const
         return m_anchorNode.get();
     case PositionIsBeforeAnchor:
     case PositionIsAfterAnchor:
-        return m_anchorNode->nonShadowBoundaryParentNode();
+        return findParent(m_anchorNode.get());
     }
     ASSERT_NOT_REACHED();
     return 0;
@@ -153,7 +176,7 @@ Text* Position::containerText() const
 {
     switch (anchorType()) {
     case PositionIsOffsetInAnchor:
-        return m_anchorNode && m_anchorNode->isTextNode() ? static_cast<Text*>(m_anchorNode.get()) : 0;
+        return m_anchorNode && m_anchorNode->isTextNode() ? toText(m_anchorNode.get()) : 0;
     case PositionIsBeforeAnchor:
     case PositionIsAfterAnchor:
         return 0;
@@ -177,7 +200,7 @@ int Position::computeOffsetInContainerNode() const
     case PositionIsAfterChildren:
         return lastOffsetInNode(m_anchorNode.get());
     case PositionIsOffsetInAnchor:
-        return std::min(lastOffsetInNode(m_anchorNode.get()), m_offset);
+        return minOffsetForNode(m_anchorNode.get(), m_offset);
     case PositionIsBeforeAnchor:
         return m_anchorNode->nodeIndex();
     case PositionIsAfterAnchor:
@@ -203,7 +226,7 @@ Position Position::parentAnchoredEquivalent() const
     
     // FIXME: This should only be necessary for legacy positions, but is also needed for positions before and after Tables
     if (m_offset <= 0 && (m_anchorType != PositionIsAfterAnchor && m_anchorType != PositionIsAfterChildren)) {
-        if (m_anchorNode->nonShadowBoundaryParentNode() && (editingIgnoresContent(m_anchorNode.get()) || isTableElement(m_anchorNode.get())))
+        if (findParent(m_anchorNode.get()) && (editingIgnoresContent(m_anchorNode.get()) || isTableElement(m_anchorNode.get())))
             return positionInParentBeforeNode(m_anchorNode.get());
         return Position(m_anchorNode.get(), 0, PositionIsOffsetInAnchor);
     }
@@ -283,7 +306,7 @@ PassRefPtr<CSSComputedStyleDeclaration> Position::computedStyle() const
     Element* elem = element();
     if (!elem)
         return 0;
-    return WebCore::computedStyle(elem);
+    return CSSComputedStyleDeclaration::create(elem);
 }
 
 Position Position::previous(PositionMoveType moveType) const
@@ -316,7 +339,7 @@ Position Position::previous(PositionMoveType moveType) const
         }
     }
 
-    ContainerNode* parent = n->nonShadowBoundaryParentNode();
+    ContainerNode* parent = findParent(n);
     if (!parent)
         return *this;
 
@@ -348,7 +371,7 @@ Position Position::next(PositionMoveType moveType) const
         return createLegacyEditingPosition(n, (moveType == Character) ? uncheckedNextOffset(n, o) : o + 1);
     }
 
-    ContainerNode* parent = n->nonShadowBoundaryParentNode();
+    ContainerNode* parent = findParent(n);
     if (!parent)
         return *this;
 
@@ -441,14 +464,14 @@ bool Position::atStartOfTree() const
 {
     if (isNull())
         return true;
-    return !deprecatedNode()->nonShadowBoundaryParentNode() && m_offset <= 0;
+    return !findParent(deprecatedNode()) && m_offset <= 0;
 }
 
 bool Position::atEndOfTree() const
 {
     if (isNull())
         return true;
-    return !deprecatedNode()->nonShadowBoundaryParentNode() && m_offset >= lastOffsetForEditing(deprecatedNode());
+    return !findParent(deprecatedNode()) && m_offset >= lastOffsetForEditing(deprecatedNode());
 }
 
 int Position::renderedOffset() const
@@ -700,6 +723,7 @@ Position Position::upstream(EditingBoundaryCrossingRule rule) const
 // and upstream() will return the left one.
 // Also, downstream() will return the last position in the last atomic node in boundary for all of the positions
 // in boundary after the last candidate, where endsOfNodeAreVisuallyDistinctPositions(boundary).
+// FIXME: This function should never be called when the line box tree is dirty. See https://bugs.webkit.org/show_bug.cgi?id=97264
 Position Position::downstream(EditingBoundaryCrossingRule rule) const
 {
     Node* startNode = deprecatedNode();
@@ -821,7 +845,7 @@ bool Position::hasRenderedNonAnonymousDescendantsWithHeight(RenderObject* render
 {
     RenderObject* stop = renderer->nextInPreOrderAfterChildren();
     for (RenderObject *o = renderer->firstChild(); o && o != stop; o = o->nextInPreOrder())
-        if (o->node()) {
+        if (o->nonPseudoNode()) {
             if ((o->isText() && toRenderText(o)->linesBoundingBox().height()) ||
                 (o->isBox() && toRenderBox(o)->borderBoundingBox().height()))
                 return true;
@@ -833,6 +857,47 @@ bool Position::nodeIsUserSelectNone(Node* node)
 {
     return node && node->renderer() && node->renderer()->style()->userSelect() == SELECT_NONE;
 }
+
+ContainerNode* Position::findParent(const Node* node)
+{
+    // FIXME: See http://web.ug/82697
+
+#if ENABLE(SHADOW_DOM)
+    if (RuntimeEnabledFeatures::shadowDOMEnabled())
+        return node->parentNode();
+#endif
+
+    return node->nonShadowBoundaryParentNode();
+}
+
+#if ENABLE(USERSELECT_ALL)
+bool Position::nodeIsUserSelectAll(const Node* node)
+{
+    return node && node->renderer() && node->renderer()->style()->userSelect() == SELECT_ALL;
+}
+
+Node* Position::rootUserSelectAllForNode(Node* node)
+{
+    if (!node || !nodeIsUserSelectAll(node))
+        return 0;
+    Node* parent = node->parentNode();
+    if (!parent)
+        return node;
+
+    Node* candidateRoot = node;
+    while (parent) {
+        if (!parent->renderer()) {
+            parent = parent->parentNode();
+            continue;
+        }
+        if (!nodeIsUserSelectAll(parent))
+            break;
+        candidateRoot = parent;
+        parent = candidateRoot->parentNode();
+    }
+    return candidateRoot;
+}
+#endif
 
 bool Position::isCandidate() const
 {
@@ -1018,7 +1083,7 @@ Position Position::leadingWhitespacePosition(EAffinity affinity, bool considerNo
 
     Position prev = previousCharacterPosition(affinity);
     if (prev != *this && prev.deprecatedNode()->inSameContainingBlockFlowElement(deprecatedNode()) && prev.deprecatedNode()->isTextNode()) {
-        String string = static_cast<Text *>(prev.deprecatedNode())->data();
+        String string = toText(prev.deprecatedNode())->data();
         UChar c = string[prev.deprecatedEditingOffset()];
         if (considerNonCollapsibleWhitespace ? (isSpaceOrNewline(c) || c == noBreakSpace) : isCollapsibleWhitespace(c))
             if (isEditablePosition(prev))
@@ -1152,7 +1217,8 @@ void Position::getInlineBoxAndOffset(EAffinity affinity, TextDirection primaryDi
             }
 
             if (((caretOffset == caretMaxOffset) ^ (affinity == DOWNSTREAM))
-                || ((caretOffset == caretMinOffset) ^ (affinity == UPSTREAM)))
+                || ((caretOffset == caretMinOffset) ^ (affinity == UPSTREAM))
+                || (caretOffset == caretMaxOffset && box->nextLeafChild() && box->nextLeafChild()->isLineBreak()))
                 break;
 
             candidate = box;
@@ -1217,10 +1283,10 @@ void Position::getInlineBoxAndOffset(EAffinity affinity, TextDirection primaryDi
     }
 
     if (caretOffset == inlineBox->caretLeftmostOffset()) {
-        InlineBox* prevBox = inlineBox->prevLeafChild();
+        InlineBox* prevBox = inlineBox->prevLeafChildIgnoringLineBreak();
         if (!prevBox || prevBox->bidiLevel() < level) {
             // Left edge of a secondary run. Set to the right edge of the entire run.
-            while (InlineBox* nextBox = inlineBox->nextLeafChild()) {
+            while (InlineBox* nextBox = inlineBox->nextLeafChildIgnoringLineBreak()) {
                 if (nextBox->bidiLevel() < level)
                     break;
                 inlineBox = nextBox;
@@ -1228,7 +1294,7 @@ void Position::getInlineBoxAndOffset(EAffinity affinity, TextDirection primaryDi
             caretOffset = inlineBox->caretRightmostOffset();
         } else if (prevBox->bidiLevel() > level) {
             // Right edge of a "tertiary" run. Set to the left edge of that run.
-            while (InlineBox* tertiaryBox = inlineBox->prevLeafChild()) {
+            while (InlineBox* tertiaryBox = inlineBox->prevLeafChildIgnoringLineBreak()) {
                 if (tertiaryBox->bidiLevel() <= level)
                     break;
                 inlineBox = tertiaryBox;
@@ -1236,10 +1302,10 @@ void Position::getInlineBoxAndOffset(EAffinity affinity, TextDirection primaryDi
             caretOffset = inlineBox->caretLeftmostOffset();
         }
     } else {
-        InlineBox* nextBox = inlineBox->nextLeafChild();
+        InlineBox* nextBox = inlineBox->nextLeafChildIgnoringLineBreak();
         if (!nextBox || nextBox->bidiLevel() < level) {
             // Right edge of a secondary run. Set to the left edge of the entire run.
-            while (InlineBox* prevBox = inlineBox->prevLeafChild()) {
+            while (InlineBox* prevBox = inlineBox->prevLeafChildIgnoringLineBreak()) {
                 if (prevBox->bidiLevel() < level)
                     break;
                 inlineBox = prevBox;
@@ -1247,7 +1313,7 @@ void Position::getInlineBoxAndOffset(EAffinity affinity, TextDirection primaryDi
             caretOffset = inlineBox->caretLeftmostOffset();
         } else if (nextBox->bidiLevel() > level) {
             // Left edge of a "tertiary" run. Set to the right edge of that run.
-            while (InlineBox* tertiaryBox = inlineBox->nextLeafChild()) {
+            while (InlineBox* tertiaryBox = inlineBox->nextLeafChildIgnoringLineBreak()) {
                 if (tertiaryBox->bidiLevel() <= level)
                     break;
                 inlineBox = tertiaryBox;
@@ -1283,20 +1349,20 @@ void Position::debugPosition(const char* msg) const
 
 void Position::formatForDebugger(char* buffer, unsigned length) const
 {
-    String result;
-    
+    StringBuilder result;
+
     if (isNull())
-        result = "<null>";
+        result.appendLiteral("<null>");
     else {
         char s[1024];
-        result += "offset ";
-        result += String::number(m_offset);
-        result += " of ";
+        result.appendLiteral("offset ");
+        result.appendNumber(m_offset);
+        result.appendLiteral(" of ");
         deprecatedNode()->formatForDebugger(s, sizeof(s));
-        result += s;
+        result.append(s);
     }
-          
-    strncpy(buffer, result.utf8().data(), length - 1);
+
+    strncpy(buffer, result.toString().utf8().data(), length - 1);
 }
 
 void Position::showAnchorTypeAndOffset() const

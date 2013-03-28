@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2011 Ericsson AB. All rights reserved.
+ * Copyright (C) 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,46 +34,38 @@
 
 #if ENABLE(MEDIA_STREAM)
 
-#include "MediaStreamSource.h"
-#include <wtf/OwnPtr.h>
+#include <wtf/PassRefPtr.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 class MediaStreamComponent;
 class MediaStreamDescriptor;
-
-class MediaStreamSourcesQueryClient : public RefCounted<MediaStreamSourcesQueryClient> {
-public:
-    virtual ~MediaStreamSourcesQueryClient() { }
-
-    virtual bool audio() const = 0;
-    virtual bool video() const = 0;
-
-    virtual void mediaStreamSourcesQueryCompleted(const MediaStreamSourceVector& audioSources, const MediaStreamSourceVector& videoSources) = 0;
-};
+class MediaStreamSourcesQueryClient;
 
 class MediaStreamCenter {
-    WTF_MAKE_NONCOPYABLE(MediaStreamCenter);
-    WTF_MAKE_FAST_ALLOCATED;
 public:
-    ~MediaStreamCenter();
+    virtual ~MediaStreamCenter();
 
     static MediaStreamCenter& instance();
 
-    void queryMediaStreamSources(PassRefPtr<MediaStreamSourcesQueryClient>);
+    virtual void queryMediaStreamSources(PassRefPtr<MediaStreamSourcesQueryClient>) = 0;
 
     // FIXME: add a way to mute a MediaStreamSource from the WebKit API layer
 
     // Calls from the DOM objects to notify the platform
-    void didSetMediaStreamTrackEnabled(MediaStreamDescriptor*, MediaStreamComponent*);
-    void didStopLocalMediaStream(MediaStreamDescriptor*);
-    void didConstructMediaStream(MediaStreamDescriptor*);
+    virtual void didSetMediaStreamTrackEnabled(MediaStreamDescriptor*, MediaStreamComponent*) = 0;
+    virtual bool didAddMediaStreamTrack(MediaStreamDescriptor*, MediaStreamComponent*) = 0;
+    virtual bool didRemoveMediaStreamTrack(MediaStreamDescriptor*, MediaStreamComponent*) = 0;
+    virtual void didStopLocalMediaStream(MediaStreamDescriptor*) = 0;
+    virtual void didCreateMediaStream(MediaStreamDescriptor*) = 0;
 
-    // Calls from the platform to update the DOM objects
-    void endLocalMediaStream(MediaStreamDescriptor*);
-
-private:
+protected:
     MediaStreamCenter();
+
+    void endLocalMediaStream(MediaStreamDescriptor*);
+    void addMediaStreamTrack(MediaStreamDescriptor*, MediaStreamComponent*);
+    void removeMediaStreamTrack(MediaStreamDescriptor*, MediaStreamComponent*);
 };
 
 } // namespace WebCore

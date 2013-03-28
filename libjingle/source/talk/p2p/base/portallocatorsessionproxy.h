@@ -42,37 +42,47 @@ class PortProxy;
 // deleted upon receiving SignalDestroyed signal. This class is used when
 // PORTALLOCATOR_ENABLE_BUNDLE flag is set.
 
-class PortAllocatorSessionMuxer : public sigslot::has_slots<> {
+class PortAllocatorSessionMuxer : public talk_base::MessageHandler,
+                                  public sigslot::has_slots<> {
  public:
   explicit PortAllocatorSessionMuxer(PortAllocatorSession* session);
   virtual ~PortAllocatorSessionMuxer();
 
   void RegisterSessionProxy(PortAllocatorSessionProxy* session_proxy);
 
-  void OnPortReady(PortAllocatorSession* session, Port* port);
-  void OnPortDestroyed(Port* port);
+  void OnPortReady(PortAllocatorSession* session, PortInterface* port);
+  void OnPortDestroyed(PortInterface* port);
+  void OnCandidatesAllocationDone(PortAllocatorSession* session);
 
-  const std::vector<Port*>& ports() { return ports_; }
+  const std::vector<PortInterface*>& ports() { return ports_; }
 
   sigslot::signal1<PortAllocatorSessionMuxer*> SignalDestroyed;
 
  private:
+  virtual void OnMessage(talk_base::Message *pmsg);
   void OnSessionProxyDestroyed(PortAllocatorSession* proxy);
+  void SendAllocationDone_w(PortAllocatorSessionProxy* proxy);
+  void SendAllocatedPorts_w(PortAllocatorSessionProxy* proxy);
 
   // Port will be deleted when SignalDestroyed received, otherwise delete
   // happens when PortAllocatorSession dtor is called.
-  std::vector<Port*> ports_;
+  talk_base::Thread* worker_thread_;
+  std::vector<PortInterface*> ports_;
   talk_base::scoped_ptr<PortAllocatorSession> session_;
   std::vector<PortAllocatorSessionProxy*> session_proxies_;
+  bool candidate_done_signal_received_;
 };
 
 class PortAllocatorSessionProxy : public PortAllocatorSession {
  public:
-  PortAllocatorSessionProxy(const std::string& name,
-                            const std::string& session_type,
+  PortAllocatorSessionProxy(const std::string& content_name,
+                            int component,
                             uint32 flags)
-      : PortAllocatorSession(name, session_type, flags),
-        impl_(NULL) {}
+        // Use empty string as the ufrag and pwd because the proxy always uses
+        // the ufrag and pwd from the underlying implementation.
+      : PortAllocatorSession(content_name, component, "", "", flags),
+        impl_(NULL) {
+  }
 
   virtual ~PortAllocatorSessionProxy();
 
@@ -85,15 +95,28 @@ class PortAllocatorSessionProxy : public PortAllocatorSession {
   virtual void StopGetAllPorts();
   virtual bool IsGettingAllPorts();
 
+  virtual void set_generation(uint32 generation) {
+    ASSERT(impl_ != NULL);
+    impl_->set_generation(generation);
+  }
+
+  virtual uint32 generation() {
+    ASSERT(impl_ != NULL);
+    return impl_->generation();
+  }
+
  private:
-  void OnPortReady(PortAllocatorSession* session, Port* port);
+  void OnPortReady(PortAllocatorSession* session, PortInterface* port);
   void OnCandidatesReady(PortAllocatorSession* session,
                          const std::vector<Candidate>& candidates);
-  void OnPortDestroyed(Port* port);
+  void OnPortDestroyed(PortInterface* port);
+  void OnCandidatesAllocationDone(PortAllocatorSession* session);
 
   // This is the actual PortAllocatorSession, owned by PortAllocator.
   PortAllocatorSession* impl_;
-  std::map<Port*, PortProxy*> proxy_ports_;
+  std::map<PortInterface*, PortProxy*> proxy_ports_;
+
+  friend class PortAllocatorSessionMuxer;
 };
 
 }  // namespace cricket

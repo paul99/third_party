@@ -29,7 +29,7 @@
 #include "JSString.h"
 #include "Operations.h"
 #include "Uint16WithFraction.h"
-#include "dtoa.h"
+#include <wtf/dtoa.h>
 #include <wtf/Assertions.h>
 #include <wtf/MathExtras.h>
 #include <wtf/Vector.h>
@@ -68,7 +68,6 @@ const ClassInfo NumberPrototype::s_info = { "Number", &NumberObject::s_info, 0, 
 @end
 */
 
-ASSERT_CLASS_FITS_IN_CELL(NumberPrototype);
 ASSERT_HAS_TRIVIAL_DESTRUCTOR(NumberPrototype);
 
 NumberPrototype::NumberPrototype(ExecState* exec, Structure* structure)
@@ -84,12 +83,12 @@ void NumberPrototype::finishCreation(ExecState* exec, JSGlobalObject*)
     ASSERT(inherits(&s_info));
 }
 
-bool NumberPrototype::getOwnPropertySlot(JSCell* cell, ExecState* exec, const Identifier& propertyName, PropertySlot &slot)
+bool NumberPrototype::getOwnPropertySlot(JSCell* cell, ExecState* exec, PropertyName propertyName, PropertySlot &slot)
 {
     return getStaticFunctionSlot<NumberObject>(exec, ExecState::numberPrototypeTable(exec), jsCast<NumberPrototype*>(cell), propertyName, slot);
 }
 
-bool NumberPrototype::getOwnPropertyDescriptor(JSObject* object, ExecState* exec, const Identifier& propertyName, PropertyDescriptor& descriptor)
+bool NumberPrototype::getOwnPropertyDescriptor(JSObject* object, ExecState* exec, PropertyName propertyName, PropertyDescriptor& descriptor)
 {
     return getStaticFunctionDescriptor<NumberObject>(exec, ExecState::numberPrototypeTable(exec), jsCast<NumberPrototype*>(object), propertyName, descriptor);
 }
@@ -148,7 +147,7 @@ static ALWAYS_INLINE bool getIntegerArgumentInRange(ExecState* exec, int low, in
 typedef char RadixBuffer[2180];
 
 // Mapping from integers 0..35 to digit identifying this value, for radix 2..36.
-static const char* const radixDigits = "0123456789abcdefghijklmnopqrstuvwxyz";
+static const char radixDigits[] = "0123456789abcdefghijklmnopqrstuvwxyz";
 
 static char* toStringWithRadix(RadixBuffer& buffer, double number, unsigned radix)
 {
@@ -339,6 +338,31 @@ static char* toStringWithRadix(RadixBuffer& buffer, double number, unsigned radi
     return startOfResultString;
 }
 
+static String toStringWithRadix(int32_t number, unsigned radix)
+{
+    LChar buf[1 + 32]; // Worst case is radix == 2, which gives us 32 digits + sign.
+    LChar* end = buf + WTF_ARRAY_LENGTH(buf);
+    LChar* p = end;
+
+    bool negative = false;
+    uint32_t positiveNumber = number;
+    if (number < 0) {
+        negative = true;
+        positiveNumber = -number;
+    }
+
+    while (positiveNumber) {
+        uint32_t index = positiveNumber % radix;
+        ASSERT(index < sizeof(radixDigits));
+        *--p = static_cast<LChar>(radixDigits[index]);
+        positiveNumber /= radix;
+    }
+    if (negative)
+        *--p = '-';
+
+    return String(p, static_cast<unsigned>(end - p));
+}
+
 // toExponential converts a number to a string, always formatting as an expoential.
 // This method takes an optional argument specifying a number of *decimal places*
 // to round the significand to (or, put another way, this method optionally rounds
@@ -353,11 +377,11 @@ EncodedJSValue JSC_HOST_CALL numberProtoFuncToExponential(ExecState* exec)
     int decimalPlacesInExponent;
     bool isUndefined;
     if (!getIntegerArgumentInRange(exec, 0, 20, decimalPlacesInExponent, isUndefined))
-        return throwVMError(exec, createRangeError(exec, "toExponential() argument must be between 0 and 20"));
+        return throwVMError(exec, createRangeError(exec, ASCIILiteral("toExponential() argument must be between 0 and 20")));
 
     // Handle NaN and Infinity.
     if (!isfinite(x))
-        return JSValue::encode(jsString(exec, UString::number(x)));
+        return JSValue::encode(jsString(exec, String::numberToStringECMAScript(x)));
 
     // Round if the argument is not undefined, always format as exponential.
     char buffer[WTF::NumberToStringBufferLength];
@@ -367,7 +391,7 @@ EncodedJSValue JSC_HOST_CALL numberProtoFuncToExponential(ExecState* exec)
     isUndefined
         ? converter.ToExponential(x, -1, &builder)
         : converter.ToExponential(x, decimalPlacesInExponent, &builder);
-    return JSValue::encode(jsString(exec, UString(builder.Finalize())));
+    return JSValue::encode(jsString(exec, String(builder.Finalize())));
 }
 
 // toFixed converts a number to a string, always formatting as an a decimal fraction.
@@ -384,20 +408,20 @@ EncodedJSValue JSC_HOST_CALL numberProtoFuncToFixed(ExecState* exec)
     int decimalPlaces;
     bool isUndefined; // This is ignored; undefined treated as 0.
     if (!getIntegerArgumentInRange(exec, 0, 20, decimalPlaces, isUndefined))
-        return throwVMError(exec, createRangeError(exec, "toFixed() argument must be between 0 and 20"));
+        return throwVMError(exec, createRangeError(exec, ASCIILiteral("toFixed() argument must be between 0 and 20")));
 
     // 15.7.4.5.7 states "If x >= 10^21, then let m = ToString(x)"
     // This also covers Ininity, and structure the check so that NaN
     // values are also handled by numberToString
     if (!(fabs(x) < 1e+21))
-        return JSValue::encode(jsString(exec, UString::number(x)));
+        return JSValue::encode(jsString(exec, String::numberToStringECMAScript(x)));
 
     // The check above will return false for NaN or Infinity, these will be
     // handled by numberToString.
     ASSERT(isfinite(x));
 
     NumberToStringBuffer buffer;
-    return JSValue::encode(jsString(exec, UString(numberToFixedWidthString(x, decimalPlaces, buffer))));
+    return JSValue::encode(jsString(exec, String(numberToFixedWidthString(x, decimalPlaces, buffer))));
 }
 
 // toPrecision converts a number to a string, takeing an argument specifying a
@@ -417,55 +441,77 @@ EncodedJSValue JSC_HOST_CALL numberProtoFuncToPrecision(ExecState* exec)
     int significantFigures;
     bool isUndefined;
     if (!getIntegerArgumentInRange(exec, 1, 21, significantFigures, isUndefined))
-        return throwVMError(exec, createRangeError(exec, "toPrecision() argument must be between 1 and 21"));
+        return throwVMError(exec, createRangeError(exec, ASCIILiteral("toPrecision() argument must be between 1 and 21")));
 
     // To precision called with no argument is treated as ToString.
     if (isUndefined)
-        return JSValue::encode(jsString(exec, UString::number(x)));
+        return JSValue::encode(jsString(exec, String::numberToStringECMAScript(x)));
 
     // Handle NaN and Infinity.
     if (!isfinite(x))
-        return JSValue::encode(jsString(exec, UString::number(x)));
+        return JSValue::encode(jsString(exec, String::numberToStringECMAScript(x)));
 
     NumberToStringBuffer buffer;
-    return JSValue::encode(jsString(exec, UString(numberToFixedPrecisionString(x, significantFigures, buffer))));
+    return JSValue::encode(jsString(exec, String(numberToFixedPrecisionString(x, significantFigures, buffer))));
 }
 
-EncodedJSValue JSC_HOST_CALL numberProtoFuncToString(ExecState* exec)
+static inline int32_t extractRadixFromArgs(ExecState* exec)
 {
-    double x;
-    if (!toThisNumber(exec->hostThisValue(), x))
-        return throwVMTypeError(exec);
-
     JSValue radixValue = exec->argument(0);
-    int radix;
+    int32_t radix;
     if (radixValue.isInt32())
         radix = radixValue.asInt32();
     else if (radixValue.isUndefined())
         radix = 10;
     else
-        radix = static_cast<int>(radixValue.toInteger(exec)); // nan -> 0
+        radix = static_cast<int32_t>(radixValue.toInteger(exec)); // nan -> 0
 
-    if (radix == 10)
-        return JSValue::encode(jsNumber(x).toString(exec));
+    return radix;
+}
 
-    // Fast path for number to character conversion.
-    if (radix == 36) {
-        unsigned c = static_cast<unsigned>(x);
-        if (c == x && c < 36) {
-            JSGlobalData* globalData = &exec->globalData();
-            return JSValue::encode(globalData->smallStrings.singleCharacterString(globalData, radixDigits[c]));
-        }
+static inline EncodedJSValue integerValueToString(ExecState* exec, int32_t radix, int32_t value)
+{
+    // A negative value casted to unsigned would be bigger than 36 (the max radix).
+    if (static_cast<unsigned>(value) < static_cast<unsigned>(radix)) {
+        ASSERT(value <= 36);
+        ASSERT(value >= 0);
+        JSGlobalData* globalData = &exec->globalData();
+        return JSValue::encode(globalData->smallStrings.singleCharacterString(globalData, radixDigits[value]));
     }
 
-    if (radix < 2 || radix > 36)
-        return throwVMError(exec, createRangeError(exec, "toString() radix argument must be between 2 and 36"));
+    if (radix == 10) {
+        JSGlobalData* globalData = &exec->globalData();
+        return JSValue::encode(jsString(globalData, globalData->numericStrings.add(value)));
+    }
 
-    if (!isfinite(x))
-        return JSValue::encode(jsString(exec, UString::number(x)));
+    return JSValue::encode(jsString(exec, toStringWithRadix(value, radix)));
+
+}
+
+EncodedJSValue JSC_HOST_CALL numberProtoFuncToString(ExecState* exec)
+{
+    double doubleValue;
+    if (!toThisNumber(exec->hostThisValue(), doubleValue))
+        return throwVMTypeError(exec);
+
+    int32_t radix = extractRadixFromArgs(exec);
+    if (radix < 2 || radix > 36)
+        return throwVMError(exec, createRangeError(exec, ASCIILiteral("toString() radix argument must be between 2 and 36")));
+
+    int32_t integerValue = static_cast<int32_t>(doubleValue);
+    if (integerValue == doubleValue)
+        return integerValueToString(exec, radix, integerValue);
+
+    if (radix == 10) {
+        JSGlobalData* globalData = &exec->globalData();
+        return JSValue::encode(jsString(globalData, globalData->numericStrings.add(doubleValue)));
+    }
+
+    if (!isfinite(doubleValue))
+        return JSValue::encode(jsString(exec, String::numberToStringECMAScript(doubleValue)));
 
     RadixBuffer s;
-    return JSValue::encode(jsString(exec, toStringWithRadix(s, x, radix)));
+    return JSValue::encode(jsString(exec, toStringWithRadix(s, doubleValue, radix)));
 }
 
 EncodedJSValue JSC_HOST_CALL numberProtoFuncToLocaleString(ExecState* exec)

@@ -37,8 +37,10 @@
 #include "Biquad.h"
 #include "FFTFrame.h"
 #include "HRTFPanner.h"
+#include "PlatformMemoryInstrumentation.h"
 #include <algorithm>
 #include <math.h>
+#include <wtf/MemoryInstrumentationVector.h>
 #include <wtf/OwnPtr.h>
 
 using namespace std;
@@ -60,7 +62,7 @@ const size_t ResponseFrameSize = 256;
 // The impulse responses may be resampled to a different sample-rate (depending on the audio hardware) when they are loaded.
 const float ResponseSampleRate = 44100;
 
-#if PLATFORM(GTK) || PLATFORM(MAC)
+#if PLATFORM(MAC) || USE(WEBAUDIO_GSTREAMER)
 #define USE_CONCATENATED_IMPULSE_RESPONSES
 #endif
 
@@ -79,7 +81,7 @@ static AudioBus* getConcatenatedImpulseResponsesForSubject(const String& subject
         bus = concatenatedImpulseResponses.leakPtr();
         audioBusMap.set(subjectName, bus);
     } else
-        bus = iterator->second;
+        bus = iterator->value;
 
     size_t responseLength = bus->length();
     size_t expectedLength = static_cast<size_t>(TotalNumberOfResponses * ResponseFrameSize);
@@ -196,8 +198,8 @@ bool HRTFElevation::calculateKernelsForAzimuthElevation(int azimuth, int elevati
 
     // Note that depending on the fftSize returned by the panner, we may be truncating the impulse response we just loaded in.
     const size_t fftSize = HRTFPanner::fftSizeForSampleRate(sampleRate);
-    kernelL = HRTFKernel::create(leftEarImpulseResponse, fftSize, sampleRate, true);
-    kernelR = HRTFKernel::create(rightEarImpulseResponse, fftSize, sampleRate, true);
+    kernelL = HRTFKernel::create(leftEarImpulseResponse, fftSize, sampleRate);
+    kernelR = HRTFKernel::create(rightEarImpulseResponse, fftSize, sampleRate);
     
     return true;
 }
@@ -335,6 +337,13 @@ void HRTFElevation::getKernelsFromAzimuth(double azimuthBlend, unsigned azimuthI
     // Linearly interpolate delays.
     frameDelayL = (1.0 - azimuthBlend) * frameDelayL + azimuthBlend * frameDelay2L;
     frameDelayR = (1.0 - azimuthBlend) * frameDelayR + azimuthBlend * frameDelay2R;
+}
+
+void HRTFElevation::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, PlatformMemoryTypes::AudioSharedData);
+    info.addMember(m_kernelListL);
+    info.addMember(m_kernelListR);
 }
 
 } // namespace WebCore

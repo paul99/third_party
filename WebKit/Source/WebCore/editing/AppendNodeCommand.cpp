@@ -51,7 +51,7 @@ static void sendAXTextChangedIgnoringLineBreaks(Node* node, AXObjectCache::AXTex
     if (nodeValue == "\n")
       return;
 
-    node->document()->axObjectCache()->nodeTextChangeNotification(node->renderer(), textChange, 0, nodeValue);
+    node->document()->axObjectCache()->nodeTextChangeNotification(node, textChange, 0, nodeValue);
 }
 
 void AppendNodeCommand::doApply()
@@ -60,7 +60,7 @@ void AppendNodeCommand::doApply()
         return;
         
     ExceptionCode ec;
-    m_parent->appendChild(m_node.get(), ec);
+    m_parent->appendChild(m_node.get(), ec, true /* lazyAttach */);
 
     if (AXObjectCache::accessibilityEnabled())
         sendAXTextChangedIgnoringLineBreaks(m_node.get(), AXObjectCache::AXTextInserted);

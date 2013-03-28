@@ -26,12 +26,15 @@
 #include "NodeRenderingContext.h"
 #include "RenderCombineText.h"
 #include "RenderText.h"
+#include "ShadowRoot.h"
 
 #if ENABLE(SVG)
 #include "RenderSVGInlineText.h"
 #include "SVGNames.h"
 #endif
 
+#include "StyleInheritedData.h"
+#include "StyleResolver.h"
 #include <wtf/text/CString.h>
 #include <wtf/text/StringBuilder.h>
 
@@ -41,7 +44,12 @@ namespace WebCore {
 
 PassRefPtr<Text> Text::create(Document* document, const String& data)
 {
-    return adoptRef(new Text(document, data));
+    return adoptRef(new Text(document, data, CreateText));
+}
+
+PassRefPtr<Text> Text::createEditingText(Document* document, const String& data)
+{
+    return adoptRef(new Text(document, data, CreateEditingText));
 }
 
 PassRefPtr<Text> Text::splitText(unsigned offset, ExceptionCode& ec)
@@ -189,17 +197,23 @@ PassRefPtr<Node> Text::cloneNode(bool /*deep*/)
     return create(document(), data());
 }
 
-bool Text::rendererIsNeeded(const NodeRenderingContext& context)
+bool Text::textRendererIsNeeded(const NodeRenderingContext& context)
 {
-    if (!CharacterData::rendererIsNeeded(context))
+    if (isEditingText())
+        return true;
+
+    if (!length())
+        return false;
+
+    if (context.style()->display() == NONE)
         return false;
 
     bool onlyWS = containsOnlyWhitespace();
     if (!onlyWS)
         return true;
 
-    RenderObject* par = context.parentRenderer();
-    if (par->isTable() || par->isTableRow() || par->isTableSection() || par->isTableCol() || par->isFrameSet())
+    RenderObject* parent = context.parentRenderer();
+    if (parent->isTable() || parent->isTableRow() || parent->isTableSection() || parent->isRenderTableCol() || parent->isFrameSet())
         return false;
     
     if (context.style()->preserveNewline()) // pre/pre-wrap/pre-line always make renderers.
@@ -209,16 +223,16 @@ bool Text::rendererIsNeeded(const NodeRenderingContext& context)
     if (prev && prev->isBR()) // <span><br/> <br/></span>
         return false;
         
-    if (par->isRenderInline()) {
+    if (parent->isRenderInline()) {
         // <span><div/> <div/></span>
         if (prev && !prev->isInline())
             return false;
     } else {
-        if (par->isRenderBlock() && !par->childrenInline() && (!prev || !prev->isInline()))
+        if (parent->isRenderBlock() && !parent->childrenInline() && (!prev || !prev->isInline()))
             return false;
         
-        RenderObject* first = par->firstChild();
-        while (first && first->isFloatingOrPositioned())
+        RenderObject* first = parent->firstChild();
+        while (first && first->isFloatingOrOutOfFlowPositioned())
             first = first->nextSibling();
         RenderObject* next = context.nextRenderer();
         if (!first || next == first)
@@ -230,14 +244,31 @@ bool Text::rendererIsNeeded(const NodeRenderingContext& context)
     return true;
 }
 
-RenderObject* Text::createRenderer(RenderArena* arena, RenderStyle* style)
-{
 #if ENABLE(SVG)
-    Node* parentOrHost = parentOrHostNode();
-    if (parentOrHost->isSVGElement() && !parentOrHost->hasTagName(SVGNames::foreignObjectTag))
-        return new (arena) RenderSVGInlineText(this, dataImpl());
+static bool isSVGShadowText(Text* text)
+{
+    Node* parentNode = text->parentNode();
+    return parentNode->isShadowRoot() && toShadowRoot(parentNode)->host()->hasTagName(SVGNames::trefTag);
+}
+
+static bool isSVGText(Text* text)
+{
+    Node* parentOrHostNode = text->parentOrHostNode();
+    return parentOrHostNode->isSVGElement() && !parentOrHostNode->hasTagName(SVGNames::foreignObjectTag);
+}
 #endif
 
+void Text::createTextRendererIfNeeded()
+{
+    NodeRenderingContext(this).createRendererForTextIfNeeded();
+}
+
+RenderText* Text::createTextRenderer(RenderArena* arena, RenderStyle* style)
+{
+#if ENABLE(SVG)
+    if (isSVGText(this) || isSVGShadowText(this))
+        return new (arena) RenderSVGInlineText(this, dataImpl());
+#endif
     if (style->hasTextCombine())
         return new (arena) RenderCombineText(this, dataImpl());
 
@@ -246,27 +277,36 @@ RenderObject* Text::createRenderer(RenderArena* arena, RenderStyle* style)
 
 void Text::attach()
 {
-    createRendererIfNeeded();
+    createTextRendererIfNeeded();
     CharacterData::attach();
 }
 
 void Text::recalcTextStyle(StyleChange change)
 {
-    if (hasCustomWillOrDidRecalcStyle())
-        willRecalcTextStyle(change);
+    RenderText* renderer = toRenderText(this->renderer());
 
-    if (change != NoChange && parentNode() && parentNode()->renderer()) {
-        if (renderer())
-            renderer()->setStyle(parentNode()->renderer()->style());
-    }
+    if (change != NoChange && renderer)
+        renderer->setStyle(document()->styleResolver()->styleForText(this));
+
     if (needsStyleRecalc()) {
-        if (renderer()) {
-            if (renderer()->isText())
-                toRenderText(renderer())->setText(dataImpl());
-        } else
+        if (renderer)
+            renderer->setText(dataImpl());
+        else
             reattach();
     }
     clearNeedsStyleRecalc();
+}
+
+void Text::updateTextRenderer(unsigned offsetOfReplacedData, unsigned lengthOfReplacedData)
+{
+    if (!attached())
+        return;
+    RenderText* textRenderer = toRenderText(renderer());
+    if (!textRenderer || !textRendererIsNeeded(NodeRenderingContext(this, textRenderer->style()))) {
+        reattach();
+        return;
+    }
+    textRenderer->setTextWithOffset(dataImpl(), offsetOfReplacedData, lengthOfReplacedData);
 }
 
 bool Text::childTypeAllowed(NodeType) const
@@ -287,7 +327,7 @@ PassRefPtr<Text> Text::createWithLengthLimit(Document* document, const String& d
         return create(document, data);
 
     RefPtr<Text> result = Text::create(document, String());
-    result->parserAppendData(data.characters() + start, dataLength - start, maxChars);
+    result->parserAppendData(data, start, maxChars);
 
     return result;
 }
@@ -295,23 +335,20 @@ PassRefPtr<Text> Text::createWithLengthLimit(Document* document, const String& d
 #ifndef NDEBUG
 void Text::formatForDebugger(char *buffer, unsigned length) const
 {
-    String result;
+    StringBuilder result;
     String s;
-    
-    s = nodeName();
-    if (s.length() > 0) {
-        result += s;
-    }
-          
+
+    result.append(nodeName());
+
     s = data();
     if (s.length() > 0) {
-        if (result.length() > 0)
-            result += "; ";
-        result += "value=";
-        result += s;
+        if (result.length())
+            result.appendLiteral("; ");
+        result.appendLiteral("value=");
+        result.append(s);
     }
-          
-    strncpy(buffer, result.utf8().data(), length - 1);
+
+    strncpy(buffer, result.toString().utf8().data(), length - 1);
 }
 #endif
 

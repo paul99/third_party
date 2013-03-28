@@ -2,26 +2,26 @@
  * libjingle
  * Copyright 2004--2005, Google Inc.
  *
- * Redistribution and use in source and binary forms, with or without 
+ * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- *  1. Redistributions of source code must retain the above copyright notice, 
+ *  1. Redistributions of source code must retain the above copyright notice,
  *     this list of conditions and the following disclaimer.
  *  2. Redistributions in binary form must reproduce the above copyright notice,
  *     this list of conditions and the following disclaimer in the documentation
  *     and/or other materials provided with the distribution.
- *  3. The name of the author may not be used to endorse or promote products 
+ *  3. The name of the author may not be used to endorse or promote products
  *     derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF 
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
- * EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
+ * EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
  * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR 
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF 
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
@@ -31,8 +31,10 @@
 #include <string>
 #include <vector>
 
+#include "talk/base/helpers.h"
+#include "talk/base/proxyinfo.h"
 #include "talk/base/sigslot.h"
-#include "talk/p2p/base/port.h"
+#include "talk/p2p/base/portinterface.h"
 
 namespace cricket {
 
@@ -48,6 +50,10 @@ const uint32 PORTALLOCATOR_DISABLE_RELAY = 0x04;
 const uint32 PORTALLOCATOR_DISABLE_TCP = 0x08;
 const uint32 PORTALLOCATOR_ENABLE_SHAKER = 0x10;
 const uint32 PORTALLOCATOR_ENABLE_BUNDLE = 0x20;
+const uint32 PORTALLOCATOR_ENABLE_IPV6 = 0x40;
+const uint32 PORTALLOCATOR_ENABLE_SHARED_UFRAG = 0x80;
+const uint32 PORTALLOCATOR_ENABLE_SHARED_SOCKET = 0x100;
+const uint32 PORTALLOCATOR_ENABLE_STUN_RETRANSMIT_ATTRIBUTE = 0x200;
 
 const uint32 kDefaultPortAllocatorFlags = 0;
 
@@ -55,23 +61,21 @@ class PortAllocatorSessionMuxer;
 
 class PortAllocatorSession : public sigslot::has_slots<> {
  public:
-  // TODO Remove session_type argument (and other places), as
-  // its not used.
-  explicit PortAllocatorSession(const std::string& name,
-                                const std::string& session_type,
-                                uint32 flags) :
-      name_(name),
-      session_type_(session_type),
-      flags_(flags) {
-  }
+  // Content name passed in mostly for logging and debugging.
+  // TODO(mallinath) - Change username and password to ice_ufrag and ice_pwd.
+  PortAllocatorSession(const std::string& content_name,
+                       int component,
+                       const std::string& username,
+                       const std::string& password,
+                       uint32 flags);
 
   // Subclasses should clean up any ports created.
   virtual ~PortAllocatorSession() {}
 
   uint32 flags() const { return flags_; }
   void set_flags(uint32 flags) { flags_ = flags; }
-  const std::string& name() const { return name_; }
-  const std::string& session_type() const { return session_type_; }
+  std::string content_name() const { return content_name_; }
+  int component() const { return component_; }
 
   // Prepares an initial set of ports to try.
   virtual void GetInitialPorts() = 0;
@@ -81,21 +85,27 @@ class PortAllocatorSession : public sigslot::has_slots<> {
   virtual void StopGetAllPorts() = 0;
   virtual bool IsGettingAllPorts() = 0;
 
-  sigslot::signal2<PortAllocatorSession*, Port*> SignalPortReady;
+  sigslot::signal2<PortAllocatorSession*, PortInterface*> SignalPortReady;
   sigslot::signal2<PortAllocatorSession*,
                    const std::vector<Candidate>&> SignalCandidatesReady;
+  sigslot::signal1<PortAllocatorSession*> SignalCandidatesAllocationDone;
 
-  uint32 generation() { return generation_; }
-  void set_generation(uint32 generation) { generation_ = generation; }
+  virtual uint32 generation() { return generation_; }
+  virtual void set_generation(uint32 generation) { generation_ = generation; }
   sigslot::signal1<PortAllocatorSession*> SignalDestroyed;
 
  protected:
-  std::string name_;
-  std::string session_type_;
+  const std::string& username() const { return username_; }
+  const std::string& password() const { return password_; }
+
+  std::string content_name_;
+  int component_;
 
  private:
   uint32 flags_;
   uint32 generation_;
+  std::string username_;
+  std::string password_;
 };
 
 class PortAllocator : public sigslot::has_slots<> {
@@ -109,8 +119,10 @@ class PortAllocator : public sigslot::has_slots<> {
 
   PortAllocatorSession* CreateSession(
       const std::string& sid,
-      const std::string& name,
-      const std::string& session_type);
+      const std::string& content_name,
+      int component,
+      const std::string& ice_ufrag,
+      const std::string& ice_pwd);
 
   PortAllocatorSessionMuxer* GetSessionMuxer(const std::string& sid) const;
   void OnSessionMuxerDestroyed(PortAllocatorSessionMuxer* session);
@@ -139,8 +151,11 @@ class PortAllocator : public sigslot::has_slots<> {
   }
 
  protected:
-  virtual PortAllocatorSession* CreateSession(const std::string &name,
-      const std::string &session_type) = 0;
+  virtual PortAllocatorSession* CreateSessionInternal(
+      const std::string& content_name,
+      int component,
+      const std::string& ice_ufrag,
+      const std::string& ice_pwd) = 0;
 
   typedef std::map<std::string, PortAllocatorSessionMuxer*> SessionMuxerMap;
 
@@ -149,7 +164,6 @@ class PortAllocator : public sigslot::has_slots<> {
   talk_base::ProxyInfo proxy_;
   int min_port_;
   int max_port_;
-
   SessionMuxerMap muxers_;
 };
 

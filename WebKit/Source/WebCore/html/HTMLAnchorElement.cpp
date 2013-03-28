@@ -25,6 +25,8 @@
 #include "HTMLAnchorElement.h"
 
 #include "Attribute.h"
+#include "DNS.h"
+#include "ElementShadow.h"
 #include "EventNames.h"
 #include "Frame.h"
 #include "FrameLoaderClient.h"
@@ -34,13 +36,12 @@
 #include "HTMLParserIdioms.h"
 #include "KeyboardEvent.h"
 #include "MouseEvent.h"
-#include "Page.h"
 #include "PingLoader.h"
 #include "RenderImage.h"
-#include "ResourceHandle.h"
 #include "SecurityOrigin.h"
 #include "SecurityPolicy.h"
 #include "Settings.h"
+#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
@@ -114,10 +115,13 @@ bool HTMLAnchorElement::isKeyboardFocusable(KeyboardEvent* event) const
     if (!document()->frame()->eventHandler()->tabsToLinks(event))
         return false;
 
+    if (isInCanvasSubtree())
+        return true;
+
     return hasNonEmptyBoundingBox();
 }
 
-static void appendServerMapMousePosition(String& url, Event* event)
+static void appendServerMapMousePosition(StringBuilder& url, Event* event)
 {
     if (!event->isMouseEvent())
         return;
@@ -132,18 +136,18 @@ static void appendServerMapMousePosition(String& url, Event* event)
     if (!imageElement || !imageElement->isServerMap())
         return;
 
-    RenderImage* renderer = toRenderImage(imageElement->renderer());
-    if (!renderer)
+    if (!imageElement->renderer() || !imageElement->renderer()->isRenderImage())
         return;
+    RenderImage* renderer = toRenderImage(imageElement->renderer());
 
     // FIXME: This should probably pass true for useTransforms.
     FloatPoint absolutePosition = renderer->absoluteToLocal(FloatPoint(static_cast<MouseEvent*>(event)->pageX(), static_cast<MouseEvent*>(event)->pageY()));
     int x = absolutePosition.x();
     int y = absolutePosition.y();
-    url += "?";
-    url += String::number(x);
-    url += ",";
-    url += String::number(y);
+    url.append('?');
+    url.appendNumber(x);
+    url.append(',');
+    url.appendNumber(y);
 }
 
 void HTMLAnchorElement::defaultEventHandler(Event* event)
@@ -210,42 +214,39 @@ void HTMLAnchorElement::setActive(bool down, bool pause)
     ContainerNode::setActive(down, pause);
 }
 
-void HTMLAnchorElement::parseMappedAttribute(Attribute* attr)
+void HTMLAnchorElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
-    if (attr->name() == hrefAttr) {
+    if (name == hrefAttr) {
         bool wasLink = isLink();
-        setIsLink(!attr->isNull());
-        if (wasLink != isLink())
+        setIsLink(!value.isNull());
+        if (wasLink != isLink()) {
             setNeedsStyleRecalc();
+            invalidateParentDistributionIfNecessary(this, SelectRuleFeatureSet::RuleFeatureLink | SelectRuleFeatureSet::RuleFeatureVisited | SelectRuleFeatureSet::RuleFeatureEnabled);
+        }
         if (isLink()) {
-            String parsedURL = stripLeadingAndTrailingHTMLSpaces(attr->value());
+            String parsedURL = stripLeadingAndTrailingHTMLSpaces(value);
             if (document()->isDNSPrefetchEnabled()) {
                 if (protocolIs(parsedURL, "http") || protocolIs(parsedURL, "https") || parsedURL.startsWith("//"))
-                    ResourceHandle::prepareForURL(document()->completeURL(parsedURL));
-            }
-            if (document()->page() && !document()->page()->javaScriptURLsAreAllowed() && protocolIsJavaScript(parsedURL)) {
-                clearIsLink();
-                attr->setValue(nullAtom);
+                    prefetchDNS(document()->completeURL(parsedURL).host());
             }
         }
         invalidateCachedVisitedLinkHash();
-    } else if (attr->name() == nameAttr || attr->name() == titleAttr) {
+    } else if (name == nameAttr || name == titleAttr) {
         // Do nothing.
-    } else if (attr->name() == relAttr)
-        setRel(attr->value());
+    } else if (name == relAttr)
+        setRel(value);
     else
-        HTMLElement::parseMappedAttribute(attr);
+        HTMLElement::parseAttribute(name, value);
 }
 
 void HTMLAnchorElement::accessKeyAction(bool sendMouseEvents)
 {
-    // send the mouse button events if the caller specified sendMouseEvents
-    dispatchSimulatedClick(0, sendMouseEvents);
+    dispatchSimulatedClick(0, sendMouseEvents ? SendMouseUpDownEvents : SendNoEvents);
 }
 
-bool HTMLAnchorElement::isURLAttribute(Attribute *attr) const
+bool HTMLAnchorElement::isURLAttribute(const Attribute& attribute) const
 {
-    return attr->name() == hrefAttr || HTMLElement::isURLAttribute(attr);
+    return attribute.name() == hrefAttr || HTMLElement::isURLAttribute(attribute);
 }
 
 bool HTMLAnchorElement::canStartSelection() const
@@ -293,7 +294,7 @@ void HTMLAnchorElement::setRel(const String& value)
 
 const AtomicString& HTMLAnchorElement::name() const
 {
-    return getAttribute(nameAttr);
+    return getNameAttribute();
 }
 
 short HTMLAnchorElement::tabIndex() const
@@ -464,7 +465,7 @@ void HTMLAnchorElement::setSearch(const String& value)
     KURL url = href();
     String newSearch = (value[0] == '?') ? value.substring(1) : value;
     // Make sure that '#' in the query does not leak to the hash.
-    url.setQuery(newSearch.replace('#', "%23"));
+    url.setQuery(newSearch.replaceWithLiteral('#', "%23"));
 
     setHref(url.string());
 }
@@ -489,7 +490,7 @@ void HTMLAnchorElement::sendPings(const KURL& destinationURL)
     if (!hasAttribute(pingAttr) || !document()->settings()->hyperlinkAuditingEnabled())
         return;
 
-    SpaceSplitString pingURLs(getAttribute(pingAttr), true);
+    SpaceSplitString pingURLs(getAttribute(pingAttr), false);
     for (unsigned i = 0; i < pingURLs.size(); i++)
         PingLoader::sendPing(document()->frame(), document()->completeURL(pingURLs[i]), destinationURL);
 }
@@ -502,9 +503,10 @@ void HTMLAnchorElement::handleClick(Event* event)
     if (!frame)
         return;
 
-    String url = stripLeadingAndTrailingHTMLSpaces(fastGetAttribute(hrefAttr));
+    StringBuilder url;
+    url.append(stripLeadingAndTrailingHTMLSpaces(fastGetAttribute(hrefAttr)));
     appendServerMapMousePosition(url, event);
-    KURL kurl = document()->completeURL(url);
+    KURL kurl = document()->completeURL(url.toString());
 
 #if ENABLE(DOWNLOAD_ATTRIBUTE)
     if (hasAttribute(downloadAttr)) {
@@ -567,24 +569,14 @@ bool isEnterKeyKeydownEvent(Event* event)
     return event->type() == eventNames().keydownEvent && event->isKeyboardEvent() && static_cast<KeyboardEvent*>(event)->keyIdentifier() == "Enter";
 }
 
-bool isMiddleMouseButtonEvent(Event* event)
-{
-    return event->isMouseEvent() && static_cast<MouseEvent*>(event)->button() == MiddleButton;
-}
-
 bool isLinkClick(Event* event)
 {
     return event->type() == eventNames().clickEvent && (!event->isMouseEvent() || static_cast<MouseEvent*>(event)->button() != RightButton);
 }
 
-void handleLinkClick(Event* event, Document* document, const String& url, const String& target, bool hideReferrer)
+bool HTMLAnchorElement::willRespondToMouseClickEvents()
 {
-    event->setDefaultHandled();
-
-    Frame* frame = document->frame();
-    if (!frame)
-        return;
-    frame->loader()->urlSelected(document->completeURL(url), target, event, false, false, hideReferrer ? NeverSendReferrer : MaybeSendReferrer);
+    return isLink() || HTMLElement::willRespondToMouseClickEvents();
 }
 
 #if ENABLE(MICRODATA)

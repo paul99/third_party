@@ -24,7 +24,6 @@
 #define SVGAnimateElement_h
 
 #if ENABLE(SVG)
-
 #include "SVGAnimatedType.h"
 #include "SVGAnimatedTypeAnimator.h"
 #include "SVGAnimationElement.h"
@@ -32,54 +31,46 @@
 
 namespace WebCore {
     
-// If we have 'currentColor' or 'inherit' as animation value, we need to grab the value during the animation
-// since the value can be animated itself.
-enum AnimatedPropertyValueType {
-    RegularPropertyValue,
-    CurrentColorValue,
-    InheritValue
-};
+class SVGAnimatedProperty;
 
 class SVGAnimateElement : public SVGAnimationElement {
 public:
     static PassRefPtr<SVGAnimateElement> create(const QualifiedName&, Document*);
-
     virtual ~SVGAnimateElement();
 
-    static void adjustForCurrentColor(SVGElement* targetElement, Color&);
-    void adjustForInheritance(SVGElement* targetElement, const QualifiedName&, String& value);
-    
     AnimatedPropertyType determineAnimatedPropertyType(SVGElement*) const;
-    void determinePropertyValueTypes(const String&, const String&);
     
-    AnimatedPropertyValueType fromPropertyValueType() { return m_fromPropertyValueType; }
-    AnimatedPropertyValueType toPropertyValueType() { return m_toPropertyValueType; }
-
 protected:
     SVGAnimateElement(const QualifiedName&, Document*);
 
-    virtual void resetToBaseValue(const String&);
+    virtual void resetAnimatedType();
+    virtual void clearAnimatedType(SVGElement* targetElement);
+
+    virtual bool calculateToAtEndOfDurationValue(const String& toAtEndOfDurationString);
     virtual bool calculateFromAndToValues(const String& fromString, const String& toString);
     virtual bool calculateFromAndByValues(const String& fromString, const String& byString);
-    virtual void calculateAnimatedValue(float percentage, unsigned repeat, SVGSMILElement* resultElement);
+    virtual void calculateAnimatedValue(float percentage, unsigned repeatCount, SVGSMILElement* resultElement);
     virtual void applyResultsToTarget();
     virtual float calculateDistance(const String& fromString, const String& toString);
+    virtual bool isAdditive() const OVERRIDE;
 
-    virtual void targetElementDidChange(SVGElement* targetElement) OVERRIDE;
+    virtual void setTargetElement(SVGElement*) OVERRIDE;
+    virtual void setAttributeName(const QualifiedName&) OVERRIDE;
 
-private:
-    SVGAnimatedTypeAnimator* ensureAnimator();
-    
-    virtual bool hasValidAttributeType();
     AnimatedPropertyType m_animatedPropertyType;
 
-    AnimatedPropertyValueType m_fromPropertyValueType;
-    AnimatedPropertyValueType m_toPropertyValueType;
+private:
+    void resetAnimatedPropertyType();
+    SVGAnimatedTypeAnimator* ensureAnimator();
+
+    virtual bool hasValidAttributeType();
 
     OwnPtr<SVGAnimatedType> m_fromType;
     OwnPtr<SVGAnimatedType> m_toType;
+    OwnPtr<SVGAnimatedType> m_toAtEndOfDurationType;
     OwnPtr<SVGAnimatedType> m_animatedType;
-    
+
+    SVGElementAnimatedPropertyList m_animatedProperties;
     OwnPtr<SVGAnimatedTypeAnimator> m_animator;
 };
 

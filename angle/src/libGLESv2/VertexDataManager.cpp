@@ -13,6 +13,7 @@
 
 #include "libGLESv2/Buffer.h"
 #include "libGLESv2/Program.h"
+#include "libGLESv2/ProgramBinary.h"
 #include "libGLESv2/main.h"
 
 #include "libGLESv2/vertexconversion.h"
@@ -127,11 +128,11 @@ GLenum VertexDataManager::prepareVertexData(GLint start, GLsizei count, Translat
     }
 
     const VertexAttributeArray &attribs = mContext->getVertexAttributes();
-    Program *program = mContext->getCurrentProgram();
+    ProgramBinary *programBinary = mContext->getCurrentProgramBinary();
 
     for (int attributeIndex = 0; attributeIndex < MAX_VERTEX_ATTRIBS; attributeIndex++)
     {
-        translated[attributeIndex].active = (program->getSemanticIndex(attributeIndex) != -1);
+        translated[attributeIndex].active = (programBinary->getSemanticIndex(attributeIndex) != -1);
     }
 
     // Determine the required storage size per used buffer, and invalidate static buffers that don't contain matching attributes
@@ -389,11 +390,11 @@ struct VertexTypeFlags
 {
 };
 
-template <unsigned int capflag, unsigned int declflag>
+template <unsigned int _capflag, unsigned int _declflag>
 struct VertexTypeFlagsHelper
 {
-    enum { capflag = capflag };
-    enum { declflag = declflag };
+    enum { capflag = _capflag };
+    enum { declflag = _declflag };
 };
 
 template <> struct VertexTypeFlags<D3DVT_FLOAT, 1> : VertexTypeFlagsHelper<0, D3DDECLTYPE_FLOAT1> { };
@@ -448,8 +449,8 @@ struct ConversionRule : gl::Cast<typename GLToCType<fromType>::type, typename D3
 template <GLenum fromType> struct ConversionRule<fromType, true, D3DVT_FLOAT> : gl::Normalize<typename GLToCType<fromType>::type> { };
 
 // Use a full specialisation for this so that it preferentially matches ahead of the generic normalize-to-float rules.
-template <> struct ConversionRule<GL_FIXED, true, D3DVT_FLOAT> : gl::FixedToFloat<GLuint, 16> { };
-template <> struct ConversionRule<GL_FIXED, false, D3DVT_FLOAT> : gl::FixedToFloat<GLuint, 16> { };
+template <> struct ConversionRule<GL_FIXED, true, D3DVT_FLOAT> : gl::FixedToFloat<GLint, 16> { };
+template <> struct ConversionRule<GL_FIXED, false, D3DVT_FLOAT> : gl::FixedToFloat<GLint, 16> { };
 
 // A 2-stage construction is used for DefaultVertexValues because float must use SimpleDefaultValues (i.e. 0/1)
 // whether it is normalized or not.
@@ -517,14 +518,20 @@ public:
         { TRANSLATION_FOR_TYPE_NORM_SIZE(type, true, 1), TRANSLATION_FOR_TYPE_NORM_SIZE(type, true, 2), TRANSLATION_FOR_TYPE_NORM_SIZE(type, true, 3), TRANSLATION_FOR_TYPE_NORM_SIZE(type, true, 4) },     \
     }
 
+#define TRANSLATIONS_FOR_TYPE_NO_NORM(type)                                                                                                                                                                 \
+    {                                                                                                                                                                                                       \
+        { TRANSLATION_FOR_TYPE_NORM_SIZE(type, false, 1), TRANSLATION_FOR_TYPE_NORM_SIZE(type, false, 2), TRANSLATION_FOR_TYPE_NORM_SIZE(type, false, 3), TRANSLATION_FOR_TYPE_NORM_SIZE(type, false, 4) }, \
+        { TRANSLATION_FOR_TYPE_NORM_SIZE(type, false, 1), TRANSLATION_FOR_TYPE_NORM_SIZE(type, false, 2), TRANSLATION_FOR_TYPE_NORM_SIZE(type, false, 3), TRANSLATION_FOR_TYPE_NORM_SIZE(type, false, 4) }, \
+    }
+
 const VertexDataManager::TranslationDescription VertexDataManager::mPossibleTranslations[NUM_GL_VERTEX_ATTRIB_TYPES][2][4] = // [GL types as enumerated by typeIndex()][normalized][size-1]
 {
     TRANSLATIONS_FOR_TYPE(GL_BYTE),
     TRANSLATIONS_FOR_TYPE(GL_UNSIGNED_BYTE),
     TRANSLATIONS_FOR_TYPE(GL_SHORT),
     TRANSLATIONS_FOR_TYPE(GL_UNSIGNED_SHORT),
-    TRANSLATIONS_FOR_TYPE(GL_FIXED),
-    TRANSLATIONS_FOR_TYPE(GL_FLOAT)
+    TRANSLATIONS_FOR_TYPE_NO_NORM(GL_FIXED),
+    TRANSLATIONS_FOR_TYPE_NO_NORM(GL_FLOAT)
 };
 
 void VertexDataManager::checkVertexCaps(DWORD declTypes)

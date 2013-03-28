@@ -31,18 +31,23 @@
 #ifndef ScriptProfiler_h
 #define ScriptProfiler_h
 
-#include "InspectorValues.h"
-#include "PlatformString.h"
 #include "ScriptHeapSnapshot.h"
 #include "ScriptProfile.h"
 #include "ScriptState.h"
 
+#include <wtf/Forward.h>
 #include <wtf/PassRefPtr.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-class DOMWrapperVisitor;
-class InjectedScriptManager;
+class ExternalArrayVisitor;
+class ExternalStringVisitor;
+class WrappedNodeVisitor;
+class Page;
+class ScriptObject;
+class ScriptValue;
+class WorkerContext;
 
 class ScriptProfiler {
     WTF_MAKE_NONCOPYABLE(ScriptProfiler);
@@ -57,16 +62,28 @@ public:
     };
 
     static void collectGarbage();
-    static PassRefPtr<InspectorValue> objectByHeapObjectId(unsigned id, InjectedScriptManager*);
+    static ScriptObject objectByHeapObjectId(unsigned id);
+    static unsigned getHeapObjectId(const ScriptValue&);
     static void start(ScriptState* state, const String& title);
+    static void startForPage(Page*, const String& title);
+#if ENABLE(WORKERS)
+    static void startForWorkerContext(WorkerContext*, const String& title);
+#endif
     static PassRefPtr<ScriptProfile> stop(ScriptState* state, const String& title);
+    static PassRefPtr<ScriptProfile> stopForPage(Page*, const String& title);
+#if ENABLE(WORKERS)
+    static PassRefPtr<ScriptProfile> stopForWorkerContext(WorkerContext*, const String& title);
+#endif
     static PassRefPtr<ScriptHeapSnapshot> takeHeapSnapshot(const String& title, HeapSnapshotProgress*);
     static bool causesRecompilation() { return false; }
     static bool isSampling() { return true; }
     static bool hasHeapProfiler() { return true; }
     static void initialize();
-    static void visitJSDOMWrappers(DOMWrapperVisitor*);
-    static void visitExternalJSStrings(DOMWrapperVisitor*);
+    static void visitNodeWrappers(WrappedNodeVisitor*);
+    static void visitExternalStrings(ExternalStringVisitor*);
+    static void visitExternalArrays(ExternalArrayVisitor*);
+    static void collectBindingMemoryInfo(MemoryInstrumentation*);
+    static size_t profilerSnapshotsSize();
 };
 
 } // namespace WebCore

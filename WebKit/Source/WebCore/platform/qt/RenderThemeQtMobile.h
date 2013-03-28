@@ -45,7 +45,7 @@ private:
 public:
     static PassRefPtr<RenderTheme> create(Page*);
 
-    virtual void adjustSliderThumbSize(RenderStyle*) const;
+    virtual void adjustSliderThumbSize(RenderStyle*, Element*) const;
 
     virtual bool isControlStyled(const RenderStyle*, const BorderData&, const FillLayer&, const Color& backgroundColor) const;
 
@@ -53,20 +53,25 @@ public:
 
     virtual bool delegatesMenuListRendering() const { return true; }
 
+    // We don't want the focus ring to be drawn by the graphics context so we
+    // always claim to support it in the theme.
+    // FIXME: This could be a usability problem in the case of contenteditable divs.
+    virtual bool supportsFocusRing(const RenderStyle*) const { return true; }
+
 protected:
 
-    virtual void adjustButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual void adjustButtonStyle(StyleResolver*, RenderStyle*, Element*) const;
     virtual bool paintButton(RenderObject*, const PaintInfo&, const IntRect&);
 
     virtual bool paintTextField(RenderObject*, const PaintInfo&, const IntRect&);
-    virtual void adjustTextFieldStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual void adjustTextFieldStyle(StyleResolver*, RenderStyle*, Element*) const;
 
     virtual bool paintMenuList(RenderObject*, const PaintInfo&, const IntRect&);
-    virtual void adjustMenuListStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual void adjustMenuListStyle(StyleResolver*, RenderStyle*, Element*) const;
 
     virtual bool paintMenuListButton(RenderObject*, const PaintInfo&, const IntRect&);
 
-#if ENABLE(PROGRESS_TAG)
+#if ENABLE(PROGRESS_ELEMENT)
     // Returns the duration of the animation for the progress bar.
     virtual double animationDurationForProgressBar(RenderProgress*) const;
     virtual bool paintProgressBar(RenderObject*, const PaintInfo&, const IntRect&);
@@ -78,12 +83,12 @@ protected:
     virtual void computeSizeBasedOnStyle(RenderStyle*) const;
     virtual QSharedPointer<StylePainter> getStylePainter(const PaintInfo&);
 
+    virtual QPalette colorPalette() const;
+
 private:
     bool checkMultiple(RenderObject*) const;
     void setButtonPadding(RenderStyle*) const;
     void setPopupPadding(RenderStyle*) const;
-
-    void setPaletteFromPageClientIfExists(QPalette&) const;
 };
 
 struct KeyIdentifier {
@@ -135,7 +140,7 @@ public:
     void drawRadioButton(const QRect&, bool checked, bool enabled = true);
     void drawPushButton(const QRect&, bool sunken, bool enabled = true);
     void drawComboBox(const QRect&, bool multiple, bool enabled = true);
-    void drawProgress(const QRect&, double progress, bool leftToRight = true, bool animated = false) const;
+    void drawProgress(const QRect&, double progress, bool leftToRight = true, bool animated = false, bool vertical = false) const;
     void drawSliderThumb(const QRect&, bool pressed) const;
 
 private:

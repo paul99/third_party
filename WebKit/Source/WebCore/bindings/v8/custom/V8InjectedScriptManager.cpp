@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007-2011 Google Inc. All rights reserved.
+ * Copyright (C) 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -29,18 +29,18 @@
  */
 
 #include "config.h"
+#if ENABLE(INSPECTOR)
 #include "InjectedScriptManager.h"
 
+#include "BindingState.h"
 #include "DOMWindow.h"
-#include "InjectedScript.h"
 #include "InjectedScriptHost.h"
-#include "ScriptValue.h"
+#include "ScriptDebugServer.h"
+#include "ScriptObject.h"
 #include "V8Binding.h"
-#include "V8BindingState.h"
 #include "V8DOMWindow.h"
-#include "V8HiddenPropertyName.h"
 #include "V8InjectedScriptHost.h"
-#include "V8Proxy.h"
+#include "V8RecursionScope.h"
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
@@ -50,6 +50,7 @@ static void WeakReferenceCallback(v8::Persistent<v8::Value> object, void* parame
     InjectedScriptHost* nativeObject = static_cast<InjectedScriptHost*>(parameter);
     nativeObject->deref();
     object.Dispose();
+    object.Clear();
 }
 
 static v8::Local<v8::Object> createInjectedScriptHostV8Wrapper(InjectedScriptHost* host)
@@ -59,12 +60,12 @@ static v8::Local<v8::Object> createInjectedScriptHostV8Wrapper(InjectedScriptHos
         // Return if allocation failed.
         return v8::Local<v8::Object>();
     }
-    v8::Local<v8::Object> instance = SafeAllocation::newInstance(function);
+    v8::Local<v8::Object> instance = V8ObjectConstructor::newInstance(function);
     if (instance.IsEmpty()) {
         // Avoid setting the wrapper if allocation failed.
         return v8::Local<v8::Object>();
     }
-    V8DOMWrapper::setDOMWrapper(instance, &V8InjectedScriptHost::info, host);
+    V8DOMWrapper::setNativeInfo(instance, &V8InjectedScriptHost::info, host);
     // Create a weak reference to the v8 wrapper of InspectorBackend to deref
     // InspectorBackend when the wrapper is garbage collected.
     host->ref();
@@ -73,7 +74,7 @@ static v8::Local<v8::Object> createInjectedScriptHostV8Wrapper(InjectedScriptHos
     return instance;
 }
 
-ScriptObject InjectedScriptManager::createInjectedScript(const String& scriptSource, ScriptState* inspectedScriptState, long id)
+ScriptObject InjectedScriptManager::createInjectedScript(const String& scriptSource, ScriptState* inspectedScriptState, int id)
 {
     v8::HandleScope scope;
 
@@ -95,7 +96,8 @@ ScriptObject InjectedScriptManager::createInjectedScript(const String& scriptSou
     // inspector's stuff) the function is called a few lines below with InjectedScriptHost wrapper,
     // injected script id and explicit reference to the inspected global object. The function is expected
     // to create and configure InjectedScript instance that is going to be used by the inspector.
-    v8::Local<v8::Script> script = v8::Script::Compile(v8String(scriptSource));
+    v8::Local<v8::Script> script = v8::Script::Compile(deprecatedV8String(scriptSource));
+    V8RecursionScope::MicrotaskSuppression recursionScope;
     v8::Local<v8::Value> v = script->Run();
     ASSERT(!v.IsEmpty());
     ASSERT(v->IsFunction());
@@ -106,49 +108,7 @@ ScriptObject InjectedScriptManager::createInjectedScript(const String& scriptSou
       v8::Number::New(id),
     };
     v8::Local<v8::Value> injectedScriptValue = v8::Function::Cast(*v)->Call(windowGlobal, 3, args);
-    v8::Local<v8::Object> injectedScript(v8::Object::Cast(*injectedScriptValue));
-    return ScriptObject(inspectedScriptState, injectedScript);
-}
-
-void InjectedScriptManager::discardInjectedScript(ScriptState* inspectedScriptState)
-{
-    v8::HandleScope handleScope;
-    v8::Local<v8::Context> context = inspectedScriptState->context();
-    v8::Context::Scope contextScope(context);
-
-    v8::Local<v8::Object> global = context->Global();
-    // Skip proxy object. The proxy object will survive page navigation while we need
-    // an object whose lifetime consides with that of the inspected context.
-    global = v8::Local<v8::Object>::Cast(global->GetPrototype());
-
-    v8::Handle<v8::String> key = V8HiddenPropertyName::devtoolsInjectedScript();
-    global->DeleteHiddenValue(key);
-}
-
-InjectedScript InjectedScriptManager::injectedScriptFor(ScriptState* inspectedScriptState)
-{
-    v8::HandleScope handleScope;
-    v8::Local<v8::Context> context = inspectedScriptState->context();
-    v8::Context::Scope contextScope(context);
-
-    v8::Local<v8::Object> global = context->Global();
-    // Skip proxy object. The proxy object will survive page navigation while we need
-    // an object whose lifetime consides with that of the inspected context.
-    global = v8::Local<v8::Object>::Cast(global->GetPrototype());
-
-    v8::Handle<v8::String> key = V8HiddenPropertyName::devtoolsInjectedScript();
-    v8::Local<v8::Value> val = global->GetHiddenValue(key);
-    if (!val.IsEmpty() && val->IsObject())
-        return InjectedScript(ScriptObject(inspectedScriptState, v8::Local<v8::Object>::Cast(val)), m_inspectedStateAccessCheck);
-
-    if (!m_inspectedStateAccessCheck(inspectedScriptState))
-        return InjectedScript();
-
-    pair<long, ScriptObject> injectedScript = injectScript(injectedScriptSource(), inspectedScriptState);
-    InjectedScript result(injectedScript.second, m_inspectedStateAccessCheck);
-    m_idToInjectedScript.set(injectedScript.first, result);
-    global->SetHiddenValue(key, injectedScript.second.v8Object());
-    return result;
+    return ScriptObject(inspectedScriptState, v8::Handle<v8::Object>::Cast(injectedScriptValue));
 }
 
 bool InjectedScriptManager::canAccessInspectedWindow(ScriptState* scriptState)
@@ -158,13 +118,15 @@ bool InjectedScriptManager::canAccessInspectedWindow(ScriptState* scriptState)
     v8::Local<v8::Object> global = context->Global();
     if (global.IsEmpty())
         return false;
-    v8::Handle<v8::Object> holder = V8DOMWrapper::lookupDOMWrapper(V8DOMWindow::GetTemplate(), global);
+    v8::Handle<v8::Object> holder = global->FindInstanceInPrototypeChain(V8DOMWindow::GetTemplate());
     if (holder.IsEmpty())
         return false;
     Frame* frame = V8DOMWindow::toNative(holder)->frame();
 
     v8::Context::Scope contextScope(context);
-    return V8BindingSecurity::canAccessFrame(V8BindingState::Only(), frame, false);
+    return BindingSecurity::shouldAllowAccessToFrame(BindingState::instance(), frame, DoNotReportSecurityError);
 }
 
 } // namespace WebCore
+
+#endif // ENABLE(INSPECTOR)

@@ -145,7 +145,7 @@ Position VisiblePosition::leftVisuallyDistinctCandidate() const
 
             if (box->isLeftToRightDirection() ? offset < caretMinOffset : offset > caretMaxOffset) {
                 // Overshot to the left.
-                InlineBox* prevBox = box->prevLeafChild();
+                InlineBox* prevBox = box->prevLeafChildIgnoringLineBreak();
                 if (!prevBox) {
                     Position positionOnLeft = primaryDirection == LTR ? previousVisuallyDistinctCandidate(m_deepPosition) : nextVisuallyDistinctCandidate(m_deepPosition);
                     if (positionOnLeft.isNull())
@@ -310,7 +310,7 @@ Position VisiblePosition::rightVisuallyDistinctCandidate() const
 
             if (box->isLeftToRightDirection() ? offset > caretMaxOffset : offset < caretMinOffset) {
                 // Overshot to the right.
-                InlineBox* nextBox = box->nextLeafChild();
+                InlineBox* nextBox = box->nextLeafChildIgnoringLineBreak();
                 if (!nextBox) {
                     Position positionOnRight = primaryDirection == LTR ? nextVisuallyDistinctCandidate(m_deepPosition) : previousVisuallyDistinctCandidate(m_deepPosition);
                     if (positionOnRight.isNull())
@@ -595,7 +595,7 @@ UChar32 VisiblePosition::characterAfter() const
     return ch;
 }
 
-IntRect VisiblePosition::localCaretRect(RenderObject*& renderer) const
+LayoutRect VisiblePosition::localCaretRect(RenderObject*& renderer) const
 {
     if (m_deepPosition.isNull()) {
         renderer = 0;
@@ -605,7 +605,7 @@ IntRect VisiblePosition::localCaretRect(RenderObject*& renderer) const
     
     renderer = node->renderer();
     if (!renderer)
-        return IntRect();
+        return LayoutRect();
 
     InlineBox* inlineBox;
     int caretOffset;
@@ -620,7 +620,7 @@ IntRect VisiblePosition::localCaretRect(RenderObject*& renderer) const
 IntRect VisiblePosition::absoluteCaretBounds() const
 {
     RenderObject* renderer;
-    IntRect localRect = localCaretRect(renderer);
+    LayoutRect localRect = localCaretRect(renderer);
     if (localRect.isEmpty() || !renderer)
         return IntRect();
 
@@ -630,7 +630,7 @@ IntRect VisiblePosition::absoluteCaretBounds() const
 int VisiblePosition::lineDirectionPointForBlockDirectionNavigation() const
 {
     RenderObject* renderer;
-    IntRect localRect = localCaretRect(renderer);
+    LayoutRect localRect = localCaretRect(renderer);
     if (localRect.isEmpty() || !renderer)
         return 0;
 

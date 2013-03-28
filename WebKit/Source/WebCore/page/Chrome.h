@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
  * Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (C) 2012, Samsung Electronics. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -36,10 +37,12 @@ class NSView;
 namespace WebCore {
 
     class ChromeClient;
-#if ENABLE(INPUT_COLOR)
+#if ENABLE(INPUT_TYPE_COLOR)
     class ColorChooser;
     class ColorChooserClient;
 #endif
+    class DateTimeChooser;
+    class DateTimeChooserClient;
     class FileChooser;
     class FileIconLoader;
     class FloatRect;
@@ -52,8 +55,10 @@ namespace WebCore {
     class Page;
     class PopupMenu;
     class PopupMenuClient;
+    class PopupOpeningObserver;
     class SearchPopupMenu;
 
+    struct DateTimeChooserParameters;
     struct FrameLoadRequest;
     struct ViewportArguments;
     struct WindowFeatures;
@@ -137,10 +142,6 @@ namespace WebCore {
         void setStatusbarText(Frame*, const String&);
         bool shouldInterruptJavaScript();
 
-#if ENABLE(REGISTER_PROTOCOL_HANDLER)
-        void registerProtocolHandler(const String& scheme, const String& baseURL, const String& url, const String& title);
-#endif
-
         IntRect windowResizerRect() const;
 
         void mouseDidMoveOverElement(const HitTestResult&, unsigned modifierFlags);
@@ -149,13 +150,11 @@ namespace WebCore {
 
         void print(Frame*);
 
-        // FIXME: Remove once all ports are using client-based geolocation. https://bugs.webkit.org/show_bug.cgi?id=40373
-        // For client-based geolocation, these two methods have moved to GeolocationClient. https://bugs.webkit.org/show_bug.cgi?id=50061
-        void requestGeolocationPermissionForFrame(Frame*, Geolocation*);
-        void cancelGeolocationPermissionRequestForFrame(Frame*, Geolocation*);
-
-#if ENABLE(INPUT_COLOR)
+#if ENABLE(INPUT_TYPE_COLOR)
         PassOwnPtr<ColorChooser> createColorChooser(ColorChooserClient*, const Color& initialColor);
+#endif
+#if ENABLE(DATE_AND_TIME_INPUT_TYPES)
+        PassRefPtr<DateTimeChooser> openDateTimeChooser(DateTimeChooserClient*, const DateTimeChooserParameters&);
 #endif
 
         void runOpenPanel(Frame*, PassRefPtr<FileChooser>);
@@ -178,15 +177,16 @@ namespace WebCore {
         PassRefPtr<PopupMenu> createPopupMenu(PopupMenuClient*) const;
         PassRefPtr<SearchPopupMenu> createSearchPopupMenu(PopupMenuClient*) const;
 
-#if ENABLE(CONTEXT_MENUS)
-        void showContextMenu();
-#endif
+        void registerPopupOpeningObserver(PopupOpeningObserver*);
+        void unregisterPopupOpeningObserver(PopupOpeningObserver*);
 
     private:
         Chrome(Page*, ChromeClient*);
+        void notifyPopupOpeningObservers() const;
 
         Page* m_page;
         ChromeClient* m_client;
+        Vector<PopupOpeningObserver*> m_popupOpeningObservers;
     };
 }
 

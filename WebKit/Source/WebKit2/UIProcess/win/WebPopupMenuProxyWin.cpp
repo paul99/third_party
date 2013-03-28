@@ -401,7 +401,7 @@ void WebPopupMenuProxyWin::calculatePositionAndSize(const IntRect& rect)
     MONITORINFOEX monitorInfo;
     monitorInfo.cbSize = sizeof(MONITORINFOEX);
     ::GetMonitorInfo(monitor, &monitorInfo);
-    FloatRect screen = monitorInfo.rcWork;
+    FloatRect screen = static_cast<IntRect>(monitorInfo.rcWork);
 
     // Check that we don't go off the screen vertically
     if (popupRect.maxY() > screen.height()) {
@@ -467,6 +467,27 @@ int WebPopupMenuProxyWin::scrollPosition(Scrollbar*) const
 void WebPopupMenuProxyWin::setScrollOffset(const IntPoint& offset)
 {
     scrollTo(offset.y());
+}
+
+int WebPopupMenuProxyWin::visibleHeight() const
+{
+    return m_scrollbar ? m_scrollbar->visibleSize() : contentsSize().height();
+}
+
+int WebPopupMenuProxyWin::visibleWidth() const
+{
+    int scrollbarWidth = m_scrollbar ? m_scrollbar->frameRect().width() : 0;
+    return contentsSize().width() - scrollbarWidth;
+}
+
+WebCore::IntSize WebPopupMenuProxyWin::contentsSize() const
+{
+    return clientRect().size();
+}
+
+WebCore::IntRect WebPopupMenuProxyWin::scrollableAreaBoundingBox() const
+{
+    return m_windowRect;
 }
 
 void WebPopupMenuProxyWin::scrollTo(int offset)
@@ -946,12 +967,12 @@ bool WebPopupMenuProxyWin::scrollToRevealSelection()
     int index = focusedIndex();
 
     if (index < m_scrollOffset) {
-        ScrollableArea::scrollToYOffsetWithoutAnimation(index);
+        ScrollableArea::scrollToOffsetWithoutAnimation(VerticalScrollbar, index);
         return true;
     }
 
     if (index >= m_scrollOffset + visibleItems()) {
-        ScrollableArea::scrollToYOffsetWithoutAnimation(index - visibleItems() + 1);
+        ScrollableArea::scrollToOffsetWithoutAnimation(VerticalScrollbar, index - visibleItems() + 1);
         return true;
     }
 

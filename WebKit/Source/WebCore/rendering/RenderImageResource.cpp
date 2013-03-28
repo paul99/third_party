@@ -56,7 +56,7 @@ void RenderImageResource::shutdown()
     ASSERT(m_renderer);
 
     if (m_cachedImage)
-        m_cachedImage->removeClientForRenderer(m_renderer);
+        m_cachedImage->removeClient(m_renderer);
 }
 
 void RenderImageResource::setCachedImage(CachedImage* newImage)
@@ -67,7 +67,7 @@ void RenderImageResource::setCachedImage(CachedImage* newImage)
         return;
 
     if (m_cachedImage)
-        m_cachedImage->removeClientForRenderer(m_renderer);
+        m_cachedImage->removeClient(m_renderer);
     m_cachedImage = newImage;
     if (m_cachedImage) {
         m_cachedImage->addClient(m_renderer);

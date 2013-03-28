@@ -56,6 +56,7 @@ public:
     //   GL_OES_standard_derivatives
     //   GL_OES_rgb8_rgba8
     //   GL_OES_vertex_array_object
+    //   GL_OES_element_index_uint
     //   GL_ANGLE_translated_shader_source
     //   GL_ARB_texture_rectangle (only the subset required to
     //     implement IOSurface binding; it's recommended to support
@@ -65,6 +66,10 @@ public:
     //   GL_EXT_texture_compression_s3tc
     //   GL_OES_compressed_ETC1_RGB8_texture
     //   GL_IMG_texture_compression_pvrtc
+    //   EXT_texture_filter_anisotropic
+    //   GL_EXT_debug_marker
+    //   GL_CHROMIUM_copy_texture
+    //   GL_CHROMIUM_flipy
 
     // Takes full name of extension; for example,
     // "GL_EXT_texture_format_BGRA8888".
@@ -135,6 +140,17 @@ public:
         COMPRESSED_RGB_PVRTC_2BPPV1_IMG = 0x8C01,
         COMPRESSED_RGBA_PVRTC_4BPPV1_IMG = 0x8C02,
         COMPRESSED_RGBA_PVRTC_2BPPV1_IMG = 0x8C03,
+
+        // GL_EXT_texture_filter_anisotropic
+        TEXTURE_MAX_ANISOTROPY_EXT = 0x84FE,
+        MAX_TEXTURE_MAX_ANISOTROPY_EXT = 0x84FF,
+
+        // GL_CHROMIUM_flipy
+        UNPACK_FLIP_Y_CHROMIUM = 0x9240,
+
+        // GL_CHROMIUM_copy_texture
+        UNPACK_PREMULTIPLY_ALPHA_CHROMIUM = 0x9241,
+        UNPACK_UNPREMULTIPLY_ALPHA_CHROMIUM = 0x9242
     };
 
     // GL_ARB_robustness
@@ -160,6 +176,35 @@ public:
 
     // GL_ANGLE_translated_shader_source
     virtual String getTranslatedShaderSourceANGLE(Platform3DObject) = 0;
+
+    // GL_CHROMIUM_copy_texture
+    virtual void copyTextureCHROMIUM(GC3Denum, Platform3DObject, Platform3DObject, GC3Dint, GC3Denum) = 0;
+
+    // EXT Robustness - uses getGraphicsResetStatusARB
+    virtual void readnPixelsEXT(int x, int y, GC3Dsizei width, GC3Dsizei height, GC3Denum format, GC3Denum type, GC3Dsizei bufSize, void *data) = 0;
+    virtual void getnUniformfvEXT(GC3Duint program, int location, GC3Dsizei bufSize, float *params) = 0;
+    virtual void getnUniformivEXT(GC3Duint program, int location, GC3Dsizei bufSize, int *params) = 0;
+
+    // GL_EXT_debug_marker
+    virtual void insertEventMarkerEXT(const String&) = 0;
+    virtual void pushGroupMarkerEXT(const String&) = 0;
+    virtual void popGroupMarkerEXT(void) = 0;
+
+    virtual bool isNVIDIA() = 0;
+    virtual bool isAMD() = 0;
+    virtual bool isIntel() = 0;
+    virtual String vendor() = 0;
+
+    // If this method returns false then the system *definitely* does not support multisampling.
+    // It does not necessarily say the system does support it - callers must attempt to construct
+    // multisampled renderbuffers and check framebuffer completeness.
+    // Ports should implement this to return false on configurations where it is known
+    // that multisampling is not available.
+    virtual bool maySupportMultisampling() = 0;
+
+    // Some configurations have bugs regarding built-in functions in their OpenGL drivers
+    // that must be avoided. Ports should implement this flag such configurations.
+    virtual bool requiresBuiltInFunctionEmulation() = 0;
 };
 
 } // namespace WebCore

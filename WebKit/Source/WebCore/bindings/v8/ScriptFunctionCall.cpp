@@ -31,12 +31,13 @@
 #include "config.h"
 #include "ScriptFunctionCall.h"
 
+#include "ScriptController.h"
 #include "ScriptScope.h"
 #include "ScriptState.h"
 #include "ScriptValue.h"
-
 #include "V8Binding.h"
-#include "V8Proxy.h"
+#include "V8ObjectConstructor.h"
+#include "V8RecursionScope.h"
 #include "V8Utilities.h"
 
 #include <v8.h>
@@ -61,13 +62,13 @@ void ScriptCallArgumentHandler::appendArgument(const ScriptValue& argument)
 void ScriptCallArgumentHandler::appendArgument(const String& argument)
 {
     ScriptScope scope(m_scriptState);
-    m_arguments.append(v8String(argument));
+    m_arguments.append(deprecatedV8String(argument));
 }
 
 void ScriptCallArgumentHandler::appendArgument(const char* argument)
 {
     ScriptScope scope(m_scriptState);
-    m_arguments.append(v8String(argument));
+    m_arguments.append(deprecatedV8String(argument));
 }
 
 void ScriptCallArgumentHandler::appendArgument(long argument)
@@ -117,7 +118,7 @@ ScriptValue ScriptFunctionCall::call(bool& hadException, bool reportExceptions)
     ScriptScope scope(m_scriptState, reportExceptions);
 
     v8::Local<v8::Object> thisObject = m_thisObject.v8Object();
-    v8::Local<v8::Value> value = thisObject->Get(v8String(m_name));
+    v8::Local<v8::Value> value = thisObject->Get(deprecatedV8String(m_name));
     if (!scope.success()) {
         hadException = true;
         return ScriptValue();
@@ -130,7 +131,11 @@ ScriptValue ScriptFunctionCall::call(bool& hadException, bool reportExceptions)
     for (size_t i = 0; i < m_arguments.size(); ++i)
         args[i] = m_arguments[i].v8Value();
 
-    v8::Local<v8::Value> result = function->Call(thisObject, m_arguments.size(), args.get());
+    v8::Local<v8::Value> result;
+    {
+        V8RecursionScope innerScope(getScriptExecutionContext());
+        result = function->Call(thisObject, m_arguments.size(), args.get());
+    }
     if (!scope.success()) {
         hadException = true;
         return ScriptValue();
@@ -150,7 +155,7 @@ ScriptObject ScriptFunctionCall::construct(bool& hadException, bool reportExcept
     ScriptScope scope(m_scriptState, reportExceptions);
 
     v8::Local<v8::Object> thisObject = m_thisObject.v8Object();
-    v8::Local<v8::Value> value = thisObject->Get(v8String(m_name));
+    v8::Local<v8::Value> value = thisObject->Get(deprecatedV8String(m_name));
     if (!scope.success()) {
         hadException = true;
         return ScriptObject();
@@ -163,7 +168,7 @@ ScriptObject ScriptFunctionCall::construct(bool& hadException, bool reportExcept
     for (size_t i = 0; i < m_arguments.size(); ++i)
         args[i] = m_arguments[i].v8Value();
 
-    v8::Local<v8::Object> result = SafeAllocation::newInstance(constructor, m_arguments.size(), args.get());
+    v8::Local<v8::Object> result = V8ObjectConstructor::newInstance(constructor, m_arguments.size(), args.get());
     if (!scope.success()) {
         hadException = true;
         return ScriptObject();
@@ -172,7 +177,7 @@ ScriptObject ScriptFunctionCall::construct(bool& hadException, bool reportExcept
     return ScriptObject(m_scriptState, result);
 }
 
-ScriptCallback::ScriptCallback(ScriptState* state, ScriptValue function)
+ScriptCallback::ScriptCallback(ScriptState* state, const ScriptValue& function)
     : ScriptCallArgumentHandler(state)
     , m_function(function)
 {
@@ -197,7 +202,7 @@ ScriptValue ScriptCallback::call(bool& hadException)
     for (size_t i = 0; i < m_arguments.size(); ++i)
         args[i] = m_arguments[i].v8Value();
 
-    v8::Handle<v8::Value> result = V8Proxy::instrumentedCallFunction(0 /* frame */, function, object, m_arguments.size(), args.get());
+    v8::Handle<v8::Value> result = ScriptController::callFunctionWithInstrumentation(0, function, object, m_arguments.size(), args.get());
 
     if (exceptionCatcher.HasCaught()) {
         hadException = true;

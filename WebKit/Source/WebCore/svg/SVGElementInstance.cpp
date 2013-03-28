@@ -30,6 +30,7 @@
 #include "EventListener.h"
 #include "EventNames.h"
 #include "FrameView.h"
+#include "SVGDocumentExtensions.h"
 #include "SVGElementInstanceList.h"
 #include "SVGUseElement.h"
 
@@ -71,10 +72,23 @@ SVGElementInstance::~SVGElementInstance()
     m_element = 0;
 }
 
+// It's important not to inline removedLastRef, because we don't want to inline the code to
+// delete an SVGElementInstance at each deref call site.
+void SVGElementInstance::removedLastRef()
+{
+#ifndef NDEBUG
+    m_deletionHasBegun = true;
+#endif
+    delete this;
+}
+
 void SVGElementInstance::detach()
 {
     // Clear all pointers. When the node is detached from the shadow DOM it should be removed but,
     // due to ref counting, it may not be. So clear everything to avoid dangling pointers.
+
+    for (SVGElementInstance* node = firstChild(); node; node = node->nextSibling())
+        node->detach();
 
     // Deregister as instance for passed element, if we haven't already.
     if (m_element->instancesForElement().contains(this))
@@ -122,16 +136,17 @@ void SVGElementInstance::invalidateAllInstancesOfElement(SVGElement* element)
     for (HashSet<SVGElementInstance*>::const_iterator it = set.begin(); it != end; ++it) {
         ASSERT((*it)->shadowTreeElement());
         ASSERT((*it)->shadowTreeElement()->correspondingElement());
+        ASSERT((*it)->shadowTreeElement()->correspondingElement() == (*it)->correspondingElement());
         ASSERT((*it)->correspondingElement() == element);
         (*it)->shadowTreeElement()->setCorrespondingElement(0);
+
         if (SVGUseElement* element = (*it)->correspondingUseElement()) {
             ASSERT(element->inDocument());
             element->invalidateShadowTree();
         }
     }
 
-    // Be sure to rebuild use trees, if needed
-    element->document()->updateLayoutIgnorePendingStylesheets();
+    element->document()->updateStyleIfNeeded();
 }
 
 const AtomicString& SVGElementInstance::interfaceName() const
@@ -184,6 +199,19 @@ EventTargetData* SVGElementInstance::ensureEventTargetData()
     return 0;
 }
 
+SVGElementInstance::InstanceUpdateBlocker::InstanceUpdateBlocker(SVGElement* targetElement)
+    : m_targetElement(targetElement->isStyled() ? static_cast<SVGStyledElement*>(targetElement) : 0)
+{
+    if (m_targetElement)
+        m_targetElement->setInstanceUpdatesBlocked(true);
+}
+
+SVGElementInstance::InstanceUpdateBlocker::~InstanceUpdateBlocker()
+{
+    if (m_targetElement)
+        m_targetElement->setInstanceUpdatesBlocked(false);
+}
+   
 }
 
 #endif

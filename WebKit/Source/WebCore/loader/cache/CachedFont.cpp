@@ -27,8 +27,7 @@
 #include "config.h"
 #include "CachedFont.h"
 
-// FIXME: This should really be a blacklist instead of a whitelist
-#if USE(CG) || PLATFORM(QT) || PLATFORM(GTK) || (PLATFORM(CHROMIUM) && (!OS(DARWIN) || USE(SKIA_ON_MAC_CHROMIUM))) || OS(WINCE)
+#if !PLATFORM(WIN_CAIRO) && !PLATFORM(WX)
 #define STORE_FONT_CUSTOM_PLATFORM_DATA
 #endif
 
@@ -37,8 +36,9 @@
 #include "CachedResourceLoader.h"
 #include "FontPlatformData.h"
 #include "MemoryCache.h"
-#include "SharedBuffer.h"
+#include "ResourceBuffer.h"
 #include "TextResourceDecoder.h"
+#include "WebCoreMemoryInstrumentation.h"
 #include <wtf/Vector.h>
 
 #ifdef STORE_FONT_CUSTOM_PLATFORM_DATA
@@ -84,12 +84,12 @@ void CachedFont::didAddClient(CachedResourceClient* c)
         static_cast<CachedFontClient*>(c)->fontLoaded(this);
 }
 
-void CachedFont::data(PassRefPtr<SharedBuffer> data, bool allDataReceived)
+void CachedFont::data(PassRefPtr<ResourceBuffer> data, bool allDataReceived)
 {
     if (!allDataReceived)
         return;
 
-    m_data = data;     
+    m_data = data;
     setEncodedSize(m_data.get() ? m_data->size() : 0);
     setLoading(false);
     checkNotify();
@@ -107,7 +107,7 @@ bool CachedFont::ensureCustomFontData()
 {
 #ifdef STORE_FONT_CUSTOM_PLATFORM_DATA
     if (!m_fontData && !errorOccurred() && !isLoading() && m_data) {
-        m_fontData = createFontCustomPlatformData(m_data.get());
+        m_fontData = createFontCustomPlatformData(m_data.get()->sharedBuffer());
         if (!m_fontData)
             setStatus(DecodeError);
     }
@@ -115,7 +115,7 @@ bool CachedFont::ensureCustomFontData()
     return m_fontData;
 }
 
-FontPlatformData CachedFont::platformDataFromCustomData(float size, bool bold, bool italic, FontOrientation orientation, TextOrientation textOrientation, FontWidthVariant widthVariant, FontRenderingMode renderingMode)
+FontPlatformData CachedFont::platformDataFromCustomData(float size, bool bold, bool italic, FontOrientation orientation, FontWidthVariant widthVariant, FontRenderingMode renderingMode)
 {
 #if ENABLE(SVG_FONTS)
     if (m_externalSVGDocument)
@@ -123,7 +123,7 @@ FontPlatformData CachedFont::platformDataFromCustomData(float size, bool bold, b
 #endif
 #ifdef STORE_FONT_CUSTOM_PLATFORM_DATA
     ASSERT(m_fontData);
-    return m_fontData->fontPlatformData(static_cast<int>(size), bold, italic, orientation, textOrientation, widthVariant, renderingMode);
+    return m_fontData->fontPlatformData(static_cast<int>(size), bold, italic, orientation, widthVariant, renderingMode);
 #else
     return FontPlatformData();
 #endif
@@ -137,7 +137,7 @@ bool CachedFont::ensureSVGFontData()
 
         RefPtr<TextResourceDecoder> decoder = TextResourceDecoder::create("application/xml");
         String svgSource = decoder->decode(m_data->data(), m_data->size());
-        svgSource += decoder->flush();
+        svgSource.append(decoder->flush());
         
         m_externalSVGDocument->setContent(svgSource);
         
@@ -198,13 +198,16 @@ void CachedFont::checkNotify()
          c->fontLoaded(this);
 }
 
-
-void CachedFont::error(CachedResource::Status status)
+void CachedFont::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
 {
-    setStatus(status);
-    ASSERT(errorOccurred());
-    setLoading(false);
-    checkNotify();
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CachedResourceFont);
+    CachedResource::reportMemoryUsage(memoryObjectInfo);
+#if ENABLE(SVG_FONTS)
+    info.addMember(m_externalSVGDocument);
+#endif
+#ifdef STORE_FONT_CUSTOM_PLATFORM_DATA
+    info.addMember(m_fontData);
+#endif
 }
 
 }

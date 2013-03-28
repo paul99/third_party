@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2009, 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -33,32 +33,43 @@
 
 #if ENABLE(WORKERS)
 
-#include "ScopedDOMDataStore.h"
+#include "ScriptValue.h"
 #include "V8Binding.h"
-
 #include <v8.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/Threading.h>
+#include <wtf/text/TextPosition.h>
 
 namespace WebCore {
 
     class ScriptSourceCode;
     class ScriptValue;
     class WorkerContext;
-    class WorkerContextExecutionProxy;
+
+    struct WorkerContextExecutionState {
+        WorkerContextExecutionState()
+            : hadException(false)
+            , lineNumber(0)
+        {
+        }
+
+        bool hadException;
+        ScriptValue exception;
+        String errorMessage;
+        int lineNumber;
+        String sourceURL;
+    };
 
     class WorkerScriptController {
     public:
         WorkerScriptController(WorkerContext*);
         ~WorkerScriptController();
 
-        WorkerContextExecutionProxy* proxy() { return m_proxy.get(); }
         WorkerContext* workerContext() { return m_workerContext; }
 
-        ScriptValue evaluate(const ScriptSourceCode&);
-        ScriptValue evaluate(const ScriptSourceCode&, ScriptValue* exception);
+        void evaluate(const ScriptSourceCode&, ScriptValue* = 0);
 
-        void setException(ScriptValue);
+        void setException(const ScriptValue&);
 
         // Async request to terminate a future JS execution. Eventually causes termination
         // exception raised during JS execution, if the worker thread happens to run JS.
@@ -66,23 +77,37 @@ namespace WebCore {
         // forbidExecution()/isExecutionForbidden() to guard against reentry into JS.
         // Can be called from any thread.
         void scheduleExecutionTermination();
+        bool isExecutionTerminating() const;
 
         // Called on Worker thread when JS exits with termination exception caused by forbidExecution() request,
         // or by Worker thread termination code to prevent future entry into JS.
         void forbidExecution();
         bool isExecutionForbidden() const;
 
-        void disableEval();
+        void disableEval(const String&);
 
         // Returns WorkerScriptController for the currently executing context. 0 will be returned if the current executing context is not the worker context.
         static WorkerScriptController* controllerForContext();
 
+        // Evaluate a script file in the current execution environment.
+        ScriptValue evaluate(const String& script, const String& fileName, const TextPosition& scriptStartPosition, WorkerContextExecutionState*);
+
+        // Returns a local handle of the context.
+        v8::Local<v8::Context> context() { return v8::Local<v8::Context>::New(m_context.get()); }
+
     private:
+        bool initializeContextIfNeeded();
+        void disposeContext();
+
         WorkerContext* m_workerContext;
-        OwnPtr<WorkerContextExecutionProxy> m_proxy;
         v8::Isolate* m_isolate;
-        ScopedDOMDataStore m_DOMDataStore;
+        ScopedPersistent<v8::Context> m_context;
+        OwnPtr<V8PerContextData> m_perContextData;
+        String m_disableEvalPending;
+        OwnPtr<DOMDataStore> m_domDataStore;
         bool m_executionForbidden;
+        bool m_executionScheduledToTerminate;
+        mutable Mutex m_scheduledTerminationMutex;
     };
 
 } // namespace WebCore

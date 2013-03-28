@@ -25,10 +25,11 @@
  */
 
 #include "config.h"
-#if PLUGIN_ARCHITECTURE(X11)
+#if PLUGIN_ARCHITECTURE(X11) && ENABLE(NETSCAPE_PLUGIN_API)
 
 #include "NetscapePlugin.h"
 
+#include "PluginController.h"
 #include "WebEvent.h"
 #include <WebCore/GraphicsContext.h>
 #include <WebCore/NotImplemented.h>
@@ -36,11 +37,20 @@
 #if PLATFORM(QT)
 #include <WebCore/QtX11ImageConversion.h>
 #elif PLATFORM(GTK)
+#include <gtk/gtk.h>
+#ifndef GTK_API_VERSION_2
+#include <gtk/gtkx.h>
+#endif
+#include <gdk/gdkx.h>
+#include <WebCore/GtkVersioning.h>
+#elif PLATFORM(EFL) && defined(HAVE_ECORE_X)
+#include <Ecore_X.h>
+#endif
+
+#if USE(CAIRO) && !PLATFORM(WIN_CAIRO)
 #include "PlatformContextCairo.h"
 #include "RefPtrCairo.h"
 #include <cairo/cairo-xlib.h>
-#include <gdk/gdkx.h>
-#include <WebCore/GtkVersioning.h>
 #endif
 
 using namespace WebCore;
@@ -79,6 +89,8 @@ static Display* getPluginDisplay()
     // Since we're a gdk/gtk app, we'll (probably?) have the same X connection as any gdk-based
     // plugins, so we can return that. We might want to add other implementations here later.
     return GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
+#elif PLATFORM(EFL) && defined(HAVE_ECORE_X)
+    return static_cast<Display*>(ecore_x_display_get());
 #else
     return 0;
 #endif
@@ -90,6 +102,8 @@ static inline int x11Screen()
     return XDefaultScreen(NetscapePlugin::x11HostDisplay());
 #elif PLATFORM(GTK)
     return gdk_screen_get_number(gdk_screen_get_default());
+#elif PLATFORM(EFL) && defined(HAVE_ECORE_X)
+    return ecore_x_screen_index_get(ecore_x_default_screen_get());
 #else
     return 0;
 #endif
@@ -101,6 +115,8 @@ static inline int displayDepth()
     return XDefaultDepth(NetscapePlugin::x11HostDisplay(), x11Screen());
 #elif PLATFORM(GTK)
     return gdk_visual_get_depth(gdk_screen_get_system_visual(gdk_screen_get_default()));
+#elif PLATFORM(EFL) && defined(HAVE_ECORE_X)
+    return ecore_x_default_depth_get(NetscapePlugin::x11HostDisplay(), ecore_x_default_screen_get());
 #else
     return 0;
 #endif
@@ -112,6 +128,8 @@ static inline unsigned long rootWindowID()
     return XDefaultRootWindow(NetscapePlugin::x11HostDisplay());
 #elif PLATFORM(GTK)
     return GDK_ROOT_WINDOW();
+#elif PLATFORM(EFL) && defined(HAVE_ECORE_X)
+    return ecore_x_window_root_first_get();
 #else
     return 0;
 #endif
@@ -139,31 +157,74 @@ Display* NetscapePlugin::x11HostDisplay()
     return dedicatedDisplay;
 #elif PLATFORM(GTK)
     return GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
+#elif PLATFORM(EFL) && defined(HAVE_ECORE_X)
+    return static_cast<Display*>(ecore_x_display_get());
 #else
     return 0;
 #endif
 }
 
-bool NetscapePlugin::platformPostInitialize()
-{
 #if PLATFORM(GTK)
-    if (moduleMixesGtkSymbols(m_pluginModule->module()))
-        return false;
+static gboolean socketPlugRemovedCallback(GtkSocket*)
+{
+    // Default action is to destroy the GtkSocket, so we just return TRUE here
+    // to be able to reuse the socket. For some obscure reason, newer versions
+    // of flash plugin remove the plug from the socket, probably because the plug
+    // created by the plugin is re-parented.
+    return TRUE;
+}
 #endif
 
-    if (m_isWindowed)
+bool NetscapePlugin::platformPostInitializeWindowed(bool needsXEmbed, uint64_t windowID)
+{
+    m_npWindow.type = NPWindowTypeWindow;
+    if (!needsXEmbed) {
+        notImplemented();
         return false;
+    }
 
-    if (!(m_pluginDisplay = getPluginDisplay()))
-        return false;
-
-    NPSetWindowCallbackStruct* callbackStruct = new NPSetWindowCallbackStruct;
-    callbackStruct->type = 0;
     Display* display = x11HostDisplay();
+
+#if PLATFORM(GTK)
+    // It seems flash needs the socket to be in the same process,
+    // I guess it uses gdk_window_lookup(), so we create a new socket here
+    // containing a plug with the UI process socket embedded.
+    m_platformPluginWidget = gtk_plug_new(static_cast<Window>(windowID));
+    GtkWidget* socket = gtk_socket_new();
+    g_signal_connect(socket, "plug-removed", G_CALLBACK(socketPlugRemovedCallback), 0);
+    gtk_container_add(GTK_CONTAINER(m_platformPluginWidget), socket);
+    gtk_widget_show(socket);
+    gtk_widget_show(m_platformPluginWidget);
+
+    m_npWindow.window = GINT_TO_POINTER(gtk_socket_get_id(GTK_SOCKET(socket)));
+    GdkWindow* window = gtk_widget_get_window(socket);
+    NPSetWindowCallbackStruct* callbackStruct = static_cast<NPSetWindowCallbackStruct*>(m_npWindow.ws_info);
+    callbackStruct->display = GDK_WINDOW_XDISPLAY(window);
+    callbackStruct->visual = GDK_VISUAL_XVISUAL(gdk_window_get_visual(window));
+    callbackStruct->depth = gdk_visual_get_depth(gdk_window_get_visual(window));
+    callbackStruct->colormap = XCreateColormap(display, GDK_ROOT_WINDOW(), callbackStruct->visual, AllocNone);
+#else
+    UNUSED_PARAM(windowID);
+#endif
+
+    XFlush(display);
+
+    callSetWindow();
+
+    return true;
+}
+
+bool NetscapePlugin::platformPostInitializeWindowless()
+{
+    Display* display = x11HostDisplay();
+    m_npWindow.type = NPWindowTypeDrawable;
+    m_npWindow.window = 0;
+
     int depth = displayDepth();
 #if PLATFORM(QT)
     ASSERT(depth == 16 || depth == 24 || depth == 32);
 #endif
+    NPSetWindowCallbackStruct* callbackStruct = static_cast<NPSetWindowCallbackStruct*>(m_npWindow.ws_info);
     callbackStruct->display = display;
     callbackStruct->depth = depth;
 
@@ -182,13 +243,43 @@ bool NetscapePlugin::platformPostInitialize()
     callbackStruct->visual = visual;
     callbackStruct->colormap = XCreateColormap(display, rootWindowID(), visual, AllocNone);
 
-    m_npWindow.type = NPWindowTypeDrawable;
-    m_npWindow.window = 0;
-    m_npWindow.ws_info = callbackStruct;
-
     callSetWindow();
 
     return true;
+}
+
+bool NetscapePlugin::platformPostInitialize()
+{
+#if PLATFORM(GTK)
+    if (moduleMixesGtkSymbols(m_pluginModule->module()))
+        return false;
+#endif
+
+    uint64_t windowID = 0;
+    bool needsXEmbed = false;
+    if (m_isWindowed) {
+        NPP_GetValue(NPPVpluginNeedsXEmbed, &needsXEmbed);
+        if (needsXEmbed) {
+            windowID = controller()->createPluginContainer();
+            if (!windowID)
+                return false;
+        } else {
+            notImplemented();
+            return false;
+        }
+    }
+
+    if (!(m_pluginDisplay = getPluginDisplay()))
+        return false;
+
+    NPSetWindowCallbackStruct* callbackStruct = new NPSetWindowCallbackStruct;
+    callbackStruct->type = 0;
+    m_npWindow.ws_info = callbackStruct;
+
+    if (m_isWindowed)
+        return platformPostInitializeWindowed(needsXEmbed, windowID);
+
+    return platformPostInitializeWindowless();
 }
 
 void NetscapePlugin::platformDestroy()
@@ -213,7 +304,13 @@ bool NetscapePlugin::platformInvalidate(const IntRect&)
 void NetscapePlugin::platformGeometryDidChange()
 {
     if (m_isWindowed) {
-        notImplemented();
+        uint64_t windowID = 0;
+#if PLATFORM(GTK)
+        windowID = static_cast<uint64_t>(GDK_WINDOW_XID(gtk_plug_get_socket_window(GTK_PLUG(m_platformPluginWidget))));
+#endif
+        IntRect clipRect(m_clipRect);
+        clipRect.move(-m_frameRectInWindowCoordinates.x(), -m_frameRectInWindowCoordinates.y());
+        controller()->windowedPluginGeometryDidChange(m_frameRectInWindowCoordinates, clipRect, windowID);
         return;
     }
 
@@ -238,10 +335,8 @@ void NetscapePlugin::platformVisibilityDidChange()
 
 void NetscapePlugin::platformPaint(GraphicsContext* context, const IntRect& dirtyRect, bool /*isSnapshot*/)
 {
-    if (m_isWindowed) {
-        notImplemented();
+    if (m_isWindowed)
         return;
-    }
 
     if (!m_isStarted) {
         // FIXME: we should paint a missing plugin icon.
@@ -279,7 +374,7 @@ void NetscapePlugin::platformPaint(GraphicsContext* context, const IntRect& dirt
     painter->drawImage(QPoint(exposedRect.x(), exposedRect.y()), qimageFromXImage(xImage), exposedRect);
 
     XDestroyImage(xImage);
-#elif PLATFORM(GTK)
+#elif PLATFORM(GTK) || (PLATFORM(EFL) && USE(CAIRO))
     RefPtr<cairo_surface_t> drawableSurface = adoptRef(cairo_xlib_surface_create(m_pluginDisplay,
                                                                                  m_drawable,
                                                                                  static_cast<NPSetWindowCallbackStruct*>(m_npWindow.ws_info)->visual,
@@ -544,4 +639,4 @@ bool NetscapePlugin::platformHandleKeyboardEvent(const WebKeyboardEvent& event)
 
 } // namespace WebKit
 
-#endif // PLUGIN_ARCHITECTURE(X11)
+#endif // PLUGIN_ARCHITECTURE(X11) && ENABLE(NETSCAPE_PLUGIN_API)

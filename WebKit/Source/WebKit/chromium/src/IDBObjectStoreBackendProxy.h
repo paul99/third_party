@@ -28,6 +28,7 @@
 
 #if ENABLE(INDEXED_DATABASE)
 
+#include "IDBKeyPath.h"
 #include "IDBObjectStoreBackendInterface.h"
 #include <wtf/OwnPtr.h>
 #include <wtf/PassOwnPtr.h>
@@ -42,20 +43,19 @@ public:
     static PassRefPtr<WebCore::IDBObjectStoreBackendInterface> create(PassOwnPtr<WebIDBObjectStore>);
     virtual ~IDBObjectStoreBackendProxy();
 
-    virtual String name() const;
-    virtual String keyPath() const;
-    virtual PassRefPtr<WebCore::DOMStringList> indexNames() const;
-
-    virtual void get(PassRefPtr<WebCore::IDBKey>, PassRefPtr<WebCore::IDBCallbacks>, WebCore::IDBTransactionBackendInterface*, WebCore::ExceptionCode&);
-    virtual void put(PassRefPtr<WebCore::SerializedScriptValue>, PassRefPtr<WebCore::IDBKey>, PutMode, PassRefPtr<WebCore::IDBCallbacks>, WebCore::IDBTransactionBackendInterface*, WebCore::ExceptionCode&);
-    virtual void deleteFunction(PassRefPtr<WebCore::IDBKey>, PassRefPtr<WebCore::IDBCallbacks>, WebCore::IDBTransactionBackendInterface*, WebCore::ExceptionCode&);
+    virtual void get(PassRefPtr<WebCore::IDBKeyRange>, PassRefPtr<WebCore::IDBCallbacks>, WebCore::IDBTransactionBackendInterface*, WebCore::ExceptionCode&);
+    virtual void put(PassRefPtr<WebCore::SerializedScriptValue>, PassRefPtr<WebCore::IDBKey>, PutMode, PassRefPtr<WebCore::IDBCallbacks>, WebCore::IDBTransactionBackendInterface*, const WTF::Vector<int64_t>&, const WTF::Vector<IndexKeys>&);
+    virtual void deleteFunction(PassRefPtr<WebCore::IDBKeyRange>, PassRefPtr<WebCore::IDBCallbacks>, WebCore::IDBTransactionBackendInterface*, WebCore::ExceptionCode&);
     virtual void clear(PassRefPtr<WebCore::IDBCallbacks>, WebCore::IDBTransactionBackendInterface*, WebCore::ExceptionCode&);
 
-    PassRefPtr<WebCore::IDBIndexBackendInterface> createIndex(const String& name, const String& keyPath, bool unique, bool multiEntry, WebCore::IDBTransactionBackendInterface*, WebCore::ExceptionCode&);
-    PassRefPtr<WebCore::IDBIndexBackendInterface> index(const String& name, WebCore::ExceptionCode&);
-    void deleteIndex(const String& name, WebCore::IDBTransactionBackendInterface*, WebCore::ExceptionCode&);
+    PassRefPtr<WebCore::IDBIndexBackendInterface> createIndex(int64_t id, const String& name, const WebCore::IDBKeyPath&, bool unique, bool multiEntry, WebCore::IDBTransactionBackendInterface*, WebCore::ExceptionCode&);
+    virtual void setIndexKeys(PassRefPtr<WebCore::IDBKey> prpPrimaryKey, const WTF::Vector<int64_t>&, const Vector<IndexKeys>&, WebCore::IDBTransactionBackendInterface*);
+    virtual void setIndexesReady(const Vector<int64_t>&, WebCore::IDBTransactionBackendInterface*);
 
-    virtual void openCursor(PassRefPtr<WebCore::IDBKeyRange>, unsigned short direction, PassRefPtr<WebCore::IDBCallbacks>, WebCore::IDBTransactionBackendInterface*, WebCore::ExceptionCode&);
+    PassRefPtr<WebCore::IDBIndexBackendInterface> index(int64_t);
+    void deleteIndex(int64_t, WebCore::IDBTransactionBackendInterface*, WebCore::ExceptionCode&);
+
+    virtual void openCursor(PassRefPtr<WebCore::IDBKeyRange>, WebCore::IDBCursor::Direction, PassRefPtr<WebCore::IDBCallbacks>, WebCore::IDBTransactionBackendInterface::TaskType, WebCore::IDBTransactionBackendInterface*, WebCore::ExceptionCode&);
     virtual void count(PassRefPtr<WebCore::IDBKeyRange>, PassRefPtr<WebCore::IDBCallbacks>, WebCore::IDBTransactionBackendInterface*, WebCore::ExceptionCode&);
 
 private:

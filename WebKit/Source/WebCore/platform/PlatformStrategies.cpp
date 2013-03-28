@@ -29,8 +29,6 @@
 
 #include "PlatformStrategies.h"
 
-#include "DefaultLocalizationStrategy.h"
-
 namespace WebCore {
 
 static PlatformStrategies* s_platformStrategies;
@@ -51,17 +49,12 @@ void setPlatformStrategies(PlatformStrategies* platformStrategies)
     
     // FIXME: This happens when mixing different platform strategies, and we should probably
     // throw an exception here in release builds.
-    ASSERT(platformStrategies != s_platformStrategies);
+    ASSERT(platformStrategies == s_platformStrategies);
 }
 
 bool hasPlatformStrategies()
 {
     return s_platformStrategies;
-}
-
-LocalizationStrategy* PlatformStrategies::createLocalizationStrategy()
-{
-    return new DefaultLocalizationStrategy;
 }
 
 } // namespace WebCore

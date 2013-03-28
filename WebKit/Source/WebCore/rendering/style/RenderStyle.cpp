@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 1999 Antti Koivisto (koivisto@kde.org)
  * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2011 Adobe Systems Incorporated. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -25,8 +26,7 @@
 #include "ContentData.h"
 #include "CursorList.h"
 #include "CSSPropertyNames.h"
-#include "CSSStyleSelector.h"
-#include "CSSWrapShapes.h"
+#include "Font.h"
 #include "FontSelector.h"
 #include "QuotesData.h"
 #include "RenderArena.h"
@@ -34,14 +34,19 @@
 #include "ScaleTransformOperation.h"
 #include "ShadowData.h"
 #include "StyleImage.h"
+#include "StyleInheritedData.h"
+#include "StyleResolver.h"
 #if ENABLE(TOUCH_EVENTS)
 #include "RenderTheme.h"
 #endif
+#include "WebCoreMemoryInstrumentation.h"
+#include <wtf/MemoryInstrumentationVector.h>
+#include <wtf/MemoryObjectInfo.h>
 #include <wtf/StdLibExtras.h>
 #include <algorithm>
 
-#if OS(ANDROID) && ENABLE(FONT_BOOSTING)
-#include <wtf/text/StringHash.h>
+#if ENABLE(TEXT_AUTOSIZING)
+#include "TextAutosizer.h"
 #endif
 
 using namespace std;
@@ -49,15 +54,13 @@ using namespace std;
 namespace WebCore {
 
 struct SameSizeAsBorderValue {
-    Color m_color;
+    RGBA32 m_color;
     unsigned m_width;
 };
 
 COMPILE_ASSERT(sizeof(BorderValue) == sizeof(SameSizeAsBorderValue), BorderValue_should_not_grow);
 
 struct SameSizeAsRenderStyle : public RefCounted<SameSizeAsRenderStyle> {
-    unsigned m_bitfields;
-
     void* dataRefs[7];
     void* ownPtrs[1];
 #if ENABLE(SVG)
@@ -138,12 +141,10 @@ ALWAYS_INLINE RenderStyle::RenderStyle(bool)
 #if ENABLE(CSS_FILTERS)
     rareNonInheritedData.access()->m_filter.init();
 #endif
-#if ENABLE(CSS_GRID_LAYOUT)
     rareNonInheritedData.access()->m_grid.init();
-#endif
+    rareNonInheritedData.access()->m_gridItem.init();
     rareInheritedData.init();
     inherited.init();
-
 #if ENABLE(SVG)
     m_svgStyle.init();
 #endif
@@ -166,9 +167,15 @@ ALWAYS_INLINE RenderStyle::RenderStyle(const RenderStyle& o)
 {
 }
 
-void RenderStyle::inheritFrom(const RenderStyle* inheritParent)
+void RenderStyle::inheritFrom(const RenderStyle* inheritParent, IsAtShadowBoundary isAtShadowBoundary)
 {
-    rareInheritedData = inheritParent->rareInheritedData;
+    if (isAtShadowBoundary == AtShadowBoundary) {
+        // Even if surrounding content is user-editable, shadow DOM should act as a single unit, and not necessarily be editable
+        EUserModify currentUserModify = userModify();
+        rareInheritedData = inheritParent->rareInheritedData;
+        setUserModify(currentUserModify);
+    } else
+        rareInheritedData = inheritParent->rareInheritedData;
     inherited = inheritParent->inherited;
     inherited_flags = inheritParent->inherited_flags;
 #if ENABLE(SVG)
@@ -198,6 +205,7 @@ void RenderStyle::copyNonInheritedFrom(const RenderStyle* other)
     noninherited_flags._page_break_before = other->noninherited_flags._page_break_before;
     noninherited_flags._page_break_after = other->noninherited_flags._page_break_after;
     noninherited_flags._page_break_inside = other->noninherited_flags._page_break_inside;
+    noninherited_flags.explicitInheritance = other->noninherited_flags.explicitInheritance;
 #if ENABLE(SVG)
     if (m_svgStyle != other->m_svgStyle)
         m_svgStyle.access()->copyNonInheritedFrom(other->m_svgStyle.get());
@@ -225,7 +233,7 @@ bool RenderStyle::operator==(const RenderStyle& o) const
 
 bool RenderStyle::isStyleAvailable() const
 {
-    return this != CSSStyleSelector::styleNotYetAvailable();
+    return this != StyleResolver::styleNotYetAvailable();
 }
 
 static inline int pseudoBit(PseudoId pseudo)
@@ -320,83 +328,6 @@ bool RenderStyle::inheritedDataShared(const RenderStyle* other) const
         && rareInheritedData.get() == other->rareInheritedData.get();
 }
 
-#if OS(ANDROID) && ENABLE(FONT_BOOSTING)
-
-inline unsigned computeFontHash(const Font& font)
-{
-    unsigned hashCodes[2] = {
-        CaseFoldingHash::hash(font.fontDescription().family().family().impl()),
-        font.fontDescription().specifiedSize()
-    };
-    return StringHasher::hashMemory<sizeof(hashCodes)>(hashCodes);
-}
-
-uint32_t RenderStyle::hashForTextAutosizing() const
-{
-    // Not a very smart hash.  Could be improved upon.
-    uint32_t hash = 0;
-
-    hash ^= rareNonInheritedData->m_appearance;
-    hash ^= rareNonInheritedData->marginBeforeCollapse;
-    hash ^= rareNonInheritedData->marginAfterCollapse;
-    hash ^= rareNonInheritedData->lineClamp.value();
-    hash ^= rareInheritedData->wordWrap;
-    hash ^= rareInheritedData->nbspMode;
-    hash ^= rareInheritedData->khtmlLineBreak;
-    hash ^= inherited->specified_line_height.value();
-    hash ^= computeFontHash(inherited->font);
-    hash ^= inherited->horizontal_border_spacing;
-    hash ^= inherited->vertical_border_spacing;
-    hash ^= inherited_flags._box_direction;
-    hash ^= inherited_flags.m_rtlOrdering;
-    hash ^= noninherited_flags._position;
-    hash ^= noninherited_flags._floating;
-    hash ^= rareNonInheritedData->m_counterIncrement;
-    hash ^= rareNonInheritedData->m_counterReset;
-    hash ^= rareNonInheritedData->textOverflow;
-    hash ^= rareInheritedData->textSecurity;
-    return hash;
-}
-
-uint32_t RenderStyle::hashForFontBoosting() const
-{
-    return hashForTextAutosizing() ^ inherited_flags._text_align;
-}
-
-bool RenderStyle::equalForTextAutosizing(const RenderStyle *other) const
-{
-    if ( rareNonInheritedData->m_appearance == other->rareNonInheritedData->m_appearance &&
-         rareNonInheritedData->marginBeforeCollapse == other->rareNonInheritedData->marginBeforeCollapse &&
-         rareNonInheritedData->marginAfterCollapse == other->rareNonInheritedData->marginAfterCollapse &&
-         (rareNonInheritedData->lineClamp == other->rareNonInheritedData->lineClamp) &&
-         (rareInheritedData->textSizeAdjust == other->rareInheritedData->textSizeAdjust) &&
-         (rareInheritedData->wordWrap == other->rareInheritedData->wordWrap) &&
-         (rareInheritedData->nbspMode == other->rareInheritedData->nbspMode) &&
-         (rareInheritedData->khtmlLineBreak == other->rareInheritedData->khtmlLineBreak) &&
-         (inherited->specified_line_height == other->inherited->specified_line_height) &&
-         (inherited->font.equalForTextAutoSizing(other->inherited->font)) &&
-         (inherited->horizontal_border_spacing == other->inherited->horizontal_border_spacing) &&
-         (inherited->vertical_border_spacing == other->inherited->vertical_border_spacing) &&
-         (inherited_flags._box_direction == other->inherited_flags._box_direction) &&
-         (inherited_flags.m_rtlOrdering == other->inherited_flags.m_rtlOrdering) &&
-         (noninherited_flags._position == other->noninherited_flags._position) &&
-         (noninherited_flags._floating == other->noninherited_flags._floating) &&
-         rareNonInheritedData->m_counterIncrement == other->rareNonInheritedData->m_counterIncrement &&
-         rareNonInheritedData->m_counterReset == other->rareNonInheritedData->m_counterReset &&
-         rareNonInheritedData->textOverflow == other->rareNonInheritedData->textOverflow &&
-         (rareInheritedData->textSecurity == other->rareInheritedData->textSecurity))
-        return true;
-    return false;
-}
-
-bool RenderStyle::equalForFontBoosting(const RenderStyle *other) const
-{
-    return equalForTextAutosizing(other)
-           && inherited_flags._text_align == other->inherited_flags._text_align;
-}
-
-#endif // OS(ANDROID) && ENABLE(FONT_BOOSTING)
-
 static bool positionedObjectMoved(const LengthBox& a, const LengthBox& b)
 {
     // If any unit types are different, then we can't guarantee
@@ -466,8 +397,8 @@ StyleDifference RenderStyle::diff(const RenderStyle* other, unsigned& changedCon
 
         if (rareNonInheritedData->m_wrapFlow != other->rareNonInheritedData->m_wrapFlow
             || rareNonInheritedData->m_wrapThrough != other->rareNonInheritedData->m_wrapThrough
-            || rareNonInheritedData->m_wrapMargin != other->rareNonInheritedData->m_wrapMargin
-            || rareNonInheritedData->m_wrapPadding != other->rareNonInheritedData->m_wrapPadding)
+            || rareNonInheritedData->m_shapeMargin != other->rareNonInheritedData->m_shapeMargin
+            || rareNonInheritedData->m_shapePadding != other->rareNonInheritedData->m_shapePadding)
             return StyleDifferenceLayout;
 
         if (rareNonInheritedData->m_deprecatedFlexibleBox.get() != other->rareNonInheritedData->m_deprecatedFlexibleBox.get()
@@ -476,6 +407,12 @@ StyleDifference RenderStyle::diff(const RenderStyle* other, unsigned& changedCon
 
         if (rareNonInheritedData->m_flexibleBox.get() != other->rareNonInheritedData->m_flexibleBox.get()
             && *rareNonInheritedData->m_flexibleBox.get() != *other->rareNonInheritedData->m_flexibleBox.get())
+            return StyleDifferenceLayout;
+        if (rareNonInheritedData->m_order != other->rareNonInheritedData->m_order
+            || rareNonInheritedData->m_alignContent != other->rareNonInheritedData->m_alignContent
+            || rareNonInheritedData->m_alignItems != other->rareNonInheritedData->m_alignItems
+            || rareNonInheritedData->m_alignSelf != other->rareNonInheritedData->m_alignSelf
+            || rareNonInheritedData->m_justifyContent != other->rareNonInheritedData->m_justifyContent)
             return StyleDifferenceLayout;
 
         // FIXME: We should add an optimized form of layout that just recomputes visual overflow.
@@ -499,16 +436,9 @@ StyleDifference RenderStyle::diff(const RenderStyle* other, unsigned& changedCon
 #endif
         }
 
-#if ENABLE(CSS_FILTERS)
-        if (rareNonInheritedData->m_filter.get() != other->rareNonInheritedData->m_filter.get()
-            && *rareNonInheritedData->m_filter.get() != *other->rareNonInheritedData->m_filter.get()) {
+        if (rareNonInheritedData->m_grid.get() != other->rareNonInheritedData->m_grid.get()
+            && rareNonInheritedData->m_gridItem.get() != other->rareNonInheritedData->m_gridItem.get())
             return StyleDifferenceLayout;
-        }
-#endif
-#if ENABLE(CSS_GRID_LAYOUT)
-        if (rareNonInheritedData->m_grid.get() != other->rareNonInheritedData->m_grid.get())
-            return StyleDifferenceLayout;
-#endif
 
 #if !USE(ACCELERATED_COMPOSITING)
         if (rareNonInheritedData.get() != other->rareNonInheritedData.get()) {
@@ -526,6 +456,11 @@ StyleDifference RenderStyle::diff(const RenderStyle* other, unsigned& changedCon
         if (rareNonInheritedData->m_dashboardRegions != other->rareNonInheritedData->m_dashboardRegions)
             return StyleDifferenceLayout;
 #endif
+
+#if ENABLE(CSS_EXCLUSIONS)
+        if (rareNonInheritedData->m_shapeInside != other->rareNonInheritedData->m_shapeInside)
+            return StyleDifferenceLayout;
+#endif
     }
 
     if (rareInheritedData.get() != other->rareInheritedData.get()) {
@@ -534,21 +469,31 @@ StyleDifference RenderStyle::diff(const RenderStyle* other, unsigned& changedCon
             || rareInheritedData->m_effectiveZoom != other->rareInheritedData->m_effectiveZoom
             || rareInheritedData->textSizeAdjust != other->rareInheritedData->textSizeAdjust
             || rareInheritedData->wordBreak != other->rareInheritedData->wordBreak
-            || rareInheritedData->wordWrap != other->rareInheritedData->wordWrap
+            || rareInheritedData->overflowWrap != other->rareInheritedData->overflowWrap
             || rareInheritedData->nbspMode != other->rareInheritedData->nbspMode
-            || rareInheritedData->khtmlLineBreak != other->rareInheritedData->khtmlLineBreak
+            || rareInheritedData->lineBreak != other->rareInheritedData->lineBreak
             || rareInheritedData->textSecurity != other->rareInheritedData->textSecurity
             || rareInheritedData->hyphens != other->rareInheritedData->hyphens
             || rareInheritedData->hyphenationLimitBefore != other->rareInheritedData->hyphenationLimitBefore
             || rareInheritedData->hyphenationLimitAfter != other->rareInheritedData->hyphenationLimitAfter
             || rareInheritedData->hyphenationString != other->rareInheritedData->hyphenationString
             || rareInheritedData->locale != other->rareInheritedData->locale
+            || rareInheritedData->m_rubyPosition != other->rareInheritedData->m_rubyPosition
             || rareInheritedData->textEmphasisMark != other->rareInheritedData->textEmphasisMark
             || rareInheritedData->textEmphasisPosition != other->rareInheritedData->textEmphasisPosition
             || rareInheritedData->textEmphasisCustomMark != other->rareInheritedData->textEmphasisCustomMark
+            || rareInheritedData->m_textOrientation != other->rareInheritedData->m_textOrientation
+            || rareInheritedData->m_tabSize != other->rareInheritedData->m_tabSize
             || rareInheritedData->m_lineBoxContain != other->rareInheritedData->m_lineBoxContain
             || rareInheritedData->m_lineGrid != other->rareInheritedData->m_lineGrid
-            || rareInheritedData->m_lineGridSnap != other->rareInheritedData->m_lineGridSnap)
+#if ENABLE(CSS_IMAGE_RESOLUTION)
+            || rareInheritedData->m_imageResolutionSource != other->rareInheritedData->m_imageResolutionSource
+            || rareInheritedData->m_imageResolutionSnap != other->rareInheritedData->m_imageResolutionSnap
+            || rareInheritedData->m_imageResolution != other->rareInheritedData->m_imageResolution
+#endif
+            || rareInheritedData->m_lineSnap != other->rareInheritedData->m_lineSnap
+            || rareInheritedData->m_lineAlign != other->rareInheritedData->m_lineAlign
+            || rareInheritedData->listStyleImage != other->rareInheritedData->listStyleImage)
             return StyleDifferenceLayout;
 
         if (!rareInheritedData->shadowDataEquivalent(*other->rareInheritedData.get()))
@@ -558,11 +503,12 @@ StyleDifference RenderStyle::diff(const RenderStyle* other, unsigned& changedCon
             return StyleDifferenceLayout;
     }
 
-    if (inherited->line_height != other->inherited->line_height
-#if OS(ANDROID) && ENABLE(FONT_BOOSTING)
-        || inherited->specified_line_height != other->inherited->specified_line_height
+#if ENABLE(TEXT_AUTOSIZING)
+    if (visual->m_textAutosizingMultiplier != other->visual->m_textAutosizingMultiplier)
+        return StyleDifferenceLayout;
 #endif
-        || inherited->list_style_image != other->inherited->list_style_image
+
+    if (inherited->line_height != other->inherited->line_height
         || inherited->font != other->inherited->font
         || inherited->horizontal_border_spacing != other->inherited->horizontal_border_spacing
         || inherited->vertical_border_spacing != other->inherited->vertical_border_spacing
@@ -635,9 +581,6 @@ StyleDifference RenderStyle::diff(const RenderStyle* other, unsigned& changedCon
     const CounterDirectiveMap* mapB = other->rareNonInheritedData->m_counterDirectives.get();
     if (!(mapA == mapB || (mapA && mapB && *mapA == *mapB)))
         return StyleDifferenceLayout;
-    if (rareNonInheritedData->m_counterIncrement != other->rareNonInheritedData->m_counterIncrement
-        || rareNonInheritedData->m_counterReset != other->rareNonInheritedData->m_counterReset)
-        return StyleDifferenceLayout;
 
     if ((visibility() == COLLAPSE) != (other->visibility() == COLLAPSE))
         return StyleDifferenceLayout;
@@ -651,6 +594,9 @@ StyleDifference RenderStyle::diff(const RenderStyle* other, unsigned& changedCon
         // a full layout is necessary to keep floating object lists sane.
         return StyleDifferenceLayout;
     }
+
+    if (!QuotesData::equals(rareInheritedData->quotes.get(), other->rareInheritedData->quotes.get()))
+        return StyleDifferenceLayout;
 
 #if ENABLE(SVG)
     // SVGRenderStyle::diff() might have returned StyleDifferenceRepaint, eg. if fill changes.
@@ -677,6 +623,11 @@ StyleDifference RenderStyle::diff(const RenderStyle* other, unsigned& changedCon
                  || visual->clip != other->visual->clip || visual->hasClip != other->visual->hasClip)
             return StyleDifferenceRepaintLayer;
     }
+    
+#if ENABLE(CSS_COMPOSITING)
+    if (rareNonInheritedData->m_effectiveBlendMode != other->rareNonInheritedData->m_effectiveBlendMode)
+        return StyleDifferenceRepaintLayer;
+#endif
 
     if (rareNonInheritedData->opacity != other->rareNonInheritedData->opacity) {
 #if USE(ACCELERATED_COMPOSITING)
@@ -686,6 +637,18 @@ StyleDifference RenderStyle::diff(const RenderStyle* other, unsigned& changedCon
         return StyleDifferenceRepaintLayer;
 #endif
     }
+
+#if ENABLE(CSS_FILTERS)
+    if (rareNonInheritedData->m_filter.get() != other->rareNonInheritedData->m_filter.get()
+        && *rareNonInheritedData->m_filter.get() != *other->rareNonInheritedData->m_filter.get()) {
+#if USE(ACCELERATED_COMPOSITING)
+        changedContextSensitiveProperties |= ContextSensitivePropertyFilter;
+        // Don't return; keep looking for another change.
+#else
+        return StyleDifferenceRepaintLayer;
+#endif
+    }
+#endif
 
     if (rareNonInheritedData->m_mask != other->rareNonInheritedData->m_mask
         || rareNonInheritedData->m_maskBoxImage != other->rareNonInheritedData->m_maskBoxImage)
@@ -703,6 +666,9 @@ StyleDifference RenderStyle::diff(const RenderStyle* other, unsigned& changedCon
         || rareInheritedData->userSelect != other->rareInheritedData->userSelect
         || rareNonInheritedData->userDrag != other->rareNonInheritedData->userDrag
         || rareNonInheritedData->m_borderFit != other->rareNonInheritedData->m_borderFit
+#if ENABLE(CSS3_TEXT)
+        || rareNonInheritedData->m_textDecorationStyle != other->rareNonInheritedData->m_textDecorationStyle
+#endif // CSS3_TEXT
         || rareInheritedData->textFillColor != other->rareInheritedData->textFillColor
         || rareInheritedData->textStrokeColor != other->rareInheritedData->textStrokeColor
         || rareInheritedData->textEmphasisColor != other->rareInheritedData->textEmphasisColor
@@ -715,9 +681,12 @@ StyleDifference RenderStyle::diff(const RenderStyle* other, unsigned& changedCon
         // the parent container. For sure, I will have to revisit this code, but for now I've added this in order 
         // to avoid having diff() == StyleDifferenceEqual where wrap-shapes actually differ.
         // Tracking bug: https://bugs.webkit.org/show_bug.cgi?id=62991
-        if (rareNonInheritedData->m_wrapShapeInside != other->rareNonInheritedData->m_wrapShapeInside
-            || rareNonInheritedData->m_wrapShapeOutside != other->rareNonInheritedData->m_wrapShapeOutside)
+        if (rareNonInheritedData->m_shapeOutside != other->rareNonInheritedData->m_shapeOutside)
             return StyleDifferenceRepaint;
+
+        if (rareNonInheritedData->m_clipPath != other->rareNonInheritedData->m_clipPath)
+            return StyleDifferenceRepaint;
+
 
 #if USE(ACCELERATED_COMPOSITING)
     if (rareNonInheritedData.get() != other->rareNonInheritedData.get()) {
@@ -761,7 +730,7 @@ void RenderStyle::setCursorList(PassRefPtr<CursorList> other)
 
 void RenderStyle::setQuotes(PassRefPtr<QuotesData> q)
 {
-    if (QuotesData::equal(rareInheritedData->quotes.get(), q.get()))
+    if (QuotesData::equals(rareInheritedData->quotes.get(), q.get()))
         return;
     rareInheritedData.access()->quotes = q;
 }
@@ -816,9 +785,7 @@ void RenderStyle::setContent(const String& string, bool add)
             // We attempt to merge with the last ContentData if possible.
             if (lastContent->isText()) {
                 TextContentData* textContent = static_cast<TextContentData*>(lastContent);
-                String text = textContent->text();
-                text += string;
-                textContent->setText(text);
+                textContent->setText(textContent->text() + string);
             } else
                 lastContent->setNext(ContentData::create(string));
 
@@ -851,39 +818,70 @@ void RenderStyle::setContent(QuoteType quote, bool add)
 
     rareNonInheritedData.access()->m_content = ContentData::create(quote);
 }
-
-void RenderStyle::applyTransform(TransformationMatrix& transform, const LayoutSize& borderBoxSize, ApplyTransformOrigin applyOrigin) const
+    
+inline bool requireTransformOrigin(const Vector<RefPtr<TransformOperation> >& transformOperations, RenderStyle::ApplyTransformOrigin applyOrigin)
 {
     // transform-origin brackets the transform with translate operations.
     // Optimize for the case where the only transform is a translation, since the transform-origin is irrelevant
     // in that case.
-    bool applyTransformOrigin = false;
-    unsigned s = rareNonInheritedData->m_transform->m_operations.operations().size();
-    unsigned i;
-    if (applyOrigin == IncludeTransformOrigin) {
-        for (i = 0; i < s; i++) {
-            TransformOperation::OperationType type = rareNonInheritedData->m_transform->m_operations.operations()[i]->getOperationType();
-            if (type != TransformOperation::TRANSLATE_X
-                    && type != TransformOperation::TRANSLATE_Y
-                    && type != TransformOperation::TRANSLATE 
-                    && type != TransformOperation::TRANSLATE_Z
-                    && type != TransformOperation::TRANSLATE_3D
-                    ) {
-                applyTransformOrigin = true;
-                break;
-            }
-        }
+    if (applyOrigin != RenderStyle::IncludeTransformOrigin)
+        return false;
+
+    unsigned size = transformOperations.size();
+    for (unsigned i = 0; i < size; ++i) {
+        TransformOperation::OperationType type = transformOperations[i]->getOperationType();
+        if (type != TransformOperation::TRANSLATE_X
+            && type != TransformOperation::TRANSLATE_Y
+            && type != TransformOperation::TRANSLATE 
+            && type != TransformOperation::TRANSLATE_Z
+            && type != TransformOperation::TRANSLATE_3D)
+            return true;
     }
+    
+    return false;
+}
 
+void RenderStyle::applyTransform(TransformationMatrix& transform, const LayoutSize& borderBoxSize, ApplyTransformOrigin applyOrigin) const
+{
+    // FIXME: when subpixel layout is supported (bug 71143) the body of this function could be replaced by
+    // applyTransform(transform, FloatRect(FloatPoint(), borderBoxSize), applyOrigin);
+    
+    const Vector<RefPtr<TransformOperation> >& transformOperations = rareNonInheritedData->m_transform->m_operations.operations();
+    bool applyTransformOrigin = requireTransformOrigin(transformOperations, applyOrigin);
+
+    if (applyTransformOrigin)
+        transform.translate3d(floatValueForLength(transformOriginX(), borderBoxSize.width()), floatValueForLength(transformOriginY(), borderBoxSize.height()), transformOriginZ());
+
+    unsigned size = transformOperations.size();
+    for (unsigned i = 0; i < size; ++i)
+        transformOperations[i]->apply(transform, borderBoxSize);
+
+    if (applyTransformOrigin)
+        transform.translate3d(-floatValueForLength(transformOriginX(), borderBoxSize.width()), -floatValueForLength(transformOriginY(), borderBoxSize.height()), -transformOriginZ()); 
+}
+
+void RenderStyle::applyTransform(TransformationMatrix& transform, const FloatRect& boundingBox, ApplyTransformOrigin applyOrigin) const
+{
+    const Vector<RefPtr<TransformOperation> >& transformOperations = rareNonInheritedData->m_transform->m_operations.operations();
+    bool applyTransformOrigin = requireTransformOrigin(transformOperations, applyOrigin);
+    
+    float offsetX = transformOriginX().type() == Percent ? boundingBox.x() : 0;
+    float offsetY = transformOriginY().type() == Percent ? boundingBox.y() : 0;
+    
     if (applyTransformOrigin) {
-        transform.translate3d(transformOriginX().calcFloatValue(borderBoxSize.width()), transformOriginY().calcFloatValue(borderBoxSize.height()), transformOriginZ());
+        transform.translate3d(floatValueForLength(transformOriginX(), boundingBox.width()) + offsetX,
+                              floatValueForLength(transformOriginY(), boundingBox.height()) + offsetY,
+                              transformOriginZ());
     }
-
-    for (i = 0; i < s; i++)
-        rareNonInheritedData->m_transform->m_operations.operations()[i]->apply(transform, borderBoxSize);
-
+    
+    unsigned size = transformOperations.size();
+    for (unsigned i = 0; i < size; ++i)
+        transformOperations[i]->apply(transform, boundingBox.size());
+    
     if (applyTransformOrigin) {
-        transform.translate3d(-transformOriginX().calcFloatValue(borderBoxSize.width()), -transformOriginY().calcFloatValue(borderBoxSize.height()), -transformOriginZ());
+        transform.translate3d(-floatValueForLength(transformOriginX(), boundingBox.width()) - offsetX,
+                              -floatValueForLength(transformOriginY(), boundingBox.height()) - offsetY,
+                              -transformOriginZ());
     }
 }
 
@@ -924,17 +922,17 @@ void RenderStyle::setBoxShadow(PassOwnPtr<ShadowData> shadowData, bool add)
     rareData->m_boxShadow = shadowData;
 }
 
-static RoundedRect::Radii calcRadiiFor(const BorderData& border, LayoutSize size)
+static RoundedRect::Radii calcRadiiFor(const BorderData& border, IntSize size, RenderView* renderView)
 {
     return RoundedRect::Radii(
-        LayoutSize(border.topLeft().width().calcValue(size.width()), 
-                   border.topLeft().height().calcValue(size.height())),
-        LayoutSize(border.topRight().width().calcValue(size.width()),
-                   border.topRight().height().calcValue(size.height())),
-        LayoutSize(border.bottomLeft().width().calcValue(size.width()), 
-                   border.bottomLeft().height().calcValue(size.height())),
-        LayoutSize(border.bottomRight().width().calcValue(size.width()), 
-                   border.bottomRight().height().calcValue(size.height())));
+        IntSize(valueForLength(border.topLeft().width(), size.width(), renderView), 
+                valueForLength(border.topLeft().height(), size.height(), renderView)),
+        IntSize(valueForLength(border.topRight().width(), size.width(), renderView),
+                valueForLength(border.topRight().height(), size.height(), renderView)),
+        IntSize(valueForLength(border.bottomLeft().width(), size.width(), renderView), 
+                valueForLength(border.bottomLeft().height(), size.height(), renderView)),
+        IntSize(valueForLength(border.bottomRight().width(), size.width(), renderView), 
+                valueForLength(border.bottomRight().height(), size.height(), renderView)));
 }
 
 static float calcConstraintScaleFor(const IntRect& rect, const RoundedRect::Radii& radii)
@@ -969,12 +967,30 @@ static float calcConstraintScaleFor(const IntRect& rect, const RoundedRect::Radi
     return factor;
 }
 
-RoundedRect RenderStyle::getRoundedBorderFor(const LayoutRect& borderRect, bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const
+StyleImage* RenderStyle::listStyleImage() const { return rareInheritedData->listStyleImage.get(); }
+void RenderStyle::setListStyleImage(PassRefPtr<StyleImage> v)
 {
-    RoundedRect roundedRect(borderRect);
+    if (rareInheritedData->listStyleImage != v)
+        rareInheritedData.access()->listStyleImage = v;
+}
+
+Color RenderStyle::color() const { return inherited->color; }
+Color RenderStyle::visitedLinkColor() const { return inherited->visitedLinkColor; }
+void RenderStyle::setColor(const Color& v) { SET_VAR(inherited, color, v) };
+void RenderStyle::setVisitedLinkColor(const Color& v) { SET_VAR(inherited, visitedLinkColor, v) }
+
+short RenderStyle::horizontalBorderSpacing() const { return inherited->horizontal_border_spacing; }
+short RenderStyle::verticalBorderSpacing() const { return inherited->vertical_border_spacing; }
+void RenderStyle::setHorizontalBorderSpacing(short v) { SET_VAR(inherited, horizontal_border_spacing, v) }
+void RenderStyle::setVerticalBorderSpacing(short v) { SET_VAR(inherited, vertical_border_spacing, v) }
+
+RoundedRect RenderStyle::getRoundedBorderFor(const LayoutRect& borderRect, RenderView* renderView, bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const
+{
+    IntRect snappedBorderRect(pixelSnappedIntRect(borderRect));
+    RoundedRect roundedRect(snappedBorderRect);
     if (hasBorderRadius()) {
-        RoundedRect::Radii radii = calcRadiiFor(surround->border, borderRect.size());
-        radii.scale(calcConstraintScaleFor(borderRect, radii));
+        RoundedRect::Radii radii = calcRadiiFor(surround->border, snappedBorderRect.size(), renderView);
+        radii.scale(calcConstraintScaleFor(snappedBorderRect, radii));
         roundedRect.includeLogicalEdges(radii, isHorizontalWritingMode(), includeLogicalLeftEdge, includeLogicalRightEdge);
     }
     return roundedRect;
@@ -1000,7 +1016,7 @@ RoundedRect RenderStyle::getRoundedInnerBorderFor(const LayoutRect& borderRect,
                borderRect.width() - leftWidth - rightWidth, 
                borderRect.height() - topWidth - bottomWidth);
 
-    RoundedRect roundedRect(innerRect);
+    RoundedRect roundedRect(pixelSnappedIntRect(innerRect));
 
     if (hasBorderRadius()) {
         RoundedRect::Radii radii = getRoundedBorderFor(borderRect).radii();
@@ -1021,6 +1037,13 @@ CounterDirectiveMap& RenderStyle::accessCounterDirectives()
     if (!map)
         map = adoptPtr(new CounterDirectiveMap);
     return *map;
+}
+
+const CounterDirectives RenderStyle::getCounterDirectives(const AtomicString& identifier) const
+{
+    if (const CounterDirectiveMap* directives = counterDirectives())
+        return directives->get(identifier);
+    return CounterDirectives();
 }
 
 const AtomicString& RenderStyle::hyphenString() const
@@ -1177,12 +1200,12 @@ AnimationList* RenderStyle::accessTransitions()
     return rareNonInheritedData->m_transitions.get();
 }
 
-const Animation* RenderStyle::transitionForProperty(int property) const
+const Animation* RenderStyle::transitionForProperty(CSSPropertyID property) const
 {
     if (transitions()) {
         for (size_t i = 0; i < transitions()->size(); ++i) {
             const Animation* p = transitions()->animation(i);
-            if (p->property() == cAnimateAll || p->property() == property) {
+            if (p->animationMode() == Animation::AnimateAll || p->property() == property) {
                 return p;
             }
         }
@@ -1190,27 +1213,82 @@ const Animation* RenderStyle::transitionForProperty(int property) const
     return 0;
 }
 
-#if OS(ANDROID) && ENABLE(FONT_BOOSTING)
-void RenderStyle::setBlendedFontSize(float specifiedSize, float computedSize)
+const Font& RenderStyle::font() const { return inherited->font; }
+const FontMetrics& RenderStyle::fontMetrics() const { return inherited->font.fontMetrics(); }
+const FontDescription& RenderStyle::fontDescription() const { return inherited->font.fontDescription(); }
+float RenderStyle::specifiedFontSize() const { return fontDescription().specifiedSize(); }
+float RenderStyle::computedFontSize() const { return fontDescription().computedSize(); }
+int RenderStyle::fontSize() const { return inherited->font.pixelSize(); }
+
+int RenderStyle::wordSpacing() const { return inherited->font.wordSpacing(); }
+int RenderStyle::letterSpacing() const { return inherited->font.letterSpacing(); }
+
+bool RenderStyle::setFontDescription(const FontDescription& v)
 {
-    FontSelector* currentFontSelector = font().fontSelector();
-    FontDescription desc(fontDescription());
-    desc.setSpecifiedSize(specifiedSize);
-    desc.setComputedSize(computedSize);
-    setFontDescription(desc);
-    font().update(currentFontSelector);
+    if (inherited->font.fontDescription() != v) {
+        inherited.access()->font = Font(v, inherited->font.letterSpacing(), inherited->font.wordSpacing());
+        return true;
+    }
+    return false;
 }
-#else
-void RenderStyle::setBlendedFontSize(int size)
+
+Length RenderStyle::specifiedLineHeight() const { return inherited->line_height; }
+Length RenderStyle::lineHeight() const
 {
+    const Length& lh = inherited->line_height;
+#if ENABLE(TEXT_AUTOSIZING)
+    // Unlike fontDescription().computedSize() and hence fontSize(), this is
+    // recalculated on demand as we only store the specified line height.
+    // FIXME: Should consider scaling the fixed part of any calc expressions
+    // too, though this involves messily poking into CalcExpressionLength.
+    float multiplier = textAutosizingMultiplier();
+    if (multiplier > 1 && lh.isFixed())
+        return Length(TextAutosizer::computeAutosizedFontSize(lh.value(), multiplier), Fixed);
+#endif
+    return lh;
+}
+void RenderStyle::setLineHeight(Length specifiedLineHeight) { SET_VAR(inherited, line_height, specifiedLineHeight); }
+
+int RenderStyle::computedLineHeight(RenderView* renderView) const
+{
+    const Length& lh = lineHeight();
+
+    // Negative value means the line height is not set. Use the font's built-in spacing.
+    if (lh.isNegative())
+        return fontMetrics().lineSpacing();
+
+    if (lh.isPercent())
+        return minimumValueForLength(lh, fontSize());
+
+    if (lh.isViewportPercentage())
+        return valueForLength(lh, 0, renderView);
+
+    return lh.value();
+}
+
+void RenderStyle::setWordSpacing(int v) { inherited.access()->font.setWordSpacing(v); }
+void RenderStyle::setLetterSpacing(int v) { inherited.access()->font.setLetterSpacing(v); }
+
+void RenderStyle::setFontSize(float size)
+{
+    // size must be specifiedSize if Text Autosizing is enabled, but computedSize if text
+    // zoom is enabled (if neither is enabled it's irrelevant as they're probably the same).
+
     FontSelector* currentFontSelector = font().fontSelector();
     FontDescription desc(fontDescription());
     desc.setSpecifiedSize(size);
     desc.setComputedSize(size);
+
+#if ENABLE(TEXT_AUTOSIZING)
+    float multiplier = textAutosizingMultiplier();
+    if (multiplier > 1) {
+        desc.setComputedSize(TextAutosizer::computeAutosizedFontSize(size, multiplier));
+    }
+#endif
+
     setFontDescription(desc);
     font().update(currentFontSelector);
 }
-#endif
 
 void RenderStyle::getShadowExtent(const ShadowData* shadow, LayoutUnit &top, LayoutUnit &right, LayoutUnit &bottom, LayoutUnit &left) const
 {
@@ -1224,11 +1302,31 @@ void RenderStyle::getShadowExtent(const ShadowData* shadow, LayoutUnit &top, Lay
             continue;
         int blurAndSpread = shadow->blur() + shadow->spread();
 
-        top = min(top, shadow->y() - blurAndSpread);
-        right = max(right, shadow->x() + blurAndSpread);
-        bottom = max(bottom, shadow->y() + blurAndSpread);
-        left = min(left, shadow->x() - blurAndSpread);
+        top = min<LayoutUnit>(top, shadow->y() - blurAndSpread);
+        right = max<LayoutUnit>(right, shadow->x() + blurAndSpread);
+        bottom = max<LayoutUnit>(bottom, shadow->y() + blurAndSpread);
+        left = min<LayoutUnit>(left, shadow->x() - blurAndSpread);
     }
+}
+
+LayoutBoxExtent RenderStyle::getShadowInsetExtent(const ShadowData* shadow) const
+{
+    LayoutUnit top = 0;
+    LayoutUnit right = 0;
+    LayoutUnit bottom = 0;
+    LayoutUnit left = 0;
+
+    for ( ; shadow; shadow = shadow->next()) {
+        if (shadow->style() == Normal)
+            continue;
+        int blurAndSpread = shadow->blur() + shadow->spread();
+        top = max<LayoutUnit>(top, shadow->y() + blurAndSpread);
+        right = min<LayoutUnit>(right, shadow->x() - blurAndSpread);
+        bottom = min<LayoutUnit>(bottom, shadow->y() - blurAndSpread);
+        left = max<LayoutUnit>(left, shadow->x() + blurAndSpread);
+    }
+
+    return LayoutBoxExtent(top, right, bottom, left);
 }
 
 void RenderStyle::getShadowHorizontalExtent(const ShadowData* shadow, LayoutUnit &left, LayoutUnit &right) const
@@ -1241,8 +1339,8 @@ void RenderStyle::getShadowHorizontalExtent(const ShadowData* shadow, LayoutUnit
             continue;
         int blurAndSpread = shadow->blur() + shadow->spread();
 
-        left = min(left, shadow->x() - blurAndSpread);
-        right = max(right, shadow->x() + blurAndSpread);
+        left = min<LayoutUnit>(left, shadow->x() - blurAndSpread);
+        right = max<LayoutUnit>(right, shadow->x() + blurAndSpread);
     }
 }
 
@@ -1256,8 +1354,8 @@ void RenderStyle::getShadowVerticalExtent(const ShadowData* shadow, LayoutUnit &
             continue;
         int blurAndSpread = shadow->blur() + shadow->spread();
 
-        top = min(top, shadow->y() - blurAndSpread);
-        bottom = max(bottom, shadow->y() + blurAndSpread);
+        top = min<LayoutUnit>(top, shadow->y() - blurAndSpread);
+        bottom = max<LayoutUnit>(bottom, shadow->y() + blurAndSpread);
     }
 }
 
@@ -1267,40 +1365,40 @@ Color RenderStyle::colorIncludingFallback(int colorProperty, bool visitedLink) c
     EBorderStyle borderStyle = BNONE;
     switch (colorProperty) {
     case CSSPropertyBackgroundColor:
-        return visitedLink ? rareNonInheritedData->m_visitedLinkBackgroundColor : backgroundColor(); // Background color doesn't fall back.
+        return visitedLink ? visitedLinkBackgroundColor() : backgroundColor(); // Background color doesn't fall back.
     case CSSPropertyBorderLeftColor:
-        result = visitedLink ? rareNonInheritedData->m_visitedLinkBorderLeftColor : borderLeftColor();
+        result = visitedLink ? visitedLinkBorderLeftColor() : borderLeftColor();
         borderStyle = borderLeftStyle();
         break;
     case CSSPropertyBorderRightColor:
-        result = visitedLink ? rareNonInheritedData->m_visitedLinkBorderRightColor : borderRightColor();
+        result = visitedLink ? visitedLinkBorderRightColor() : borderRightColor();
         borderStyle = borderRightStyle();
         break;
     case CSSPropertyBorderTopColor:
-        result = visitedLink ? rareNonInheritedData->m_visitedLinkBorderTopColor : borderTopColor();
+        result = visitedLink ? visitedLinkBorderTopColor() : borderTopColor();
         borderStyle = borderTopStyle();
         break;
     case CSSPropertyBorderBottomColor:
-        result = visitedLink ? rareNonInheritedData->m_visitedLinkBorderBottomColor : borderBottomColor();
+        result = visitedLink ? visitedLinkBorderBottomColor() : borderBottomColor();
         borderStyle = borderBottomStyle();
         break;
     case CSSPropertyColor:
-        result = visitedLink ? inherited->visitedLinkColor : color();
+        result = visitedLink ? visitedLinkColor() : color();
         break;
     case CSSPropertyOutlineColor:
-        result = visitedLink ? rareNonInheritedData->m_visitedLinkOutlineColor : outlineColor();
+        result = visitedLink ? visitedLinkOutlineColor() : outlineColor();
         break;
     case CSSPropertyWebkitColumnRuleColor:
-        result = visitedLink ? rareNonInheritedData->m_multiCol->m_visitedLinkColumnRuleColor : columnRuleColor();
+        result = visitedLink ? visitedLinkColumnRuleColor() : columnRuleColor();
         break;
     case CSSPropertyWebkitTextEmphasisColor:
-        result = visitedLink ? rareInheritedData->visitedLinkTextEmphasisColor : textEmphasisColor();
+        result = visitedLink ? visitedLinkTextEmphasisColor() : textEmphasisColor();
         break;
     case CSSPropertyWebkitTextFillColor:
-        result = visitedLink ? rareInheritedData->visitedLinkTextFillColor : textFillColor();
+        result = visitedLink ? visitedLinkTextFillColor() : textFillColor();
         break;
     case CSSPropertyWebkitTextStrokeColor:
-        result = visitedLink ? rareInheritedData->visitedLinkTextStrokeColor : textStrokeColor();
+        result = visitedLink ? visitedLinkTextStrokeColor() : textStrokeColor();
         break;
     default:
         ASSERT_NOT_REACHED();
@@ -1311,7 +1409,7 @@ Color RenderStyle::colorIncludingFallback(int colorProperty, bool visitedLink) c
         if (!visitedLink && (borderStyle == INSET || borderStyle == OUTSET || borderStyle == RIDGE || borderStyle == GROOVE))
             result.setRGB(238, 238, 238);
         else
-            result = visitedLink ? inherited->visitedLinkColor : color();
+            result = visitedLink ? visitedLinkColor() : color();
     }
     return result;
 }
@@ -1334,48 +1432,6 @@ Color RenderStyle::visitedDependentColor(int colorProperty) const
 
     // Take the alpha from the unvisited color, but get the RGB values from the visited color.
     return Color(visitedColor.red(), visitedColor.green(), visitedColor.blue(), unvisitedColor.alpha());
-}
-
-Length RenderStyle::logicalWidth() const
-{
-    if (isHorizontalWritingMode())
-        return width();
-    return height();
-}
-
-Length RenderStyle::logicalHeight() const
-{
-    if (isHorizontalWritingMode())
-        return height();
-    return width();
-}
-
-Length RenderStyle::logicalMinWidth() const
-{
-    if (isHorizontalWritingMode())
-        return minWidth();
-    return minHeight();
-}
-
-Length RenderStyle::logicalMaxWidth() const
-{
-    if (isHorizontalWritingMode())
-        return maxWidth();
-    return maxHeight();
-}
-
-Length RenderStyle::logicalMinHeight() const
-{
-    if (isHorizontalWritingMode())
-        return minHeight();
-    return minWidth();
-}
-
-Length RenderStyle::logicalMaxHeight() const
-{
-    if (isHorizontalWritingMode())
-        return maxHeight();
-    return maxWidth();
 }
 
 const BorderValue& RenderStyle::borderBefore() const
@@ -1469,98 +1525,6 @@ unsigned short RenderStyle::borderEndWidth() const
         return isLeftToRightDirection() ? borderRightWidth() : borderLeftWidth();
     return isLeftToRightDirection() ? borderBottomWidth() : borderTopWidth();
 }
-    
-Length RenderStyle::marginBefore() const
-{
-    switch (writingMode()) {
-    case TopToBottomWritingMode:
-        return marginTop();
-    case BottomToTopWritingMode:
-        return marginBottom();
-    case LeftToRightWritingMode:
-        return marginLeft();
-    case RightToLeftWritingMode:
-        return marginRight();
-    }
-    ASSERT_NOT_REACHED();
-    return marginTop();
-}
-
-Length RenderStyle::marginAfter() const
-{
-    switch (writingMode()) {
-    case TopToBottomWritingMode:
-        return marginBottom();
-    case BottomToTopWritingMode:
-        return marginTop();
-    case LeftToRightWritingMode:
-        return marginRight();
-    case RightToLeftWritingMode:
-        return marginLeft();
-    }
-    ASSERT_NOT_REACHED();
-    return marginBottom();
-}
-
-Length RenderStyle::marginBeforeUsing(const RenderStyle* otherStyle) const
-{
-    switch (otherStyle->writingMode()) {
-    case TopToBottomWritingMode:
-        return marginTop();
-    case BottomToTopWritingMode:
-        return marginBottom();
-    case LeftToRightWritingMode:
-        return marginLeft();
-    case RightToLeftWritingMode:
-        return marginRight();
-    }
-    ASSERT_NOT_REACHED();
-    return marginTop();
-}
-
-Length RenderStyle::marginAfterUsing(const RenderStyle* otherStyle) const
-{
-    switch (otherStyle->writingMode()) {
-    case TopToBottomWritingMode:
-        return marginBottom();
-    case BottomToTopWritingMode:
-        return marginTop();
-    case LeftToRightWritingMode:
-        return marginRight();
-    case RightToLeftWritingMode:
-        return marginLeft();
-    }
-    ASSERT_NOT_REACHED();
-    return marginBottom();
-}
-
-Length RenderStyle::marginStart() const
-{
-    if (isHorizontalWritingMode())
-        return isLeftToRightDirection() ? marginLeft() : marginRight();
-    return isLeftToRightDirection() ? marginTop() : marginBottom();
-}
-
-Length RenderStyle::marginEnd() const
-{
-    if (isHorizontalWritingMode())
-        return isLeftToRightDirection() ? marginRight() : marginLeft();
-    return isLeftToRightDirection() ? marginBottom() : marginTop();
-}
-    
-Length RenderStyle::marginStartUsing(const RenderStyle* otherStyle) const
-{
-    if (otherStyle->isHorizontalWritingMode())
-        return otherStyle->isLeftToRightDirection() ? marginLeft() : marginRight();
-    return otherStyle->isLeftToRightDirection() ? marginTop() : marginBottom();
-}
-
-Length RenderStyle::marginEndUsing(const RenderStyle* otherStyle) const
-{
-    if (otherStyle->isHorizontalWritingMode())
-        return otherStyle->isLeftToRightDirection() ? marginRight() : marginLeft();
-    return otherStyle->isLeftToRightDirection() ? marginBottom() : marginTop();
-}
 
 void RenderStyle::setMarginStart(Length margin)
 {
@@ -1592,52 +1556,6 @@ void RenderStyle::setMarginEnd(Length margin)
     }
 }
 
-Length RenderStyle::paddingBefore() const
-{
-    switch (writingMode()) {
-    case TopToBottomWritingMode:
-        return paddingTop();
-    case BottomToTopWritingMode:
-        return paddingBottom();
-    case LeftToRightWritingMode:
-        return paddingLeft();
-    case RightToLeftWritingMode:
-        return paddingRight();
-    }
-    ASSERT_NOT_REACHED();
-    return paddingTop();
-}
-
-Length RenderStyle::paddingAfter() const
-{
-    switch (writingMode()) {
-    case TopToBottomWritingMode:
-        return paddingBottom();
-    case BottomToTopWritingMode:
-        return paddingTop();
-    case LeftToRightWritingMode:
-        return paddingRight();
-    case RightToLeftWritingMode:
-        return paddingLeft();
-    }
-    ASSERT_NOT_REACHED();
-    return paddingBottom();
-}
-
-Length RenderStyle::paddingStart() const
-{
-    if (isHorizontalWritingMode())
-        return isLeftToRightDirection() ? paddingLeft() : paddingRight();
-    return isLeftToRightDirection() ? paddingTop() : paddingBottom();
-}
-
-Length RenderStyle::paddingEnd() const
-{
-    if (isHorizontalWritingMode())
-        return isLeftToRightDirection() ? paddingRight() : paddingLeft();
-    return isLeftToRightDirection() ? paddingBottom() : paddingTop();
-}
-
 TextEmphasisMark RenderStyle::textEmphasisMark() const
 {
     TextEmphasisMark mark = static_cast<TextEmphasisMark>(rareInheritedData->textEmphasisMark);
@@ -1657,24 +1575,31 @@ Color RenderStyle::initialTapHighlightColor()
 }
 #endif
 
-void RenderStyle::getImageOutsets(const NinePieceImage& image, LayoutUnit& top, LayoutUnit& right, LayoutUnit& bottom, LayoutUnit& left) const
+LayoutBoxExtent RenderStyle::imageOutsets(const NinePieceImage& image) const
 {
-    top = NinePieceImage::computeOutset(image.outset().top(), borderTopWidth());
-    right = NinePieceImage::computeOutset(image.outset().right(), borderRightWidth());
-    bottom = NinePieceImage::computeOutset(image.outset().bottom(), borderBottomWidth());
-    left = NinePieceImage::computeOutset(image.outset().left(), borderLeftWidth());
+    return LayoutBoxExtent(NinePieceImage::computeOutset(image.outset().top(), borderTopWidth()),
+                           NinePieceImage::computeOutset(image.outset().right(), borderRightWidth()),
+                           NinePieceImage::computeOutset(image.outset().bottom(), borderBottomWidth()),
+                           NinePieceImage::computeOutset(image.outset().left(), borderLeftWidth()));
 }
 
-void RenderStyle::getImageHorizontalOutsets(const NinePieceImage& image, LayoutUnit& left, LayoutUnit& right) const
+void RenderStyle::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
 {
-    right = NinePieceImage::computeOutset(image.outset().right(), borderRightWidth());
-    left = NinePieceImage::computeOutset(image.outset().left(), borderLeftWidth());
-}
-
-void RenderStyle::getImageVerticalOutsets(const NinePieceImage& image, LayoutUnit& top, LayoutUnit& bottom) const
-{
-    top = NinePieceImage::computeOutset(image.outset().top(), borderTopWidth());
-    bottom = NinePieceImage::computeOutset(image.outset().bottom(), borderBottomWidth());
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CSS);
+    info.addMember(m_box);
+    info.addMember(visual);
+    // FIXME: m_background contains RefPtr<StyleImage> that might need to be instrumented.
+    info.addMember(m_background);
+    // FIXME: surrond contains some fields e.g. BorderData that might need to be instrumented.
+    info.addMember(surround);
+    info.addMember(rareNonInheritedData);
+    info.addMember(rareInheritedData);
+    // FIXME: inherited contains StyleImage and Font fields that might need to be instrumented.
+    info.addMember(inherited);
+    info.addMember(m_cachedPseudoStyles);
+#if ENABLE(SVG)
+    info.addMember(m_svgStyle);
+#endif
 }
 
 } // namespace WebCore

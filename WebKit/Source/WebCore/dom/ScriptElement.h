@@ -28,6 +28,7 @@
 namespace WebCore {
 
 class CachedScript;
+class ContainerNode;
 class Element;
 class ScriptElement;
 class ScriptSourceCode;
@@ -66,7 +67,7 @@ protected:
     bool forceAsync() const { return m_forceAsync; }
 
     // Helper functions used by our parent classes.
-    void insertedIntoDocument();
+    void insertedInto(ContainerNode*);
     void childrenChanged();
     void handleSourceAttribute(const String& sourceUrl);
     void handleAsyncAttribute();
@@ -92,6 +93,7 @@ private:
 
     Element* m_element;
     CachedResourceHandle<CachedScript> m_cachedScript;
+    WTF::OrdinalNumber m_startLineNumber;
     bool m_parserInserted : 1;
     bool m_isExternalScript : 1;
     bool m_alreadyStarted : 1;
@@ -101,6 +103,7 @@ private:
     bool m_willExecuteWhenDocumentFinishedParsing : 1;
     bool m_forceAsync : 1;
     bool m_willExecuteInOrder : 1;
+    bool m_requestUsesAccessControl : 1;
     String m_characterEncoding;
     String m_fallbackCharacterEncoding;
 };

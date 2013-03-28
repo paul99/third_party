@@ -51,7 +51,9 @@ AccessibilityTableCell::~AccessibilityTableCell()
 
 PassRefPtr<AccessibilityTableCell> AccessibilityTableCell::create(RenderObject* renderer)
 {
-    return adoptRef(new AccessibilityTableCell(renderer));
+    AccessibilityTableCell* obj = new AccessibilityTableCell(renderer);
+    obj->init();
+    return adoptRef(obj);
 }
 
 bool AccessibilityTableCell::accessibilityIsIgnored() const
@@ -104,7 +106,7 @@ void AccessibilityTableCell::rowIndexRange(pair<int, int>& rowRange)
         return;
     
     RenderTableCell* renderCell = toRenderTableCell(m_renderer);
-    rowRange.first = renderCell->row();
+    rowRange.first = renderCell->rowIndex();
     rowRange.second = renderCell->rowSpan();
     
     // since our table might have multiple sections, we have to offset our row appropriately
@@ -160,7 +162,7 @@ AccessibilityObject* AccessibilityTableCell::titleUIElement() const
     if (!col)
         return 0;
 
-    int row = renderCell->row();
+    int row = renderCell->rowIndex();
 
     RenderTableSection* section = renderCell->section();
     if (!section)

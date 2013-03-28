@@ -34,8 +34,12 @@
 #endif
 #endif
 
-#if PLATFORM(QT) && USE(TEXTURE_MAPPER)
-#include "qt/LayerTreeHostQt.h"
+#if USE(COORDINATED_GRAPHICS)
+#include "CoordinatedLayerTreeHost.h"
+#endif
+
+#if PLATFORM(GTK) && USE(TEXTURE_MAPPER_GL)
+#include "LayerTreeHostGtk.h"
 #endif
 
 using namespace WebCore;
@@ -48,9 +52,12 @@ PassRefPtr<LayerTreeHost> LayerTreeHost::create(WebPage* webPage)
     return LayerTreeHostCAMac::create(webPage);
 #elif PLATFORM(WIN) && HAVE(WKQCA)
     return LayerTreeHostCAWin::create(webPage);
-#elif PLATFORM(QT) && USE(TEXTURE_MAPPER)
-    return LayerTreeHostQt::create(webPage);
+#elif USE(COORDINATED_GRAPHICS)
+    return CoordinatedLayerTreeHost::create(webPage);
+#elif PLATFORM(GTK) && USE(TEXTURE_MAPPER_GL)
+    return LayerTreeHostGtk::create(webPage);
 #else
+    UNUSED_PARAM(webPage);
     return 0;
 #endif
 }

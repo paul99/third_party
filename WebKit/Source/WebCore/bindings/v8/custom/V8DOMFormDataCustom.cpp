@@ -35,28 +35,20 @@
 #include "V8Binding.h"
 #include "V8Blob.h"
 #include "V8HTMLFormElement.h"
-#include "V8Proxy.h"
 #include "V8Utilities.h"
 
 namespace WebCore {
 
-v8::Handle<v8::Value> V8DOMFormData::constructorCallback(const v8::Arguments& args)
+v8::Handle<v8::Value> V8DOMFormData::constructorCallbackCustom(const v8::Arguments& args)
 {
-    INC_STATS("DOM.FormData.Constructor");
-
-    if (!args.IsConstructCall())
-        return throwError("DOM object constructor cannot be called as a function.", V8Proxy::TypeError);
-
-    if (ConstructorMode::current() == ConstructorMode::WrapExistingObject)
-        return args.Holder();
-
     HTMLFormElement* form = 0;
     if (args.Length() > 0 && V8HTMLFormElement::HasInstance(args[0]))
         form = V8HTMLFormElement::toNative(args[0]->ToObject());
     RefPtr<DOMFormData> domFormData = DOMFormData::create(form);
 
-    V8DOMWrapper::setDOMWrapper(args.Holder(), &info, domFormData.get());
-    return toV8(domFormData.release(), args.Holder());
+    v8::Handle<v8::Object> wrapper = args.Holder();
+    V8DOMWrapper::associateObjectWithWrapper(domFormData.release(), &info, wrapper);
+    return wrapper;
 }
 
 v8::Handle<v8::Value> V8DOMFormData::appendCallback(const v8::Arguments& args)
@@ -64,7 +56,7 @@ v8::Handle<v8::Value> V8DOMFormData::appendCallback(const v8::Arguments& args)
     INC_STATS("DOM.FormData.append()");
     
     if (args.Length() < 2)
-        return throwError("Not enough arguments", V8Proxy::SyntaxError);
+        return throwError(v8SyntaxError, "Not enough arguments", args.GetIsolate());
 
     DOMFormData* domFormData = V8DOMFormData::toNative(args.Holder());
 

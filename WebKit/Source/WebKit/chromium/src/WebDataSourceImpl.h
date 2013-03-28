@@ -62,6 +62,7 @@ public:
     virtual bool hasUnreachableURL() const;
     virtual WebURL unreachableURL() const;
     virtual void redirectChain(WebVector<WebURL>&) const;
+    virtual bool isClientRedirect() const;
     virtual WebString pageTitle() const;
     virtual WebTextDirection pageTitleDirection() const;
     virtual WebNavigationType navigationType() const;
@@ -70,6 +71,7 @@ public:
     virtual void setExtraData(ExtraData*);
     virtual WebApplicationCacheHost* applicationCacheHost();
     virtual void setDeferMainResourceDataLoad(bool);
+    virtual void setNavigationStartTime(double);
 
     static WebNavigationType toWebNavigationType(WebCore::NavigationType type);
 

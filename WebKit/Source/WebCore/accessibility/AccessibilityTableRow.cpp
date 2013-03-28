@@ -54,7 +54,9 @@ AccessibilityTableRow::~AccessibilityTableRow()
 
 PassRefPtr<AccessibilityTableRow> AccessibilityTableRow::create(RenderObject* renderer)
 {
-    return adoptRef(new AccessibilityTableRow(renderer));
+    AccessibilityTableRow* obj = new AccessibilityTableRow(renderer);
+    obj->init();
+    return adoptRef(obj);
 }
 
 AccessibilityRole AccessibilityTableRow::roleValue() const
@@ -72,6 +74,12 @@ bool AccessibilityTableRow::isTableRow() const
         return false;
     
     return true;
+}
+    
+AccessibilityObject* AccessibilityTableRow::observableObject() const
+{
+    // This allows the table to be the one who sends notifications about tables.
+    return parentTable();
 }
     
 bool AccessibilityTableRow::accessibilityIsIgnored() const

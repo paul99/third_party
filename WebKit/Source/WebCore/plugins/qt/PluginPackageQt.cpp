@@ -28,9 +28,10 @@
 #include "PluginPackage.h"
 
 #include "MIMETypeRegistry.h"
-#include "npruntime_impl.h"
 #include "PluginDatabase.h"
 #include "PluginDebug.h"
+#include "npruntime_impl.h"
+#include <QFileInfo>
 #include <wtf/text/CString.h>
 
 namespace WebCore {
@@ -41,9 +42,8 @@ bool PluginPackage::fetchInfo()
         return false;
 
     NPP_GetValueProcPtr gv = (NPP_GetValueProcPtr)m_module->resolve("NP_GetValue");
-    typedef char *(*NPP_GetMIMEDescriptionProcPtr)();
-    NPP_GetMIMEDescriptionProcPtr gm =
-        (NPP_GetMIMEDescriptionProcPtr)m_module->resolve("NP_GetMIMEDescription");
+    NP_GetMIMEDescriptionFuncPtr gm =
+        (NP_GetMIMEDescriptionFuncPtr)m_module->resolve("NP_GetMIMEDescription");
     if (!gm || !gv)
         return false;
 
@@ -52,16 +52,15 @@ bool PluginPackage::fetchInfo()
     if (err != NPERR_NO_ERROR)
         return false;
 
-    m_name = buf;
+    m_name = String::fromUTF8(buf);
     err = gv(0, NPPVpluginDescriptionString, (void*) &buf);
     if (err != NPERR_NO_ERROR)
         return false;
 
-    m_description = buf;
+    m_description = String::fromUTF8(buf);
     determineModuleVersionFromDescription();
 
-    String mimeDescription = gm();
-    setMIMEDescription(mimeDescription);
+    setMIMEDescription(String::fromUTF8(gm()));
     m_infoIsFromCache = false;
 
     return true;
@@ -131,12 +130,30 @@ static void initializeGtk(QLibrary* module = 0)
     }
 }
 
+bool PluginPackage::isPluginBlacklisted()
+{
+    // TODO: enumerate all plugins that are incompatible with Qt5.
+    const QLatin1String pluginBlacklist[] = {
+        QLatin1String("skypebuttons")
+    };
+
+    QString baseName = QFileInfo(static_cast<QString>(m_path)).baseName();
+    for (unsigned i = 0; i < sizeof(pluginBlacklist) / sizeof(QLatin1String); ++i) {
+        if (baseName == pluginBlacklist[i])
+            return true;
+    }
+    return false;
+}
+
 bool PluginPackage::load()
 {
     if (m_isLoaded) {
         m_loadCount++;
         return true;
     }
+
+    if (isPluginBlacklisted())
+        return false;
 
     m_module = new QLibrary((QString)m_path);
     m_module->setLoadHints(QLibrary::ResolveAllSymbolsHint);

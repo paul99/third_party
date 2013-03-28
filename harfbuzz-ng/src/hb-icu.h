@@ -30,8 +30,8 @@
 #define HB_ICU_H
 
 #include "hb.h"
-#include <unicode/uscript.h>
 
+#include <unicode/uscript.h>
 
 HB_BEGIN_DECLS
 

@@ -43,7 +43,7 @@ public:
     virtual ~AccessibilitySlider() { }
 
 protected:
-    AccessibilitySlider(RenderObject*);
+    explicit AccessibilitySlider(RenderObject*);
 
 private:
     HTMLInputElement* element() const;
@@ -75,7 +75,6 @@ public:
 
     virtual AccessibilityRole roleValue() const { return SliderThumbRole; }
 
-    virtual LayoutSize size() const;
     virtual LayoutRect elementRect() const;
 
     virtual bool accessibilityIsIgnored() const;

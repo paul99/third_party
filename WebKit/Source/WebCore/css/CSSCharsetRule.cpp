@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2008, 2012 Apple Inc. All rights reserved.
  * Copyright (C) 2006 Alexey Proskuryakov (ap@macrules.ru)
  *
  * This library is free software; you can redistribute it and/or
@@ -21,10 +21,12 @@
 #include "config.h"
 #include "CSSCharsetRule.h"
 
+#include "WebCoreMemoryInstrumentation.h"
+
 namespace WebCore {
 
 CSSCharsetRule::CSSCharsetRule(CSSStyleSheet* parent, const String& encoding)
-    : CSSRule(parent, CSSRule::CHARSET_RULE)
+    : CSSRule(parent)
     , m_encoding(encoding)
 {
 }
@@ -32,6 +34,13 @@ CSSCharsetRule::CSSCharsetRule(CSSStyleSheet* parent, const String& encoding)
 String CSSCharsetRule::cssText() const
 {
     return "@charset \"" + m_encoding + "\";";
+}
+
+void CSSCharsetRule::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CSS);
+    CSSRule::reportMemoryUsage(memoryObjectInfo);
+    info.addMember(m_encoding);
 }
 
 } // namespace WebCore

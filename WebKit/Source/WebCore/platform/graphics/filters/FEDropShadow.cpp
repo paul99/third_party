@@ -29,8 +29,8 @@
 #include "RenderTreeAsText.h"
 #include "ShadowBlur.h"
 #include "TextStream.h"
-#include <wtf/ByteArray.h>
 #include <wtf/MathExtras.h>
+#include <wtf/Uint8ClampedArray.h>
 
 using namespace std;
 
@@ -61,10 +61,6 @@ void FEDropShadow::determineAbsolutePaintRect()
     FloatRect absoluteOffsetPaintRect(absolutePaintRect);
     absoluteOffsetPaintRect.move(filter->applyHorizontalScale(m_dx), filter->applyVerticalScale(m_dy));
     absolutePaintRect.unite(absoluteOffsetPaintRect);
-    if (clipsToBounds())
-        absolutePaintRect.intersect(maxEffectRect());
-    else
-        absolutePaintRect.unite(maxEffectRect());
     
     unsigned kernelSizeX = 0;
     unsigned kernelSizeY = 0;
@@ -73,6 +69,12 @@ void FEDropShadow::determineAbsolutePaintRect()
     // We take the half kernel size and multiply it with three, because we run box blur three times.
     absolutePaintRect.inflateX(3 * kernelSizeX * 0.5f);
     absolutePaintRect.inflateY(3 * kernelSizeY * 0.5f);
+
+    if (clipsToBounds())
+        absolutePaintRect.intersect(maxEffectRect());
+    else
+        absolutePaintRect.unite(maxEffectRect());
+
     setAbsolutePaintRect(enclosingIntRect(absolutePaintRect));
 }
 
@@ -103,12 +105,12 @@ void FEDropShadow::platformApplySoftware()
     ShadowBlur contextShadow(blurRadius, offset, m_shadowColor, ColorSpaceDeviceRGB);
 
     // TODO: Direct pixel access to ImageBuffer would avoid copying the ImageData.
-    IntRect shadowArea(IntPoint(), resultImage->size());
-    RefPtr<ByteArray> srcPixelArray = resultImage->getPremultipliedImageData(shadowArea);
+    IntRect shadowArea(IntPoint(), resultImage->internalSize());
+    RefPtr<Uint8ClampedArray> srcPixelArray = resultImage->getPremultipliedImageData(shadowArea);
 
     contextShadow.blurLayerImage(srcPixelArray->data(), shadowArea.size(), 4 * shadowArea.size().width());
 
-    resultImage->putPremultipliedImageData(srcPixelArray.get(), shadowArea.size(), shadowArea, IntPoint());
+    resultImage->putByteArray(Premultiplied, srcPixelArray.get(), shadowArea.size(), shadowArea, IntPoint());
 
     resultContext->setCompositeOperation(CompositeSourceIn);
     resultContext->fillRect(FloatRect(FloatPoint(), absolutePaintRect().size()), m_shadowColor, ColorSpaceDeviceRGB);

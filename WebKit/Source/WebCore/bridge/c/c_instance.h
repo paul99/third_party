@@ -31,12 +31,11 @@
 #include "BridgeJSC.h"
 #include "runtime_root.h"
 #include <wtf/PassRefPtr.h>
+#include <wtf/text/WTFString.h>
 
 typedef struct NPObject NPObject;
 
 namespace JSC {
-
-class UString;
 
 namespace Bindings {
 
@@ -49,7 +48,7 @@ public:
         return adoptRef(new CInstance(object, rootObject));
     }
 
-    static void setGlobalException(JSC::UString exception);
+    static void setGlobalException(String);
     static void moveGlobalExceptionToExecState(ExecState*);
 
     ~CInstance ();
@@ -59,7 +58,7 @@ public:
     virtual JSValue valueOf(ExecState*) const;
     virtual JSValue defaultValue(ExecState*, PreferredPrimitiveType) const;
 
-    virtual JSValue getMethod(ExecState* exec, const Identifier& propertyName);
+    virtual JSValue getMethod(ExecState*, PropertyName);
     virtual JSValue invokeMethod(ExecState*, RuntimeMethod* method);
     virtual bool supportsInvokeDefaultMethod() const;
     virtual JSValue invokeDefaultMethod(ExecState*);

@@ -22,13 +22,10 @@
 #include "Icon.h"
 
 #include "GraphicsContext.h"
-#include "PlatformString.h"
 #include "IntRect.h"
-
-#include <qpainter.h>
-#include <qpixmap.h>
-#include <qrect.h>
-#include <qglobal.h>
+#include "NotImplemented.h"
+#include <QMimeDatabase>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -46,22 +43,44 @@ PassRefPtr<Icon> Icon::createIconForFiles(const Vector<String>& filenames)
     if (filenames.isEmpty())
         return 0;
 
-    if (filenames.size() == 1) {
-        RefPtr<Icon> i = adoptRef(new Icon);
-        i->m_icon = QIcon(filenames[0]);
-        return i.release();
+    QMimeType mimeType = QMimeDatabase().mimeTypeForFile(filenames[0], QMimeDatabase::MatchExtension);
+
+    QString iconName = mimeType.iconName();
+    QString genericIconName = mimeType.genericIconName();
+
+    // We try to match one of three cases:
+    // 1. All the files have the same type.
+    // 2. All the files are of the same generic type.
+    // 3. The files are not even of the same generic type.
+    const int count = filenames.size();
+    for (int i = 1; i < count; ++i) {
+        mimeType = QMimeDatabase().mimeTypeForFile(filenames[i], QMimeDatabase::MatchExtension);
+        if (iconName != mimeType.iconName())
+            iconName.clear();
+        if (genericIconName != mimeType.genericIconName()) {
+            genericIconName.clear();
+            break;
+        }
     }
 
-    //FIXME: Implement this
-    return 0;
+    // FIXME: By default, only X11 will support themed icons.
+    RefPtr<Icon> icon = adoptRef(new Icon);
+    if (!iconName.isEmpty())
+        icon->m_icon = QIcon::fromTheme(iconName, QIcon::fromTheme(genericIconName));
+    else if (!genericIconName.isEmpty())
+        icon->m_icon = QIcon::fromTheme(genericIconName);
+
+    if (icon->m_icon.isNull())
+        return 0;
+    return icon.release();
 }
 
-void Icon::paint(GraphicsContext* ctx, const IntRect& rect)
+void Icon::paint(GraphicsContext* context, const IntRect& rect)
 {
-    QPixmap px = m_icon.pixmap(rect.size());
-    QPainter *p = static_cast<QPainter*>(ctx->platformContext());
-    if (p && !px.isNull())
-        p->drawPixmap(rect.x(), rect.y(), px);
+    if (m_icon.isNull())
+        return;
+
+    m_icon.paint(context->platformContext(), rect);
 }
 
 }

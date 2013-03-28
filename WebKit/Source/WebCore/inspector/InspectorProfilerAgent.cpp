@@ -28,11 +28,16 @@
  */
 
 #include "config.h"
-#include "InspectorProfilerAgent.h"
 
 #if ENABLE(JAVASCRIPT_DEBUGGER) && ENABLE(INSPECTOR)
 
+#include "InspectorProfilerAgent.h"
+
 #include "Console.h"
+#include "ConsoleAPITypes.h"
+#include "ConsoleTypes.h"
+#include "InjectedScript.h"
+#include "InjectedScriptHost.h"
 #include "InspectorConsoleAgent.h"
 #include "InspectorFrontend.h"
 #include "InspectorState.h"
@@ -42,14 +47,14 @@
 #include "Page.h"
 #include "PageScriptDebugServer.h"
 #include "ScriptHeapSnapshot.h"
+#include "ScriptObject.h"
 #include "ScriptProfile.h"
 #include "ScriptProfiler.h"
+#include "WebCoreMemoryInstrumentation.h"
+#include "WorkerScriptDebugServer.h"
+#include <wtf/MemoryInstrumentationHashMap.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/text/StringConcatenate.h>
-
-#if USE(JSC)
-#include "JSDOMWindow.h"
-#endif
 
 namespace WebCore {
 
@@ -62,19 +67,74 @@ static const char* const UserInitiatedProfileName = "org.webkit.profiles.user-in
 static const char* const CPUProfileType = "CPU";
 static const char* const HeapProfileType = "HEAP";
 
+
+class PageProfilerAgent : public InspectorProfilerAgent {
+public:
+    PageProfilerAgent(InstrumentingAgents* instrumentingAgents, InspectorConsoleAgent* consoleAgent, Page* inspectedPage, InspectorState* state, InjectedScriptManager* injectedScriptManager)
+        : InspectorProfilerAgent(instrumentingAgents, consoleAgent, state, injectedScriptManager), m_inspectedPage(inspectedPage) { }
+    virtual ~PageProfilerAgent() { }
+
+private:
+    virtual void recompileScript()
+    {
+        PageScriptDebugServer::shared().recompileAllJSFunctionsSoon();
+    }
+
+    virtual void startProfiling(const String& title)
+    {
+        ScriptProfiler::startForPage(m_inspectedPage, title);
+    }
+
+    virtual PassRefPtr<ScriptProfile> stopProfiling(const String& title)
+    {
+        return ScriptProfiler::stopForPage(m_inspectedPage, title);
+    }
+
+    Page* m_inspectedPage;
+};
+
 PassOwnPtr<InspectorProfilerAgent> InspectorProfilerAgent::create(InstrumentingAgents* instrumentingAgents, InspectorConsoleAgent* consoleAgent, Page* inspectedPage, InspectorState* inspectorState, InjectedScriptManager* injectedScriptManager)
 {
-    return adoptPtr(new InspectorProfilerAgent(instrumentingAgents, consoleAgent, inspectedPage, inspectorState, injectedScriptManager));
+    return adoptPtr(new PageProfilerAgent(instrumentingAgents, consoleAgent, inspectedPage, inspectorState, injectedScriptManager));
 }
 
-InspectorProfilerAgent::InspectorProfilerAgent(InstrumentingAgents* instrumentingAgents, InspectorConsoleAgent* consoleAgent, Page* inspectedPage, InspectorState* inspectorState, InjectedScriptManager* injectedScriptManager)
+#if ENABLE(WORKERS)
+class WorkerProfilerAgent : public InspectorProfilerAgent {
+public:
+    WorkerProfilerAgent(InstrumentingAgents* instrumentingAgents, InspectorConsoleAgent* consoleAgent, WorkerContext* workerContext, InspectorState* state, InjectedScriptManager* injectedScriptManager)
+        : InspectorProfilerAgent(instrumentingAgents, consoleAgent, state, injectedScriptManager), m_workerContext(workerContext) { }
+    virtual ~WorkerProfilerAgent() { }
+
+private:
+    virtual void recompileScript() { }
+
+    virtual void startProfiling(const String& title)
+    {
+        ScriptProfiler::startForWorkerContext(m_workerContext, title);
+    }
+
+    virtual PassRefPtr<ScriptProfile> stopProfiling(const String& title)
+    {
+        return ScriptProfiler::stopForWorkerContext(m_workerContext, title);
+    }
+
+    WorkerContext* m_workerContext;
+};
+
+PassOwnPtr<InspectorProfilerAgent> InspectorProfilerAgent::create(InstrumentingAgents* instrumentingAgents, InspectorConsoleAgent* consoleAgent, WorkerContext* workerContext, InspectorState* inspectorState, InjectedScriptManager* injectedScriptManager)
+{
+    return adoptPtr(new WorkerProfilerAgent(instrumentingAgents, consoleAgent, workerContext, inspectorState, injectedScriptManager));
+}
+#endif
+
+InspectorProfilerAgent::InspectorProfilerAgent(InstrumentingAgents* instrumentingAgents, InspectorConsoleAgent* consoleAgent, InspectorState* inspectorState, InjectedScriptManager* injectedScriptManager)
     : InspectorBaseAgent<InspectorProfilerAgent>("Profiler", instrumentingAgents, inspectorState)
     , m_consoleAgent(consoleAgent)
-    , m_inspectedPage(inspectedPage)
     , m_injectedScriptManager(injectedScriptManager)
     , m_frontend(0)
     , m_enabled(false)
     , m_recordingUserInitiatedProfile(false)
+    , m_headersRequested(false)
     , m_currentUserInitiatedProfileNumber(-1)
     , m_nextUserInitiatedProfileNumber(1)
     , m_nextUserInitiatedHeapSnapshotNumber(1)
@@ -91,7 +151,7 @@ void InspectorProfilerAgent::addProfile(PassRefPtr<ScriptProfile> prpProfile, un
 {
     RefPtr<ScriptProfile> profile = prpProfile;
     m_profiles.add(profile->uid(), profile);
-    if (m_frontend)
+    if (m_frontend && m_headersRequested)
         m_frontend->addProfileHeader(createProfileHeader(*profile));
     addProfileFinishedMessageToConsole(profile, lineNumber, sourceURL);
 }
@@ -119,24 +179,24 @@ void InspectorProfilerAgent::collectGarbage(WebCore::ErrorString*)
     ScriptProfiler::collectGarbage();
 }
 
-PassRefPtr<InspectorObject> InspectorProfilerAgent::createProfileHeader(const ScriptProfile& profile)
+PassRefPtr<TypeBuilder::Profiler::ProfileHeader> InspectorProfilerAgent::createProfileHeader(const ScriptProfile& profile)
 {
-    RefPtr<InspectorObject> header = InspectorObject::create();
-    header->setString("title", profile.title());
-    header->setNumber("uid", profile.uid());
-    header->setString("typeId", String(CPUProfileType));
-    return header;
+    return TypeBuilder::Profiler::ProfileHeader::create()
+        .setTypeId(TypeBuilder::Profiler::ProfileHeader::TypeId::CPU)
+        .setUid(profile.uid())
+        .setTitle(profile.title())
+        .release();
 }
 
-PassRefPtr<InspectorObject> InspectorProfilerAgent::createSnapshotHeader(const ScriptHeapSnapshot& snapshot)
+PassRefPtr<TypeBuilder::Profiler::ProfileHeader> InspectorProfilerAgent::createSnapshotHeader(const ScriptHeapSnapshot& snapshot)
 {
-    RefPtr<InspectorObject> header = InspectorObject::create();
-    header->setString("title", snapshot.title());
-    header->setNumber("uid", snapshot.uid());
-    header->setString("typeId", String(HeapProfileType));
-    return header;
+    RefPtr<TypeBuilder::Profiler::ProfileHeader> header = TypeBuilder::Profiler::ProfileHeader::create()
+        .setTypeId(TypeBuilder::Profiler::ProfileHeader::TypeId::HEAP)
+        .setUid(snapshot.uid())
+        .setTitle(snapshot.title());
+    header->setMaxJSObjectId(snapshot.maxSnapshotJSObjectId());
+    return header.release();
 }
-
 
 void InspectorProfilerAgent::causesRecompilation(ErrorString*, bool* result)
 {
@@ -172,7 +232,8 @@ void InspectorProfilerAgent::disable()
     if (!m_enabled)
         return;
     m_enabled = false;
-    PageScriptDebugServer::shared().recompileAllJSFunctionsSoon();
+    m_headersRequested = false;
+    recompileScript();
 }
 
 void InspectorProfilerAgent::enable(bool skipRecompile)
@@ -181,7 +242,7 @@ void InspectorProfilerAgent::enable(bool skipRecompile)
         return;
     m_enabled = true;
     if (!skipRecompile)
-        PageScriptDebugServer::shared().recompileAllJSFunctionsSoon();
+        recompileScript();
 }
 
 String InspectorProfilerAgent::getCurrentUserInitiatedProfileName(bool incrementProfileNumber)
@@ -192,14 +253,17 @@ String InspectorProfilerAgent::getCurrentUserInitiatedProfileName(bool increment
     return makeString(UserInitiatedProfileName, '.', String::number(m_currentUserInitiatedProfileNumber));
 }
 
-void InspectorProfilerAgent::getProfileHeaders(ErrorString*, RefPtr<InspectorArray>& headers)
+void InspectorProfilerAgent::getProfileHeaders(ErrorString*, RefPtr<TypeBuilder::Array<TypeBuilder::Profiler::ProfileHeader> >& headers)
 {
+    m_headersRequested = true;
+    headers = TypeBuilder::Array<TypeBuilder::Profiler::ProfileHeader>::create();
+
     ProfilesMap::iterator profilesEnd = m_profiles.end();
     for (ProfilesMap::iterator it = m_profiles.begin(); it != profilesEnd; ++it)
-        headers->pushObject(createProfileHeader(*it->second));
+        headers->addItem(createProfileHeader(*it->value));
     HeapSnapshotsMap::iterator snapshotsEnd = m_snapshots.end();
     for (HeapSnapshotsMap::iterator it = m_snapshots.begin(); it != snapshotsEnd; ++it)
-        headers->pushObject(createSnapshotHeader(*it->second));
+        headers->addItem(createSnapshotHeader(*it->value));
 }
 
 namespace {
@@ -217,31 +281,37 @@ private:
 
 } // namespace
 
-void InspectorProfilerAgent::getProfile(ErrorString*, const String& type, unsigned uid, RefPtr<InspectorObject>& profileObject)
+void InspectorProfilerAgent::getProfile(ErrorString* errorString, const String& type, int rawUid, RefPtr<TypeBuilder::Profiler::Profile>& profileObject)
 {
+    unsigned uid = static_cast<unsigned>(rawUid);
     if (type == CPUProfileType) {
         ProfilesMap::iterator it = m_profiles.find(uid);
-        if (it != m_profiles.end()) {
-            profileObject = createProfileHeader(*it->second);
-            profileObject->setObject("head", it->second->buildInspectorObjectForHead());
-            if (it->second->bottomUpHead())
-                profileObject->setObject("bottomUpHead", it->second->buildInspectorObjectForBottomUpHead());
+        if (it == m_profiles.end()) {
+            *errorString = "Profile wasn't found";
+            return;
         }
+        profileObject = TypeBuilder::Profiler::Profile::create();
+        profileObject->setHead(it->value->buildInspectorObjectForHead());
+        if (it->value->bottomUpHead())
+            profileObject->setBottomUpHead(it->value->buildInspectorObjectForBottomUpHead());
     } else if (type == HeapProfileType) {
         HeapSnapshotsMap::iterator it = m_snapshots.find(uid);
-        if (it != m_snapshots.end()) {
-            RefPtr<ScriptHeapSnapshot> snapshot = it->second;
-            profileObject = createSnapshotHeader(*snapshot);
-            if (m_frontend) {
-                OutputStream stream(m_frontend, uid);
-                snapshot->writeJSON(&stream);
-            }
+        if (it == m_snapshots.end()) {
+            *errorString = "Profile wasn't found";
+            return;
+        }
+        RefPtr<ScriptHeapSnapshot> snapshot = it->value;
+        profileObject = TypeBuilder::Profiler::Profile::create();
+        if (m_frontend) {
+            OutputStream stream(m_frontend, uid);
+            snapshot->writeJSON(&stream);
         }
     }
 }
 
-void InspectorProfilerAgent::removeProfile(ErrorString*, const String& type, unsigned uid)
+void InspectorProfilerAgent::removeProfile(ErrorString*, const String& type, int rawUid)
 {
+    unsigned uid = static_cast<unsigned>(rawUid);
     if (type == CPUProfileType) {
         if (m_profiles.contains(uid))
             m_profiles.remove(uid);
@@ -260,11 +330,12 @@ void InspectorProfilerAgent::resetState()
     m_nextUserInitiatedProfileNumber = 1;
     m_nextUserInitiatedHeapSnapshotNumber = 1;
     resetFrontendProfiles();
+    m_injectedScriptManager->injectedScriptHost()->clearInspectedObjects();
 }
 
 void InspectorProfilerAgent::resetFrontendProfiles()
 {
-    if (m_frontend
+    if (m_headersRequested && m_frontend
         && m_profiles.begin() == m_profiles.end()
         && m_snapshots.begin() == m_snapshots.end())
         m_frontend->resetProfiles();
@@ -289,6 +360,7 @@ void InspectorProfilerAgent::restore()
     restoreEnablement();
 
     // Revisit this.
+    m_headersRequested = true;
     resetFrontendProfiles();
     if (m_state->getBoolean(ProfilerAgentState::userInitiatedProfiling))
         start();
@@ -312,12 +384,7 @@ void InspectorProfilerAgent::start(ErrorString*)
     }
     m_recordingUserInitiatedProfile = true;
     String title = getCurrentUserInitiatedProfileName(true);
-#if USE(JSC)
-    JSC::ExecState* scriptState = toJSDOMWindow(m_inspectedPage->mainFrame(), debuggerWorld())->globalExec();
-#else
-    ScriptState* scriptState = 0;
-#endif
-    ScriptProfiler::start(scriptState, title);
+    startProfiling(title);
     addStartProfilingMessageToConsole(title, 0, String());
     toggleRecordButton(true);
     m_state->setBoolean(ProfilerAgentState::userInitiatedProfiling, true);
@@ -329,14 +396,7 @@ void InspectorProfilerAgent::stop(ErrorString*)
         return;
     m_recordingUserInitiatedProfile = false;
     String title = getCurrentUserInitiatedProfileName();
-#if USE(JSC)
-    JSC::ExecState* scriptState = toJSDOMWindow(m_inspectedPage->mainFrame(), debuggerWorld())->globalExec();
-#else
-    // Use null script state to avoid filtering by context security token.
-    // All functions from all iframes should be visible from Inspector UI.
-    ScriptState* scriptState = 0;
-#endif
-    RefPtr<ScriptProfile> profile = ScriptProfiler::stop(scriptState, title);
+    RefPtr<ScriptProfile> profile = stopProfiling(title);
     if (profile)
         addProfile(profile, 0, String());
     toggleRecordButton(false);
@@ -387,13 +447,54 @@ void InspectorProfilerAgent::toggleRecordButton(bool isProfiling)
         m_frontend->setRecordingProfile(isProfiling);
 }
 
-void InspectorProfilerAgent::getObjectByHeapObjectId(ErrorString* error, int id, RefPtr<InspectorObject>& result)
+void InspectorProfilerAgent::getObjectByHeapObjectId(ErrorString* error, const String& heapSnapshotObjectId, const String* objectGroup, RefPtr<TypeBuilder::Runtime::RemoteObject>& result)
 {
-    RefPtr<InspectorValue> heapObject = ScriptProfiler::objectByHeapObjectId(id, m_injectedScriptManager);
-    if (!heapObject->isNull())
-        heapObject->asObject(&result);
-    else
-        *error = "Object is not available.";
+    bool ok;
+    unsigned id = heapSnapshotObjectId.toUInt(&ok);
+    if (!ok) {
+        *error = "Invalid heap snapshot object id";
+        return;
+    }
+    ScriptObject heapObject = ScriptProfiler::objectByHeapObjectId(id);
+    if (heapObject.hasNoValue()) {
+        *error = "Object is not available";
+        return;
+    }
+    InjectedScript injectedScript = m_injectedScriptManager->injectedScriptFor(heapObject.scriptState());
+    if (injectedScript.hasNoValue()) {
+        *error = "Object is not available. Inspected context is gone";
+        return;
+    }
+    result = injectedScript.wrapObject(heapObject, objectGroup ? *objectGroup : "");
+    if (!result)
+        *error = "Failed to wrap object";
+}
+
+void InspectorProfilerAgent::getHeapObjectId(ErrorString* errorString, const String& objectId, String* heapSnapshotObjectId)
+{
+    InjectedScript injectedScript = m_injectedScriptManager->injectedScriptForObjectId(objectId);
+    if (injectedScript.hasNoValue()) {
+        *errorString = "Inspected context has gone";
+        return;
+    }
+    ScriptValue value = injectedScript.findObjectById(objectId);
+    if (value.hasNoValue() || value.isUndefined()) {
+        *errorString = "Object with given id not found";
+        return;
+    }
+    unsigned id = ScriptProfiler::getHeapObjectId(value);
+    *heapSnapshotObjectId = String::number(id);
+}
+
+void InspectorProfilerAgent::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::InspectorProfilerAgent);
+    InspectorBaseAgent<InspectorProfilerAgent>::reportMemoryUsage(memoryObjectInfo);
+    info.addMember(m_consoleAgent);
+    info.addMember(m_injectedScriptManager);
+    info.addWeakPointer(m_frontend);
+    info.addMember(m_profiles);
+    info.addMember(m_snapshots);
 }
 
 } // namespace WebCore

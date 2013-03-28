@@ -31,7 +31,7 @@
 #include "config.h"
 #include "NotificationPresenterImpl.h"
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 
 #include "KURL.h"
 #include "Notification.h"
@@ -41,7 +41,7 @@
 #include "WebNotification.h"
 #include "WebNotificationPermissionCallback.h"
 #include "WebNotificationPresenter.h"
-#include "platform/WebURL.h"
+#include <public/WebURL.h>
 
 #include <wtf/PassRefPtr.h>
 
@@ -49,9 +49,10 @@ using namespace WebCore;
 
 namespace WebKit {
 
+#if ENABLE(LEGACY_NOTIFICATIONS)
 class VoidCallbackClient : public WebNotificationPermissionCallback {
 public:
-    VoidCallbackClient(PassRefPtr<VoidCallback> callback)
+    explicit VoidCallbackClient(PassRefPtr<VoidCallback> callback)
         : m_callback(callback)
     {
     }
@@ -68,6 +69,33 @@ private:
 
     RefPtr<VoidCallback> m_callback;
 };
+#endif // ENABLE(LEGACY_NOTIFICATIONS)
+
+#if ENABLE(NOTIFICATIONS)
+class NotificationPermissionCallbackClient : public WebNotificationPermissionCallback {
+public:
+    NotificationPermissionCallbackClient(WebNotificationPresenter* presenter, PassRefPtr<SecurityOrigin> securityOrigin, PassRefPtr<NotificationPermissionCallback> callback)
+        : m_presenter(presenter)
+        , m_securityOrigin(securityOrigin)
+        , m_callback(callback)
+    {
+    }
+
+    virtual void permissionRequestComplete()
+    {
+        if (m_callback)
+            m_callback->handleEvent(Notification::permissionString(static_cast<NotificationClient::Permission>(m_presenter->checkPermission(WebSecurityOrigin(m_securityOrigin)))));
+        delete this;
+    }
+
+private:
+    virtual ~NotificationPermissionCallbackClient() { }
+
+    WebNotificationPresenter* m_presenter;
+    RefPtr<SecurityOrigin> m_securityOrigin;
+    RefPtr<NotificationPermissionCallback> m_callback;
+};
+#endif // ENABLE(NOTIFICATIONS)
 
 void NotificationPresenterImpl::initialize(WebNotificationPresenter* presenter)
 {
@@ -98,17 +126,26 @@ void NotificationPresenterImpl::notificationControllerDestroyed()
 {
 }
 
-NotificationPresenter::Permission NotificationPresenterImpl::checkPermission(ScriptExecutionContext* context)
+NotificationClient::Permission NotificationPresenterImpl::checkPermission(ScriptExecutionContext* context)
 {
     int result = m_presenter->checkPermission(WebSecurityOrigin(context->securityOrigin()));
-    return static_cast<NotificationPresenter::Permission>(result);
+    return static_cast<NotificationClient::Permission>(result);
 }
 
+#if ENABLE(LEGACY_NOTIFICATIONS)
 void NotificationPresenterImpl::requestPermission(ScriptExecutionContext* context, PassRefPtr<VoidCallback> callback)
 {
     m_presenter->requestPermission(WebSecurityOrigin(context->securityOrigin()), new VoidCallbackClient(callback));
 }
+#endif // ENABLE(LEGACY_NOTIFICATIONS)
+
+#if ENABLE(NOTIFICATIONS)
+void NotificationPresenterImpl::requestPermission(ScriptExecutionContext* context, WTF::PassRefPtr<NotificationPermissionCallback> callback)
+{
+    m_presenter->requestPermission(WebSecurityOrigin(context->securityOrigin()), new NotificationPermissionCallbackClient(m_presenter, context->securityOrigin(), callback));
+}
+#endif // ENABLE(NOTIFICATIONS)
 
 } // namespace WebKit
 
-#endif // ENABLE(NOTIFICATIONS)
+#endif // ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)

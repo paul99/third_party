@@ -30,6 +30,7 @@
 #include <wtf/StringExtras.h>
 #include <wtf/Vector.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/StringBuilder.h>
 
 using std::swap;
 
@@ -58,10 +59,8 @@ void FrameTree::clearName()
     m_uniqueName = AtomicString();
 }
 
-Frame* FrameTree::parent(bool checkForDisconnectedFrame) const 
+Frame* FrameTree::parent() const 
 { 
-    if (checkForDisconnectedFrame && m_thisFrame->isDisconnected())
-        return 0;
     return m_parent;
 }
 
@@ -103,7 +102,7 @@ void FrameTree::actuallyAppendChild(PassRefPtr<Frame> child)
     } else
         m_firstChild = child;
 
-    m_childCount++;
+    m_scopedChildCount = invalidCount;
 
     ASSERT(!m_lastChild->tree()->m_nextSibling);
 }
@@ -125,7 +124,7 @@ void FrameTree::removeChild(Frame* child)
     child->tree()->m_previousSibling = 0;
     child->tree()->m_nextSibling = 0;
 
-    m_childCount--;
+    m_scopedChildCount = invalidCount;
 }
 
 AtomicString FrameTree::uniqueChildName(const AtomicString& requestedName) const
@@ -152,29 +151,90 @@ AtomicString FrameTree::uniqueChildName(const AtomicString& requestedName) const
             break;
         chain.append(frame);
     }
-    String name;
-    name += framePathPrefix;
-    if (frame)
-        name += frame->tree()->uniqueName().string().substring(framePathPrefixLength,
-            frame->tree()->uniqueName().length() - framePathPrefixLength - framePathSuffixLength);
+    StringBuilder name;
+    name.append(framePathPrefix);
+    if (frame) {
+        name.append(frame->tree()->uniqueName().string().substring(framePathPrefixLength,
+            frame->tree()->uniqueName().length() - framePathPrefixLength - framePathSuffixLength));
+    }
     for (int i = chain.size() - 1; i >= 0; --i) {
         frame = chain[i];
-        name += "/";
-        name += frame->tree()->uniqueName();
+        name.append('/');
+        name.append(frame->tree()->uniqueName());
     }
 
-    // Suffix buffer has more than enough space for:
-    //     10 characters before the number
-    //     a number (20 digits for the largest 64-bit integer)
-    //     6 characters after the number
-    //     trailing null byte
-    // But we still use snprintf just to be extra-safe.
-    char suffix[40];
-    snprintf(suffix, sizeof(suffix), "/<!--frame%u-->-->", childCount());
+    name.appendLiteral("/<!--frame");
+    name.appendNumber(childCount());
+    name.appendLiteral("-->-->");
 
-    name += suffix;
+    return name.toAtomicString();
+}
 
-    return AtomicString(name);
+inline Frame* FrameTree::scopedChild(unsigned index, TreeScope* scope) const
+{
+    if (!scope)
+        return 0;
+
+    unsigned scopedIndex = 0;
+    for (Frame* result = firstChild(); result; result = result->tree()->nextSibling()) {
+        if (result->inScope(scope)) {
+            if (scopedIndex == index)
+                return result;
+            scopedIndex++;
+        }
+    }
+
+    return 0;
+}
+
+inline Frame* FrameTree::scopedChild(const AtomicString& name, TreeScope* scope) const
+{
+    if (!scope)
+        return 0;
+
+    for (Frame* child = firstChild(); child; child = child->tree()->nextSibling())
+        if (child->tree()->uniqueName() == name && child->inScope(scope))
+            return child;
+    return 0;
+}
+
+inline unsigned FrameTree::scopedChildCount(TreeScope* scope) const
+{
+    if (!scope)
+        return 0;
+
+    unsigned scopedCount = 0;
+    for (Frame* result = firstChild(); result; result = result->tree()->nextSibling()) {
+        if (result->inScope(scope))
+            scopedCount++;
+    }
+
+    return scopedCount;
+}
+
+Frame* FrameTree::scopedChild(unsigned index) const
+{
+    return scopedChild(index, m_thisFrame->document());
+}
+
+Frame* FrameTree::scopedChild(const AtomicString& name) const
+{
+    return scopedChild(name, m_thisFrame->document());
+}
+
+unsigned FrameTree::scopedChildCount() const
+{
+    if (m_scopedChildCount == invalidCount)
+        m_scopedChildCount = scopedChildCount(m_thisFrame->document());
+    return m_scopedChildCount;
+}
+
+unsigned FrameTree::childCount() const
+{
+    unsigned count = 0;
+    for (Frame* result = firstChild(); result; result = result->tree()->nextSibling())
+        ++count;
+    return count;
 }
 
 Frame* FrameTree::child(unsigned index) const
@@ -325,14 +385,11 @@ Frame* FrameTree::deepLastChild() const
     return result;
 }
 
-Frame* FrameTree::top(bool checkForDisconnectedFrame) const
+Frame* FrameTree::top() const
 {
     Frame* frame = m_thisFrame;
-    for (Frame* parent = m_thisFrame; parent; parent = parent->tree()->parent()) {
+    for (Frame* parent = m_thisFrame; parent; parent = parent->tree()->parent())
         frame = parent;
-        if (checkForDisconnectedFrame && frame->isDisconnected())
-            return frame;
-    }
     return frame;
 }
 

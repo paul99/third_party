@@ -29,13 +29,15 @@
  */
 
 #include "config.h"
-#include "TimelineRecordFactory.h"
 
 #if ENABLE(INSPECTOR)
+
+#include "TimelineRecordFactory.h"
 
 #include "Event.h"
 #include "InspectorValues.h"
 #include "IntRect.h"
+#include "LayoutRect.h"
 #include "ResourceRequest.h"
 #include "ResourceResponse.h"
 #include "ScriptCallStack.h"
@@ -52,7 +54,7 @@ PassRefPtr<InspectorObject> TimelineRecordFactory::createGenericRecord(double st
     if (maxCallStackDepth) {
         RefPtr<ScriptCallStack> stackTrace = createScriptCallStack(maxCallStackDepth, true);
         if (stackTrace && stackTrace->size())
-            record->setArray("stackTrace", stackTrace->buildInspectorArray());
+            record->setValue("stackTrace", stackTrace->buildInspectorArray());
     }
     return record.release();
 }
@@ -160,20 +162,25 @@ PassRefPtr<InspectorObject> TimelineRecordFactory::createResourceFinishData(cons
     return data.release();
 }
 
-PassRefPtr<InspectorObject> TimelineRecordFactory::createReceiveResourceData(const String& requestId)
+PassRefPtr<InspectorObject> TimelineRecordFactory::createReceiveResourceData(const String& requestId, int length)
 {
     RefPtr<InspectorObject> data = InspectorObject::create();
     data->setString("requestId", requestId);
+    data->setNumber("encodedDataLength", length);
     return data.release();
 }
     
-PassRefPtr<InspectorObject> TimelineRecordFactory::createPaintData(const LayoutRect& rect)
+PassRefPtr<InspectorObject> TimelineRecordFactory::createDecodeImageData(const String& imageType)
 {
     RefPtr<InspectorObject> data = InspectorObject::create();
-    data->setNumber("x", rect.x());
-    data->setNumber("y", rect.y());
-    data->setNumber("width", rect.width());
-    data->setNumber("height", rect.height());
+    data->setString("imageType", imageType);
+    return data.release();
+}
+
+PassRefPtr<InspectorObject> TimelineRecordFactory::createResizeImageData(bool shouldCache)
+{
+    RefPtr<InspectorObject> data = InspectorObject::create();
+    data->setBoolean("cached", shouldCache);
     return data.release();
 }
 
@@ -185,11 +192,19 @@ PassRefPtr<InspectorObject> TimelineRecordFactory::createParseHTMLData(unsigned 
     return data.release();
 }
 
-PassRefPtr<InspectorObject> TimelineRecordFactory::createAnimationFrameCallbackData(int callbackId)
+PassRefPtr<InspectorObject> TimelineRecordFactory::createAnimationFrameData(int callbackId)
 {
     RefPtr<InspectorObject> data = InspectorObject::create();
     data->setNumber("id", callbackId);
     return data.release();
+}
+
+void TimelineRecordFactory::addRectData(InspectorObject* data, const LayoutRect& rect)
+{
+    data->setNumber("x", rect.x());
+    data->setNumber("y", rect.y());
+    data->setNumber("width", rect.width());
+    data->setNumber("height", rect.height());
 }
 
 } // namespace WebCore

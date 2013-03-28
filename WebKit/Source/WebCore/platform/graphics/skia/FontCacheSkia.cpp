@@ -1,10 +1,10 @@
 /*
  * Copyright (c) 2006, 2007, 2008, 2009 Google Inc. All rights reserved.
- *
+ * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
  * met:
- *
+ * 
  *     * Redistributions of source code must retain the above copyright
  * notice, this list of conditions and the following disclaimer.
  *     * Redistributions in binary form must reproduce the above
@@ -14,7 +14,7 @@
  *     * Neither the name of Google Inc. nor the names of its
  * contributors may be used to endorse or promote products derived from
  * this software without specific prior written permission.
- *
+ * 
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -30,19 +30,16 @@
 
 #include "config.h"
 #include "FontCache.h"
-
 #include "Font.h"
 #include "FontDescription.h"
+#include "FontFamily.h"
 #include "FontPlatformData.h"
 #include "Logging.h"
 #include "NotImplemented.h"
-#include "PlatformSupport.h"
 #include "SimpleFontData.h"
-
 #include "SkPaint.h"
 #include "SkTypeface.h"
 #include "SkUtils.h"
-
 #include <unicode/locid.h>
 #include <wtf/Assertions.h>
 #include <wtf/text/AtomicString.h>
@@ -54,13 +51,11 @@ void FontCache::platformInit()
 {
 }
 
-const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font,
-                                                          const UChar* characters,
-                                                          int length)
+PassRefPtr<SimpleFontData> FontCache::getFontDataForCharacters(const Font& font, const UChar* characters, int length)
 {
     icu::Locale locale = icu::Locale::getDefault();
-    PlatformSupport::FontFamily family;
-    PlatformSupport::getFontFamilyForCharacters(characters, length, locale.getLanguage(), &family);
+    FontCache::SimpleFontFamily family;
+    FontCache::getFontFamilyForCharacters(characters, length, locale.getLanguage(), &family);
     if (family.name.isEmpty())
         return 0;
 
@@ -84,22 +79,25 @@ const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font,
         description.setItalic(FontItalicOff);
     }
 
-    FontPlatformData platformData = FontPlatformData(*getCachedFontPlatformData(description, atomicFamily, DoNotRetain));
+    FontPlatformData* substitutePlatformData = getCachedFontPlatformData(description, atomicFamily, DoNotRetain);
+    if (!substitutePlatformData)
+        return 0;
+    FontPlatformData platformData = FontPlatformData(*substitutePlatformData);
     platformData.setFakeBold(shouldSetFakeBold);
     platformData.setFakeItalic(shouldSetFakeItalic);
     return getCachedFontData(&platformData, DoNotRetain);
 }
 
-SimpleFontData* FontCache::getSimilarFontPlatformData(const Font& font)
+PassRefPtr<SimpleFontData> FontCache::getSimilarFontPlatformData(const Font& font)
 {
     return 0;
 }
 
-SimpleFontData* FontCache::getLastResortFallbackFont(const FontDescription& description, ShouldRetain shouldRetain)
+PassRefPtr<SimpleFontData> FontCache::getLastResortFallbackFont(const FontDescription& description, ShouldRetain shouldRetain)
 {
-    DEFINE_STATIC_LOCAL(const AtomicString, sansStr, ("Sans"));
-    DEFINE_STATIC_LOCAL(const AtomicString, serifStr, ("Serif"));
-    DEFINE_STATIC_LOCAL(const AtomicString, monospaceStr, ("Monospace"));
+    DEFINE_STATIC_LOCAL(const AtomicString, sansStr, ("Sans", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(const AtomicString, serifStr, ("Serif", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(const AtomicString, monospaceStr, ("Monospace", AtomicString::ConstructFromLiteral));
 
     FontPlatformData* fontPlatformData = 0;
     switch (description.genericFamily()) {
@@ -113,6 +111,12 @@ SimpleFontData* FontCache::getLastResortFallbackFont(const FontDescription& desc
     default:
         fontPlatformData = getCachedFontPlatformData(description, sansStr);
         break;
+    }
+
+    if (!fontPlatformData) {
+        // we should at least have Arial; this is the SkFontHost_fontconfig last resort fallback
+        DEFINE_STATIC_LOCAL(const AtomicString, arialStr, ("Arial", AtomicString::ConstructFromLiteral));
+        fontPlatformData = getCachedFontPlatformData(description, arialStr);
     }
 
     ASSERT(fontPlatformData);
@@ -176,8 +180,7 @@ FontPlatformData* FontCache::createFontPlatformData(const FontDescription& fontD
                              fontDescription.computedSize(),
                              (style & SkTypeface::kBold) && !tf->isBold(),
                              (style & SkTypeface::kItalic) && !tf->isItalic(),
-                             fontDescription.orientation(),
-                             fontDescription.textOrientation());
+                             fontDescription.orientation());
     tf->unref();
     return result;
 }

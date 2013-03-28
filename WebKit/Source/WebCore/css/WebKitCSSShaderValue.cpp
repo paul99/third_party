@@ -1,5 +1,5 @@
 /*
- * Copyright 2011 Adobe Systems Incorporated. All Rights Reserved.
+ * Copyright (C) 2011 Adobe Systems Incorporated. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,15 +32,20 @@
 #if ENABLE(CSS_SHADERS)
 #include "WebKitCSSShaderValue.h"
 
+#include "CSSParser.h"
 #include "CachedResourceLoader.h"
+#include "CachedResourceRequest.h"
+#include "CachedResourceRequestInitiators.h"
 #include "Document.h"
 #include "StyleCachedShader.h"
 #include "StylePendingShader.h"
+#include "WebCoreMemoryInstrumentation.h"
 
 namespace WebCore {
 
 WebKitCSSShaderValue::WebKitCSSShaderValue(const String& url)
-    : CSSPrimitiveValue(WebKitCSSShaderClass, url, CSS_URI)
+    : CSSValue(WebKitCSSShaderClass)
+    , m_url(url)
     , m_accessedShader(false)
 {
 }
@@ -56,9 +61,10 @@ StyleCachedShader* WebKitCSSShaderValue::cachedShader(CachedResourceLoader* load
     if (!m_accessedShader) {
         m_accessedShader = true;
 
-        ResourceRequest request(loader->document()->completeURL(getStringValue()));
-        if (CachedShader* cachedShader = loader->requestShader(request))
-            m_shader = StyleCachedShader::create(cachedShader);
+        CachedResourceRequest request(ResourceRequest(loader->document()->completeURL(m_url)));
+        request.setInitiator(cachedResourceRequestInitiators().css);
+        if (CachedResourceHandle<CachedShader> cachedShader = loader->requestShader(request))
+            m_shader = StyleCachedShader::create(cachedShader.get());
     }
 
     return (m_shader && m_shader->isCachedShader()) ? static_cast<StyleCachedShader*>(m_shader.get()) : 0;
@@ -72,7 +78,17 @@ StyleShader* WebKitCSSShaderValue::cachedOrPendingShader()
     return m_shader.get();
 }
 
+String WebKitCSSShaderValue::customCssText() const
+{
+    return "url(" + quoteCSSURLIfNeeded(m_url) + ")";
+}
 
+void WebKitCSSShaderValue::reportDescendantMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CSS);
+    info.addMember(m_url);
+}
+    
 } // namespace WebCore
 
 #endif // ENABLE(CSS_SHADERS)

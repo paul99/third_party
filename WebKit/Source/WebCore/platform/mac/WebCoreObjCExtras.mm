@@ -35,10 +35,10 @@
 #include "WebCoreObjCExtras.h"
 
 #include <objc/objc-auto.h>
-#include <objc/objc-runtime.h>
 #include <utility>
 #include <wtf/Assertions.h>
 #include <wtf/MainThread.h>
+#include <wtf/ObjcRuntimeExtras.h>
 #include <wtf/Threading.h>
 #include <wtf/UnusedParam.h>
 
@@ -63,7 +63,7 @@ static void deallocCallback(void* context)
     Method method = class_getInstanceMethod(pair->first, @selector(dealloc));
     
     IMP imp = method_getImplementation(method);
-    imp(pair->second, @selector(dealloc));
+    wtfCallIMP<void>(imp, pair->second, @selector(dealloc));
     
     delete pair;
 }

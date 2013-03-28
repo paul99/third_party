@@ -85,10 +85,7 @@ using namespace HTMLNames;
 
 static inline bool isObservable(JSNode* jsNode, Node* node)
 {
-    // The DOM doesn't know how to keep a tree of nodes alive without the root
-    // being explicitly referenced. So, we artificially treat the root of
-    // every tree as observable.
-    // FIXME: Resolve this lifetime issue in the DOM, and remove this.
+    // The root node keeps the tree intact.
     if (!node->parentNode())
         return true;
 
@@ -132,7 +129,7 @@ static inline bool isReachableFromDOM(JSNode* jsNode, Node* node, SlotVisitor& v
 
 bool JSNodeOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, SlotVisitor& visitor)
 {
-    JSNode* jsNode = static_cast<JSNode*>(handle.get().asCell());
+    JSNode* jsNode = jsCast<JSNode*>(handle.get().asCell());
     return isReachableFromDOM(jsNode, jsNode->impl(), visitor);
 }
 
@@ -188,7 +185,7 @@ JSValue JSNode::appendChild(ExecState* exec)
     return jsNull();
 }
 
-ScopeChainNode* JSNode::pushEventHandlerScope(ExecState* exec, ScopeChainNode* node) const
+JSScope* JSNode::pushEventHandlerScope(ExecState* exec, JSScope* node) const
 {
     if (inherits(&JSHTMLElement::s_info))
         return jsCast<const JSHTMLElement*>(this)->pushEventHandlerScope(exec, node);
@@ -256,9 +253,6 @@ static ALWAYS_INLINE JSValue createWrapperInline(ExecState* exec, JSDOMGlobalObj
         case Node::DOCUMENT_FRAGMENT_NODE:
             wrapper = CREATE_DOM_WRAPPER(exec, globalObject, DocumentFragment, node);
             break;
-        case Node::SHADOW_ROOT_NODE:
-            wrapper = CREATE_DOM_WRAPPER(exec, globalObject, Node, node);
-            break;
         case Node::ENTITY_REFERENCE_NODE:
             wrapper = CREATE_DOM_WRAPPER(exec, globalObject, EntityReference, node);
             break;
@@ -280,6 +274,16 @@ JSValue toJSNewlyCreated(ExecState* exec, JSDOMGlobalObject* globalObject, Node*
         return jsNull();
     
     return createWrapperInline(exec, globalObject, node);
+}
+
+void willCreatePossiblyOrphanedTreeByRemovalSlowCase(Node* root)
+{
+    ScriptState* scriptState = mainWorldScriptState(root->document()->frame());
+    if (!scriptState)
+        return;
+
+    JSLockHolder lock(scriptState);
+    toJS(scriptState, static_cast<JSDOMGlobalObject*>(scriptState->lexicalGlobalObject()), root);
 }
 
 } // namespace WebCore

@@ -36,9 +36,10 @@
 #include "RenderPart.h"
 #include "RenderSVGContainer.h"
 #include "RenderSVGResource.h"
+#include "RenderSVGResourceContainer.h"
 #include "RenderView.h"
 #include "SVGLength.h"
-#include "SVGRenderSupport.h"
+#include "SVGRenderingContext.h"
 #include "SVGResources.h"
 #include "SVGResourcesCache.h"
 #include "SVGSVGElement.h"
@@ -56,8 +57,10 @@ namespace WebCore {
 
 RenderSVGRoot::RenderSVGRoot(SVGStyledElement* node)
     : RenderReplaced(node)
+    , m_objectBoundingBoxValid(false)
     , m_isLayoutSizeChanged(false)
     , m_needsBoundariesOrTransformUpdate(true)
+    , m_hasSVGShadow(false)
 {
 }
 
@@ -87,9 +90,9 @@ void RenderSVGRoot::computeIntrinsicRatioInformation(FloatSize& intrinsicSize, d
     //   resolving both values to user units.
     if (intrinsicWidthAttribute.isFixed() || intrinsicHeightAttribute.isFixed()) {
         if (intrinsicWidthAttribute.isFixed())
-            intrinsicSize.setWidth(intrinsicWidthAttribute.calcFloatValue(0));
+            intrinsicSize.setWidth(floatValueForLength(intrinsicWidthAttribute, 0));
         if (intrinsicHeightAttribute.isFixed())
-            intrinsicSize.setHeight(intrinsicHeightAttribute.calcFloatValue(0));
+            intrinsicSize.setHeight(floatValueForLength(intrinsicHeightAttribute, 0));
         if (!intrinsicSize.isEmpty())
             intrinsicRatio = intrinsicSize.width() / static_cast<double>(intrinsicSize.height());
         return;
@@ -151,9 +154,9 @@ bool RenderSVGRoot::isEmbeddedThroughFrameContainingSVGDocument() const
     return frame->document()->isSVGDocument();
 }
 
-static inline LayoutUnit resolveLengthAttributeForSVG(const Length& length, float scale, float maxSize)
+static inline LayoutUnit resolveLengthAttributeForSVG(const Length& length, float scale, float maxSize, RenderView* renderView)
 {
-    return static_cast<LayoutUnit>(length.calcValue(maxSize) * (length.isFixed() ? scale : 1));
+    return static_cast<LayoutUnit>(valueForLength(length, maxSize, renderView) * (length.isFixed() ? scale : 1));
 }
 
 LayoutUnit RenderSVGRoot::computeReplacedLogicalWidth(bool includeMaxWidth) const
@@ -165,15 +168,18 @@ LayoutUnit RenderSVGRoot::computeReplacedLogicalWidth(bool includeMaxWidth) cons
     if (!m_containerSize.isEmpty())
         return m_containerSize.width();
 
-    if (style()->logicalWidth().isSpecified())
+    if (style()->logicalWidth().isSpecified() || style()->logicalMaxWidth().isSpecified())
         return RenderReplaced::computeReplacedLogicalWidth(includeMaxWidth);
 
     if (svg->widthAttributeEstablishesViewport())
-        return resolveLengthAttributeForSVG(svg->intrinsicWidth(SVGSVGElement::IgnoreCSSProperties), style()->effectiveZoom(), containingBlock()->availableLogicalWidth());
+        return resolveLengthAttributeForSVG(svg->intrinsicWidth(SVGSVGElement::IgnoreCSSProperties), style()->effectiveZoom(), containingBlock()->availableLogicalWidth(), view());
 
-    // Only SVGs embedded in <object> reach this point.
-    ASSERT(isEmbeddedThroughFrameContainingSVGDocument());
-    return document()->frame()->ownerRenderer()->availableLogicalWidth();
+    // SVG embedded through object/embed/iframe.
+    if (isEmbeddedThroughFrameContainingSVGDocument())
+        return document()->frame()->ownerRenderer()->availableLogicalWidth();
+
+    // SVG embedded via SVGImage (background-image/border-image/etc) / Inline SVG.
+    return RenderReplaced::computeReplacedLogicalWidth(includeMaxWidth);
 }
 
 LayoutUnit RenderSVGRoot::computeReplacedLogicalHeight() const
@@ -185,7 +191,7 @@ LayoutUnit RenderSVGRoot::computeReplacedLogicalHeight() const
     if (!m_containerSize.isEmpty())
         return m_containerSize.height();
 
-    if (hasReplacedLogicalHeight())
+    if (style()->logicalHeight().isSpecified() || style()->logicalMaxHeight().isSpecified())
         return RenderReplaced::computeReplacedLogicalHeight();
 
     if (svg->heightAttributeEstablishesViewport()) {
@@ -200,16 +206,20 @@ LayoutUnit RenderSVGRoot::computeReplacedLogicalHeight() const
         } else
             RenderBlock::removePercentHeightDescendant(const_cast<RenderSVGRoot*>(this));
 
-        return resolveLengthAttributeForSVG(height, style()->effectiveZoom(), containingBlock()->availableLogicalHeight());
+        return resolveLengthAttributeForSVG(height, style()->effectiveZoom(), containingBlock()->availableLogicalHeight(), view());
     }
 
-    // Only SVGs embedded in <object> reach this point.
-    ASSERT(isEmbeddedThroughFrameContainingSVGDocument());
-    return document()->frame()->ownerRenderer()->availableLogicalHeight();
+    // SVG embedded through object/embed/iframe.
+    if (isEmbeddedThroughFrameContainingSVGDocument())
+        return document()->frame()->ownerRenderer()->availableLogicalHeight();
+
+    // SVG embedded via SVGImage (background-image/border-image/etc) / Inline SVG.
+    return RenderReplaced::computeReplacedLogicalHeight();
 }
 
 void RenderSVGRoot::layout()
 {
+    StackStats::LayoutCheckPoint layoutCheckPoint;
     ASSERT(needsLayout());
 
     m_resourcesNeedingToInvalidateClients.clear();
@@ -220,15 +230,14 @@ void RenderSVGRoot::layout()
     bool needsLayout = selfNeedsLayout();
     LayoutRepainter repainter(*this, checkForRepaintDuringLayout() && needsLayout);
 
-    LayoutSize oldSize(width(), height());
-    computeLogicalWidth();
-    computeLogicalHeight();
+    LayoutSize oldSize = size();
+    updateLogicalWidth();
+    updateLogicalHeight();
     buildLocalToBorderBoxTransform();
 
     SVGSVGElement* svg = static_cast<SVGSVGElement*>(node());
     m_isLayoutSizeChanged = needsLayout || (svg->hasRelativeLengths() && oldSize != size());
     SVGRenderSupport::layoutChildren(this, needsLayout || SVGRenderSupport::filtersForceContainerLayout(this));
-    m_isLayoutSizeChanged = false;
 
     if (!m_resourcesNeedingToInvalidateClients.isEmpty()) {
         // Invalidate resource clients, which may mark some nodes for layout.
@@ -252,43 +261,58 @@ void RenderSVGRoot::layout()
     setNeedsLayout(false);
 }
 
-void RenderSVGRoot::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& adjustedPaintOffset)
+void RenderSVGRoot::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     // An empty viewport disables rendering.
-    if (borderBoxRect().isEmpty())
+    if (pixelSnappedBorderBoxRect().isEmpty())
         return;
 
     // Don't paint, if the context explicitely disabled it.
     if (paintInfo.context->paintingDisabled())
         return;
 
+    Page* page = 0;
+    if (Frame* frame = this->frame())
+        page = frame->page();
+
     // Don't paint if we don't have kids, except if we have filters we should paint those.
     if (!firstChild()) {
         SVGResources* resources = SVGResourcesCache::cachedResourcesForRenderObject(this);
-        if (!resources || !resources->filter())
+        if (!resources || !resources->filter()) {
+            if (page && paintInfo.phase == PaintPhaseForeground)
+                page->addRelevantUnpaintedObject(this, visualOverflowRect());
             return;
+        }
     }
+
+    if (page && paintInfo.phase == PaintPhaseForeground)
+        page->addRelevantRepaintedObject(this, visualOverflowRect());
 
     // Make a copy of the PaintInfo because applyTransform will modify the damage rect.
     PaintInfo childPaintInfo(paintInfo);
     childPaintInfo.context->save();
 
     // Apply initial viewport clip - not affected by overflow handling
-    childPaintInfo.context->clip(overflowClipRect(adjustedPaintOffset, paintInfo.renderRegion));
+    childPaintInfo.context->clip(pixelSnappedIntRect(overflowClipRect(paintOffset, paintInfo.renderRegion)));
 
     // Convert from container offsets (html renderers) to a relative transform (svg renderers).
     // Transform from our paint container's coordinate system to our local coords.
-    childPaintInfo.applyTransform(AffineTransform::translation(adjustedPaintOffset.x() - x(), adjustedPaintOffset.y() - y()) * localToParentTransform());
+    IntPoint adjustedPaintOffset = roundedIntPoint(paintOffset);
+    childPaintInfo.applyTransform(AffineTransform::translation(adjustedPaintOffset.x(), adjustedPaintOffset.y()) * localToBorderBoxTransform());
 
-    bool continueRendering = true;
-    if (childPaintInfo.phase == PaintPhaseForeground)
-        continueRendering = SVGRenderSupport::prepareToRenderSVGContent(this, childPaintInfo);
+    // SVGRenderingContext must be destroyed before we restore the childPaintInfo.context, because a filter may have
+    // changed the context and it is only reverted when the SVGRenderingContext destructor finishes applying the filter.
+    {
+        SVGRenderingContext renderingContext;
+        bool continueRendering = true;
+        if (childPaintInfo.phase == PaintPhaseForeground) {
+            renderingContext.prepareToRenderSVGContent(this, childPaintInfo);
+            continueRendering = renderingContext.isRenderingPrepared();
+        }
 
-    if (continueRendering)
-        RenderBox::paint(childPaintInfo, LayoutPoint());
-
-    if (childPaintInfo.phase == PaintPhaseForeground)
-        SVGRenderSupport::finishRenderSVGContent(this, childPaintInfo, paintInfo.context);
+        if (continueRendering)
+            RenderBox::paint(childPaintInfo, LayoutPoint());
+    }
 
     childPaintInfo.context->restore();
 }
@@ -314,10 +338,16 @@ void RenderSVGRoot::styleDidChange(StyleDifference diff, const RenderStyle* oldS
     SVGResourcesCache::clientStyleChanged(this, diff, style());
 }
 
-void RenderSVGRoot::updateFromElement()
+void RenderSVGRoot::addChild(RenderObject* child, RenderObject* beforeChild)
 {
-    RenderReplaced::updateFromElement();
-    SVGResourcesCache::clientUpdatedFromElement(this, style());
+    RenderReplaced::addChild(child, beforeChild);
+    SVGResourcesCache::clientWasAddedToTree(child, child->style());
+}
+
+void RenderSVGRoot::removeChild(RenderObject* child)
+{
+    SVGResourcesCache::clientWillBeRemovedFromTree(child);
+    RenderReplaced::removeChild(child);
 }
 
 // RenderBox methods will expect coordinates w/o any transforms in coordinates
@@ -328,7 +358,7 @@ void RenderSVGRoot::buildLocalToBorderBoxTransform()
     float scale = style()->effectiveZoom();
     FloatPoint translate = svg->currentTranslate();
     LayoutSize borderAndPadding(borderLeft() + paddingLeft(), borderTop() + paddingTop());
-    m_localToBorderBoxTransform = svg->viewBoxToViewTransform(width() / scale, height() / scale);
+    m_localToBorderBoxTransform = svg->viewBoxToViewTransform(contentWidth() / scale, contentHeight() / scale);
     if (borderAndPadding.isEmpty() && scale == 1 && translate == FloatPoint::zero())
         return;
     m_localToBorderBoxTransform = AffineTransform(scale, 0, 0, scale, borderAndPadding.width() + translate.x(), borderAndPadding.height() + translate.y()) * m_localToBorderBoxTransform;
@@ -339,85 +369,93 @@ const AffineTransform& RenderSVGRoot::localToParentTransform() const
     // Slightly optimized version of m_localToParentTransform = AffineTransform::translation(x(), y()) * m_localToBorderBoxTransform;
     m_localToParentTransform = m_localToBorderBoxTransform;
     if (x())
-        m_localToParentTransform.setE(m_localToParentTransform.e() + x());
+        m_localToParentTransform.setE(m_localToParentTransform.e() + roundToInt(x()));
     if (y())
-        m_localToParentTransform.setF(m_localToParentTransform.f() + y());
+        m_localToParentTransform.setF(m_localToParentTransform.f() + roundToInt(y()));
     return m_localToParentTransform;
 }
 
-LayoutRect RenderSVGRoot::clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer) const
+LayoutRect RenderSVGRoot::clippedOverflowRectForRepaint(const RenderLayerModelObject* repaintContainer) const
 {
     return SVGRenderSupport::clippedOverflowRectForRepaint(this, repaintContainer);
 }
 
-void RenderSVGRoot::computeFloatRectForRepaint(RenderBoxModelObject* repaintContainer, FloatRect& repaintRect, bool fixed) const
+void RenderSVGRoot::computeFloatRectForRepaint(const RenderLayerModelObject* repaintContainer, FloatRect& repaintRect, bool fixed) const
 {
     // Apply our local transforms (except for x/y translation), then our shadow, 
     // and then call RenderBox's method to handle all the normal CSS Box model bits
     repaintRect = m_localToBorderBoxTransform.mapRect(repaintRect);
 
-    // Apply initial viewport clip - not affected by overflow settings    
-    repaintRect.intersect(borderBoxRect());
-
     const SVGRenderStyle* svgStyle = style()->svgStyle();
     if (const ShadowData* shadow = svgStyle->shadow())
         shadow->adjustRectForShadow(repaintRect);
+
+    // Apply initial viewport clip - not affected by overflow settings
+    repaintRect.intersect(pixelSnappedBorderBoxRect());
 
     LayoutRect rect = enclosingIntRect(repaintRect);
     RenderReplaced::computeRectForRepaint(repaintContainer, rect, fixed);
     repaintRect = rect;
 }
 
-void RenderSVGRoot::mapLocalToContainer(RenderBoxModelObject* repaintContainer, bool fixed, bool useTransforms, TransformState& transformState, bool* wasFixed) const
+// This method expects local CSS box coordinates.
+// Callers with local SVG viewport coordinates should first apply the localToBorderBoxTransform
+// to convert from SVG viewport coordinates to local CSS box coordinates.
+void RenderSVGRoot::mapLocalToContainer(const RenderLayerModelObject* repaintContainer, TransformState& transformState, MapCoordinatesFlags mode, bool* wasFixed) const
 {
-    ASSERT(!fixed); // We should have no fixed content in the SVG rendering tree.
-    ASSERT(useTransforms); // mapping a point through SVG w/o respecting trasnforms is useless.
+    ASSERT(mode & ~IsFixed); // We should have no fixed content in the SVG rendering tree.
+    ASSERT(mode & UseTransforms); // mapping a point through SVG w/o respecting trasnforms is useless.
 
-    // Transform to our border box and let RenderBox transform the rest of the way.
-    transformState.applyTransform(m_localToBorderBoxTransform);
-    RenderReplaced::mapLocalToContainer(repaintContainer, fixed, useTransforms, transformState, wasFixed);
+    RenderReplaced::mapLocalToContainer(repaintContainer, transformState, mode | ApplyContainerFlip, wasFixed);
+}
+
+const RenderObject* RenderSVGRoot::pushMappingToContainer(const RenderLayerModelObject* ancestorToStopAt, RenderGeometryMap& geometryMap) const
+{
+    return RenderReplaced::pushMappingToContainer(ancestorToStopAt, geometryMap);
 }
 
 void RenderSVGRoot::updateCachedBoundaries()
 {
-    m_objectBoundingBox = FloatRect();
-    m_strokeBoundingBox = FloatRect();
-    m_repaintBoundingBox = FloatRect();
+    SVGRenderSupport::computeContainerBoundingBoxes(this, m_objectBoundingBox, m_objectBoundingBoxValid, m_strokeBoundingBox, m_repaintBoundingBoxExcludingShadow);
+    SVGRenderSupport::intersectRepaintRectWithResources(this, m_repaintBoundingBoxExcludingShadow);
+    m_repaintBoundingBoxExcludingShadow.inflate(borderAndPaddingWidth());
 
-    SVGRenderSupport::computeContainerBoundingBoxes(this, m_objectBoundingBox, m_strokeBoundingBox, m_repaintBoundingBox);
-    SVGRenderSupport::intersectRepaintRectWithResources(this, m_repaintBoundingBox);
-    m_repaintBoundingBox.inflate(borderAndPaddingWidth());
+    m_repaintBoundingBox = m_repaintBoundingBoxExcludingShadow;
+    SVGRenderSupport::intersectRepaintRectWithShadows(this, m_repaintBoundingBox);
 }
 
-bool RenderSVGRoot::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction hitTestAction)
+bool RenderSVGRoot::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction hitTestAction)
 {
-    LayoutPoint pointInParent = pointInContainer - toLayoutSize(accumulatedOffset);
-    LayoutPoint pointInBorderBox(pointInParent.x() - x(), pointInParent.y() - y());
+    LayoutPoint pointInParent = locationInContainer.point() - toLayoutSize(accumulatedOffset);
+    LayoutPoint pointInBorderBox = pointInParent - toLayoutSize(location());
 
-    // Note: For now, we're ignoring hits to border and padding for <svg>
-    if (!contentBoxRect().contains(pointInBorderBox))
-        return false;
+    // Only test SVG content if the point is in our content box.
+    // FIXME: This should be an intersection when rect-based hit tests are supported by nodeAtFloatPoint.
+    if (contentBoxRect().contains(pointInBorderBox)) {
+        FloatPoint localPoint = localToParentTransform().inverse().mapPoint(FloatPoint(pointInParent));
 
-    LayoutPoint localPoint = localToParentTransform().inverse().mapPoint(pointInParent);
-
-    for (RenderObject* child = lastChild(); child; child = child->previousSibling()) {
-        if (child->nodeAtFloatPoint(request, result, localPoint, hitTestAction)) {
-            // FIXME: CSS/HTML assumes the local point is relative to the border box, right?
-            updateHitTestResult(result, pointInBorderBox);
+        for (RenderObject* child = lastChild(); child; child = child->previousSibling()) {
             // FIXME: nodeAtFloatPoint() doesn't handle rect-based hit tests yet.
-            result.addNodeToRectBasedTestResult(child->node(), pointInContainer);
-            return true;
+            if (child->nodeAtFloatPoint(request, result, localPoint, hitTestAction)) {
+                updateHitTestResult(result, pointInBorderBox);
+                if (!result.addNodeToRectBasedTestResult(child->node(), request, locationInContainer))
+                    return true;
+            }
         }
     }
 
     // If we didn't early exit above, we've just hit the container <svg> element. Unlike SVG 1.1, 2nd Edition allows container elements to be hit.
-    if (hitTestAction == HitTestBlockBackground && style()->pointerEvents() != PE_NONE) {
+    if (hitTestAction == HitTestBlockBackground && visibleToHitTesting()) {
         // Only return true here, if the last hit testing phase 'BlockBackground' is executed. If we'd return true in the 'Foreground' phase,
         // hit testing would stop immediately. For SVG only trees this doesn't matter. Though when we have a <foreignObject> subtree we need
         // to be able to detect hits on the background of a <div> element. If we'd return true here in the 'Foreground' phase, we are not able 
         // to detect these hits anymore.
-        updateHitTestResult(result, roundedLayoutPoint(localPoint));
-        return true;
+        LayoutRect boundsRect(accumulatedOffset + location(), size());
+        if (locationInContainer.intersects(boundsRect)) {
+            updateHitTestResult(result, pointInBorderBox);
+            if (!result.addNodeToRectBasedTestResult(node(), request, locationInContainer, boundsRect))
+                return true;
+        }
     }
 
     return false;
@@ -431,6 +469,14 @@ bool RenderSVGRoot::hasRelativeDimensions() const
     return svg->intrinsicHeight(SVGSVGElement::IgnoreCSSProperties).isPercent() || svg->intrinsicWidth(SVGSVGElement::IgnoreCSSProperties).isPercent();
 }
 
+bool RenderSVGRoot::hasRelativeLogicalHeight() const
+{
+    SVGSVGElement* svg = static_cast<SVGSVGElement*>(node());
+    ASSERT(svg);
+
+    return svg->intrinsicHeight(SVGSVGElement::IgnoreCSSProperties).isPercent();
+}
+
 void RenderSVGRoot::addResourceForClientInvalidation(RenderSVGResourceContainer* resource)
 {
     RenderObject* svgRoot = resource->parent();
@@ -439,14 +485,6 @@ void RenderSVGRoot::addResourceForClientInvalidation(RenderSVGResourceContainer*
     if (!svgRoot)
         return;
     static_cast<RenderSVGRoot*>(svgRoot)->m_resourcesNeedingToInvalidateClients.add(resource);
-}
-
-bool RenderSVGRoot::hasRelativeLogicalHeight() const
-{
-    SVGSVGElement* svg = static_cast<SVGSVGElement*>(node());
-    ASSERT(svg);
-
-    return svg->intrinsicHeight(SVGSVGElement::IgnoreCSSProperties).isPercent();
 }
 
 }

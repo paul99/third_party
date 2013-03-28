@@ -28,7 +28,7 @@
 
 #include "ContextMenuClient.h"
 
-#include <RefCounted.h>
+#include <wtf/RefCounted.h>
 
 namespace WebCore {
 class ContextMenu;
@@ -40,7 +40,7 @@ public:
     virtual PlatformMenuDescription getCustomMenuFromDefaultItems(ContextMenu*);
     virtual void contextMenuItemSelected(ContextMenuItem*, const ContextMenu*);
 
-    virtual void downloadURL(const KURL& url);
+    virtual void downloadURL(const KURL&);
     virtual void lookUpInDictionary(Frame*);
     virtual void speak(const String&);
     virtual bool isSpeaking();

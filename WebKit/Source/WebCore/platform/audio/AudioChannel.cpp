@@ -41,8 +41,18 @@ namespace WebCore {
 
 using namespace VectorMath;
 
+void AudioChannel::resizeSmaller(size_t newLength)
+{
+    ASSERT(newLength <= m_length);
+    if (newLength <= m_length)
+        m_length = newLength;
+}
+
 void AudioChannel::scale(float scale)
 {
+    if (isSilent())
+        return;
+
     vsmul(data(), 1, &scale, mutableData(), 1, length());
 }
 
@@ -53,6 +63,10 @@ void AudioChannel::copyFrom(const AudioChannel* sourceChannel)
     if (!isSafe)
         return;
 
+    if (sourceChannel->isSilent()) {
+        zero();
+        return;
+    }
     memcpy(mutableData(), sourceChannel->data(), sizeof(float) * length());
 }
 
@@ -64,6 +78,9 @@ void AudioChannel::copyFromRange(const AudioChannel* sourceChannel, unsigned sta
     if (!isRangeSafe)
         return;
 
+    if (sourceChannel->isSilent() && isSilent())
+        return;
+
     // Check that this channel has enough space.
     size_t rangeLength = endFrame - startFrame;
     bool isRangeLengthSafe = rangeLength <= length();
@@ -73,7 +90,14 @@ void AudioChannel::copyFromRange(const AudioChannel* sourceChannel, unsigned sta
 
     const float* source = sourceChannel->data();
     float* destination = mutableData();
-    memcpy(destination, source + startFrame, sizeof(float) * rangeLength);
+
+    if (sourceChannel->isSilent()) {
+        if (rangeLength == length())
+            zero();
+        else
+            memset(destination, 0, sizeof(float) * rangeLength);
+    } else
+        memcpy(destination, source + startFrame, sizeof(float) * rangeLength);
 }
 
 void AudioChannel::sumFrom(const AudioChannel* sourceChannel)
@@ -83,12 +107,21 @@ void AudioChannel::sumFrom(const AudioChannel* sourceChannel)
     if (!isSafe)
         return;
 
-    vadd(data(), 1, sourceChannel->data(), 1, mutableData(), 1, length());
+    if (sourceChannel->isSilent())
+        return;
+
+    if (isSilent())
+        copyFrom(sourceChannel);
+    else
+        vadd(data(), 1, sourceChannel->data(), 1, mutableData(), 1, length());
 }
 
 float AudioChannel::maxAbsValue() const
 {
-    float max = 0.0f;
+    if (isSilent())
+        return 0;
+
+    float max = 0;
 
     vmaxmgv(data(), 1, &max, length());
 

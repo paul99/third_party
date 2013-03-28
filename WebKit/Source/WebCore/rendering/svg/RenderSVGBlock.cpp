@@ -27,6 +27,7 @@
 #include "RenderSVGResource.h"
 #include "SVGElement.h"
 #include "SVGResourcesCache.h"
+#include "StyleInheritedData.h"
 
 namespace WebCore {
 
@@ -60,9 +61,9 @@ void RenderSVGBlock::setStyle(PassRefPtr<RenderStyle> style)
     RenderBlock::setStyle(useStyle.release());
 }
 
-void RenderSVGBlock::updateBoxModelInfoFromStyle()
+void RenderSVGBlock::updateFromStyle()
 {
-    RenderBlock::updateBoxModelInfoFromStyle();
+    RenderBlock::updateFromStyle();
 
     // RenderSVGlock, used by Render(SVGText|ForeignObject), is not allowed to call setHasOverflowClip(true).
     // RenderBlock assumes a layer to be present when the overflow clip functionality is requested. Both
@@ -79,7 +80,7 @@ void RenderSVGBlock::updateBoxModelInfoFromStyle()
     setHasOverflowClip(false);
 }
 
-void RenderSVGBlock::absoluteRects(Vector<LayoutRect>&, const LayoutPoint&) const
+void RenderSVGBlock::absoluteRects(Vector<IntRect>&, const LayoutPoint&) const
 {
     // This code path should never be taken for SVG, as we're assuming useTransforms=true everywhere, absoluteQuads should be used.
     ASSERT_NOT_REACHED();
@@ -102,12 +103,6 @@ void RenderSVGBlock::styleDidChange(StyleDifference diff, const RenderStyle* old
 {
     RenderBlock::styleDidChange(diff, oldStyle);
     SVGResourcesCache::clientStyleChanged(this, diff, style());
-}
-
-void RenderSVGBlock::updateFromElement()
-{
-    RenderBlock::updateFromElement();
-    SVGResourcesCache::clientUpdatedFromElement(this, style());
 }
 
 }

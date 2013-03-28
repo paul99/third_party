@@ -56,7 +56,7 @@ static void gtkStyleChangedCallback(GObject*, GParamSpec*)
 {
     StyleContextMap::const_iterator end = styleContextMap().end();
     for (StyleContextMap::const_iterator iter = styleContextMap().begin(); iter != end; ++iter)
-        gtk_style_context_invalidate(iter->second.get());
+        gtk_style_context_invalidate(iter->value.get());
 
     Page::scheduleForcedStyleRecalcForAllPages();
 }
@@ -77,9 +77,9 @@ static StyleContextMap& styleContextMap()
 
 static GtkStyleContext* getStyleContext(GType widgetType)
 {
-    std::pair<StyleContextMap::iterator, bool> result = styleContextMap().add(widgetType, 0);
-    if (!result.second)
-        return result.first->second.get();
+    StyleContextMap::AddResult result = styleContextMap().add(widgetType, 0);
+    if (!result.isNewEntry)
+        return result.iterator->value.get();
 
     GtkWidgetPath* path = gtk_widget_path_new();
     gtk_widget_path_append_type(path, widgetType);
@@ -111,7 +111,7 @@ static GtkStyleContext* getStyleContext(GType widgetType)
     gtk_style_context_set_path(context.get(), path);
     gtk_widget_path_free(path);
 
-    result.first->second = context;
+    result.iterator->value = context;
     return context.get();
 }
 
@@ -218,10 +218,27 @@ static void setToggleSize(GtkStyleContext* context, RenderStyle* style)
         style->setHeight(Length(indicatorSize, Fixed));
 }
 
-static void paintToggle(const RenderThemeGtk* theme, GType widgetType, RenderObject* renderObject, const PaintInfo& paintInfo, const IntRect& rect)
+static void paintToggle(const RenderThemeGtk* theme, GType widgetType, RenderObject* renderObject, const PaintInfo& paintInfo, const IntRect& fullRect)
 {
     GtkStyleContext* context = getStyleContext(widgetType);
     gtk_style_context_save(context);
+
+    // Some themes do not render large toggle buttons properly, so we simply
+    // shrink the rectangle back down to the default size and then center it
+    // in the full toggle button region. The reason for not simply forcing toggle
+    // buttons to be a smaller size is that we don't want to break site layouts.
+    gint indicatorSize;
+    gtk_style_context_get_style(context, "indicator-size", &indicatorSize, NULL);
+    IntRect rect(fullRect);
+    if (rect.width() > indicatorSize) {
+        rect.inflateX(-(rect.width() - indicatorSize) / 2);
+        rect.setWidth(indicatorSize); // In case rect.width() was equal to indicatorSize + 1.
+    }
+
+    if (rect.height() > indicatorSize) {
+        rect.inflateY(-(rect.height() - indicatorSize) / 2);
+        rect.setHeight(indicatorSize); // In case rect.height() was equal to indicatorSize + 1.
+    }
 
     gtk_style_context_set_direction(context, static_cast<GtkTextDirection>(gtkTextDirection(renderObject->style()->direction())));
     gtk_style_context_add_class(context, widgetType == GTK_TYPE_CHECK_BUTTON ? GTK_STYLE_CLASS_CHECK : GTK_STYLE_CLASS_RADIO);
@@ -366,7 +383,7 @@ static void getComboBoxMetrics(RenderStyle* style, GtkBorder& border, int& focus
     if (style->appearance() == NoControlPart)
         return;
 
-    GtkStyleContext* context = getStyleContext(GTK_TYPE_BUTTON);
+    GtkStyleContext* context = getStyleContext(GTK_TYPE_COMBO_BOX);
     gtk_style_context_save(context);
 
     gtk_style_context_add_class(context, GTK_STYLE_CLASS_BUTTON);
@@ -522,12 +539,11 @@ bool RenderThemeGtk::paintMenuList(RenderObject* renderObject, const PaintInfo& 
     gtk_style_context_restore(arrowStyleContext);
 
     // Paint the separator if needed.
-    GtkStyleContext* separatorStyleContext = getStyleContext(GTK_TYPE_SEPARATOR);
+    GtkStyleContext* separatorStyleContext = getStyleContext(GTK_TYPE_COMBO_BOX);
     gtk_style_context_save(separatorStyleContext);
 
     gtk_style_context_set_direction(separatorStyleContext, direction);
     gtk_style_context_add_class(separatorStyleContext, "separator");
-    gtk_style_context_add_class(separatorStyleContext, GTK_STYLE_CLASS_BUTTON);
 
     gboolean wideSeparators;
     gint separatorWidth;
@@ -689,7 +705,7 @@ bool RenderThemeGtk::paintSliderThumb(RenderObject* renderObject, const PaintInf
     return false;
 }
 
-void RenderThemeGtk::adjustSliderThumbSize(RenderStyle* style) const
+void RenderThemeGtk::adjustSliderThumbSize(RenderStyle* style, Element*) const
 {
     ControlPart part = style->appearance();
 #if ENABLE(VIDEO)
@@ -714,7 +730,7 @@ void RenderThemeGtk::adjustSliderThumbSize(RenderStyle* style) const
     style->setHeight(Length(sliderLength, Fixed));
 }
 
-#if ENABLE(PROGRESS_TAG)
+#if ENABLE(PROGRESS_ELEMENT)
 bool RenderThemeGtk::paintProgressBar(RenderObject* renderObject, const PaintInfo& paintInfo, const IntRect& rect)
 {
     if (!renderObject->isProgress())
@@ -751,14 +767,15 @@ bool RenderThemeGtk::paintProgressBar(RenderObject* renderObject, const PaintInf
 
 static gint spinButtonArrowSize(GtkStyleContext* context)
 {
-    const PangoFontDescription* fontDescription = gtk_style_context_get_font(context, static_cast<GtkStateFlags>(0));
+    const PangoFontDescription* fontDescription;
+    gtk_style_context_get(context, static_cast<GtkStateFlags>(0), "font", &fontDescription, NULL);
     gint fontSize = pango_font_description_get_size(fontDescription);
     gint arrowSize = max(PANGO_PIXELS(fontSize), minSpinButtonArrowSize);
 
     return arrowSize - arrowSize % 2; // Force even.
 }
 
-void RenderThemeGtk::adjustInnerSpinButtonStyle(CSSStyleSelector*, RenderStyle* style, Element*) const
+void RenderThemeGtk::adjustInnerSpinButtonStyle(StyleResolver*, RenderStyle* style, Element*) const
 {
     GtkStyleContext* context = getStyleContext(GTK_TYPE_SPIN_BUTTON);
 

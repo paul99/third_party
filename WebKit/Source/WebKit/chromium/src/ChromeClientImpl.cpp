@@ -34,16 +34,22 @@
 
 #include "AXObjectCache.h"
 #include "AccessibilityObject.h"
-#if ENABLE(INPUT_COLOR)
+#if ENABLE(INPUT_TYPE_COLOR)
 #include "ColorChooser.h"
 #include "ColorChooserClient.h"
-#include "ColorChooserProxy.h"
+#if ENABLE(PAGE_POPUP)
+#include "ColorChooserPopupUIController.h"
+#else
+#include "ColorChooserUIController.h"
+#endif
 #endif
 #include "Console.h"
 #include "Cursor.h"
-#include "DatabaseTracker.h"
+#include "DateTimeChooser.h"
+#include "DateTimeChooserImpl.h"
 #include "Document.h"
 #include "DocumentLoader.h"
+#include "ExternalDateTimeChooser.h"
 #include "ExternalPopupMenu.h"
 #include "FileChooser.h"
 #include "FileIconLoader.h"
@@ -51,9 +57,8 @@
 #include "FrameLoadRequest.h"
 #include "FrameView.h"
 #include "Geolocation.h"
-#include "GeolocationService.h"
 #include "GraphicsLayer.h"
-#include "GraphicsLayerChromium.h"
+#include "HTMLInputElement.h"
 #include "HTMLNames.h"
 #include "HitTestResult.h"
 #include "Icon.h"
@@ -61,8 +66,8 @@
 #include "NavigationAction.h"
 #include "Node.h"
 #include "Page.h"
+#include "PagePopupDriver.h"
 #include "PlatformScreen.h"
-#include "PlatformSupport.h"
 #include "PopupContainer.h"
 #include "PopupMenuChromium.h"
 #include "RenderWidget.h"
@@ -70,13 +75,10 @@
 #include "SearchPopupMenuChromium.h"
 #include "SecurityOrigin.h"
 #include "Settings.h"
-#if USE(V8)
-#include "V8Proxy.h"
-#endif
+#include "TextFieldDecorationElement.h"
 #include "WebAccessibilityObject.h"
-#if ENABLE(INPUT_COLOR)
+#if ENABLE(INPUT_TYPE_COLOR)
 #include "WebColorChooser.h"
-#include "WebColorChooserClientImpl.h"
 #endif
 #include "WebConsoleMessage.h"
 #include "WebCursorInfo.h"
@@ -92,15 +94,17 @@
 #include "WebPopupMenuImpl.h"
 #include "WebPopupMenuInfo.h"
 #include "WebPopupType.h"
-#include "platform/WebRect.h"
 #include "WebSettings.h"
 #include "WebTextDirection.h"
-#include "platform/WebURLRequest.h"
 #include "WebViewClient.h"
 #include "WebViewImpl.h"
 #include "WebWindowFeatures.h"
 #include "WindowFeatures.h"
 #include "WrappedResourceRequest.h"
+#include <public/Platform.h>
+#include <public/WebRect.h>
+#include <public/WebURLRequest.h>
+#include <wtf/text/CString.h>
 #include <wtf/text/StringBuilder.h>
 #include <wtf/text/StringConcatenate.h>
 #include <wtf/unicode/CharacterNames.h>
@@ -137,6 +141,10 @@ ChromeClientImpl::ChromeClientImpl(WebViewImpl* webView)
     , m_scrollbarsVisible(true)
     , m_menubarVisible(true)
     , m_resizable(true)
+    , m_nextNewWindowNavigationPolicy(WebNavigationPolicyIgnore)
+#if ENABLE(PAGE_POPUP)
+    , m_pagePopupDriver(webView)
+#endif
 {
 }
 
@@ -162,17 +170,19 @@ void ChromeClientImpl::setWindowRect(const FloatRect& r)
 
 FloatRect ChromeClientImpl::windowRect()
 {
-    WebRect rect;
-    if (m_webView->client())
-        rect = m_webView->client()->rootWindowRect();
-    else {
-        // These numbers will be fairly wrong. The window's x/y coordinates will
-        // be the top left corner of the screen and the size will be the content
-        // size instead of the window size.
-        rect.width = m_webView->size().width;
-        rect.height = m_webView->size().height;
+    if (m_webView->client()) {
+        // On Chrome for Android, rootWindowRect is in physical screen pixels
+        // instead of density independent (UI) pixels, and must be scaled down.
+        FloatRect rect = FloatRect(m_webView->client()->rootWindowRect());
+        if (!m_webView->page()->settings()->applyDeviceScaleFactorInCompositor())
+            rect.scale(1 / m_webView->client()->screenInfo().deviceScaleFactor);
+        return rect;
     }
-    return FloatRect(rect);
+
+    // These numbers will be fairly wrong. The window's x/y coordinates will
+    // be the top left corner of the screen and the size will be the content
+    // size instead of the window size.
+    return FloatRect(0, 0, m_webView->size().width, m_webView->size().height);
 }
 
 FloatRect ChromeClientImpl::pageRect()
@@ -239,30 +249,36 @@ Page* ChromeClientImpl::createWindow(
     if (!m_webView->client())
         return 0;
 
+    // FrameLoaderClientImpl may have given us a policy to use for the next new
+    // window navigation. If not, determine the policy using the same logic as
+    // show().
+    WebNavigationPolicy policy;
+    if (m_nextNewWindowNavigationPolicy != WebNavigationPolicyIgnore) {
+        policy = m_nextNewWindowNavigationPolicy;
+        m_nextNewWindowNavigationPolicy = WebNavigationPolicyIgnore;
+    } else
+        policy = getNavigationPolicy();
+
     WrappedResourceRequest request;
     if (!r.resourceRequest().isEmpty())
         request.bind(r.resourceRequest());
     else if (!action.resourceRequest().isEmpty())
         request.bind(action.resourceRequest());
     WebViewImpl* newView = static_cast<WebViewImpl*>(
-        m_webView->client()->createView(WebFrameImpl::fromFrame(frame), request, features, r.frameName()));
+        m_webView->client()->createView(WebFrameImpl::fromFrame(frame), request, features, r.frameName(), policy));
     if (!newView)
         return 0;
 
     return newView->page();
 }
 
-static inline bool currentEventShouldCauseBackgroundTab(const WebInputEvent* inputEvent)
+static inline void updatePolicyForEvent(const WebInputEvent* inputEvent, WebNavigationPolicy* policy)
 {
-    if (!inputEvent)
-        return false;
-
-    if (inputEvent->type != WebInputEvent::MouseUp)
-        return false;
+    if (!inputEvent || inputEvent->type != WebInputEvent::MouseUp)
+        return;
 
     const WebMouseEvent* mouseEvent = static_cast<const WebMouseEvent*>(inputEvent);
 
-    WebNavigationPolicy policy;
     unsigned short buttonNumber;
     switch (mouseEvent->button) {
     case WebMouseEvent::ButtonLeft:
@@ -275,24 +291,23 @@ static inline bool currentEventShouldCauseBackgroundTab(const WebInputEvent* inp
         buttonNumber = 2;
         break;
     default:
-        return false;
+        return;
     }
     bool ctrl = mouseEvent->modifiers & WebMouseEvent::ControlKey;
     bool shift = mouseEvent->modifiers & WebMouseEvent::ShiftKey;
     bool alt = mouseEvent->modifiers & WebMouseEvent::AltKey;
     bool meta = mouseEvent->modifiers & WebMouseEvent::MetaKey;
 
-    if (!WebViewImpl::navigationPolicyFromMouseEvent(buttonNumber, ctrl, shift, alt, meta, &policy))
-        return false;
-
-    return policy == WebNavigationPolicyNewBackgroundTab;
+    WebNavigationPolicy userPolicy = *policy;
+    WebViewImpl::navigationPolicyFromMouseEvent(buttonNumber, ctrl, shift, alt, meta, &userPolicy);
+    // User and app agree that we want a new window; let the app override the decorations.
+    if (userPolicy == WebNavigationPolicyNewWindow && *policy == WebNavigationPolicyNewPopup)
+        return;
+    *policy = userPolicy;
 }
 
-void ChromeClientImpl::show()
+WebNavigationPolicy ChromeClientImpl::getNavigationPolicy()
 {
-    if (!m_webView->client())
-        return;
-
     // If our default configuration was modified by a script or wasn't
     // created by a user gesture, then show as a popup. Else, let this
     // new window be opened as a toplevel window.
@@ -305,10 +320,17 @@ void ChromeClientImpl::show()
     WebNavigationPolicy policy = WebNavigationPolicyNewForegroundTab;
     if (asPopup)
         policy = WebNavigationPolicyNewPopup;
-    if (currentEventShouldCauseBackgroundTab(WebViewImpl::currentInputEvent()))
-        policy = WebNavigationPolicyNewBackgroundTab;
+    updatePolicyForEvent(WebViewImpl::currentInputEvent(), &policy);
 
-    m_webView->client()->show(policy);
+    return policy;
+}
+
+void ChromeClientImpl::show()
+{
+    if (!m_webView->client())
+        return;
+
+    m_webView->client()->show(getNavigationPolicy());
 }
 
 bool ChromeClientImpl::canRunModal()
@@ -371,7 +393,6 @@ void ChromeClientImpl::setResizable(bool value)
 }
 
 void ChromeClientImpl::addMessageToConsole(MessageSource source,
-                                           MessageType type,
                                            MessageLevel level,
                                            const String& message,
                                            unsigned lineNumber,
@@ -476,13 +497,6 @@ IntRect ChromeClientImpl::windowResizerRect() const
     return result;
 }
 
-#if ENABLE(REGISTER_PROTOCOL_HANDLER)
-void ChromeClientImpl::registerProtocolHandler(const String& scheme, const String& baseURL, const String& url, const String& title)
-{
-    m_webView->client()->registerProtocolHandler(scheme, baseURL, url, title);
-}
-#endif
-
 void ChromeClientImpl::invalidateRootView(const IntRect&, bool)
 {
     notImplemented();
@@ -492,20 +506,11 @@ void ChromeClientImpl::invalidateContentsAndRootView(const IntRect& updateRect, 
 {
     if (updateRect.isEmpty())
         return;
-#if USE(ACCELERATED_COMPOSITING)
-    if (!m_webView->isAcceleratedCompositingActive()) {
-#endif
-        if (m_webView->client())
-            m_webView->client()->didInvalidateRect(updateRect);
-#if USE(ACCELERATED_COMPOSITING)
-    } else
-        m_webView->invalidateRootLayerRect(updateRect);
-#endif
+    m_webView->invalidateRect(updateRect);
 }
 
 void ChromeClientImpl::invalidateContentsForSlowScroll(const IntRect& updateRect, bool immediate)
 {
-    m_webView->hidePopups();
     invalidateContentsAndRootView(updateRect, immediate);
 }
 
@@ -520,7 +525,6 @@ void ChromeClientImpl::scroll(
     const IntSize& scrollDelta, const IntRect& scrollRect,
     const IntRect& clipRect)
 {
-    m_webView->hidePopups();
 #if USE(ACCELERATED_COMPOSITING)
     if (!m_webView->isAcceleratedCompositingActive()) {
 #endif
@@ -564,9 +568,7 @@ void ChromeClientImpl::contentsSizeChanged(Frame* frame, const IntSize& size) co
     m_webView->didChangeContentsSize();
 
     WebFrameImpl* webframe = WebFrameImpl::fromFrame(frame);
-#if OS(ANDROID)
     webframe->didChangeContentsSize(size);
-#endif
     if (webframe->client())
         webframe->client()->didChangeContentsSize(webframe, size);
 }
@@ -598,7 +600,7 @@ void ChromeClientImpl::mouseDidMoveOverElement(
             Widget* widget = toRenderWidget(object)->widget();
             if (widget && widget->isPluginContainer()) {
                 WebPluginContainerImpl* plugin = static_cast<WebPluginContainerImpl*>(widget);
-                url = plugin->plugin()->linkAtPosition(result.point());
+                url = plugin->plugin()->linkAtPosition(result.roundedPointInInnerNodeFrame());
             }
         }
     }
@@ -620,53 +622,38 @@ void ChromeClientImpl::setToolTip(const String& tooltipText, TextDirection dir)
 void ChromeClientImpl::dispatchViewportPropertiesDidChange(const ViewportArguments& arguments) const
 {
 #if ENABLE(VIEWPORT)
-    if (!m_webView->isFixedLayoutModeEnabled() || !m_webView->client() || !m_webView->page())
-        return;
-
-    ViewportArguments args;
-    if (arguments == args)
-        // Default viewport arguments passed in. This is a signal to reset the viewport.
-        args.width = ViewportArguments::ValueDesktopWidth;
-    else
-        args = arguments;
-
-    FrameView* frameView = m_webView->mainFrameImpl()->frameView();
-    int dpi = screenHorizontalDPI(frameView);
-    if (dpi == 0)
+    if (!m_webView->settings()->viewportEnabled() || !m_webView->isFixedLayoutModeEnabled() || !m_webView->client() || !m_webView->page())
         return;
 
     WebViewClient* client = m_webView->client();
-    WebRect deviceRect = client->windowRect();
+    WebSize deviceSize = m_webView->size();
     // If the window size has not been set yet don't attempt to set the viewport
-    if (!deviceRect.width || !deviceRect.height)
+    if (!deviceSize.width || !deviceSize.height)
         return;
 
     Settings* settings = m_webView->page()->settings();
+    float devicePixelRatio = client->screenInfo().deviceScaleFactor;
     // Call the common viewport computing logic in ViewportArguments.cpp.
     ViewportAttributes computed = computeViewportAttributes(
-        args, settings->layoutFallbackWidth(), deviceRect.width, deviceRect.height,
-        dpi, IntSize(deviceRect.width, deviceRect.height));
+        arguments, settings->layoutFallbackWidth(), deviceSize.width, deviceSize.height,
+        devicePixelRatio, IntSize(deviceSize.width, deviceSize.height));
 
-#if OS(ANDROID)
-    if (m_webView->page()->settings()->forceEnableZoom()) {
-        // When the 'force enable zoom' accessibility option is set, allow zooming by at least 5x.
-        computed.maximumScale = max(computed.maximumScale, 5.0f);
+    restrictScaleFactorToInitialScaleIfNotUserScalable(computed);
+
+    if (m_webView->ignoreViewportTagMaximumScale()) {
+        computed.maximumScale = max(computed.maximumScale, m_webView->maxPageScaleFactor);
         computed.userScalable = true;
     }
-#endif
 
     int layoutWidth = computed.layoutSize.width();
     int layoutHeight = computed.layoutSize.height();
     m_webView->setFixedLayoutSize(IntSize(layoutWidth, layoutHeight));
 
     bool needInitializePageScale = !m_webView->isPageScaleFactorSet();
-    m_webView->setDeviceScaleFactor(computed.devicePixelRatio);
-#if OS(ANDROID)
-    m_webView->page()->setDevicePixelRatioForDeviceDimensions(computed.devicePixelRatioForDeviceDimensions);
-#endif
+    m_webView->setDeviceScaleFactor(devicePixelRatio);
     m_webView->setPageScaleFactorLimits(computed.minimumScale, computed.maximumScale);
     if (needInitializePageScale)
-        m_webView->setPageScaleFactorPreservingScrollOffset(computed.initialScale * computed.devicePixelRatio);
+        m_webView->setPageScaleFactorPreservingScrollOffset(computed.initialScale * devicePixelRatio);
 #endif
 }
 
@@ -691,18 +678,35 @@ void ChromeClientImpl::reachedApplicationCacheOriginQuota(SecurityOrigin*, int64
     ASSERT_NOT_REACHED();
 }
 
-#if ENABLE(INPUT_COLOR)
-PassOwnPtr<ColorChooser> ChromeClientImpl::createColorChooser(ColorChooserClient* chooserClient, const Color& initialColor)
+#if ENABLE(INPUT_TYPE_COLOR)
+PassOwnPtr<ColorChooser> ChromeClientImpl::createColorChooser(ColorChooserClient* chooserClient, const Color&)
+{
+    OwnPtr<ColorChooserUIController> controller;
+#if ENABLE(PAGE_POPUP)
+    controller = adoptPtr(new ColorChooserPopupUIController(this, chooserClient));
+#else
+    controller = adoptPtr(new ColorChooserUIController(this, chooserClient));
+#endif
+    controller->openUI();
+    return controller.release();
+}
+PassOwnPtr<WebColorChooser> ChromeClientImpl::createWebColorChooser(WebColorChooserClient* chooserClient, const WebColor& initialColor)
 {
     WebViewClient* client = m_webView->client();
     if (!client)
         return nullptr;
-    WebColorChooserClientImpl* chooserClientProxy = new WebColorChooserClientImpl(chooserClient);
-    WebColor webColor = static_cast<WebColor>(initialColor.rgb());
-    WebColorChooser* chooser = client->createColorChooser(chooserClientProxy, webColor);
-    if (!chooser)
-        return nullptr;
-    return adoptPtr(new ColorChooserProxy(adoptPtr(chooser)));
+    return adoptPtr(client->createColorChooser(chooserClient, initialColor));
+}
+#endif
+
+#if ENABLE(DATE_AND_TIME_INPUT_TYPES)
+PassRefPtr<DateTimeChooser> ChromeClientImpl::openDateTimeChooser(DateTimeChooserClient* pickerClient, const DateTimeChooserParameters& parameters)
+{
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+    return DateTimeChooserImpl::create(this, pickerClient, parameters);
+#else
+    return ExternalDateTimeChooser::create(this, m_webView->client(), pickerClient, parameters);
+#endif
 }
 #endif
 
@@ -719,13 +723,13 @@ void ChromeClientImpl::runOpenPanel(Frame* frame, PassRefPtr<FileChooser> fileCh
 #else
     params.directory = false;
 #endif
-    params.acceptMIMETypes = fileChooser->settings().acceptMIMETypes;
+    params.acceptTypes = fileChooser->settings().acceptTypes();
     params.selectedFiles = fileChooser->settings().selectedFiles;
     if (params.selectedFiles.size() > 0)
         params.initialValue = params.selectedFiles[0];
-#if OS(ANDROID) && ENABLE(MEDIA_CAPTURE)
+#if ENABLE(MEDIA_CAPTURE)
     params.capture = fileChooser->settings().capture;
-#elif OS(ANDROID)
+#else
     params.capture = WebString();
 #endif
     WebFileChooserCompletionImpl* chooserCompletion =
@@ -769,6 +773,22 @@ void ChromeClientImpl::popupOpened(PopupContainer* popupContainer,
                                    const IntRect& bounds,
                                    bool handleExternally)
 {
+    // For Autofill popups, if the popup will not be fully visible, we shouldn't
+    // show it at all. Among other things, this prevents users from being able
+    // to interact via the keyboard with an invisible popup.
+    if (popupContainer->popupType() == PopupContainer::Suggestion) {
+        FrameView* view = m_webView->page()->mainFrame()->view();
+        IntRect visibleRect = view->visibleContentRect(true /* include scrollbars */);
+        // |bounds| is in screen coordinates, so make sure to convert it to
+        // content coordinates prior to comparing to |visibleRect|.
+        IntRect screenRect = bounds;
+        screenRect.setLocation(view->screenToContents(bounds.location()));
+        if (!visibleRect.contains(screenRect)) {
+            m_webView->hideAutofillPopup();
+            return;
+        }
+    }
+
     if (!m_webView->client())
         return;
 
@@ -785,7 +805,7 @@ void ChromeClientImpl::popupOpened(PopupContainer* popupContainer,
         // transparent to the WebView.
         m_webView->popupOpened(popupContainer);
     }
-    static_cast<WebPopupMenuImpl*>(webwidget)->init(popupContainer, bounds);
+    static_cast<WebPopupMenuImpl*>(webwidget)->initialize(popupContainer, bounds);
 }
 
 void ChromeClientImpl::popupClosed(WebCore::PopupContainer* popupContainer)
@@ -805,6 +825,12 @@ void ChromeClientImpl::setCursorHiddenUntilMouseMoves(bool)
 
 void ChromeClientImpl::setCursor(const WebCursorInfo& cursor)
 {
+#if OS(DARWIN)
+    // On Mac the mousemove event propagates to both the popup and main window.
+    // If a popup is open we don't want the main window to change the cursor.
+    if (m_webView->hasOpenedPopup())
+        return;
+#endif
     if (m_webView->client())
         m_webView->client()->didChangeCursor(cursor);
 }
@@ -812,6 +838,11 @@ void ChromeClientImpl::setCursor(const WebCursorInfo& cursor)
 void ChromeClientImpl::setCursorForPlugin(const WebCursorInfo& cursor)
 {
     setCursor(cursor);
+}
+
+void ChromeClientImpl::setNewWindowNavigationPolicy(WebNavigationPolicy policy)
+{
+    m_nextNewWindowNavigationPolicy = policy;
 }
 
 void ChromeClientImpl::formStateDidChange(const Node* node)
@@ -825,14 +856,6 @@ void ChromeClientImpl::formStateDidChange(const Node* node)
     if (webframe->client())
         webframe->client()->didUpdateCurrentHistoryItem(webframe);
 }
-
-#if ENABLE(TOUCH_EVENTS)
-void ChromeClientImpl::needTouchEvents(bool needTouchEvents)
-{
-    if (m_webView->client())
-        m_webView->client()->didSetNeedTouchEvents(needTouchEvents);
-}
-#endif
 
 void ChromeClientImpl::getPopupMenuInfo(PopupContainer* popupContainer,
                                         WebPopupMenuInfo* info)
@@ -882,6 +905,11 @@ void ChromeClientImpl::postAccessibilityNotification(AccessibilityObject* obj, A
         m_webView->client()->postAccessibilityNotification(WebAccessibilityObject(obj), toWebAccessibilityNotification(notification));
 }
 
+WebKit::WebScreenInfo ChromeClientImpl::screenInfo()
+{
+    return m_webView->client()->screenInfo();
+}
+
 bool ChromeClientImpl::paintCustomOverhangArea(GraphicsContext* context, const IntRect& horizontalOverhangArea, const IntRect& verticalOverhangArea, const IntRect& dirtyRect)
 {
     Frame* frame = m_webView->mainFrameImpl()->frame();
@@ -891,62 +919,15 @@ bool ChromeClientImpl::paintCustomOverhangArea(GraphicsContext* context, const I
     return false;
 }
 
-#if OS(ANDROID)
-void ChromeClientImpl::addOrUpdateScrollingLayer(WebCore::GraphicsLayer* layer, WebCore::ScrollableArea* scrollableArea, ScrollingBehavior scrollingBehavior)
-{
-    GraphicsLayerChromium* graphicsLayerChromium = static_cast<GraphicsLayerChromium*>(layer);
-    graphicsLayerChromium->setScrollableArea(scrollableArea);
-
-    LayerChromium* layerChromium = layer->platformLayer();
-    layerChromium->setScrollable(true);
-    layerChromium->setAllowScrollingAncestors(scrollingBehavior == AllowScrollingAncestors);
-    layerChromium->setScrollPosition(scrollableArea->scrollPosition());
-    layerChromium->setMaxScrollPosition(IntSize(scrollableArea->scrollSize(HorizontalScrollbar), scrollableArea->scrollSize(VerticalScrollbar)));
-    if (!layer->appliesPageScale())
-        layerChromium->setContentsScale(layer->pageScaleFactor());
-}
-
-void ChromeClientImpl::removeScrollingLayer(GraphicsLayer* layer)
-{
-    GraphicsLayerChromium* graphicsLayerChromium = static_cast<GraphicsLayerChromium*>(layer);
-    graphicsLayerChromium->setScrollableArea(0);
-
-    LayerChromium* layerChromium = layer->platformLayer();
-    layerChromium->setScrollable(false);
-    layerChromium->setAllowScrollingAncestors(true);
-    layerChromium->setScrollPosition(IntPoint());
-    layerChromium->setMaxScrollPosition(IntSize());
-}
-
-void ChromeClientImpl::setLayerInputEventRegion(PlatformLayer* layer, const Region& region)
-{
-    layer->setInputEventRegion(region);
-}
-#endif // OS(ANDROID)
-
-// FIXME: Remove ChromeClientImpl::requestGeolocationPermissionForFrame and ChromeClientImpl::cancelGeolocationPermissionRequestForFrame
-// once all ports have moved to client-based geolocation (see https://bugs.webkit.org/show_bug.cgi?id=40373 ).
-// For client-based geolocation, these methods are now implemented as WebGeolocationClient::requestPermission and WebGeolocationClient::cancelPermissionRequest.
-// (see https://bugs.webkit.org/show_bug.cgi?id=50061 ).
-void ChromeClientImpl::requestGeolocationPermissionForFrame(Frame* frame, Geolocation* geolocation)
-{
-    ASSERT_NOT_REACHED();
-}
-
-void ChromeClientImpl::cancelGeolocationPermissionRequestForFrame(Frame* frame, Geolocation* geolocation)
-{
-    ASSERT_NOT_REACHED();
-}
-
 #if USE(ACCELERATED_COMPOSITING)
 void ChromeClientImpl::attachRootGraphicsLayer(Frame* frame, GraphicsLayer* graphicsLayer)
 {
     m_webView->setRootGraphicsLayer(graphicsLayer);
 }
 
-void ChromeClientImpl::scheduleCompositingLayerSync()
+void ChromeClientImpl::scheduleCompositingLayerFlush()
 {
-    m_webView->setRootLayerNeedsDisplay();
+    m_webView->scheduleCompositingLayerSync();
 }
 
 ChromeClient::CompositingTriggerFlags ChromeClientImpl::allowedCompositingTriggers() const
@@ -973,8 +954,6 @@ ChromeClient::CompositingTriggerFlags ChromeClientImpl::allowedCompositingTrigge
 
 bool ChromeClientImpl::supportsFullscreenForNode(const Node* node)
 {
-    if (m_webView->client() && node->hasTagName(WebCore::HTMLNames::videoTag))
-        return true;
     return false;
 }
 
@@ -1010,15 +989,6 @@ void ChromeClientImpl::fullScreenRendererChanged(RenderBox*)
 }
 #endif
 
-#if OS(ANDROID) && ENABLE(FONT_BOOSTING)
-int ChromeClientImpl::visibleWidth() const
-{
-    if (m_webView->client())
-        return m_webView->client()->getVisibleWidth();
-    return 0;
-}
-#endif
-
 bool ChromeClientImpl::selectItemWritingDirectionIsNatural()
 {
     return false;
@@ -1031,7 +1001,7 @@ bool ChromeClientImpl::selectItemAlignmentFollowsMenuWritingDirection()
 
 bool ChromeClientImpl::hasOpenedPopup() const
 {
-    return !!m_webView->selectPopup();
+    return m_webView->hasOpenedPopup();
 }
 
 PassRefPtr<PopupMenu> ChromeClientImpl::createPopupMenu(PopupMenuClient* client) const
@@ -1047,6 +1017,54 @@ PassRefPtr<SearchPopupMenu> ChromeClientImpl::createSearchPopupMenu(PopupMenuCli
     return adoptRef(new SearchPopupMenuChromium(client));
 }
 
+#if ENABLE(PAGE_POPUP)
+PagePopup* ChromeClientImpl::openPagePopup(PagePopupClient* client, const IntRect& originBoundsInRootView)
+{
+    ASSERT(m_pagePopupDriver);
+    return m_pagePopupDriver->openPagePopup(client, originBoundsInRootView);
+}
+
+void ChromeClientImpl::closePagePopup(PagePopup* popup)
+{
+    ASSERT(m_pagePopupDriver);
+    m_pagePopupDriver->closePagePopup(popup);
+}
+
+void ChromeClientImpl::setPagePopupDriver(PagePopupDriver* driver)
+{
+    ASSERT(driver);
+    m_pagePopupDriver = driver;
+}
+
+void ChromeClientImpl::resetPagePopupDriver()
+{
+    m_pagePopupDriver = m_webView;
+}
+#endif
+
+bool ChromeClientImpl::willAddTextFieldDecorationsTo(HTMLInputElement* input)
+{
+    ASSERT(input);
+    const Vector<OwnPtr<TextFieldDecorator> >& decorators = m_webView->textFieldDecorators();
+    for (unsigned i = 0; i < decorators.size(); ++i) {
+        if (decorators[i]->willAddDecorationTo(input))
+            return true;
+    }
+    return false;
+}
+
+void ChromeClientImpl::addTextFieldDecorationsTo(HTMLInputElement* input)
+{
+    ASSERT(willAddTextFieldDecorationsTo(input));
+    const Vector<OwnPtr<TextFieldDecorator> >& decorators = m_webView->textFieldDecorators();
+    for (unsigned i = 0; i < decorators.size(); ++i) {
+        if (!decorators[i]->willAddDecorationTo(input))
+            continue;
+        RefPtr<TextFieldDecorationElement> decoration = TextFieldDecorationElement::create(input->document(), decorators[i].get());
+        decoration->decorate(input, decorators[i]->visibleByDefault());
+    }
+}
+
 bool ChromeClientImpl::shouldRunModalDialogDuringPageDismissal(const DialogType& dialogType, const String& dialogMessage, FrameLoader::PageDismissalType dismissalType) const
 {
     const char* kDialogs[] = {"alert", "confirm", "prompt", "showModalDialog"};
@@ -1057,7 +1075,7 @@ bool ChromeClientImpl::shouldRunModalDialogDuringPageDismissal(const DialogType&
     int dismissal = static_cast<int>(dismissalType) - 1; // Exclude NoDismissal.
     ASSERT(0 <= dismissal && dismissal < static_cast<int>(arraysize(kDismissals)));
 
-    PlatformSupport::histogramEnumeration("Renderer.ModalDialogsDuringPageDismissal", dismissal * arraysize(kDialogs) + dialog, arraysize(kDialogs) * arraysize(kDismissals));
+    WebKit::Platform::current()->histogramEnumeration("Renderer.ModalDialogsDuringPageDismissal", dismissal * arraysize(kDialogs) + dialog, arraysize(kDialogs) * arraysize(kDismissals));
 
     m_webView->mainFrame()->addMessageToConsole(WebConsoleMessage(WebConsoleMessage::LevelError, makeString("Blocked ", kDialogs[dialog], "('", dialogMessage, "') during ", kDismissals[dismissal], ".")));
 
@@ -1085,6 +1103,13 @@ void ChromeClientImpl::numWheelEventHandlersChanged(unsigned numberOfWheelHandle
     m_webView->numberOfWheelEventHandlersChanged(numberOfWheelHandlers);
 }
 
+#if ENABLE(TOUCH_EVENTS)
+void ChromeClientImpl::needTouchEvents(bool needsTouchEvents)
+{
+    m_webView->hasTouchEventHandlers(needsTouchEvents);
+}
+#endif // ENABLE(TOUCH_EVENTS)
+
 #if ENABLE(POINTER_LOCK)
 bool ChromeClientImpl::requestPointerLock()
 {
@@ -1100,6 +1125,32 @@ bool ChromeClientImpl::isPointerLocked()
 {
     return m_webView->isPointerLocked();
 }
+#endif
+
+#if ENABLE(DRAGGABLE_REGION)
+void ChromeClientImpl::annotatedRegionsChanged()
+{
+    WebViewClient* client = m_webView->client();
+    if (client)
+        client->draggableRegionsChanged();
+}
+#endif
+
+#if ENABLE(NAVIGATOR_CONTENT_UTILS)
+PassOwnPtr<NavigatorContentUtilsClientImpl> NavigatorContentUtilsClientImpl::create(WebViewImpl* webView)
+{
+    return adoptPtr(new NavigatorContentUtilsClientImpl(webView));
+}
+
+NavigatorContentUtilsClientImpl::NavigatorContentUtilsClientImpl(WebViewImpl* webView)
+    : m_webView(webView)
+{
+}
+
+void NavigatorContentUtilsClientImpl::registerProtocolHandler(const String& scheme, const String& baseURL, const String& url, const String& title)
+{ 
+    m_webView->client()->registerProtocolHandler(scheme, baseURL, url, title);
+} 
 #endif
 
 } // namespace WebKit

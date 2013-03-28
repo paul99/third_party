@@ -62,23 +62,25 @@ public:
     virtual void bringToFront();
     virtual void closeWindow();
 
-    virtual void requestAttachWindow();
-    virtual void requestDetachWindow();
-    virtual void requestSetDockSide(const String&);
+    virtual void requestSetDockSide(DockSide);
     virtual void changeAttachedWindowHeight(unsigned);
 
     virtual void openInNewTab(const String& url);
 
-    virtual bool canSaveAs();
-    virtual void saveAs(const WTF::String& fileName, const WTF::String& content);
+    virtual bool canSave();
+    virtual void save(const WTF::String& urk, const WTF::String& content, bool forceSaveAs);
+    virtual void append(const WTF::String& urk, const WTF::String& content);
+    virtual bool canInspectWorkers();
 
     virtual void inspectedURLChanged(const WTF::String&);
 
     virtual void sendMessageToBackend(const WTF::String&);
+
+    virtual bool isUnderTest();
+
 private:
     WebCore::Page* m_frontendPage;
     WebDevToolsFrontendClient* m_client;
-    WebDevToolsFrontendImpl* m_frontend;
     RefPtr<WebCore::InspectorFrontendHost> m_frontendHost;
 };
 

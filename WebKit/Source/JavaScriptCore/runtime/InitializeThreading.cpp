@@ -31,13 +31,15 @@
 
 #include "ExecutableAllocator.h"
 #include "Heap.h"
+#include "HeapStatistics.h"
 #include "Options.h"
 #include "Identifier.h"
 #include "JSDateMath.h"
 #include "JSGlobalObject.h"
-#include "UString.h"
+#include "JSLock.h"
+#include "LLIntData.h"
 #include "WriteBarrier.h"
-#include "dtoa.h"
+#include <wtf/dtoa.h>
 #include <wtf/Threading.h>
 #include <wtf/dtoa/cached-powers.h>
 
@@ -53,14 +55,20 @@ static void initializeThreadingOnce()
 {
     WTF::double_conversion::initialize();
     WTF::initializeThreading();
-    Options::initializeOptions();
+    GlobalJSLock::initialize();
+    Options::initialize();
+    if (Options::recordGCPauseTimes())
+        HeapStatistics::initialize();
 #if ENABLE(WRITE_BARRIER_PROFILING)
     WriteBarrierCounters::initialize();
 #endif
-#if ENABLE(JIT) && ENABLE(ASSEMBLER)
+#if ENABLE(ASSEMBLER)
     ExecutableAllocator::initializeAllocator();
 #endif
-    RegisterFile::initializeThreading();
+    JSStack::initializeThreading();
+#if ENABLE(LLINT)
+    LLInt::initialize();
+#endif
 }
 
 void initializeThreading()

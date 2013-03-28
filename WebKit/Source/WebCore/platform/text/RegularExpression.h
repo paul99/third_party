@@ -26,14 +26,19 @@
 #ifndef RegularExpression_h
 #define RegularExpression_h
 
-#include "PlatformString.h"
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
+
+enum MultilineMode {
+    MultilineDisabled,
+    MultilineEnabled
+};
 
 class RegularExpression {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    RegularExpression(const String&, TextCaseSensitivity);
+    RegularExpression(const String&, TextCaseSensitivity, MultilineMode = MultilineDisabled);
     ~RegularExpression();
 
     RegularExpression(const RegularExpression&);

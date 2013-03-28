@@ -56,6 +56,11 @@ extern "C" {
 #include "program/prog_parameter.h"
 }
 
+#if defined(__clang__ ) && defined(ADDRESS_SANITIZER)
+// Suppress AddressSanitizer reports about OOB reads in swizzle_for_size().
+// See also http://crbug.com/139772.
+__attribute__((no_address_safety_analysis))
+#endif
 static int swizzle_for_size(int size);
 
 /**
@@ -565,7 +570,7 @@ ir_to_mesa_visitor::get_temp(const glsl_type *type)
 variable_storage *
 ir_to_mesa_visitor::find_variable_storage(ir_variable *var)
 {
-   
+
    variable_storage *entry;
 
    foreach_iter(exec_list_iterator, iter, this->variables) {

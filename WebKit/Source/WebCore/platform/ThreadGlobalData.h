@@ -42,9 +42,11 @@ using WTF::ThreadSpecific;
 namespace WebCore {
 
     class EventNames;
+    class ThreadLocalInspectorCounters;
     class ThreadTimers;
     class XMLMIMETypeRegExp;
 
+    struct CachedResourceRequestInitiators;
     struct ICUConverterWrapper;
     struct TECConverterWrapper;
 
@@ -55,6 +57,7 @@ namespace WebCore {
         ~ThreadGlobalData();
         void destroy(); // called on workers to clean up the ThreadGlobalData before the thread exits.
 
+        const CachedResourceRequestInitiators& cachedResourceRequestInitiators() { return *m_cachedResourceRequestInitiators; }
         EventNames& eventNames() { return *m_eventNames; }
         ThreadTimers& threadTimers() { return *m_threadTimers; }
         XMLMIMETypeRegExp& xmlTypeRegExp() { return *m_xmlTypeRegExp; }
@@ -67,7 +70,12 @@ namespace WebCore {
         TECConverterWrapper& cachedConverterTEC() { return *m_cachedConverterTEC; }
 #endif
 
+#if ENABLE(INSPECTOR)
+        ThreadLocalInspectorCounters& inspectorCounters() { return *m_inspectorCounters; }
+#endif
+
     private:
+        OwnPtr<CachedResourceRequestInitiators> m_cachedResourceRequestInitiators;
         OwnPtr<EventNames> m_eventNames;
         OwnPtr<ThreadTimers> m_threadTimers;
         OwnPtr<XMLMIMETypeRegExp> m_xmlTypeRegExp;
@@ -82,6 +90,10 @@ namespace WebCore {
 
 #if PLATFORM(MAC)
         OwnPtr<TECConverterWrapper> m_cachedConverterTEC;
+#endif
+
+#if ENABLE(INSPECTOR)
+        OwnPtr<ThreadLocalInspectorCounters> m_inspectorCounters;
 #endif
 
 #if ENABLE(WORKERS)

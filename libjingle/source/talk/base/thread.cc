@@ -27,6 +27,10 @@
 
 #include "talk/base/thread.h"
 
+#ifndef __has_feature
+#define __has_feature(x) 0  // Compatibility with non-clang or LLVM compilers.
+#endif  // __has_feature
+
 #if defined(WIN32)
 #include <comdef.h>
 #elif defined(POSIX)
@@ -38,10 +42,7 @@
 #include "talk/base/stringutils.h"
 #include "talk/base/timeutils.h"
 
-#ifdef USE_COCOA_THREADING
-#if !defined(OSX) && !defined(IOS)
-#error USE_COCOA_THREADING is defined but not OSX nor IOS
-#endif
+#if !__has_feature(objc_arc) && (defined(OSX) || defined(IOS))
 #include "talk/base/maccocoathreadhelper.h"
 #include "talk/base/scoped_autorelease_pool.h"
 #endif
@@ -56,21 +57,31 @@ ThreadManager* ThreadManager::Instance() {
 #ifdef POSIX
 ThreadManager::ThreadManager() {
   pthread_key_create(&key_, NULL);
+#ifndef NO_MAIN_THREAD_WRAPPING
   WrapCurrentThread();
-#ifdef USE_COCOA_THREADING
+#endif
+#if !__has_feature(objc_arc) && (defined(OSX) || defined(IOS))
+  // Under Automatic Reference Counting (ARC), you cannot use autorelease pools
+  // directly. Instead, you use @autoreleasepool blocks instead.  Also, we are
+  // maintaining thread safety using immutability within context of GCD dispatch
+  // queues in this case.
   InitCocoaMultiThreading();
 #endif
 }
 
 ThreadManager::~ThreadManager() {
-#ifdef USE_COCOA_THREADING
+#if __has_feature(objc_arc)
+  @autoreleasepool
+#elif defined(OSX) || defined(IOS)
   // This is called during exit, at which point apparently no NSAutoreleasePools
   // are available; but we might still need them to do cleanup (or we get the
   // "no autoreleasepool in place, just leaking" warning when exiting).
   ScopedAutoreleasePool pool;
 #endif
-  UnwrapCurrentThread();
-  pthread_key_delete(key_);
+  {
+    UnwrapCurrentThread();
+    pthread_key_delete(key_);
+  }
 }
 
 Thread *ThreadManager::CurrentThread() {
@@ -85,7 +96,9 @@ void ThreadManager::SetCurrentThread(Thread *thread) {
 #ifdef WIN32
 ThreadManager::ThreadManager() {
   key_ = TlsAlloc();
+#ifndef NO_MAIN_THREAD_WRAPPING
   WrapCurrentThread();
+#endif
 }
 
 ThreadManager::~ThreadManager() {
@@ -133,6 +146,7 @@ Thread::Thread(SocketServer* ss)
       has_sends_(false),
 #if defined(WIN32)
       thread_(NULL),
+      thread_id_(0),
 #endif
       owned_(true),
       delete_self_when_complete_(false) {
@@ -221,7 +235,7 @@ bool Thread::Start(Runnable* runnable) {
     flags = CREATE_SUSPENDED;
   }
   thread_ = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)PreRun, init, flags,
-                         NULL);
+                         &thread_id_);
   if (thread_) {
     started_ = true;
     if (priority_ != PRIORITY_NORMAL) {
@@ -278,6 +292,7 @@ void Thread::Join() {
     WaitForSingleObject(thread_, INFINITE);
     CloseHandle(thread_);
     thread_ = NULL;
+    thread_id_ = 0;
 #elif defined(POSIX)
     void *pv;
     pthread_join(thread_, &pv);
@@ -306,7 +321,7 @@ void SetThreadName(DWORD dwThreadID, LPCSTR szThreadName) {
 
   __try {
     RaiseException(MSDEV_SET_THREAD_NAME, 0, sizeof(info) / sizeof(DWORD),
-                   reinterpret_cast<DWORD*>(&info));
+                   reinterpret_cast<ULONG_PTR*>(&info));
   }
   __except(EXCEPTION_CONTINUE_EXECUTION) {
   }
@@ -321,21 +336,25 @@ void* Thread::PreRun(void* pv) {
 #elif defined(POSIX)
   // TODO: See if naming exists for pthreads.
 #endif
-#ifdef USE_COCOA_THREADING
+#if __has_feature(objc_arc)
+  @autoreleasepool
+#elif defined(OSX) || defined(IOS)
   // Make sure the new thread has an autoreleasepool
   ScopedAutoreleasePool pool;
 #endif
-  if (init->runnable) {
-    init->runnable->Run(init->thread);
-  } else {
-    init->thread->Run();
+  {
+    if (init->runnable) {
+      init->runnable->Run(init->thread);
+    } else {
+      init->thread->Run();
+    }
+    if (init->thread->delete_self_when_complete_) {
+      init->thread->started_ = false;
+      delete init->thread;
+    }
+    delete init;
+    return NULL;
   }
-  if (init->thread->delete_self_when_complete_) {
-    init->thread->started_ = false;
-    delete init->thread;
-  }
-  delete init;
-  return NULL;
 }
 
 void Thread::Run() {
@@ -469,22 +488,26 @@ bool Thread::ProcessMessages(int cmsLoop) {
   int cmsNext = cmsLoop;
 
   while (true) {
-#ifdef USE_COCOA_THREADING
+#if __has_feature(objc_arc)
+    @autoreleasepool
+#elif defined(OSX) || defined(IOS)
     // see: http://developer.apple.com/library/mac/#documentation/Cocoa/Reference/Foundation/Classes/NSAutoreleasePool_Class/Reference/Reference.html
     // Each thread is supposed to have an autorelease pool. Also for event loops
     // like this, autorelease pool needs to be created and drained/released
     // for each cycle.
     ScopedAutoreleasePool pool;
 #endif
-    Message msg;
-    if (!Get(&msg, cmsNext))
-      return !IsQuitting();
-    Dispatch(&msg);
+    {
+      Message msg;
+      if (!Get(&msg, cmsNext))
+        return !IsQuitting();
+      Dispatch(&msg);
 
-    if (cmsLoop != kForever) {
-      cmsNext = TimeUntil(msEnd);
-      if (cmsNext < 0)
-        return true;
+      if (cmsLoop != kForever) {
+        cmsNext = TimeUntil(msEnd);
+        if (cmsNext < 0)
+          return true;
+      }
     }
   }
 }
@@ -504,6 +527,7 @@ bool Thread::WrapCurrentWithThreadManager(ThreadManager* thread_manager) {
     LOG_GLE(LS_ERROR) << "Unable to get handle to thread.";
     return false;
   }
+  thread_id_ = GetCurrentThreadId();
 #elif defined(POSIX)
   thread_ = pthread_self();
 #endif

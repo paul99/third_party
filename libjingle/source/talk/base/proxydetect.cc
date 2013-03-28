@@ -1050,6 +1050,8 @@ bool GetMacProxySettingsFromDictionary(ProxyInfo* proxy,
   return gotProxy;
 }
 
+// TODO(hughv) Update keychain functions. They work on 10.8, but are depricated.
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 bool p_putPasswordInProxyInfo(ProxyInfo* proxy) {
   bool result = true;  // by default we assume we're good.
   // for all we know there isn't any password.  We'll set to false
@@ -1084,7 +1086,7 @@ bool p_putPasswordInProxyInfo(ProxyInfo* proxy) {
   attributes[1].length = sizeof(UInt32);
   attributes[1].data = &port;
 
-  std::string ip = proxy->address.IPAsString();
+  std::string ip = proxy->address.ipaddr().ToString();
   attributes[2].tag = kSecServerItemAttr;
   attributes[2].length = ip.length();
   attributes[2].data = const_cast<char*>(ip.c_str());

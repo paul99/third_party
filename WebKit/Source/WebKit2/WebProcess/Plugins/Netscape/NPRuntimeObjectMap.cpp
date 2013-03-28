@@ -26,6 +26,8 @@
 #include "config.h"
 #include "NPRuntimeObjectMap.h"
 
+#if ENABLE(NETSCAPE_PLUGIN_API)
+
 #include "JSNPObject.h"
 #include "NPJSObject.h"
 #include "NPRuntimeUtilities.h"
@@ -98,12 +100,11 @@ JSObject* NPRuntimeObjectMap::getOrCreateJSObject(JSGlobalObject* globalObject, 
     if (NPJSObject::isNPJSObject(npObject))
         return NPJSObject::toNPJSObject(npObject)->jsObject();
     
-    if (JSC::Weak<JSNPObject> jsNPObject = m_jsNPObjects.get(npObject))
-        return jsNPObject.get();
+    if (JSNPObject* jsNPObject = m_jsNPObjects.get(npObject))
+        return jsNPObject;
 
     JSNPObject* jsNPObject = JSNPObject::create(globalObject, this, npObject);
-    m_jsNPObjects.set(npObject, JSC::Weak<JSNPObject>(globalObject->globalData(), jsNPObject, this, npObject));
-
+    weakAdd(m_jsNPObjects, npObject, JSC::PassWeak<JSNPObject>(jsNPObject, this, npObject));
     return jsNPObject;
 }
 
@@ -138,7 +139,7 @@ JSValue NPRuntimeObjectMap::convertNPVariantToJSValue(JSC::ExecState* exec, JSC:
 
 void NPRuntimeObjectMap::convertJSValueToNPVariant(ExecState* exec, JSValue value, NPVariant& variant)
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
 
     VOID_TO_NPVARIANT(variant);
     
@@ -177,7 +178,7 @@ void NPRuntimeObjectMap::convertJSValueToNPVariant(ExecState* exec, JSValue valu
     ASSERT_NOT_REACHED();
 }
 
-bool NPRuntimeObjectMap::evaluate(NPObject* npObject, const String&scriptString, NPVariant* result)
+bool NPRuntimeObjectMap::evaluate(NPObject* npObject, const String& scriptString, NPVariant* result)
 {
     Strong<JSGlobalObject> globalObject(this->globalObject()->globalData(), this->globalObject());
     if (!globalObject)
@@ -185,11 +186,11 @@ bool NPRuntimeObjectMap::evaluate(NPObject* npObject, const String&scriptString,
 
     ExecState* exec = globalObject->globalExec();
     
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
     JSValue thisValue = getOrCreateJSObject(globalObject.get(), npObject);
 
     globalObject->globalData().timeoutChecker.start();
-    JSValue resultValue = JSC::evaluate(exec, globalObject->globalScopeChain(), makeSource(UString(scriptString.impl())), thisValue);
+    JSValue resultValue = JSC::evaluate(exec, makeSource(scriptString), thisValue);
     globalObject->globalData().timeoutChecker.stop();
 
     convertJSValueToNPVariant(exec, resultValue, *result);
@@ -210,8 +211,12 @@ void NPRuntimeObjectMap::invalidate()
 
     Vector<NPObject*> objects;
 
-    for (HashMap<NPObject*, JSC::Weak<JSNPObject> >::iterator ptr = m_jsNPObjects.begin(), end = m_jsNPObjects.end(); ptr != end; ++ptr)
-        objects.append(ptr->second->leakNPObject());
+    for (HashMap<NPObject*, JSC::Weak<JSNPObject> >::iterator ptr = m_jsNPObjects.begin(), end = m_jsNPObjects.end(); ptr != end; ++ptr) {
+        JSNPObject* jsNPObject = ptr->value.get();
+        if (!jsNPObject) // Skip zombies.
+            continue;
+        objects.append(jsNPObject->leakNPObject());
+    }
 
     m_jsNPObjects.clear();
 
@@ -261,8 +266,8 @@ void NPRuntimeObjectMap::moveGlobalExceptionToExecState(ExecState* exec)
         return;
 
     {
-        JSLock lock(SilenceAssertionsOnly);
-        throwError(exec, createError(exec, stringToUString(globalExceptionString())));
+        JSLockHolder lock(exec);
+        throwError(exec, createError(exec, globalExceptionString()));
     }
     
     globalExceptionString() = String();
@@ -290,12 +295,11 @@ void NPRuntimeObjectMap::addToInvalidationQueue(NPObject* npObject)
 
 void NPRuntimeObjectMap::finalize(JSC::Handle<JSC::Unknown> handle, void* context)
 {
-    HashMap<NPObject*, JSC::Weak<JSNPObject> >::iterator found = m_jsNPObjects.find(static_cast<NPObject*>(context));
-    ASSERT(found != m_jsNPObjects.end());
-    ASSERT_UNUSED(handle, asObject(handle.get()) == found->second);
-    JSNPObject* object = found->second.get();
-    m_jsNPObjects.remove(found);
+    JSNPObject* object = static_cast<JSNPObject*>(handle.get().asCell());
+    weakRemove(m_jsNPObjects, static_cast<NPObject*>(context), object);
     addToInvalidationQueue(object->leakNPObject());
 }
 
 } // namespace WebKit
+
+#endif // ENABLE(NETSCAPE_PLUGIN_API)

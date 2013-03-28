@@ -27,7 +27,6 @@
 #ifndef CSSPreloadScanner_h
 #define CSSPreloadScanner_h
 
-#include "PlatformString.h"
 #include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
@@ -38,7 +37,7 @@ class HTMLToken;
 class CSSPreloadScanner {
     WTF_MAKE_NONCOPYABLE(CSSPreloadScanner);
 public:
-    CSSPreloadScanner(Document*);
+    explicit CSSPreloadScanner(Document*);
 
     void reset();
     void scan(const HTMLToken&, bool scanningBody);

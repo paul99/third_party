@@ -47,9 +47,10 @@ class SocketStreamHandlePrivate : public QObject {
     Q_OBJECT
 public:
     SocketStreamHandlePrivate(SocketStreamHandle*, const KURL&);
+    SocketStreamHandlePrivate(SocketStreamHandle*, QTcpSocket*);
     ~SocketStreamHandlePrivate();
 
-public slots:
+public Q_SLOTS:
     void socketConnected();
     void socketReadyRead();
     int send(const char* data, int len);
@@ -63,6 +64,7 @@ public slots:
     void socketSslErrors(const QList<QSslError>&);
 #endif
 public:
+    void initConnections();
     QTcpSocket* m_socket;
     SocketStreamHandle* m_streamHandle;
 };

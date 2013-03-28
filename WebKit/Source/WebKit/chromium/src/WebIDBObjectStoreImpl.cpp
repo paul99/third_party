@@ -31,6 +31,7 @@
 #include "DOMStringList.h"
 #include "IDBCallbacksProxy.h"
 #include "IDBIndexBackendInterface.h"
+#include "IDBKeyPath.h"
 #include "IDBKeyRange.h"
 #include "IDBObjectStoreBackendInterface.h"
 #include "WebIDBIndexImpl.h"
@@ -52,34 +53,55 @@ WebIDBObjectStoreImpl::~WebIDBObjectStoreImpl()
 {
 }
 
-WebString WebIDBObjectStoreImpl::name() const
+void WebIDBObjectStoreImpl::get(const WebIDBKeyRange& keyRange, WebIDBCallbacks* callbacks, const WebIDBTransaction& transaction, WebExceptionCode& ec)
 {
-    return m_objectStore->name();
+    m_objectStore->get(keyRange, IDBCallbacksProxy::create(adoptPtr(callbacks)), transaction.getIDBTransactionBackendInterface(), ec);
 }
 
-WebString WebIDBObjectStoreImpl::keyPath() const
+void WebIDBObjectStoreImpl::put(const WebSerializedScriptValue& value, const WebIDBKey& key, PutMode putMode, WebIDBCallbacks* callbacks, const WebIDBTransaction& transaction, const WebVector<long long>& webIndexIds, const WebVector<WebIndexKeys>& webIndexKeys)
 {
-    return m_objectStore->keyPath();
+    ASSERT(webIndexIds.size() == webIndexKeys.size());
+    Vector<int64_t> indexIds(webIndexIds.size());
+    Vector<IDBObjectStoreBackendInterface::IndexKeys> indexKeys(webIndexKeys.size());
+
+    for (size_t i = 0; i < webIndexIds.size(); ++i) {
+        indexIds[i] = webIndexIds[i];
+        Vector<RefPtr<IDBKey> > indexKeyList(webIndexKeys[i].size());
+        for (size_t j = 0; j < webIndexKeys[i].size(); ++j)
+            indexKeyList[j] = webIndexKeys[i][j];
+        indexKeys[i] = indexKeyList;
+    }
+
+    m_objectStore->put(value, key, static_cast<IDBObjectStoreBackendInterface::PutMode>(putMode), IDBCallbacksProxy::create(adoptPtr(callbacks)), transaction.getIDBTransactionBackendInterface(), indexIds, indexKeys);
 }
 
-WebDOMStringList WebIDBObjectStoreImpl::indexNames() const
+void WebIDBObjectStoreImpl::setIndexKeys(const WebIDBKey& primaryKey, const WebVector<long long>& webIndexIds, const WebVector<WebIndexKeys>& webIndexKeys, const WebIDBTransaction& transaction)
 {
-    return m_objectStore->indexNames();
+    ASSERT(webIndexIds.size() == webIndexKeys.size());
+    Vector<int64_t> indexIds(webIndexIds.size());
+    Vector<IDBObjectStoreBackendInterface::IndexKeys> indexKeys(webIndexKeys.size());
+
+    for (size_t i = 0; i < webIndexIds.size(); ++i) {
+        indexIds[i] = webIndexIds[i];
+        Vector<RefPtr<IDBKey> > indexKeyList(webIndexKeys[i].size());
+        for (size_t j = 0; j < webIndexKeys[i].size(); ++j)
+            indexKeyList[j] = webIndexKeys[i][j];
+        indexKeys[i] = indexKeyList;
+    }
+    m_objectStore->setIndexKeys(primaryKey, indexIds, indexKeys, transaction.getIDBTransactionBackendInterface());
 }
 
-void WebIDBObjectStoreImpl::get(const WebIDBKey& key, WebIDBCallbacks* callbacks, const WebIDBTransaction& transaction, WebExceptionCode& ec)
+void WebIDBObjectStoreImpl::setIndexesReady(const WebVector<long long>& webIndexNames, const WebIDBTransaction& transaction)
 {
-    m_objectStore->get(key, IDBCallbacksProxy::create(adoptPtr(callbacks)), transaction.getIDBTransactionBackendInterface(), ec);
+    Vector<int64_t> indexIds(webIndexNames.size());
+    for (size_t i = 0; i < webIndexNames.size(); ++i)
+        indexIds[i] = webIndexNames[i];
+    m_objectStore->setIndexesReady(indexIds, transaction.getIDBTransactionBackendInterface());
 }
 
-void WebIDBObjectStoreImpl::put(const WebSerializedScriptValue& value, const WebIDBKey& key, PutMode putMode, WebIDBCallbacks* callbacks, const WebIDBTransaction& transaction, WebExceptionCode& ec)
+void WebIDBObjectStoreImpl::deleteFunction(const WebIDBKeyRange& keyRange, WebIDBCallbacks* callbacks, const WebIDBTransaction& transaction, WebExceptionCode& ec)
 {
-    m_objectStore->put(value, key, static_cast<IDBObjectStoreBackendInterface::PutMode>(putMode), IDBCallbacksProxy::create(adoptPtr(callbacks)), transaction.getIDBTransactionBackendInterface(), ec);
-}
-
-void WebIDBObjectStoreImpl::deleteFunction(const WebIDBKey& key, WebIDBCallbacks* callbacks, const WebIDBTransaction& transaction, WebExceptionCode& ec)
-{
-    m_objectStore->deleteFunction(key, IDBCallbacksProxy::create(adoptPtr(callbacks)), transaction.getIDBTransactionBackendInterface(), ec);
+    m_objectStore->deleteFunction(keyRange, IDBCallbacksProxy::create(adoptPtr(callbacks)), transaction.getIDBTransactionBackendInterface(), ec);
 }
 
 void WebIDBObjectStoreImpl::clear(WebIDBCallbacks* callbacks, const WebIDBTransaction& transaction, WebExceptionCode& ec)
@@ -87,30 +109,30 @@ void WebIDBObjectStoreImpl::clear(WebIDBCallbacks* callbacks, const WebIDBTransa
     m_objectStore->clear(IDBCallbacksProxy::create(adoptPtr(callbacks)), transaction.getIDBTransactionBackendInterface(), ec);
 }
 
-WebIDBIndex* WebIDBObjectStoreImpl::createIndex(const WebString& name, const WebString& keyPath, bool unique, bool multiEntry, const WebIDBTransaction& transaction, WebExceptionCode& ec)
+WebIDBIndex* WebIDBObjectStoreImpl::createIndex(long long id, const WebString& name, const WebIDBKeyPath& keyPath, bool unique, bool multiEntry, const WebIDBTransaction& transaction, WebExceptionCode& ec)
 {
-    RefPtr<IDBIndexBackendInterface> index = m_objectStore->createIndex(name, keyPath, unique, multiEntry, transaction.getIDBTransactionBackendInterface(), ec);
+    RefPtr<IDBIndexBackendInterface> index = m_objectStore->createIndex(id, name, keyPath, unique, multiEntry, transaction.getIDBTransactionBackendInterface(), ec);
     if (!index)
         return 0;
     return new WebIDBIndexImpl(index);
 }
 
-WebIDBIndex* WebIDBObjectStoreImpl::index(const WebString& name, WebExceptionCode& ec)
+WebIDBIndex* WebIDBObjectStoreImpl::index(long long objectStoreId)
 {
-    RefPtr<IDBIndexBackendInterface> index = m_objectStore->index(name, ec);
+    RefPtr<IDBIndexBackendInterface> index = m_objectStore->index(objectStoreId);
     if (!index)
         return 0;
     return new WebIDBIndexImpl(index);
 }
 
-void WebIDBObjectStoreImpl::deleteIndex(const WebString& name, const WebIDBTransaction& transaction, WebExceptionCode& ec)
+void WebIDBObjectStoreImpl::deleteIndex(long long objectStoreId, const WebIDBTransaction& transaction, WebExceptionCode& ec)
 {
-    m_objectStore->deleteIndex(name, transaction.getIDBTransactionBackendInterface(), ec);
+    m_objectStore->deleteIndex(objectStoreId, transaction.getIDBTransactionBackendInterface(), ec);
 }
 
-void WebIDBObjectStoreImpl::openCursor(const WebIDBKeyRange& keyRange, unsigned short direction, WebIDBCallbacks* callbacks, const WebIDBTransaction& transaction, WebExceptionCode& ec)
+void WebIDBObjectStoreImpl::openCursor(const WebIDBKeyRange& keyRange, WebIDBCursor::Direction direction, WebIDBCallbacks* callbacks, WebIDBTransaction::TaskType taskType, const WebIDBTransaction& transaction, WebExceptionCode& ec)
 {
-    m_objectStore->openCursor(keyRange, direction, IDBCallbacksProxy::create(adoptPtr(callbacks)), transaction.getIDBTransactionBackendInterface(), ec);
+    m_objectStore->openCursor(keyRange, static_cast<IDBCursor::Direction>(direction), IDBCallbacksProxy::create(adoptPtr(callbacks)), static_cast<IDBTransactionBackendInterface::TaskType>(taskType), transaction.getIDBTransactionBackendInterface(), ec);
 }
 
 void WebIDBObjectStoreImpl::count(const WebIDBKeyRange& keyRange, WebIDBCallbacks* callbacks, const WebIDBTransaction& transaction, WebExceptionCode& ec)

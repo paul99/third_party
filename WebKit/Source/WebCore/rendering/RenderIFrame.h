@@ -30,22 +30,31 @@
 
 namespace WebCore {
 
+class RenderView;
+
 class RenderIFrame : public RenderFrameBase {
 public:
     explicit RenderIFrame(Element*);
 
+    bool flattenFrame() const;
+    bool isSeamless() const;
+
 private:
-    virtual void computeLogicalHeight();
-    virtual void computeLogicalWidth();
+    virtual LayoutUnit minPreferredLogicalWidth() const OVERRIDE;
+    virtual LayoutUnit maxPreferredLogicalWidth() const OVERRIDE;
 
-    virtual void layout();
+    virtual bool shouldComputeSizeAsReplaced() const OVERRIDE;
+    virtual bool isInlineBlockOrInlineTable() const OVERRIDE;
 
-    virtual bool isRenderIFrame() const { return true; }
+    virtual void layout() OVERRIDE;
 
-    virtual const char* renderName() const { return "RenderPartObject"; } // Lying for now to avoid breaking tests
+    virtual bool isRenderIFrame() const OVERRIDE { return true; }
 
-    bool flattenFrame();
+    virtual const char* renderName() const OVERRIDE { return "RenderPartObject"; } // Lying for now to avoid breaking tests
 
+    void layoutSeamlessly();
+
+    RenderView* contentRootRenderer() const;
 };
 
 inline RenderIFrame* toRenderIFrame(RenderObject* object)

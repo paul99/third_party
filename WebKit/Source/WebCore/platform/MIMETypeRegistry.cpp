@@ -40,8 +40,8 @@
 #include <wtf/RetainPtr.h>
 #endif
 #if PLATFORM(QT)
-#include <qimagereader.h>
-#include <qimagewriter.h>
+#include <QImageReader>
+#include <QImageWriter>
 #endif
 
 #if ENABLE(WEB_ARCHIVE) || ENABLE(MHTML)
@@ -139,7 +139,6 @@ static const TypeExtensionPair commonMediaTypes[] = {
     { "audio/x-wav", "wav" }
 };
 
-#if ENABLE(FILE_SYSTEM)
 static const char textPlain[] = "text/plain";
 static const char textHtml[] = "text/html";
 static const char imageJpeg[] = "image/jpeg";
@@ -181,7 +180,6 @@ static const TypeExtensionPair wellKnownMimeTypes[] = {
     { "application/rdf+xml", "rdf" },
     { "application/x-shockwave-flash", "swf" },
 };
-#endif
 
 static HashSet<String>* supportedImageResourceMIMETypes;
 static HashSet<String>* supportedImageMIMETypes;
@@ -229,22 +227,6 @@ static void initializeSupportedImageMIMETypes()
     supportedImageMIMETypes->remove("application/pdf");
     supportedImageMIMETypes->remove("application/postscript");
 
-#elif PLATFORM(QT)
-    QList<QByteArray> formats = QImageReader::supportedImageFormats();
-    for (size_t i = 0; i < static_cast<size_t>(formats.size()); ++i) {
-#if ENABLE(SVG)
-        /*
-         * Qt has support for SVG, but we want to use KSVG2
-         */
-        if (formats.at(i).toLower().startsWith("svg"))
-            continue;
-#endif
-        String mimeType = MIMETypeRegistry::getMIMETypeForExtension(formats.at(i).constData());
-        if (!mimeType.isEmpty()) {
-            supportedImageMIMETypes->add(mimeType);
-            supportedImageResourceMIMETypes->add(mimeType);
-        }
-    }
 #else
     // assume that all implementations at least support the following standard
     // image types:
@@ -261,10 +243,22 @@ static void initializeSupportedImageMIMETypes()
         supportedImageMIMETypes->add(types[i]);
         supportedImageResourceMIMETypes->add(types[i]);
     }
-#if PLATFORM(BLACKBERRY)
-    supportedImageMIMETypes->add("image/pjpeg");
-    supportedImageResourceMIMETypes->add("image/pjpeg");
-#endif
+
+#if PLATFORM(QT)
+    QList<QByteArray> formats = QImageReader::supportedImageFormats();
+    for (size_t i = 0; i < static_cast<size_t>(formats.size()); ++i) {
+#if ENABLE(SVG)
+        // Qt has support for SVG, but we want to use KSVG2
+        if (formats.at(i).toLower().startsWith("svg"))
+            continue;
+#endif // ENABLE(SVG)
+        String mimeType = MIMETypeRegistry::getMIMETypeForExtension(formats.at(i).constData());
+        if (!mimeType.isEmpty()) {
+            supportedImageMIMETypes->add(mimeType);
+            supportedImageResourceMIMETypes->add(mimeType);
+        }
+     }
+#endif // PLATFORM(QT)
 #endif
 }
 
@@ -304,6 +298,9 @@ static void initializeSupportedImageMIMETypesForEncoding()
     supportedImageMIMETypesForEncoding->add("image/ico");
 #elif USE(CAIRO)
     supportedImageMIMETypesForEncoding->add("image/png");
+#elif PLATFORM(BLACKBERRY)
+    supportedImageMIMETypesForEncoding->add("image/png");
+    supportedImageMIMETypesForEncoding->add("image/jpeg");
 #endif
 }
 
@@ -474,7 +471,6 @@ static void initializeMIMETypeRegistry()
     initializeUnsupportedTextMIMETypes();
 }
 
-#if ENABLE(FILE_SYSTEM)
 static String findMimeType(const TypeExtensionPair* pairs, unsigned numPairs, const String& extension)
 {
     if (!extension.isEmpty()) {
@@ -494,8 +490,8 @@ String MIMETypeRegistry::getWellKnownMIMETypeForExtension(const String& extensio
         return found;
     return findMimeType(commonMediaTypes, sizeof(commonMediaTypes) / sizeof(commonMediaTypes[0]), extension);
 }
-#endif
 
+#if !PLATFORM(QT)
 String MIMETypeRegistry::getMIMETypeForPath(const String& path)
 {
     size_t pos = path.reverseFind('.');
@@ -505,8 +501,9 @@ String MIMETypeRegistry::getMIMETypeForPath(const String& path)
         if (result.length())
             return result;
     }
-    return "application/octet-stream";
+    return defaultMIMEType();
 }
+#endif
 
 bool MIMETypeRegistry::isSupportedImageMIMEType(const String& mimeType)
 {
@@ -514,7 +511,7 @@ bool MIMETypeRegistry::isSupportedImageMIMEType(const String& mimeType)
         return false;
     if (!supportedImageMIMETypes)
         initializeMIMETypeRegistry();
-    return supportedImageMIMETypes->contains(mimeType);
+    return supportedImageMIMETypes->contains(getNormalizedMIMEType(mimeType));
 }
 
 bool MIMETypeRegistry::isSupportedImageResourceMIMEType(const String& mimeType)
@@ -523,7 +520,7 @@ bool MIMETypeRegistry::isSupportedImageResourceMIMEType(const String& mimeType)
         return false;
     if (!supportedImageResourceMIMETypes)
         initializeMIMETypeRegistry();
-    return supportedImageResourceMIMETypes->contains(mimeType);
+    return supportedImageResourceMIMETypes->contains(getNormalizedMIMEType(mimeType));
 }
 
 bool MIMETypeRegistry::isSupportedImageMIMETypeForEncoding(const String& mimeType)
@@ -584,6 +581,17 @@ bool MIMETypeRegistry::isJavaAppletMIMEType(const String& mimeType)
         || mimeType.startsWith("application/x-java-vm", false);
 }
 
+bool MIMETypeRegistry::canShowMIMEType(const String& mimeType)
+{
+    if (isSupportedImageMIMEType(mimeType) || isSupportedNonImageMIMEType(mimeType) || isSupportedMediaMIMEType(mimeType))
+        return true;
+
+    if (mimeType.startsWith("text/", false))
+        return !MIMETypeRegistry::isUnsupportedTextMIMEType(mimeType);
+
+    return false;
+}
+
 HashSet<String>& MIMETypeRegistry::getSupportedImageMIMETypes()
 {
     if (!supportedImageMIMETypes)
@@ -628,8 +636,85 @@ HashSet<String>& MIMETypeRegistry::getUnsupportedTextMIMETypes()
 
 const String& defaultMIMEType()
 {
-    DEFINE_STATIC_LOCAL(const String, defaultMIMEType, ("application/octet-stream"));
+    DEFINE_STATIC_LOCAL(const String, defaultMIMEType, (ASCIILiteral("application/octet-stream")));
     return defaultMIMEType;
 }
+
+#if !PLATFORM(QT) && !PLATFORM(BLACKBERRY)
+String MIMETypeRegistry::getNormalizedMIMEType(const String& mimeType)
+{
+    return mimeType;
+}
+#endif
+
+#if PLATFORM(BLACKBERRY)
+typedef HashMap<String, String> MIMETypeAssociationMap;
+
+static const MIMETypeAssociationMap& mimeTypeAssociationMap()
+{
+    static MIMETypeAssociationMap* mimeTypeMap = 0;
+    if (mimeTypeMap)
+        return *mimeTypeMap;
+
+    mimeTypeMap = new MIMETypeAssociationMap;
+
+    mimeTypeMap->add(ASCIILiteral("image/x-ms-bmp"), ASCIILiteral("image/bmp"));
+    mimeTypeMap->add(ASCIILiteral("image/x-windows-bmp"), ASCIILiteral("image/bmp"));
+    mimeTypeMap->add(ASCIILiteral("image/x-bmp"), ASCIILiteral("image/bmp"));
+    mimeTypeMap->add(ASCIILiteral("image/x-bitmap"), ASCIILiteral("image/bmp"));
+    mimeTypeMap->add(ASCIILiteral("image/x-ms-bitmap"), ASCIILiteral("image/bmp"));
+    mimeTypeMap->add(ASCIILiteral("image/jpg"), ASCIILiteral("image/jpeg"));
+    mimeTypeMap->add(ASCIILiteral("image/pjpeg"), ASCIILiteral("image/jpeg"));
+    mimeTypeMap->add(ASCIILiteral("image/x-png"), ASCIILiteral("image/png"));
+    mimeTypeMap->add(ASCIILiteral("image/vnd.rim.png"), ASCIILiteral("image/png"));
+    mimeTypeMap->add(ASCIILiteral("image/ico"), ASCIILiteral("image/vnd.microsoft.icon"));
+    mimeTypeMap->add(ASCIILiteral("image/icon"), ASCIILiteral("image/vnd.microsoft.icon"));
+    mimeTypeMap->add(ASCIILiteral("text/ico"), ASCIILiteral("image/vnd.microsoft.icon"));
+    mimeTypeMap->add(ASCIILiteral("application/ico"), ASCIILiteral("image/vnd.microsoft.icon"));
+    mimeTypeMap->add(ASCIILiteral("image/x-icon"), ASCIILiteral("image/vnd.microsoft.icon"));
+    mimeTypeMap->add(ASCIILiteral("audio/vnd.qcelp"), ASCIILiteral("audio/qcelp"));
+    mimeTypeMap->add(ASCIILiteral("audio/qcp"), ASCIILiteral("audio/qcelp"));
+    mimeTypeMap->add(ASCIILiteral("audio/vnd.qcp"), ASCIILiteral("audio/qcelp"));
+    mimeTypeMap->add(ASCIILiteral("audio/wav"), ASCIILiteral("audio/x-wav"));
+    mimeTypeMap->add(ASCIILiteral("audio/mid"), ASCIILiteral("audio/midi"));
+    mimeTypeMap->add(ASCIILiteral("audio/sp-midi"), ASCIILiteral("audio/midi"));
+    mimeTypeMap->add(ASCIILiteral("audio/x-mid"), ASCIILiteral("audio/midi"));
+    mimeTypeMap->add(ASCIILiteral("audio/x-midi"), ASCIILiteral("audio/midi"));
+    mimeTypeMap->add(ASCIILiteral("audio/x-mpeg"), ASCIILiteral("audio/mpeg"));
+    mimeTypeMap->add(ASCIILiteral("audio/mp3"), ASCIILiteral("audio/mpeg"));
+    mimeTypeMap->add(ASCIILiteral("audio/x-mp3"), ASCIILiteral("audio/mpeg"));
+    mimeTypeMap->add(ASCIILiteral("audio/mpeg3"), ASCIILiteral("audio/mpeg"));
+    mimeTypeMap->add(ASCIILiteral("audio/x-mpeg3"), ASCIILiteral("audio/mpeg"));
+    mimeTypeMap->add(ASCIILiteral("audio/mpg3"), ASCIILiteral("audio/mpeg"));
+    mimeTypeMap->add(ASCIILiteral("audio/mpg"), ASCIILiteral("audio/mpeg"));
+    mimeTypeMap->add(ASCIILiteral("audio/x-mpg"), ASCIILiteral("audio/mpeg"));
+    mimeTypeMap->add(ASCIILiteral("audio/m4a"), ASCIILiteral("audio/mp4"));
+    mimeTypeMap->add(ASCIILiteral("audio/x-m4a"), ASCIILiteral("audio/mp4"));
+    mimeTypeMap->add(ASCIILiteral("audio/x-mp4"), ASCIILiteral("audio/mp4"));
+    mimeTypeMap->add(ASCIILiteral("audio/x-aac"), ASCIILiteral("audio/aac"));
+    mimeTypeMap->add(ASCIILiteral("audio/x-amr"), ASCIILiteral("audio/amr"));
+    mimeTypeMap->add(ASCIILiteral("audio/mpegurl"), ASCIILiteral("audio/x-mpegurl"));
+    mimeTypeMap->add(ASCIILiteral("audio/flac"), ASCIILiteral("audio/x-flac"));
+    mimeTypeMap->add(ASCIILiteral("video/3gp"), ASCIILiteral("video/3gpp"));
+    mimeTypeMap->add(ASCIILiteral("video/avi"), ASCIILiteral("video/x-msvideo"));
+    mimeTypeMap->add(ASCIILiteral("video/x-m4v"), ASCIILiteral("video/mp4"));
+    mimeTypeMap->add(ASCIILiteral("video/x-quicktime"), ASCIILiteral("video/quicktime"));
+    mimeTypeMap->add(ASCIILiteral("application/java"), ASCIILiteral("application/java-archive"));
+    mimeTypeMap->add(ASCIILiteral("application/x-java-archive"), ASCIILiteral("application/java-archive"));
+    mimeTypeMap->add(ASCIILiteral("application/x-zip-compressed"), ASCIILiteral("application/zip"));
+
+    return *mimeTypeMap;
+}
+
+String MIMETypeRegistry::getNormalizedMIMEType(const String& mimeType)
+{
+    MIMETypeAssociationMap::const_iterator it = mimeTypeAssociationMap().find(mimeType);
+
+    if (it != mimeTypeAssociationMap().end())
+        return it->value;
+
+    return mimeType;
+}
+#endif
 
 } // namespace WebCore

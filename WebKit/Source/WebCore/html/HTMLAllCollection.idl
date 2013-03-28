@@ -23,21 +23,19 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-module html {
+[
+    IndexedGetter,
+    NamedGetter,
+    CustomCall,
+    MasqueradesAsUndefined,
+    GenerateIsReachable=ImplOwnerNodeRoot,
+    V8DependentLifetime,
+    V8SkipVTableValidation
+] interface HTMLAllCollection {
+    readonly attribute unsigned long length;
+    [Custom] Node item(in [Optional=DefaultIsUndefined] unsigned long index);
+    [Custom] Node namedItem(in DOMString name);
+    // FIXME: This should return an HTMLAllCollection.
+    NodeList tags(in DOMString name);
+};
 
-    interface [
-        HasIndexGetter,
-        HasNameGetter,
-        CustomCall,
-        MasqueradesAsUndefined,
-        GenerateIsReachable
-    ] HTMLAllCollection {
-        readonly attribute unsigned long length;
-        [Custom] Node item(in [Optional=CallWithDefaultValue] unsigned long index);
-        [Custom] Node namedItem(in DOMString name);
-
-        // FIXME: This should return an HTMLAllCollection.
-        NodeList tags(in DOMString name);
-    };
-
-}

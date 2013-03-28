@@ -29,8 +29,9 @@
 
 #include "CachedResourceClientWalker.h"
 #include "CachedStyleSheetClient.h"
-#include "SharedBuffer.h"
+#include "ResourceBuffer.h"
 #include "TextResourceDecoder.h"
+#include "WebCoreMemoryInstrumentation.h"
 #include <wtf/Vector.h>
 
 namespace WebCore {
@@ -63,16 +64,16 @@ String CachedXSLStyleSheet::encoding() const
     return m_decoder->encoding().name();
 }
 
-void CachedXSLStyleSheet::data(PassRefPtr<SharedBuffer> data, bool allDataReceived)
+void CachedXSLStyleSheet::data(PassRefPtr<ResourceBuffer> data, bool allDataReceived)
 {
     if (!allDataReceived)
         return;
 
-    m_data = data;     
+    m_data = data;
     setEncodedSize(m_data.get() ? m_data->size() : 0);
     if (m_data.get()) {
-        m_sheet = String(m_decoder->decode(m_data->data(), encodedSize()));
-        m_sheet += m_decoder->flush();
+        m_sheet = m_decoder->decode(m_data->data(), encodedSize());
+        m_sheet.append(m_decoder->flush());
     }
     setLoading(false);
     checkNotify();
@@ -88,12 +89,12 @@ void CachedXSLStyleSheet::checkNotify()
         c->setXSLStyleSheet(m_resourceRequest.url(), m_response.url(), m_sheet);
 }
 
-void CachedXSLStyleSheet::error(CachedResource::Status status)
+void CachedXSLStyleSheet::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
 {
-    setStatus(status);
-    ASSERT(errorOccurred());
-    setLoading(false);
-    checkNotify();
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CachedResourceXSLT);
+    CachedResource::reportMemoryUsage(memoryObjectInfo);
+    info.addMember(m_sheet);
+    info.addMember(m_decoder);
 }
 
 #endif

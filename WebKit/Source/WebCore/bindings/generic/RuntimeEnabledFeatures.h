@@ -31,6 +31,8 @@
 #ifndef RuntimeEnabledFeatures_h
 #define RuntimeEnabledFeatures_h
 
+#include "PlatformExportMacros.h"
+
 namespace WebCore {
 
 // A class that stores static enablers for all experimental features. Note that
@@ -59,18 +61,26 @@ public:
 
     static void setWebkitIndexedDBEnabled(bool isEnabled) { isIndexedDBEnabled = isEnabled; }
     static bool webkitIndexedDBEnabled() { return isIndexedDBEnabled; }
-    static bool webkitIDBCursorEnabled() { return isIndexedDBEnabled; }
-    static bool webkitIDBDatabaseEnabled() { return isIndexedDBEnabled; }
-    static bool webkitIDBDatabaseErrorEnabled() { return isIndexedDBEnabled; }
-    static bool webkitIDBDatabaseExceptionEnabled() { return isIndexedDBEnabled; }
-    static bool webkitIDBFactoryEnabled() { return isIndexedDBEnabled; }
-    static bool webkitIDBIndexEnabled() { return isIndexedDBEnabled; }
-    static bool webkitIDBKeyRangeEnabled() { return isIndexedDBEnabled; }
-    static bool webkitIDBObjectStoreEnabled() { return isIndexedDBEnabled; }
-    static bool webkitIDBRequestEnabled() { return isIndexedDBEnabled; }
-    static bool webkitIDBTransactionEnabled() { return isIndexedDBEnabled; }
+    static bool indexedDBEnabled() { return isIndexedDBEnabled; }
+
+#if ENABLE(CSS_EXCLUSIONS)
+    static void setCSSExclusionsEnabled(bool isEnabled) { isCSSExclusionsEnabled = isEnabled; }
+    static bool cssExclusionsEnabled() { return isCSSExclusionsEnabled; }
+#else
+    static void setCSSExclusionsEnabled(bool) { }
+    static bool cssExclusionsEnabled() { return false; }
+#endif
+
+#if ENABLE(CSS_REGIONS)
+    static void setCSSRegionsEnabled(bool isEnabled) { isCSSRegionsEnabled = isEnabled; }
+    static bool cssRegionsEnabled() { return isCSSRegionsEnabled; }
+#else
+    static void setCSSRegionsEnabled(bool) { }
+    static bool cssRegionsEnabled() { return false; }
+#endif
 
 #if ENABLE(FULLSCREEN_API)
+    // Mozilla version
     static bool webkitFullScreenAPIEnabled() { return isFullScreenAPIEnabled; }
     static void setWebkitFullScreenAPIEnabled(bool isEnabled) { isFullScreenAPIEnabled = isEnabled; }
     static bool webkitRequestFullScreenEnabled() { return isFullScreenAPIEnabled; }
@@ -78,14 +88,12 @@ public:
     static bool webkitFullScreenKeyboardInputAllowedEnabled() { return isFullScreenAPIEnabled; }
     static bool webkitCurrentFullScreenElementEnabled() { return isFullScreenAPIEnabled; }
     static bool webkitCancelFullScreenEnabled() { return isFullScreenAPIEnabled; }
-#endif
 
-#if ENABLE(POINTER_LOCK)
-    static bool webkitPointerLockEnabled() { return isPointerLockEnabled; }
-    static void setWebkitPointerLockEnabled(bool isEnabled) { isPointerLockEnabled = isEnabled; }
-    static bool webkitPointerEnabled() { return isPointerLockEnabled; }
-    static bool webkitMovementXEnabled() { return isPointerLockEnabled; }
-    static bool webkitMovementYEnabled() { return isPointerLockEnabled; }
+    // W3C version
+    static bool webkitFullscreenEnabledEnabled() { return isFullScreenAPIEnabled; }
+    static bool webkitFullscreenElementEnabled() { return isFullScreenAPIEnabled; }
+    static bool webkitExitFullscreenEnabled() { return isFullScreenAPIEnabled; }
+    static bool webkitRequestFullscreenEnabled() { return isFullScreenAPIEnabled; }
 #endif
 
 #if ENABLE(VIDEO)
@@ -115,11 +123,8 @@ public:
 #if ENABLE(WEB_AUDIO)
     static void setWebkitAudioContextEnabled(bool isEnabled) { isWebAudioEnabled = isEnabled; }
     static bool webkitAudioContextEnabled() { return isWebAudioEnabled; }
+    static bool webkitOfflineAudioContextEnabled() { return isWebAudioEnabled; }
 #endif
-
-    static void setPushStateEnabled(bool isEnabled) { isPushStateEnabled = isEnabled; }
-    static bool pushStateEnabled() { return isPushStateEnabled; }
-    static bool replaceStateEnabled() { return isPushStateEnabled; }
 
 #if ENABLE(TOUCH_EVENTS)
     static bool touchEnabled() { return isTouchEnabled; }
@@ -136,7 +141,7 @@ public:
     static bool deviceMotionEnabled() { return isDeviceMotionEnabled; }
     static bool deviceMotionEventEnabled() { return isDeviceMotionEnabled; }
     static bool ondevicemotionEnabled() { return isDeviceMotionEnabled; }
-    
+
     static void setDeviceOrientationEnabled(bool isEnabled) { isDeviceOrientationEnabled = isEnabled; }
     static bool deviceOrientationEnabled() { return isDeviceOrientationEnabled; }
     static bool deviceOrientationEventEnabled() { return isDeviceOrientationEnabled; }
@@ -147,11 +152,14 @@ public:
     static bool webkitSpeechEnabled() { return isSpeechInputEnabled; }
     static bool webkitGrammarEnabled() { return isSpeechInputEnabled; }
 
-#if ENABLE(XHR_RESPONSE_BLOB)
-    static bool xhrResponseBlobEnabled() { return isXHRResponseBlobEnabled; }
-    static void setXHRResponseBlobEnabled(bool isEnabled) { isXHRResponseBlobEnabled = isEnabled; }
-    static bool responseBlobEnabled() { return isXHRResponseBlobEnabled; }
-    static bool asBlobEnabled()  { return isXHRResponseBlobEnabled; }
+#if ENABLE(SCRIPTED_SPEECH)
+    static void setScriptedSpeechEnabled(bool isEnabled) { isScriptedSpeechEnabled = isEnabled; }
+    static bool scriptedSpeechEnabled() { return isScriptedSpeechEnabled; }
+    static bool webkitSpeechRecognitionEnabled() { return isScriptedSpeechEnabled; }
+    static bool webkitSpeechRecognitionErrorEnabled() { return isScriptedSpeechEnabled; }
+    static bool webkitSpeechRecognitionEventEnabled() { return isScriptedSpeechEnabled; }
+    static bool webkitSpeechGrammarEnabled() { return isScriptedSpeechEnabled; }
+    static bool webkitSpeechGrammarListEnabled() { return isScriptedSpeechEnabled; }
 #endif
 
 #if ENABLE(FILE_SYSTEM)
@@ -168,12 +176,16 @@ public:
     static bool mediaStreamEnabled() { return isMediaStreamEnabled; }
     static void setMediaStreamEnabled(bool isEnabled) { isMediaStreamEnabled = isEnabled; }
     static bool webkitGetUserMediaEnabled() { return isMediaStreamEnabled; }
-    static bool webkitPeerConnectionEnabled() { return isMediaStreamEnabled; }
+    static bool webkitMediaStreamEnabled() { return isMediaStreamEnabled; }
+
+    static bool peerConnectionEnabled() { return isMediaStreamEnabled && isPeerConnectionEnabled; }
+    static void setPeerConnectionEnabled(bool isEnabled) { isPeerConnectionEnabled = isEnabled; }
+    static bool webkitRTCPeerConnectionEnabled() { return peerConnectionEnabled(); }
 #endif
 
 #if ENABLE(GAMEPAD)
-    static void setWebkitGamepadsEnabled(bool isEnabled) { isGamepadEnabled = isEnabled; }
-    static bool webkitGamepadsEnabled() { return isGamepadEnabled; }
+    static void setWebkitGetGamepadsEnabled(bool isEnabled) { isGamepadEnabled = isEnabled; }
+    static bool webkitGetGamepadsEnabled() { return isGamepadEnabled; }
 #endif
 
 #if ENABLE(QUOTA)
@@ -182,8 +194,13 @@ public:
 #endif
 
 #if ENABLE(MEDIA_SOURCE)
-    static bool webkitMediaSourceEnabled() { return isMediaSourceEnabled; }
-    static void setWebkitMediaSourceEnabled(bool isEnabled) { isMediaSourceEnabled = isEnabled; }
+    static bool mediaSourceEnabled() { return isMediaSourceEnabled; }
+    static void setMediaSourceEnabled(bool isEnabled) { isMediaSourceEnabled = isEnabled; }
+#endif
+
+#if ENABLE(ENCRYPTED_MEDIA)
+    static bool encryptedMediaEnabled() { return isEncryptedMediaEnabled; }
+    static void setEncryptedMediaEnabled(bool isEnabled) { isEncryptedMediaEnabled = isEnabled; }
 #endif
 
 #if ENABLE(VIDEO_TRACK)
@@ -194,6 +211,70 @@ public:
 #if ENABLE(SHADOW_DOM)
     static bool shadowDOMEnabled() { return isShadowDOMEnabled; }
     static void setShadowDOMEnabled(bool isEnabled) { isShadowDOMEnabled = isEnabled; }
+
+    static bool authorShadowDOMForAnyElementEnabled() { return isAuthorShadowDOMForAnyElementEnabled; }
+    static void setAuthorShadowDOMForAnyElementEnabled(bool isEnabled) { isAuthorShadowDOMForAnyElementEnabled = isEnabled; }
+#endif
+
+#if ENABLE(STYLE_SCOPED)
+    static bool styleScopedEnabled() { return isStyleScopedEnabled; }
+    static void setStyleScopedEnabled(bool isEnabled) { isStyleScopedEnabled = isEnabled; }
+#endif
+
+#if ENABLE(INPUT_TYPE_DATE)
+    static bool inputTypeDateEnabled() { return isInputTypeDateEnabled; }
+    static void setInputTypeDateEnabled(bool isEnabled) { isInputTypeDateEnabled = isEnabled; }
+#endif
+
+#if ENABLE(INPUT_TYPE_DATETIME)
+    static bool inputTypeDateTimeEnabled() { return isInputTypeDateTimeEnabled; }
+    static void setInputTypeDateTimeEnabled(bool isEnabled) { isInputTypeDateTimeEnabled = isEnabled; }
+#endif
+
+#if ENABLE(INPUT_TYPE_DATETIMELOCAL)
+    static bool inputTypeDateTimeLocalEnabled() { return isInputTypeDateTimeLocalEnabled; }
+    static void setInputTypeDateTimeLocalEnabled(bool isEnabled) { isInputTypeDateTimeLocalEnabled = isEnabled; }
+#endif
+
+#if ENABLE(INPUT_TYPE_MONTH)
+    static bool inputTypeMonthEnabled() { return isInputTypeMonthEnabled; }
+    static void setInputTypeMonthEnabled(bool isEnabled) { isInputTypeMonthEnabled = isEnabled; }
+#endif
+
+#if ENABLE(INPUT_TYPE_TIME)
+    static bool inputTypeTimeEnabled() { return isInputTypeTimeEnabled; }
+    static void setInputTypeTimeEnabled(bool isEnabled) { isInputTypeTimeEnabled = isEnabled; }
+#endif
+
+#if ENABLE(INPUT_TYPE_WEEK)
+    static bool inputTypeWeekEnabled() { return isInputTypeWeekEnabled; }
+    static void setInputTypeWeekEnabled(bool isEnabled) { isInputTypeWeekEnabled = isEnabled; }
+#endif
+
+#if ENABLE(DIALOG_ELEMENT)
+    static bool dialogElementEnabled() { return isDialogElementEnabled; }
+    static void setDialogElementEnabled(bool isEnabled) { isDialogElementEnabled = isEnabled; }
+#endif
+
+#if ENABLE(CSP_NEXT)
+    static bool experimentalContentSecurityPolicyFeaturesEnabled() { return areExperimentalContentSecurityPolicyFeaturesEnabled; }
+    static void setExperimentalContentSecurityPolicyFeaturesEnabled(bool isEnabled) { areExperimentalContentSecurityPolicyFeaturesEnabled = isEnabled; }
+#endif
+
+    static bool langAttributeAwareFormControlUIEnabled() { return isLangAttributeAwareFormControlUIEnabled; }
+    // The lang attribute support is incomplete and should only be turned on for tests.
+    static void setLangAttributeAwareFormControlUIEnabled(bool isEnabled) { isLangAttributeAwareFormControlUIEnabled = isEnabled; }
+
+#if ENABLE(REQUEST_AUTOCOMPLETE)
+    static bool requestAutocompleteEnabled() { return isRequestAutocompleteEnabled; }
+    static void setRequestAutocompleteEnabled(bool isEnabled) { isRequestAutocompleteEnabled = isEnabled; }
+#endif
+
+#if ENABLE(WEB_INTENTS)
+    static bool webkitStartActivityEnabled() { return isWebIntentsEnabled; }
+    static bool webkitIntentEnabled() { return isWebIntentsEnabled; }
+    static bool webKitIntentEnabled() { return isWebIntentsEnabled; }
+    static void setWebIntentsEnabled(bool isEnabled) { isWebIntentsEnabled = isEnabled; }
 #endif
 
 private:
@@ -208,15 +289,16 @@ private:
     static bool isGeolocationEnabled;
     static bool isIndexedDBEnabled;
     static bool isWebAudioEnabled;
-    static bool isPushStateEnabled;
     static bool isTouchEnabled;
     static bool isDeviceMotionEnabled;
     static bool isDeviceOrientationEnabled;
     static bool isSpeechInputEnabled;
-#if ENABLE(XHR_RESPONSE_BLOB)
-    static bool isXHRResponseBlobEnabled;
+    static bool isCSSExclusionsEnabled;
+    static bool isCSSRegionsEnabled;
+    WEBCORE_TESTING static bool isLangAttributeAwareFormControlUIEnabled;
+#if ENABLE(SCRIPTED_SPEECH)
+    static bool isScriptedSpeechEnabled;
 #endif
-
 #if ENABLE(FILE_SYSTEM)
     static bool isFileSystemEnabled;
 #endif
@@ -227,6 +309,7 @@ private:
 
 #if ENABLE(MEDIA_STREAM)
     static bool isMediaStreamEnabled;
+    static bool isPeerConnectionEnabled;
 #endif
 
 #if ENABLE(GAMEPAD)
@@ -241,12 +324,12 @@ private:
     static bool isFullScreenAPIEnabled;
 #endif
 
-#if ENABLE(POINTER_LOCK)
-    static bool isPointerLockEnabled;
-#endif
-
 #if ENABLE(MEDIA_SOURCE)
     static bool isMediaSourceEnabled;
+#endif
+
+#if ENABLE(ENCRYPTED_MEDIA)
+    static bool isEncryptedMediaEnabled;
 #endif
 
 #if ENABLE(VIDEO_TRACK)
@@ -255,7 +338,54 @@ private:
 
 #if ENABLE(SHADOW_DOM)
     static bool isShadowDOMEnabled;
+
+    static bool isAuthorShadowDOMForAnyElementEnabled;
 #endif
+
+#if ENABLE(STYLE_SCOPED)
+    static bool isStyleScopedEnabled;
+#endif
+
+#if ENABLE(INPUT_TYPE_DATE)
+    static bool isInputTypeDateEnabled;
+#endif
+
+#if ENABLE(INPUT_TYPE_DATETIME)
+    static bool isInputTypeDateTimeEnabled;
+#endif
+
+#if ENABLE(INPUT_TYPE_DATETIMELOCAL)
+    static bool isInputTypeDateTimeLocalEnabled;
+#endif
+
+#if ENABLE(INPUT_TYPE_MONTH)
+    static bool isInputTypeMonthEnabled;
+#endif
+
+#if ENABLE(INPUT_TYPE_TIME)
+    static bool isInputTypeTimeEnabled;
+#endif
+
+#if ENABLE(INPUT_TYPE_WEEK)
+    static bool isInputTypeWeekEnabled;
+#endif
+
+#if ENABLE(DIALOG_ELEMENT)
+    static bool isDialogElementEnabled;
+#endif
+
+#if ENABLE(REQUEST_AUTOCOMPLETE)
+    static bool isRequestAutocompleteEnabled;
+#endif
+
+#if ENABLE(CSP_NEXT)
+    static bool areExperimentalContentSecurityPolicyFeaturesEnabled;
+#endif
+
+#if ENABLE(WEB_INTENTS)
+    static bool isWebIntentsEnabled;
+#endif
+
 };
 
 } // namespace WebCore

@@ -29,16 +29,15 @@
  */
 
 #include "config.h"
-#include "platform/WebRect.h"
 #include "WebElement.h"
 #include "WebDocument.h"
-
 #include "Element.h"
+#include "NamedNodeMap.h"
 #include "RenderBoxModelObject.h"
 #include "RenderObject.h"
+#include <public/WebRect.h>
 #include <wtf/PassRefPtr.h>
 
-#include "WebNamedNodeMap.h"
 
 using namespace WebCore;
 
@@ -65,9 +64,25 @@ bool WebElement::hasTagName(const WebString& tagName) const
                              tagName.operator String());
 }
 
+bool WebElement::hasHTMLTagName(const WebString& tagName) const
+{
+    // How to create                     class              nodeName localName
+    // createElement('input')            HTMLInputElement   INPUT    input
+    // createElement('INPUT')            HTMLInputElement   INPUT    input
+    // createElementNS(xhtmlNS, 'input') HTMLInputElement   INPUT    input
+    // createElementNS(xhtmlNS, 'INPUT') HTMLUnknownElement INPUT    INPUT
+    const Element* element = constUnwrap<Element>();
+    return HTMLNames::xhtmlNamespaceURI == element->namespaceURI() && element->localName() == String(tagName).lower();
+}
+
 bool WebElement::hasAttribute(const WebString& attrName) const
 {
     return constUnwrap<Element>()->hasAttribute(attrName);
+}
+
+void WebElement::removeAttribute(const WebString& attrName)
+{
+    unwrap<Element>()->removeAttribute(attrName);
 }
 
 WebString WebElement::getAttribute(const WebString& attrName) const
@@ -82,9 +97,25 @@ bool WebElement::setAttribute(const WebString& attrName, const WebString& attrVa
     return !exceptionCode;
 }
 
-WebNamedNodeMap WebElement::attributes() const
+unsigned WebElement::attributeCount() const
 {
-    return WebNamedNodeMap(m_private->attributes());
+    if (!constUnwrap<Element>()->hasAttributes())
+        return 0;
+    return constUnwrap<Element>()->attributeCount();
+}
+
+WebString WebElement::attributeLocalName(unsigned index) const
+{
+    if (index >= attributeCount())
+        return WebString();
+    return constUnwrap<Element>()->attributeItem(index)->localName();
+}
+
+WebString WebElement::attributeValue(unsigned index) const
+{
+    if (index >= attributeCount())
+        return WebString();
+    return constUnwrap<Element>()->attributeItem(index)->value();
 }
 
 WebString WebElement::innerText()

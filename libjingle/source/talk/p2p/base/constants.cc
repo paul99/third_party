@@ -49,8 +49,11 @@ const buzz::StaticQName QN_JINGLE_CONTENT = { NS_JINGLE, "content" };
 const buzz::StaticQName QN_JINGLE_CONTENT_NAME = { NS_EMPTY, "name" };
 const buzz::StaticQName QN_JINGLE_CONTENT_MEDIA = { NS_EMPTY, "media" };
 const buzz::StaticQName QN_JINGLE_REASON = { NS_JINGLE, "reason" };
+const buzz::StaticQName QN_JINGLE_DRAFT_GROUP = { NS_JINGLE_DRAFT, "group" };
+const buzz::StaticQName QN_JINGLE_DRAFT_GROUP_TYPE = { NS_EMPTY, "type" };
 const char JINGLE_CONTENT_MEDIA_AUDIO[] = "audio";
 const char JINGLE_CONTENT_MEDIA_VIDEO[] = "video";
+const char JINGLE_CONTENT_MEDIA_DATA[] = "data";
 const char JINGLE_ACTION_SESSION_INITIATE[] = "session-initiate";
 const char JINGLE_ACTION_SESSION_INFO[] = "session-info";
 const char JINGLE_ACTION_SESSION_ACCEPT[] = "session-accept";
@@ -97,9 +100,10 @@ const char LN_BANDWIDTH[] = "bandwidth";
 
 const char CN_AUDIO[] = "audio";
 const char CN_VIDEO[] = "video";
+const char CN_DATA[] = "data";
 const char CN_OTHER[] = "main";
 // other SDP related strings
-const char GN_BUNDLE[] = "BUNDLE";
+const char GROUP_TYPE_BUNDLE[] = "BUNDLE";
 
 const char NS_JINGLE_RTP[] = "urn:xmpp:jingle:apps:rtp:1";
 const buzz::StaticQName QN_JINGLE_RTP_CONTENT =
@@ -141,7 +145,7 @@ const buzz::StaticQName QN_CRYPTO_TAG = { NS_EMPTY, "tag" };
 const buzz::StaticQName QN_CRYPTO_SESSION_PARAMS =
     { NS_EMPTY, "session-params" };
 
-// transports and candidates
+// Transports and candidates.
 const char LN_TRANSPORT[] = "transport";
 const char LN_CANDIDATE[] = "candidate";
 const buzz::StaticQName QN_UFRAG = { cricket::NS_EMPTY, "ufrag" };
@@ -153,14 +157,28 @@ const buzz::StaticQName QN_NETWORK = { cricket::NS_EMPTY, "network" };
 const buzz::StaticQName QN_GENERATION = { cricket::NS_EMPTY, "generation" };
 const buzz::StaticQName QN_PRIORITY = { cricket::NS_EMPTY, "priority" };
 const buzz::StaticQName QN_PROTOCOL = { cricket::NS_EMPTY, "protocol" };
-const char JINGLE_CANDIDATE_TYPE_PEER_STUN[] = "prflx";
-const char JINGLE_CANDIDATE_TYPE_SERVER_STUN[] = "srflx";
-const char JINGLE_CANDIDATE_NAME_RTP[] = "1";
-const char JINGLE_CANDIDATE_NAME_RTCP[] = "2";
+const char ICE_CANDIDATE_TYPE_PEER_STUN[] = "prflx";
+const char ICE_CANDIDATE_TYPE_SERVER_STUN[] = "srflx";
+// Minimum ufrag length is 4 characters as per RFC5245. We chose 16 because
+// some internal systems expect username to be 16 bytes.
+const int ICE_UFRAG_LENGTH = 16;
+// Minimum password length of 22 characters as per RFC5245. We chose 24 because
+// some internal systems expect password to be multiple of 4.
+const int ICE_PWD_LENGTH = 24;
+// TODO: This is media-specific, so might belong
+// somewhere like media/base/constants.h
+const int ICE_CANDIDATE_COMPONENT_RTP = 1;
+const int ICE_CANDIDATE_COMPONENT_RTCP = 2;
+const int ICE_CANDIDATE_COMPONENT_DEFAULT = 1;
 
-// TODO Once we are full ICE-UDP compliant, use this namespace.
-// For now, just use the same as NS_GINGLE_P2P.
-// const char NS_JINGLE_ICE_UDP[] = "urn:xmpp:jingle:transports:ice-udp:1";
+const buzz::StaticQName QN_FINGERPRINT = { cricket::NS_EMPTY, "fingerprint" };
+const buzz::StaticQName QN_FINGERPRINT_ALGORITHM =
+    { cricket::NS_EMPTY, "algorithm" };
+const buzz::StaticQName QN_FINGERPRINT_DIGEST = { cricket::NS_EMPTY, "digest" };
+
+const char NS_JINGLE_ICE_UDP[] = "urn:xmpp:jingle:transports:ice-udp:1";
+
+const char ICE_OPTION_GICE[] = "google-ice";
 const char NS_GINGLE_P2P[] = "http://www.google.com/transport/p2p";
 const buzz::StaticQName QN_GINGLE_P2P_TRANSPORT =
     { NS_GINGLE_P2P, LN_TRANSPORT };
@@ -173,11 +191,13 @@ const buzz::StaticQName QN_ADDRESS = { cricket::NS_EMPTY, "address" };
 const buzz::StaticQName QN_USERNAME = { cricket::NS_EMPTY, "username" };
 const buzz::StaticQName QN_PASSWORD = { cricket::NS_EMPTY, "password" };
 const buzz::StaticQName QN_PREFERENCE = { cricket::NS_EMPTY, "preference" };
-const char GINGLE_CANDIDATE_TYPE_STUN[] = "stun";
-const char GINGLE_CANDIDATE_NAME_RTP[] = "rtp";
-const char GINGLE_CANDIDATE_NAME_RTCP[] = "rtcp";
-const char GINGLE_CANDIDATE_NAME_VIDEO_RTP[] = "video_rtp";
-const char GINGLE_CANDIDATE_NAME_VIDEO_RTCP[] = "video_rtcp";
+const char GICE_CANDIDATE_TYPE_STUN[] = "stun";
+const char GICE_CHANNEL_NAME_RTP[] = "rtp";
+const char GICE_CHANNEL_NAME_RTCP[] = "rtcp";
+const char GICE_CHANNEL_NAME_VIDEO_RTP[] = "video_rtp";
+const char GICE_CHANNEL_NAME_VIDEO_RTCP[] = "video_rtcp";
+const char GICE_CHANNEL_NAME_DATA_RTP[] = "data_rtp";
+const char GICE_CHANNEL_NAME_DATA_RTCP[] = "data_rtcp";
 
 // terminate reasons and errors
 const char JINGLE_ERROR_BAD_REQUEST[] = "bad-request";
@@ -220,6 +240,10 @@ const buzz::StaticQName QN_JINGLE_DRAFT_SSRC_GROUP =
 const buzz::StaticQName QN_SEMANTICS = { cricket::NS_EMPTY, "semantics" };
 const buzz::StaticQName QN_JINGLE_LEGACY_NOTIFY = { NS_JINGLE_DRAFT, "notify" };
 const buzz::StaticQName QN_JINGLE_LEGACY_SOURCE = { NS_JINGLE_DRAFT, "source" };
+
+const char NS_GINGLE_RAW[] = "http://www.google.com/transport/raw-udp";
+const buzz::StaticQName QN_GINGLE_RAW_TRANSPORT = { NS_GINGLE_RAW, "transport" };
+const buzz::StaticQName QN_GINGLE_RAW_CHANNEL = { NS_GINGLE_RAW, "channel" };
 
 // old stuff
 #ifdef FEATURE_ENABLE_VOICEMAIL

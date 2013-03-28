@@ -1,10 +1,10 @@
 /*
  * Copyright (c) 2011 Google Inc. All rights reserved.
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
  * met:
- * 
+ *
  *     * Redistributions of source code must retain the above copyright
  * notice, this list of conditions and the following disclaimer.
  *     * Redistributions in binary form must reproduce the above
@@ -14,7 +14,7 @@
  *     * Neither the name of Google Inc. nor the names of its
  * contributors may be used to endorse or promote products derived from
  * this software without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -31,10 +31,11 @@
 #include "config.h"
 #include "Font.h"
 
+#include "FontSmoothingMode.h"
 #include "GlyphBuffer.h"
 #include "GraphicsContext.h"
+#include "LayoutTestSupport.h"
 #include "PlatformContextSkia.h"
-#include "PlatformSupport.h"
 #include "SimpleFontData.h"
 
 #include "SkCanvas.h"
@@ -54,23 +55,6 @@ bool Font::canExpandAroundIdeographsInComplexText()
     return true;
 }
 
-static bool isCanvasMultiLayered(SkCanvas* canvas)
-{
-    SkCanvas::LayerIter layerIterator(canvas, false);
-    layerIterator.next();
-    return !layerIterator.done();
-}
-
-static void adjustTextRenderMode(SkPaint* paint, PlatformContextSkia* skiaContext)
-{
-    // Our layers only have a single alpha channel. This means that subpixel
-    // rendered text cannot be compositied correctly when the layer is
-    // collapsed. Therefore, subpixel text is disabled when we are drawing
-    // onto a layer or when the compositor is being used.
-    if (isCanvasMultiLayered(skiaContext->canvas()) || skiaContext->isDrawingToImageBuffer())
-        paint->setLCDRenderText(false);
-}
-
 static void setupPaint(SkPaint* paint, const SimpleFontData* fontData, const Font* font, bool shouldAntialias, bool shouldSmoothFonts)
 {
     const FontPlatformData& platformData = fontData->platformData();
@@ -88,6 +72,16 @@ static void setupPaint(SkPaint* paint, const SimpleFontData* fontData, const Fon
     paint->setAutohinted(false); // freetype specific
     paint->setLCDRenderText(shouldSmoothFonts);
     paint->setSubpixelText(true);
+
+#if OS(DARWIN)
+    // When using CoreGraphics, disable hinting when webkit-font-smoothing:antialiased is used.
+    // See crbug.com/152304
+    if (font->fontDescription().fontSmoothing() == Antialiased)
+        paint->setHinting(SkPaint::kNo_Hinting);
+#endif
+    
+    if (font->fontDescription().textRenderingMode() == GeometricPrecision)
+        paint->setHinting(SkPaint::kNo_Hinting);
 }
 
 // TODO: This needs to be split into helper functions to better scope the
@@ -100,7 +94,7 @@ void Font::drawGlyphs(GraphicsContext* gc, const SimpleFontData* font,
 
     bool shouldSmoothFonts = true;
     bool shouldAntialias = true;
-    
+
     switch (fontDescription().fontSmoothing()) {
     case Antialiased:
         shouldSmoothFonts = false;
@@ -113,10 +107,10 @@ void Font::drawGlyphs(GraphicsContext* gc, const SimpleFontData* font,
         break;
     case AutoSmoothing:
         // For the AutoSmooth case, don't do anything! Keep the default settings.
-        break; 
+        break;
     }
-    
-    if (!shouldUseSmoothing() || PlatformSupport::layoutTestMode())
+
+    if (!shouldUseSmoothing() || isRunningLayoutTest())
         shouldSmoothFonts = false;
 
     const GlyphBufferGlyph* glyphs = glyphBuffer.glyphs(from);
@@ -137,14 +131,14 @@ void Font::drawGlyphs(GraphicsContext* gc, const SimpleFontData* font,
 
     for (int i = 0; i < numGlyphs; i++) {
         pos[i].set(x, y);
-        x += SkFloatToScalar(adv[i].width);
-        y += SkFloatToScalar(adv[i].height);
+        x += SkFloatToScalar(adv[i].width());
+        y += SkFloatToScalar(adv[i].height());
     }
 
-    SkCanvas* canvas = gc->platformContext()->canvas();
+    PlatformContextSkia* platformContext = gc->platformContext();
     if (font->platformData().orientation() == Vertical) {
-        canvas->save();
-        canvas->rotate(-90);
+        platformContext->save();
+        platformContext->rotate(-90);
         SkMatrix rotator;
         rotator.reset();
         rotator.setRotate(90);
@@ -157,11 +151,10 @@ void Font::drawGlyphs(GraphicsContext* gc, const SimpleFontData* font,
         SkPaint paint;
         gc->platformContext()->setupPaintForFilling(&paint);
         setupPaint(&paint, font, this, shouldAntialias, shouldSmoothFonts);
-        adjustTextRenderMode(&paint, gc->platformContext());
+        gc->platformContext()->adjustTextRenderMode(&paint);
         paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
-        paint.setColor(gc->fillColor().rgb());
 
-        canvas->drawPosText(glyphs, numGlyphs * sizeof(uint16_t), pos, paint);
+        platformContext->drawPosText(glyphs, numGlyphs * sizeof(uint16_t), pos, paint);
     }
 
     if ((textMode & TextModeStroke)
@@ -171,9 +164,8 @@ void Font::drawGlyphs(GraphicsContext* gc, const SimpleFontData* font,
         SkPaint paint;
         gc->platformContext()->setupPaintForStroking(&paint, 0, 0);
         setupPaint(&paint, font, this, shouldAntialias, shouldSmoothFonts);
-        adjustTextRenderMode(&paint, gc->platformContext());
+        gc->platformContext()->adjustTextRenderMode(&paint);
         paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
-        paint.setColor(gc->strokeColor().rgb());
 
         if (textMode & TextModeFill) {
             // If we also filled, we don't want to draw shadows twice.
@@ -181,10 +173,10 @@ void Font::drawGlyphs(GraphicsContext* gc, const SimpleFontData* font,
             paint.setLooper(0);
         }
 
-        canvas->drawPosText(glyphs, numGlyphs * sizeof(uint16_t), pos, paint);
+        platformContext->drawPosText(glyphs, numGlyphs * sizeof(uint16_t), pos, paint);
     }
     if (font->platformData().orientation() == Vertical)
-        canvas->restore();
+        platformContext->restore();
 }
 
 } // namespace WebCore

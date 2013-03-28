@@ -31,10 +31,11 @@
 #include "config.h"
 #include "WebSettingsImpl.h"
 
+#include "DeferredImageDecoder.h"
 #include "FontRenderingMode.h"
 #include "Settings.h"
-#include "platform/WebString.h"
-#include "platform/WebURL.h"
+#include <public/WebString.h>
+#include <public/WebURL.h>
 #include <wtf/UnusedParam.h>
 
 #if defined(OS_WIN)
@@ -47,13 +48,18 @@ namespace WebKit {
 
 WebSettingsImpl::WebSettingsImpl(Settings* settings)
     : m_settings(settings)
-    , m_compositeToTextureEnabled(false)
     , m_showFPSCounter(false)
     , m_showPlatformLayerTree(false)
-#if OS(ANDROID)
-    , m_allowContentURLAccess(false)
-    , m_onlyAllowFileAccessToAndroidResources(true)
-#endif
+    , m_showPaintRects(false)
+    , m_renderVSyncEnabled(true)
+    , m_lowLatencyRenderingEnabled(false)
+    , m_viewportEnabled(false)
+    , m_gestureTapHighlightEnabled(true)
+    , m_autoZoomFocusedNodeToLegibleScale(false)
+    , m_deferredImageDecodingEnabled(false)
+    , m_doubleTapToZoomEnabled(false)
+    , m_defaultTileSize(WebSize(256, 256))
+    , m_maxUntiledLayerSize(WebSize(512, 512))
 {
     ASSERT(settings);
 }
@@ -88,6 +94,11 @@ void WebSettingsImpl::setFantasyFontFamily(const WebString& font, UScriptCode sc
     m_settings->setFantasyFontFamily(font, script);
 }
 
+void WebSettingsImpl::setPictographFontFamily(const WebString& font, UScriptCode script)
+{
+    m_settings->setPictographFontFamily(font, script);
+}
+
 void WebSettingsImpl::setDefaultFontSize(int size)
 {
     m_settings->setDefaultFontSize(size);
@@ -113,6 +124,54 @@ void WebSettingsImpl::setMinimumLogicalFontSize(int size)
     m_settings->setMinimumLogicalFontSize(size);
 }
 
+void WebSettingsImpl::setDeviceSupportsTouch(bool deviceSupportsTouch)
+{
+    m_settings->setDeviceSupportsTouch(deviceSupportsTouch);
+}
+
+void WebSettingsImpl::setDeviceSupportsMouse(bool deviceSupportsMouse)
+{
+    m_settings->setDeviceSupportsMouse(deviceSupportsMouse);
+}
+
+bool WebSettingsImpl::deviceSupportsTouch()
+{
+    return m_settings->deviceSupportsTouch();
+}
+
+void WebSettingsImpl::setApplyDeviceScaleFactorInCompositor(bool applyDeviceScaleFactorInCompositor)
+{
+    m_settings->setApplyDeviceScaleFactorInCompositor(applyDeviceScaleFactorInCompositor);
+}
+
+void WebSettingsImpl::setApplyPageScaleFactorInCompositor(bool applyPageScaleFactorInCompositor)
+{
+    m_settings->setApplyPageScaleFactorInCompositor(applyPageScaleFactorInCompositor);
+}
+
+void WebSettingsImpl::setAutoZoomFocusedNodeToLegibleScale(bool autoZoomFocusedNodeToLegibleScale)
+{
+    m_autoZoomFocusedNodeToLegibleScale = autoZoomFocusedNodeToLegibleScale;
+}
+
+void WebSettingsImpl::setTextAutosizingEnabled(bool enabled)
+{
+#if ENABLE(TEXT_AUTOSIZING)
+    m_settings->setTextAutosizingEnabled(enabled);
+#else
+    UNUSED_PARAM(enabled);
+#endif
+}
+
+void WebSettingsImpl::setTextAutosizingFontScaleFactor(float fontScaleFactor)
+{
+#if ENABLE(TEXT_AUTOSIZING)
+    m_settings->setTextAutosizingFontScaleFactor(fontScaleFactor);
+#else
+    UNUSED_PARAM(fontScaleFactor);
+#endif
+}
+
 void WebSettingsImpl::setDefaultTextEncodingName(const WebString& encoding)
 {
     m_settings->setDefaultTextEncodingName((String)encoding);
@@ -131,6 +190,11 @@ void WebSettingsImpl::setWebSecurityEnabled(bool enabled)
 void WebSettingsImpl::setJavaScriptCanOpenWindowsAutomatically(bool canOpenWindows)
 {
     m_settings->setJavaScriptCanOpenWindowsAutomatically(canOpenWindows);
+}
+
+void WebSettingsImpl::setSupportsMultipleWindows(bool supportsMultipleWindows)
+{
+    m_settings->setSupportsMultipleWindows(supportsMultipleWindows);
 }
 
 void WebSettingsImpl::setLoadsImagesAutomatically(bool loadsImagesAutomatically)
@@ -208,6 +272,11 @@ void WebSettingsImpl::setPageCacheSupportsPlugins(bool pageCacheSupportsPlugins)
     m_settings->setPageCacheSupportsPlugins(pageCacheSupportsPlugins);
 }
 
+void WebSettingsImpl::setDoubleTapToZoomEnabled(bool doubleTapToZoomEnabled)
+{
+    m_doubleTapToZoomEnabled = doubleTapToZoomEnabled;
+}
+
 void WebSettingsImpl::setDownloadableBinaryFontsEnabled(bool enabled)
 {
     m_settings->setDownloadableBinaryFontsEnabled(enabled);
@@ -269,34 +338,17 @@ void WebSettingsImpl::setAllowFileAccessFromFileURLs(bool allow)
     m_settings->setAllowFileAccessFromFileURLs(allow);
 }
 
-#if OS(ANDROID)
-void WebSettingsImpl::setAllowContentURLAccess(bool allow)
-{
-    m_allowContentURLAccess = allow;
-}
-
-bool WebSettingsImpl::allowContentURLAccess() const
-{
-    return m_allowContentURLAccess;
-}
-
-void WebSettingsImpl::setOnlyAllowFileAccessToAndroidResources(bool onlyAllow)
-{
-    m_onlyAllowFileAccessToAndroidResources = onlyAllow;
-}
-
-bool WebSettingsImpl::onlyAllowFileAccessToAndroidResources() const
-{
-    return m_onlyAllowFileAccessToAndroidResources;
-}
-#endif
-
 void WebSettingsImpl::setTextDirectionSubmenuInclusionBehaviorNeverIncluded()
 {
     // FIXME: If you ever need more behaviors than this, then we should probably
     //        define an enum in WebSettings.h and have a switch statement that
     //        translates.  Until then, this is probably fine, though.
     m_settings->setTextDirectionSubmenuInclusionBehavior(WebCore::TextDirectionSubmenuNeverIncluded);
+}
+
+void WebSettingsImpl::setTouchDragDropEnabled(bool enabled)
+{
+    m_settings->setTouchDragDropEnabled(enabled);
 }
 
 void WebSettingsImpl::setOfflineWebApplicationCacheEnabled(bool enabled)
@@ -314,6 +366,26 @@ void WebSettingsImpl::setExperimentalWebGLEnabled(bool enabled)
     m_settings->setWebGLEnabled(enabled);
 }
 
+void WebSettingsImpl::setCSSStickyPositionEnabled(bool enabled)
+{
+    m_settings->setCSSStickyPositionEnabled(enabled);
+}
+
+void WebSettingsImpl::setExperimentalCSSGridLayoutEnabled(bool enabled)
+{
+    m_settings->setCSSGridLayoutEnabled(enabled);
+}
+
+void WebSettingsImpl::setExperimentalCSSCustomFilterEnabled(bool enabled)
+{
+    m_settings->setCSSCustomFilterEnabled(enabled);
+}
+
+void WebSettingsImpl::setExperimentalCSSVariablesEnabled(bool enabled)
+{
+    m_settings->setCSSVariablesEnabled(enabled);
+}
+
 void WebSettingsImpl::setOpenGLMultisamplingEnabled(bool enabled)
 {
     m_settings->setOpenGLMultisamplingEnabled(enabled);
@@ -322,6 +394,21 @@ void WebSettingsImpl::setOpenGLMultisamplingEnabled(bool enabled)
 void WebSettingsImpl::setPrivilegedWebGLExtensionsEnabled(bool enabled)
 {
     m_settings->setPrivilegedWebGLExtensionsEnabled(enabled);
+}
+
+void WebSettingsImpl::setRenderVSyncEnabled(bool enabled)
+{
+    m_renderVSyncEnabled = enabled;
+}
+
+void WebSettingsImpl::setLowLatencyRenderingEnabled(bool lowLatencyRenderingEnabled)
+{
+    m_lowLatencyRenderingEnabled = lowLatencyRenderingEnabled;
+}
+
+void WebSettingsImpl::setWebGLErrorsToConsoleEnabled(bool enabled)
+{
+    m_settings->setWebGLErrorsToConsoleEnabled(enabled);
 }
 
 void WebSettingsImpl::setShowDebugBorders(bool show)
@@ -339,14 +426,25 @@ void WebSettingsImpl::setShowPlatformLayerTree(bool show)
     m_showPlatformLayerTree = show;
 }
 
+void WebSettingsImpl::setShowPaintRects(bool show)
+{
+    m_showPaintRects = show;
+}
+
 void WebSettingsImpl::setEditingBehavior(EditingBehavior behavior)
 {
     m_settings->setEditingBehaviorType(static_cast<WebCore::EditingBehaviorType>(behavior));
 }
 
+void WebSettingsImpl::setAcceleratedAnimationEnabled(bool enabled)
+{
+    m_acceleratedAnimationEnabled = enabled;
+}
+
 void WebSettingsImpl::setAcceleratedCompositingEnabled(bool enabled)
 {
     m_settings->setAcceleratedCompositingEnabled(enabled);
+    m_settings->setScrollingCoordinatorEnabled(enabled);
 }
 
 void WebSettingsImpl::setForceCompositingMode(bool enabled)
@@ -359,11 +457,6 @@ void WebSettingsImpl::setMockScrollbarsEnabled(bool enabled)
     m_settings->setMockScrollbarsEnabled(enabled);
 }
 
-void WebSettingsImpl::setCompositeToTextureEnabled(bool enabled)
-{
-    m_compositeToTextureEnabled = enabled;
-}
-
 void WebSettingsImpl::setAcceleratedCompositingFor3DTransformsEnabled(bool enabled)
 {
     m_settings->setAcceleratedCompositingFor3DTransformsEnabled(enabled);
@@ -372,6 +465,12 @@ void WebSettingsImpl::setAcceleratedCompositingFor3DTransformsEnabled(bool enabl
 void WebSettingsImpl::setAcceleratedCompositingForVideoEnabled(bool enabled)
 {
     m_settings->setAcceleratedCompositingForVideoEnabled(enabled);
+}
+
+void WebSettingsImpl::setAcceleratedCompositingForOverflowScrollEnabled(
+    bool enabled)
+{
+    m_settings->setAcceleratedCompositingForOverflowScrollEnabled(enabled);
 }
 
 void WebSettingsImpl::setAcceleratedCompositingForPluginsEnabled(bool enabled)
@@ -389,6 +488,11 @@ void WebSettingsImpl::setAcceleratedCompositingForAnimationEnabled(bool enabled)
     m_settings->setAcceleratedCompositingForAnimationEnabled(enabled);
 }
 
+void WebSettingsImpl::setAcceleratedCompositingForScrollableFramesEnabled(bool enabled)
+{
+    m_settings->setAcceleratedCompositingForScrollableFramesEnabled(enabled);
+}
+
 void WebSettingsImpl::setAcceleratedFiltersEnabled(bool enabled)
 {
     m_settings->setAcceleratedFiltersEnabled(enabled);
@@ -397,6 +501,22 @@ void WebSettingsImpl::setAcceleratedFiltersEnabled(bool enabled)
 void WebSettingsImpl::setAccelerated2dCanvasEnabled(bool enabled)
 {
     m_settings->setAccelerated2dCanvasEnabled(enabled);
+}
+
+void WebSettingsImpl::setAntialiased2dCanvasEnabled(bool enabled)
+{
+    m_settings->setAntialiased2dCanvasEnabled(enabled);
+}
+
+void WebSettingsImpl::setDeferred2dCanvasEnabled(bool enabled)
+{
+    m_settings->setDeferred2dCanvasEnabled(enabled);
+}
+
+void WebSettingsImpl::setDeferredImageDecodingEnabled(bool enabled)
+{
+    DeferredImageDecoder::setEnabled(enabled);
+    m_deferredImageDecodingEnabled = enabled;
 }
 
 void WebSettingsImpl::setAcceleratedCompositingForFixedPositionEnabled(bool enabled)
@@ -473,29 +593,6 @@ void WebSettingsImpl::setAllowRunningOfInsecureContent(bool enabled)
     m_settings->setAllowRunningOfInsecureContent(enabled);
 }
 
-void WebSettingsImpl::setFontBoostingVersion(int version)
-{
-#if OS(ANDROID) && ENABLE(FONT_BOOSTING)
-    m_settings->setFontBoostingVersion(version);
-#else
-    ASSERT(version == 0); // Must be disabled, as Font Boosting is compiled out.
-#endif
-}
-
-#if OS(ANDROID) && ENABLE(FONT_BOOSTING)
-void WebSettingsImpl::setFontScaleFactor(float scale)
-{
-    m_settings->setFontScaleFactor(scale);
-}
-#endif
-
-#if OS(ANDROID) && ENABLE(VIEWPORT)
-void WebSettingsImpl::setForceEnableZoom(bool enabled)
-{
-    m_settings->setForceEnableZoom(enabled);
-}
-#endif
-
 void WebSettingsImpl::setPasswordEchoEnabled(bool flag)
 {
     m_settings->setPasswordEchoEnabled(flag);
@@ -504,6 +601,11 @@ void WebSettingsImpl::setPasswordEchoEnabled(bool flag)
 void WebSettingsImpl::setPasswordEchoDurationInSeconds(double durationInSeconds)
 {
     m_settings->setPasswordEchoDurationInSeconds(durationInSeconds);
+}
+
+void WebSettingsImpl::setPerTilePaintingEnabled(bool enabled)
+{
+    m_perTilePaintingEnabled = enabled;
 }
 
 void WebSettingsImpl::setShouldPrintBackgrounds(bool enabled)
@@ -520,12 +622,17 @@ void WebSettingsImpl::setEnableScrollAnimator(bool enabled)
 #endif
 }
 
-void WebSettingsImpl::setHixie76WebSocketProtocolEnabled(bool enabled)
+void WebSettingsImpl::setEnableTouchAdjustment(bool enabled)
 {
-#if ENABLE(WEB_SOCKETS)
-    m_settings->setUseHixie76WebSocketProtocol(enabled);
+    m_settings->setTouchAdjustmentEnabled(enabled);
+}
+
+bool WebSettingsImpl::scrollAnimatorEnabled() const
+{
+#if ENABLE(SMOOTH_SCROLLING)
+    return m_settings->scrollAnimatorEnabled();
 #else
-    UNUSED_PARAM(enabled);
+    return false;
 #endif
 }
 
@@ -561,29 +668,74 @@ void WebSettingsImpl::setShouldDisplayTextDescriptions(bool enabled)
 #endif
 }
 
+void WebSettingsImpl::setShouldRespectImageOrientation(bool enabled)
+{
+    m_settings->setShouldRespectImageOrientation(enabled);
+}
+
 void WebSettingsImpl::setAcceleratedPaintingEnabled(bool enabled)
 {
     m_settings->setAcceleratedDrawingEnabled(enabled);
 }
 
-void WebSettingsImpl::setPerTilePaintingEnabled(bool enabled)
-{
-    m_settings->setPerTileDrawingEnabled(enabled);
-}
-
-void WebSettingsImpl::setPartialSwapEnabled(bool enabled)
-{
-    m_settings->setPartialSwapEnabled(enabled);
-}
-
-void WebSettingsImpl::setThreadedAnimationEnabled(bool enabled)
-{
-    m_settings->setThreadedAnimationEnabled(enabled);
-}
-
 void WebSettingsImpl::setMediaPlaybackRequiresUserGesture(bool required)
 {
     m_settings->setMediaPlaybackRequiresUserGesture(required);
+}
+
+void WebSettingsImpl::setFixedPositionCreatesStackingContext(bool creates)
+{
+    m_settings->setFixedPositionCreatesStackingContext(creates);
+}
+
+void WebSettingsImpl::setViewportEnabled(bool enabled)
+{
+    m_viewportEnabled = enabled;
+}
+
+void WebSettingsImpl::setDefaultTileSize(WebSize size)
+{
+    m_defaultTileSize = size;
+}
+
+void WebSettingsImpl::setMaxUntiledLayerSize(WebSize size)
+{
+    m_maxUntiledLayerSize = size;
+}
+
+void WebSettingsImpl::setSyncXHRInDocumentsEnabled(bool enabled)
+{
+    m_settings->setSyncXHRInDocumentsEnabled(enabled);
+}
+
+void WebSettingsImpl::setCookieEnabled(bool enabled)
+{
+    m_settings->setCookieEnabled(enabled);
+}
+
+void WebSettingsImpl::setGestureTapHighlightEnabled(bool enableHighlight)
+{
+    m_gestureTapHighlightEnabled = enableHighlight;
+}
+
+bool WebSettingsImpl::applyDeviceScaleFactorInCompositor() const
+{
+    return m_settings->applyDeviceScaleFactorInCompositor();
+}
+
+bool WebSettingsImpl::applyPageScaleFactorInCompositor() const
+{
+    return m_settings->applyPageScaleFactorInCompositor();
+}
+
+void WebSettingsImpl::setAllowCustomScrollbarInMainFrame(bool enabled)
+{
+    m_settings->setAllowCustomScrollbarInMainFrame(enabled);
+}
+
+void WebSettingsImpl::setCompositedScrollingForFramesEnabled(bool enabled)
+{
+    m_settings->setCompositedScrollingForFramesEnabled(enabled);
 }
 
 } // namespace WebKit

@@ -33,6 +33,7 @@
 
 #if ENABLE(INSPECTOR) && ENABLE(WORKERS)
 
+#include "InspectorBaseAgent.h"
 #include <wtf/FastAllocBase.h>
 #include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
@@ -42,14 +43,9 @@
 namespace WebCore {
 
 class InjectedScriptManager;
-#if ENABLE(JAVASCRIPT_DEBUGGER)
-class InspectorDebuggerAgent;
-#endif
 class InspectorBackendDispatcher;
-class InspectorConsoleAgent;
 class InspectorFrontend;
 class InspectorFrontendChannel;
-class InspectorConsoleAgent;
 class InspectorInstrumentation;
 class InspectorRuntimeAgent;
 class InspectorState;
@@ -79,14 +75,10 @@ private:
     WorkerContext* m_workerContext;
     OwnPtr<InspectorStateClient> m_stateClient;
     OwnPtr<InspectorState> m_state;
-    OwnPtr<InstrumentingAgents> m_instrumentingAgents;
+    RefPtr<InstrumentingAgents> m_instrumentingAgents;
     OwnPtr<InjectedScriptManager> m_injectedScriptManager;
-#if ENABLE(JAVASCRIPT_DEBUGGER)
-    OwnPtr<InspectorDebuggerAgent> m_debuggerAgent;
-#endif
-    OwnPtr<InspectorRuntimeAgent> m_runtimeAgent;
-    OwnPtr<InspectorConsoleAgent> m_consoleAgent;
-
+    InspectorRuntimeAgent* m_runtimeAgent;
+    InspectorAgentRegistry m_agents;
     OwnPtr<InspectorFrontendChannel> m_frontendChannel;
     OwnPtr<InspectorFrontend> m_frontend;
     RefPtr<InspectorBackendDispatcher> m_backendDispatcher;

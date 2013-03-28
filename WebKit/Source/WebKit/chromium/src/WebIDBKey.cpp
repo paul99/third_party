@@ -30,12 +30,7 @@
 
 #if ENABLE(INDEXED_DATABASE)
 
-#include "IDBBindingUtilities.h"
 #include "IDBKey.h"
-#include "IDBKeyPath.h"
-#include "SerializedScriptValue.h"
-#include "WebIDBKeyPath.h"
-#include "platform/WebSerializedScriptValue.h"
 
 using namespace WebCore;
 
@@ -83,19 +78,6 @@ WebIDBKey WebIDBKey::createNull()
     return key;
 }
 
-WebIDBKey WebIDBKey::createFromValueAndKeyPath(const WebSerializedScriptValue& serializedScriptValue, const WebIDBKeyPath& idbKeyPath)
-{
-    // FIXME: If key path is empty string, this should return invalid key instead
-    if (serializedScriptValue.isNull())
-        return WebIDBKey::createNull();
-    return createIDBKeyFromSerializedValueAndKeyPath(serializedScriptValue, idbKeyPath);
-}
-
-WebSerializedScriptValue WebIDBKey::injectIDBKeyIntoSerializedValue(const WebIDBKey& key, const WebSerializedScriptValue& value, const WebIDBKeyPath& path)
-{
-    return WebCore::injectIDBKeyIntoSerializedValue(key, value, path);
-}
-
 void WebIDBKey::assign(const WebIDBKey& value)
 {
     m_private = value.m_private;
@@ -120,6 +102,8 @@ static PassRefPtr<IDBKey> convertFromWebIDBKeyArray(const WebVector<WebIDBKey>& 
             keys.append(IDBKey::createNumber(array[i].number()));
             break;
         case WebIDBKey::InvalidType:
+            keys.append(IDBKey::createInvalid());
+            break;
         case WebIDBKey::NullType:
             ASSERT_NOT_REACHED();
             break;
@@ -149,6 +133,8 @@ static void convertToWebIDBKeyArray(const IDBKey::KeyArray& array, WebVector<Web
             keys[i] = WebIDBKey::createNumber(key->number());
             break;
         case IDBKey::InvalidType:
+            keys[i] = WebIDBKey::createInvalid();
+            break;
         case IDBKey::MinType:
             ASSERT_NOT_REACHED();
             break;
@@ -197,6 +183,13 @@ WebIDBKey::Type WebIDBKey::type() const
     if (!m_private.get())
         return NullType;
     return Type(m_private->type());
+}
+
+bool WebIDBKey::isValid() const
+{
+    if (!m_private.get())
+        return false;
+    return m_private->isValid();
 }
 
 WebVector<WebIDBKey> WebIDBKey::array() const

@@ -33,12 +33,12 @@
 
 #include "DOMWindow.h"
 #include "Frame.h"
-#include "PlatformString.h"
 #include "npruntime_impl.h"
 #include "npruntime_priv.h"
 #include "NPV8Object.h"
+#include "V8Binding.h"
 #include "V8NPObject.h"
-#include "V8Proxy.h"
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -62,13 +62,13 @@ void convertV8ObjectToNPVariant(v8::Local<v8::Value> object, NPObject* owner, NP
     else if (object->IsUndefined())
         VOID_TO_NPVARIANT(*result);
     else if (object->IsString()) {
-        v8::String::Utf8Value utf8(object);
-        int length = utf8.length() + 1;
+        v8::Handle<v8::String> str = object->ToString();
+        int length = str->Utf8Length() + 1;
         char* utf8Chars = reinterpret_cast<char*>(malloc(length));
-        memcpy(utf8Chars, *utf8, length);
-        STRINGN_TO_NPVARIANT(utf8Chars, utf8.length(), *result);
+        str->WriteUtf8(utf8Chars, length, 0, v8::String::HINT_MANY_WRITES_EXPECTED);
+        STRINGN_TO_NPVARIANT(utf8Chars, length-1, *result);
     } else if (object->IsObject()) {
-        DOMWindow* window = V8Proxy::retrieveWindow(V8Proxy::currentContext());
+        DOMWindow* window = toDOMWindow(v8::Context::GetCurrent());
         NPObject* npobject = npCreateV8ScriptObject(0, v8::Handle<v8::Object>::Cast(object), window);
         if (npobject)
             _NPN_RegisterObject(npobject, owner);
@@ -82,11 +82,11 @@ v8::Handle<v8::Value> convertNPVariantToV8Object(const NPVariant* variant, NPObj
 
     switch (type) {
     case NPVariantType_Int32:
-        return v8::Integer::New(NPVARIANT_TO_INT32(*variant));
+        return deprecatedV8Integer(NPVARIANT_TO_INT32(*variant));
     case NPVariantType_Double:
         return v8::Number::New(NPVARIANT_TO_DOUBLE(*variant));
     case NPVariantType_Bool:
-        return NPVARIANT_TO_BOOLEAN(*variant) ? v8::True() : v8::False();
+        return v8Boolean(NPVARIANT_TO_BOOLEAN(*variant));
     case NPVariantType_Null:
         return v8::Null();
     case NPVariantType_Void:

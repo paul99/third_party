@@ -33,10 +33,10 @@
 
 #if ENABLE(MUTATION_OBSERVERS)
 
-#include "PlatformString.h"
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -57,8 +57,8 @@ public:
     virtual const AtomicString& type() = 0;
     virtual Node* target() = 0;
 
-    virtual NodeList* addedNodes() { return 0; }
-    virtual NodeList* removedNodes() { return 0; }
+    virtual NodeList* addedNodes() = 0;
+    virtual NodeList* removedNodes() = 0;
     virtual Node* previousSibling() { return 0; }
     virtual Node* nextSibling() { return 0; }
 

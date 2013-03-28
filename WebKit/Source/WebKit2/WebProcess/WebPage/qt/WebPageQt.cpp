@@ -28,14 +28,20 @@
 #include "WebPage.h"
 
 #include "NotImplemented.h"
+#include "PopupMenuClient.h"
 #include "WebEditorClient.h"
 #include "WebEvent.h"
 #include "WebPageProxyMessages.h"
+#include "WebPopupMenu.h"
 #include "WebProcess.h"
+#include <QClipboard>
+#include <QGuiApplication>
+#include <WebCore/DOMWrapperWorld.h>
 #include <WebCore/FocusController.h>
 #include <WebCore/Frame.h>
 #include <WebCore/KeyboardEvent.h>
 #include <WebCore/Page.h>
+#include <WebCore/PageGroup.h>
 #include <WebCore/PlatformKeyboardEvent.h>
 #include <WebCore/Range.h>
 #include <WebCore/Settings.h>
@@ -336,12 +342,12 @@ void WebPage::confirmComposition(const String& compositionString, int64_t select
     Editor* editor = targetFrame->editor();
     editor->confirmComposition(compositionString);
 
-    RefPtr<Range> selectionRange;
-    if (selectionStart != -1) {
-        Element* scope = targetFrame->selection()->rootEditableElement();
-        selectionRange = TextIterator::rangeFromLocationAndLength(scope, selectionStart, selectionLength);
-        ASSERT_WITH_MESSAGE(selectionRange, "Invalid selection: [%lld:%lld] in text of length %d", static_cast<long long>(selectionStart), static_cast<long long>(selectionLength), scope->innerText().length());
-    }
+    if (selectionStart == -1)
+        return;
+
+    Element* scope = targetFrame->selection()->rootEditableElement();
+    RefPtr<Range> selectionRange = TextIterator::rangeFromLocationAndLength(scope, selectionStart, selectionLength);
+    ASSERT_WITH_MESSAGE(selectionRange, "Invalid selection: [%lld:%lld] in text of length %d", static_cast<long long>(selectionStart), static_cast<long long>(selectionLength), scope->innerText().length());
 
     if (selectionRange) {
         VisibleSelection selection(selectionRange.get(), SEL_DEFAULT_AFFINITY);
@@ -409,6 +415,29 @@ void WebPage::applicationSchemeReply(const QtNetworkReplyData& replyData)
     QtNetworkReply* networkReply = m_applicationSchemeReplies.take(replyData.m_replyUuid);
     networkReply->setReplyData(replyData);
     networkReply->finalize();
+}
+
+void WebPage::setUserScripts(const Vector<String>& scripts)
+{
+    // This works because we keep an unique page group for each Page.
+    PageGroup* pageGroup = PageGroup::pageGroup(this->pageGroup()->identifier());
+    pageGroup->removeUserScriptsFromWorld(mainThreadNormalWorld());
+    for (unsigned i = 0; i < scripts.size(); ++i)
+        pageGroup->addUserScriptToWorld(mainThreadNormalWorld(), scripts.at(i), KURL(), Vector<String>(), Vector<String>(), InjectAtDocumentEnd, InjectInTopFrameOnly);
+}
+
+void WebPage::selectedIndex(int32_t newIndex)
+{
+    changeSelectedIndex(newIndex);
+}
+
+void WebPage::hidePopupMenu()
+{
+    if (!m_activePopupMenu)
+        return;
+
+    m_activePopupMenu->client()->popupDidHide();
+    m_activePopupMenu = 0;
 }
 
 } // namespace WebKit

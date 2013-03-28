@@ -26,9 +26,9 @@
 #ifndef YarrParser_h
 #define YarrParser_h
 
-#include <runtime/UString.h>
 #include "Yarr.h"
 #include <wtf/ASCIICType.h>
+#include <wtf/text/WTFString.h>
 #include <wtf/unicode/Unicode.h>
 
 namespace JSC { namespace Yarr {
@@ -47,13 +47,14 @@ template<class Delegate, typename CharType>
 class Parser {
 private:
     template<class FriendDelegate>
-    friend const char* parse(FriendDelegate& delegate, const UString& pattern, unsigned backReferenceLimit);
+    friend const char* parse(FriendDelegate&, const String& pattern, unsigned backReferenceLimit);
 
     enum ErrorCode {
         NoError,
         PatternTooLarge,
         QuantifierOutOfOrder,
         QuantifierWithoutAtom,
+        QuantifierTooLarge,
         MissingParentheses,
         ParenthesesUnmatched,
         ParenthesesTypeInvalid,
@@ -227,7 +228,7 @@ private:
         UChar m_character;
     };
 
-    Parser(Delegate& delegate, const UString& pattern, unsigned backReferenceLimit)
+    Parser(Delegate& delegate, const String& pattern, unsigned backReferenceLimit)
         : m_delegate(delegate)
         , m_backReferenceLimit(backReferenceLimit)
         , m_err(NoError)
@@ -546,6 +547,11 @@ private:
         ASSERT(!m_err);
         ASSERT(min <= max);
 
+        if (min == UINT_MAX) {
+            m_err = QuantifierTooLarge;
+            return;
+        }
+
         if (lastTokenWasAnAtom)
             m_delegate.quantifyAtom(min, max, !tryConsume('?'));
         else
@@ -685,6 +691,7 @@ private:
             REGEXP_ERROR_PREFIX "regular expression too large",
             REGEXP_ERROR_PREFIX "numbers out of order in {} quantifier",
             REGEXP_ERROR_PREFIX "nothing to repeat",
+            REGEXP_ERROR_PREFIX "number too large in {} quantifier",
             REGEXP_ERROR_PREFIX "missing )",
             REGEXP_ERROR_PREFIX "unmatched parentheses",
             REGEXP_ERROR_PREFIX "unrecognized character after (?",
@@ -695,7 +702,6 @@ private:
 
         return errorMessages[m_err];
     }
-
 
     // Misc helper functions:
 
@@ -862,7 +868,7 @@ private:
  */
 
 template<class Delegate>
-const char* parse(Delegate& delegate, const UString& pattern, unsigned backReferenceLimit = quantifyInfinite)
+const char* parse(Delegate& delegate, const String& pattern, unsigned backReferenceLimit = quantifyInfinite)
 {
     if (pattern.is8Bit())
         return Parser<Delegate, LChar>(delegate, pattern, backReferenceLimit).parse();

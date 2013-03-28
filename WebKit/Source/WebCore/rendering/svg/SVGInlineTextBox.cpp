@@ -35,7 +35,7 @@
 #include "RenderSVGInlineText.h"
 #include "RenderSVGResource.h"
 #include "RenderSVGResourceSolidColor.h"
-#include "SVGImageBufferTools.h"
+#include "SVGRenderingContext.h"
 #include "SVGResourcesCache.h"
 #include "SVGRootInlineBox.h"
 #include "SVGTextRunRenderingContext.h"
@@ -43,6 +43,15 @@
 using namespace std;
 
 namespace WebCore {
+
+struct ExpectedSVGInlineTextBoxSize : public InlineTextBox {
+    float float1;
+    uint32_t bitfields : 5;
+    void* pointer;
+    Vector<SVGTextFragment> vector;
+};
+
+COMPILE_ASSERT(sizeof(SVGInlineTextBox) == sizeof(ExpectedSVGInlineTextBoxSize), SVGInlineTextBox_is_not_of_expected_size);
 
 SVGInlineTextBox::SVGInlineTextBox(RenderObject* object)
     : InlineTextBox(object)
@@ -128,13 +137,13 @@ FloatRect SVGInlineTextBox::selectionRectForTextFragment(const SVGTextFragment& 
     return selectionRect;
 }
 
-IntRect SVGInlineTextBox::localSelectionRect(int startPosition, int endPosition)
+LayoutRect SVGInlineTextBox::localSelectionRect(int startPosition, int endPosition)
 {
     int boxStart = start();
     startPosition = max(startPosition - boxStart, 0);
     endPosition = min(endPosition - boxStart, static_cast<int>(len()));
     if (startPosition >= endPosition)
-        return IntRect();
+        return LayoutRect();
 
     RenderText* text = textRenderer();
     ASSERT(text);
@@ -274,7 +283,7 @@ void SVGInlineTextBox::paint(PaintInfo& paintInfo, const LayoutPoint&, LayoutUni
     ASSERT(svgStyle);
 
     bool hasFill = svgStyle->hasFill();
-    bool hasStroke = svgStyle->hasStroke();
+    bool hasVisibleStroke = svgStyle->hasVisibleStroke();
 
     RenderStyle* selectionStyle = style;
     if (hasSelection) {
@@ -285,15 +294,15 @@ void SVGInlineTextBox::paint(PaintInfo& paintInfo, const LayoutPoint&, LayoutUni
 
             if (!hasFill)
                 hasFill = svgSelectionStyle->hasFill();
-            if (!hasStroke)
-                hasStroke = svgSelectionStyle->hasStroke();
+            if (!hasVisibleStroke)
+                hasVisibleStroke = svgSelectionStyle->hasVisibleStroke();
         } else
             selectionStyle = style;
     }
 
     if (textRenderer->frame() && textRenderer->frame()->view() && textRenderer->frame()->view()->paintBehavior() & PaintBehaviorRenderingSVGMask) {
         hasFill = true;
-        hasStroke = false;
+        hasVisibleStroke = false;
     }
 
     AffineTransform fragmentTransform;
@@ -321,7 +330,7 @@ void SVGInlineTextBox::paint(PaintInfo& paintInfo, const LayoutPoint&, LayoutUni
         }
 
         // Stroke text
-        if (hasStroke) {
+        if (hasVisibleStroke) {
             m_paintingResourceMode = ApplyToStrokeMode | ApplyToTextMode;
             paintText(paintInfo.context, style, selectionStyle, fragment, hasSelection, paintSelectedTextOnly);
         }
@@ -422,12 +431,11 @@ TextRun SVGInlineTextBox::constructTextRun(RenderStyle* style, const SVGTextFrag
 
     TextRun run(text->characters() + fragment.characterOffset
                 , fragment.length
-                , false /* allowTabs */
                 , 0 /* xPos, only relevant with allowTabs=true */
                 , 0 /* padding, only relevant for justified text, not relevant for SVG */
                 , TextRun::AllowTrailingExpansion
                 , direction()
-                , m_dirOverride || style->rtlOrdering() == VisualOrder /* directionalOverride */);
+                , dirOverride() || style->rtlOrdering() == VisualOrder /* directionalOverride */);
 
     if (textRunNeedsRenderingContext(style->font()))
         run.setRenderingContext(SVGTextRunRenderingContext::create(text));
@@ -526,40 +534,17 @@ void SVGInlineTextBox::paintDecoration(GraphicsContext* context, ETextDecoration
     ASSERT(svgDecorationStyle);
 
     bool hasDecorationFill = svgDecorationStyle->hasFill();
-    bool hasDecorationStroke = svgDecorationStyle->hasStroke();
+    bool hasVisibleDecorationStroke = svgDecorationStyle->hasVisibleStroke();
 
     if (hasDecorationFill) {
         m_paintingResourceMode = ApplyToFillMode;
         paintDecorationWithStyle(context, decoration, fragment, decorationRenderer);
     }
 
-    if (hasDecorationStroke) {
+    if (hasVisibleDecorationStroke) {
         m_paintingResourceMode = ApplyToStrokeMode;
         paintDecorationWithStyle(context, decoration, fragment, decorationRenderer);
     }
-}
-
-static inline void normalizeTransform(AffineTransform& transform)
-{
-    // Obtain consistent numerical results for the AffineTransform on both 32/64bit platforms.
-    // Tested with SnowLeopard on Core Duo vs. Core 2 Duo.
-    static const float s_floatEpsilon = std::numeric_limits<float>::epsilon();
-
-    if (fabs(transform.a() - 1) <= s_floatEpsilon)
-        transform.setA(1);
-    else if (fabs(transform.a() + 1) <= s_floatEpsilon)
-        transform.setA(-1);
-
-    if (fabs(transform.d() - 1) <= s_floatEpsilon)
-        transform.setD(1);
-    else if (fabs(transform.d() + 1) <= s_floatEpsilon)
-        transform.setD(-1);
-
-    if (fabs(transform.e()) <= s_floatEpsilon)
-        transform.setE(0);
-
-    if (fabs(transform.f()) <= s_floatEpsilon)
-        transform.setF(0);
 }
 
 void SVGInlineTextBox::paintDecorationWithStyle(GraphicsContext* context, ETextDecoration decoration, const SVGTextFragment& fragment, RenderObject* decorationRenderer)
@@ -589,12 +574,7 @@ void SVGInlineTextBox::paintDecorationWithStyle(GraphicsContext* context, ETextD
     if (scalingFactor != 1) {
         width *= scalingFactor;
         decorationOrigin.scale(scalingFactor, scalingFactor);
-
-        AffineTransform newTransform = context->getCTM();
-        newTransform.scale(1 / scalingFactor);
-        normalizeTransform(newTransform);
-
-        context->setCTM(newTransform);
+        context->scale(FloatSize(1 / scalingFactor, 1 / scalingFactor));
     }
 
     decorationOrigin.move(0, -scaledFontMetrics.floatAscent() + positionOffsetForDecoration(decoration, scaledFontMetrics, thickness));
@@ -635,21 +615,12 @@ void SVGInlineTextBox::paintTextWithShadows(GraphicsContext* context, RenderStyl
         if (shadow)
             extraOffset = applyShadowToGraphicsContext(context, shadow, shadowRect, false /* stroked */, true /* opaque */, true /* horizontal */);
 
-        AffineTransform originalTransform;
-        if (scalingFactor != 1) {
-            originalTransform = context->getCTM();
-
-            AffineTransform newTransform = originalTransform;
-            newTransform.scale(1 / scalingFactor);
-            normalizeTransform(newTransform);
-
-            context->setCTM(newTransform);
-        }
+        context->save();
+        context->scale(FloatSize(1 / scalingFactor, 1 / scalingFactor));
 
         scaledFont.drawText(context, textRun, textOrigin + extraOffset, startPosition, endPosition);
 
-        if (scalingFactor != 1)
-            context->setCTM(originalTransform);
+        context->restore();
 
         restoreGraphicsContextAfterTextPainting(context, textRun);
 
@@ -730,7 +701,7 @@ FloatRect SVGInlineTextBox::calculateBoundaries() const
     return textRect;
 }
 
-bool SVGInlineTextBox::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit, LayoutUnit)
+bool SVGInlineTextBox::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit, LayoutUnit)
 {
     // FIXME: integrate with InlineTextBox::nodeAtPoint better.
     ASSERT(!isLineBreak());
@@ -743,9 +714,9 @@ bool SVGInlineTextBox::nodeAtPoint(const HitTestRequest& request, HitTestResult&
             FloatPoint boxOrigin(x(), y());
             boxOrigin.moveBy(accumulatedOffset);
             FloatRect rect(boxOrigin, size());
-            if (rect.intersects(result.rectForPoint(pointInContainer))) {
-                renderer()->updateHitTestResult(result, pointInContainer - toLayoutSize(accumulatedOffset));
-                if (!result.addNodeToRectBasedTestResult(renderer()->node(), pointInContainer, rect))
+            if (locationInContainer.intersects(rect)) {
+                renderer()->updateHitTestResult(result, locationInContainer.point() - toLayoutSize(accumulatedOffset));
+                if (!result.addNodeToRectBasedTestResult(renderer()->node(), request, locationInContainer, rect))
                     return true;
              }
         }

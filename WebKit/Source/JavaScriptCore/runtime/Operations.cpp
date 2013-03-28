@@ -58,28 +58,29 @@ NEVER_INLINE JSValue jsAddSlowCase(CallFrame* callFrame, JSValue v1, JSValue v2)
 
 JSValue jsTypeStringForValue(CallFrame* callFrame, JSValue v)
 {
+    JSGlobalData& globalData = callFrame->globalData();
     if (v.isUndefined())
-        return jsNontrivialString(callFrame, "undefined");
+        return globalData.smallStrings.undefinedString(&globalData);
     if (v.isBoolean())
-        return jsNontrivialString(callFrame, "boolean");
+        return globalData.smallStrings.booleanString(&globalData);
     if (v.isNumber())
-        return jsNontrivialString(callFrame, "number");
+        return globalData.smallStrings.numberString(&globalData);
     if (v.isString())
-        return jsNontrivialString(callFrame, "string");
+        return globalData.smallStrings.stringString(&globalData);
     if (v.isObject()) {
         // Return "undefined" for objects that should be treated
         // as null when doing comparisons.
-        if (asObject(v)->structure()->typeInfo().masqueradesAsUndefined())
-            return jsNontrivialString(callFrame, "undefined");
+        if (asObject(v)->structure()->masqueradesAsUndefined(callFrame->lexicalGlobalObject()))
+            return globalData.smallStrings.undefinedString(&globalData);
         CallData callData;
         JSObject* object = asObject(v);
         if (object->methodTable()->getCallData(object, callData) != CallTypeNone)
-            return jsNontrivialString(callFrame, "function");
+            return globalData.smallStrings.functionString(&globalData);
     }
-    return jsNontrivialString(callFrame, "object");
+    return globalData.smallStrings.objectString(&globalData);
 }
 
-bool jsIsObjectType(JSValue v)
+bool jsIsObjectType(CallFrame* callFrame, JSValue v)
 {
     if (!v.isCell())
         return v.isNull();
@@ -88,7 +89,7 @@ bool jsIsObjectType(JSValue v)
     if (type == NumberType || type == StringType)
         return false;
     if (type >= ObjectType) {
-        if (asObject(v)->structure()->typeInfo().masqueradesAsUndefined())
+        if (asObject(v)->structure()->masqueradesAsUndefined(callFrame->lexicalGlobalObject()))
             return false;
         CallData callData;
         JSObject* object = asObject(v);

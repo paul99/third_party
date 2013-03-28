@@ -36,6 +36,7 @@
 #include "talk/p2p/base/constants.h"
 #include "talk/p2p/base/parsing.h"
 #include "talk/p2p/base/sessiondescription.h"  // Needed to delete contents.
+#include "talk/p2p/base/transportinfo.h"
 #include "talk/xmllite/xmlelement.h"
 
 namespace cricket {
@@ -94,26 +95,6 @@ struct SessionMessage {
   const buzz::XmlElement* stanza;
 };
 
-// A TransportInfo is NOT a transport-info message.  It is comparable
-// to a "ContentInfo". A transport-info message is basically just a
-// collection of TransportInfos.
-struct TransportInfo {
-  TransportInfo() {}
-
-  TransportInfo(const std::string& content_name,
-                const std::string& transport_type,
-                const Candidates& candidates)
-      : content_name(content_name),
-        transport_type(transport_type),
-        candidates(candidates) {}
-
-  std::string content_name;
-  std::string transport_type;  // xmlns of <transport>
-  Candidates candidates;
-};
-
-typedef std::vector<TransportInfo> TransportInfos;
-
 // TODO: Break up this class so we don't have to typedef it into
 // different classes.
 struct ContentMessage {
@@ -139,6 +120,7 @@ struct ContentMessage {
   bool owns_contents;
   ContentInfos contents;
   TransportInfos transports;
+  ContentGroups groups;
 };
 
 typedef ContentMessage SessionInitiate;
@@ -160,6 +142,19 @@ struct SessionRedirect {
   std::string target;
 };
 
+// Used during parsing and writing to map component to channel name
+// and back.  This is primarily for converting old G-ICE candidate
+// signalling to new ICE candidate classes.
+class CandidateTranslator {
+ public:
+  virtual bool GetChannelNameFromComponent(
+      int component, std::string* channel_name) const = 0;
+  virtual bool GetComponentFromChannelName(
+      const std::string& channel_name, int* component) const = 0;
+};
+
+// Content name => translator
+typedef std::map<std::string, CandidateTranslator*> CandidateTranslatorMap;
 
 bool IsSessionMessage(const buzz::XmlElement* stanza);
 bool ParseSessionMessage(const buzz::XmlElement* stanza,
@@ -177,6 +172,7 @@ bool ParseSessionInitiate(SignalingProtocol protocol,
                           const buzz::XmlElement* action_elem,
                           const ContentParserMap& content_parsers,
                           const TransportParserMap& transport_parsers,
+                          const CandidateTranslatorMap& translators,
                           SessionInitiate* init,
                           ParseError* error);
 bool WriteSessionInitiate(SignalingProtocol protocol,
@@ -184,12 +180,15 @@ bool WriteSessionInitiate(SignalingProtocol protocol,
                           const TransportInfos& tinfos,
                           const ContentParserMap& content_parsers,
                           const TransportParserMap& transport_parsers,
+                          const CandidateTranslatorMap& translators,
+                          const ContentGroups& groups,
                           XmlElements* elems,
                           WriteError* error);
 bool ParseSessionAccept(SignalingProtocol protocol,
                         const buzz::XmlElement* action_elem,
                         const ContentParserMap& content_parsers,
                         const TransportParserMap& transport_parsers,
+                        const CandidateTranslatorMap& translators,
                         SessionAccept* accept,
                         ParseError* error);
 bool WriteSessionAccept(SignalingProtocol protocol,
@@ -197,6 +196,8 @@ bool WriteSessionAccept(SignalingProtocol protocol,
                         const TransportInfos& tinfos,
                         const ContentParserMap& content_parsers,
                         const TransportParserMap& transport_parsers,
+                        const CandidateTranslatorMap& translators,
+                        const ContentGroups& groups,
                         XmlElements* elems,
                         WriteError* error);
 bool ParseSessionTerminate(SignalingProtocol protocol,
@@ -210,8 +211,14 @@ bool ParseDescriptionInfo(SignalingProtocol protocol,
                           const buzz::XmlElement* action_elem,
                           const ContentParserMap& content_parsers,
                           const TransportParserMap& transport_parsers,
+                          const CandidateTranslatorMap& translators,
                           DescriptionInfo* description_info,
                           ParseError* error);
+bool WriteDescriptionInfo(SignalingProtocol protocol,
+                          const ContentInfos& contents,
+                          const ContentParserMap& content_parsers,
+                          XmlElements* elems,
+                          WriteError* error);
 // Since a TransportInfo is not a transport-info message, and a
 // transport-info message is just a collection of TransportInfos, we
 // say Parse/Write TransportInfos for transport-info messages.
@@ -219,11 +226,13 @@ bool ParseTransportInfos(SignalingProtocol protocol,
                          const buzz::XmlElement* action_elem,
                          const ContentInfos& contents,
                          const TransportParserMap& trans_parsers,
+                         const CandidateTranslatorMap& translators,
                          TransportInfos* tinfos,
                          ParseError* error);
 bool WriteTransportInfos(SignalingProtocol protocol,
                          const TransportInfos& tinfos,
                          const TransportParserMap& trans_parsers,
+                         const CandidateTranslatorMap& translators,
                          XmlElements* elems,
                          WriteError* error);
 // Handles both Gingle and Jingle syntax.

@@ -30,7 +30,8 @@
 #include "InspectorInstrumentation.h"
 #include "ScheduledAction.h"
 #include "ScriptExecutionContext.h"
-#include "UserGestureIndicator.h"
+#include "WebCoreMemoryInstrumentation.h"
+#include <wtf/CurrentTime.h>
 #include <wtf/HashSet.h>
 #include <wtf/StdLibExtras.h>
 
@@ -41,19 +42,8 @@ namespace WebCore {
 static const int maxIntervalForUserGestureForwarding = 1000; // One second matches Gecko.
 static const int maxTimerNestingLevel = 5;
 static const double oneMillisecond = 0.001;
-double DOMTimer::s_minDefaultTimerInterval = 0.010; // 10 milliseconds
 
 static int timerNestingLevel = 0;
-    
-static int timeoutId()
-{
-    static int lastUsedTimeoutId = 0;
-    ++lastUsedTimeoutId;
-    // Avoid wraparound going negative on us.
-    if (lastUsedTimeoutId <= 0)
-        lastUsedTimeoutId = 1;
-    return lastUsedTimeoutId;
-}
     
 static inline bool shouldForwardUserGesture(int interval, int nestingLevel)
 {
@@ -64,13 +54,15 @@ static inline bool shouldForwardUserGesture(int interval, int nestingLevel)
 
 DOMTimer::DOMTimer(ScriptExecutionContext* context, PassOwnPtr<ScheduledAction> action, int interval, bool singleShot)
     : SuspendableTimer(context)
-    , m_timeoutId(timeoutId())
+    , m_timeoutId(context->newUniqueID())
     , m_nestingLevel(timerNestingLevel + 1)
     , m_action(action)
     , m_originalInterval(interval)
-    , m_shouldForwardUserGesture(shouldForwardUserGesture(interval, m_nestingLevel))
 {
-    scriptExecutionContext()->addTimeout(m_timeoutId, this);
+    if (shouldForwardUserGesture(interval, m_nestingLevel))
+        m_userGestureToken = UserGestureIndicator::currentToken();
+
+    context->addTimeout(m_timeoutId, this);
 
     double intervalMilliseconds = intervalClampedToMinimum(interval, context->minimumTimerInterval());
     if (singleShot)
@@ -92,6 +84,7 @@ int DOMTimer::install(ScriptExecutionContext* context, PassOwnPtr<ScheduledActio
     // or if it is a one-time timer and it has fired (DOMTimer::fired).
     DOMTimer* timer = new DOMTimer(context, action, timeout, singleShot);
 
+    timer->suspendIfNeeded();
     InspectorInstrumentation::didInstallTimer(context, timer->m_timeoutId, timeout, singleShot);
 
     return timer->m_timeoutId;
@@ -114,11 +107,9 @@ void DOMTimer::fired()
 {
     ScriptExecutionContext* context = scriptExecutionContext();
     timerNestingLevel = m_nestingLevel;
-    
-    UserGestureIndicator gestureIndicator(m_shouldForwardUserGesture ? DefinitelyProcessingUserGesture : PossiblyProcessingUserGesture);
-    
+    ASSERT(!context->activeDOMObjectsAreSuspended());
     // Only the first execution of a multi-shot timer should get an affirmative user gesture indicator.
-    m_shouldForwardUserGesture = false;
+    UserGestureIndicator gestureIndicator(m_userGestureToken.release());
 
     InspectorInstrumentationCookie cookie = InspectorInstrumentation::willFireTimer(context, m_timeoutId);
 
@@ -191,6 +182,29 @@ double DOMTimer::intervalClampedToMinimum(int timeout, double minimumTimerInterv
     if (intervalMilliseconds < minimumTimerInterval && m_nestingLevel >= maxTimerNestingLevel)
         intervalMilliseconds = minimumTimerInterval;
     return intervalMilliseconds;
+}
+
+double DOMTimer::alignedFireTime(double fireTime) const
+{
+    double alignmentInterval = scriptExecutionContext()->timerAlignmentInterval();
+    if (alignmentInterval) {
+        double currentTime = monotonicallyIncreasingTime();
+        if (fireTime <= currentTime)
+            return fireTime;
+
+        double alignedTime = ceil(fireTime / alignmentInterval) * alignmentInterval;
+        return alignedTime;
+    }
+
+    return fireTime;
+}
+
+void DOMTimer::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::DOM);
+    SuspendableTimer::reportMemoryUsage(memoryObjectInfo);
+    info.addMember(m_action);
+    info.addMember(m_userGestureToken);
 }
 
 } // namespace WebCore

@@ -34,18 +34,19 @@
 #if ENABLE(JAVASCRIPT_DEBUGGER)
 
 #include "Frame.h"
+#include "InspectorInstrumentation.h"
 #include "Page.h"
 #include "ScriptDebugListener.h"
 #include "V8Binding.h"
 #include "V8DOMWindow.h"
-#include "V8Proxy.h"
+#include "V8RecursionScope.h"
 #include <wtf/OwnPtr.h>
 #include <wtf/PassOwnPtr.h>
 #include <wtf/StdLibExtras.h>
 
 namespace WebCore {
 
-static Frame* retrieveFrame(v8::Handle<v8::Context> context)
+static Frame* retrieveFrameWithGlobalObjectCheck(v8::Handle<v8::Context> context)
 {
     if (context.IsEmpty())
         return 0;
@@ -55,11 +56,11 @@ static Frame* retrieveFrame(v8::Handle<v8::Context> context)
     if (global.IsEmpty())
         return 0;
 
-    global = V8DOMWrapper::lookupDOMWrapper(V8DOMWindow::GetTemplate(), global);
+    global = global->FindInstanceInPrototypeChain(V8DOMWindow::GetTemplate());
     if (global.IsEmpty())
         return 0;
 
-    return V8Proxy::retrieveFrame(context);
+    return toFrameIfNotDetached(context);
 }
 
 PageScriptDebugServer& PageScriptDebugServer::shared()
@@ -76,9 +77,6 @@ PageScriptDebugServer::PageScriptDebugServer()
 
 void PageScriptDebugServer::addListener(ScriptDebugListener* listener, Page* page)
 {
-    V8Proxy* proxy = V8Proxy::retrieve(page->mainFrame());
-    if (!proxy)
-        return;
     ScriptController* scriptController = page->mainFrame()->script();
     if (!scriptController->canExecuteScripts(NotAboutToExecuteScript))
         return;
@@ -94,19 +92,23 @@ void PageScriptDebugServer::addListener(ScriptDebugListener* listener, Page* pag
     }
     m_listenersMap.set(page, listener);
 
-    V8DOMWindowShell* shell = proxy->windowShell();
-    if (!shell->isContextInitialized())
+    V8DOMWindowShell* shell = scriptController->existingWindowShell(mainThreadNormalWorld());
+    if (!shell || !shell->isContextInitialized())
         return;
     v8::Handle<v8::Context> context = shell->context();
-    v8::Handle<v8::Function> getScriptsFunction = v8::Local<v8::Function>::Cast(m_debuggerScript.get()->Get(v8::String::New("getScripts")));
-    v8::Handle<v8::Value> argv[] = { context->GetData() };
-    v8::Handle<v8::Value> value = getScriptsFunction->Call(m_debuggerScript.get(), 1, argv);
+    v8::Handle<v8::Function> getScriptsFunction = v8::Local<v8::Function>::Cast(m_debuggerScript.get()->Get(v8::String::NewSymbol("getScripts")));
+    v8::Handle<v8::Value> argv[] = { context->GetEmbedderData(0) };
+    v8::Handle<v8::Value> value;
+    {
+        V8RecursionScope::MicrotaskSuppression scope;
+        value = getScriptsFunction->Call(m_debuggerScript.get(), 1, argv);
+    }
     if (value.IsEmpty())
         return;
     ASSERT(!value->IsUndefined() && value->IsArray());
     v8::Handle<v8::Array> scriptsArray = v8::Handle<v8::Array>::Cast(value);
     for (unsigned i = 0; i < scriptsArray->Length(); ++i)
-        dispatchDidParseSource(listener, v8::Handle<v8::Object>::Cast(scriptsArray->Get(v8::Integer::New(i))));
+        dispatchDidParseSource(listener, v8::Handle<v8::Object>::Cast(scriptsArray->Get(deprecatedV8Integer(i))));
 }
 
 void PageScriptDebugServer::removeListener(ScriptDebugListener* listener, Page* page)
@@ -129,10 +131,42 @@ void PageScriptDebugServer::setClientMessageLoop(PassOwnPtr<ClientMessageLoop> c
     m_clientMessageLoop = clientMessageLoop;
 }
 
+void PageScriptDebugServer::compileScript(ScriptState* state, const String& expression, const String& sourceURL, String* scriptId, String* exceptionMessage)
+{
+    ScriptExecutionContext* scriptExecutionContext = state->scriptExecutionContext();
+    RefPtr<Frame> protect = static_cast<Document*>(scriptExecutionContext)->frame();
+    ScriptDebugServer::compileScript(state, expression, sourceURL, scriptId, exceptionMessage);
+    if (!scriptId->isNull())
+        m_compiledScriptURLs.set(*scriptId, sourceURL);
+}
+
+void PageScriptDebugServer::clearCompiledScripts()
+{
+    ScriptDebugServer::clearCompiledScripts();
+    m_compiledScriptURLs.clear();
+}
+
+void PageScriptDebugServer::runScript(ScriptState* state, const String& scriptId, ScriptValue* result, bool* wasThrown, String* exceptionMessage)
+{
+    String sourceURL = m_compiledScriptURLs.take(scriptId);
+
+    ScriptExecutionContext* scriptExecutionContext = state->scriptExecutionContext();
+    Frame* frame = static_cast<Document*>(scriptExecutionContext)->frame();
+    InspectorInstrumentationCookie cookie;
+    if (frame)
+        cookie = InspectorInstrumentation::willEvaluateScript(frame, sourceURL, TextPosition::minimumPosition().m_line.oneBasedInt());
+
+    RefPtr<Frame> protect = frame;
+    ScriptDebugServer::runScript(state, scriptId, result, wasThrown, exceptionMessage);
+
+    if (frame)
+        InspectorInstrumentation::didEvaluateScript(cookie);
+}
+
 ScriptDebugListener* PageScriptDebugServer::getDebugListenerForContext(v8::Handle<v8::Context> context)
 {
     v8::HandleScope scope;
-    Frame* frame = retrieveFrame(context);
+    Frame* frame = retrieveFrameWithGlobalObjectCheck(context);
     if (!frame)
         return 0;
     return m_listenersMap.get(frame->page());
@@ -141,7 +175,7 @@ ScriptDebugListener* PageScriptDebugServer::getDebugListenerForContext(v8::Handl
 void PageScriptDebugServer::runMessageLoopOnPause(v8::Handle<v8::Context> context)
 {
     v8::HandleScope scope;
-    Frame* frame = retrieveFrame(context);
+    Frame* frame = retrieveFrameWithGlobalObjectCheck(context);
     m_pausedPage = frame->page();
 
     // Wait for continue or step command.

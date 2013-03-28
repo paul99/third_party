@@ -32,9 +32,11 @@
 #include "config.h"
 #include "HiddenInputType.h"
 
+#include "FormController.h"
 #include "FormDataList.h"
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
+#include "InputTypeNames.h"
 #include <wtf/PassOwnPtr.h>
 
 namespace WebCore {
@@ -46,8 +48,23 @@ PassOwnPtr<InputType> HiddenInputType::create(HTMLInputElement* element)
     return adoptPtr(new HiddenInputType(element));
 }
 
-const AtomicString& HiddenInputType::formControlType() const {
+const AtomicString& HiddenInputType::formControlType() const
+{
     return InputTypeNames::hidden();
+}
+
+FormControlState HiddenInputType::saveFormControlState() const
+{
+    // valueAttributeWasUpdatedAfterParsing() never be true for form
+    // controls create by createElement() or cloneNode(). It's ok for
+    // now because we restore values only to form controls created by
+    // parsing.
+    return element()->valueAttributeWasUpdatedAfterParsing() ? FormControlState(element()->value()) : FormControlState();
+}
+
+void HiddenInputType::restoreFormControlState(const FormControlState& state)
+{
+    element()->setAttribute(valueAttr, state[0]);
 }
 
 bool HiddenInputType::supportsValidation() const
@@ -75,7 +92,7 @@ bool HiddenInputType::storesValueSeparateFromAttribute()
     return false;
 }
 
-void HiddenInputType::setValue(const String& sanitizedValue, bool, bool)
+void HiddenInputType::setValue(const String& sanitizedValue, bool, TextFieldEventBehavior)
 {
     element()->setAttribute(valueAttr, sanitizedValue);
 }

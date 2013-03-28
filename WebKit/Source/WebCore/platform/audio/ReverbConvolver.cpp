@@ -50,21 +50,19 @@ const int InputBufferSize = 8 * 16384;
 // tuned for individual platforms if this assumption is found to be incorrect.
 const size_t RealtimeFrameLimit = 8192  + 4096; // ~278msec @ 44.1KHz
 
-const size_t MinFFTSize = 256;
+const size_t MinFFTSize = 128;
 const size_t MaxRealtimeFFTSize = 2048;
 
-static void* backgroundThreadEntry(void* threadData)
+static void backgroundThreadEntry(void* threadData)
 {
     ReverbConvolver* reverbConvolver = static_cast<ReverbConvolver*>(threadData);
     reverbConvolver->backgroundThreadEntry();
-    return 0;
 }
 
 ReverbConvolver::ReverbConvolver(AudioChannel* impulseResponse, size_t renderSliceSize, size_t maxFFTSize, size_t convolverRenderPhase, bool useBackgroundThreads)
     : m_impulseResponseLength(impulseResponse->length())
     , m_accumulationBuffer(impulseResponse->length() + renderSliceSize)
     , m_inputBuffer(InputBufferSize)
-    , m_renderSliceSize(renderSliceSize)
     , m_minFFTSize(MinFFTSize) // First stage will have this size - successive stages will double in size each time
     , m_maxFFTSize(maxFFTSize) // until we hit m_maxFFTSize
     , m_useBackgroundThreads(useBackgroundThreads)
@@ -85,8 +83,8 @@ ReverbConvolver::ReverbConvolver(AudioChannel* impulseResponse, size_t renderSli
     const float* response = impulseResponse->data();
     size_t totalResponseLength = impulseResponse->length();
 
-    // Because we're not using direct-convolution in the leading portion, the reverb has an overall latency of half the first-stage FFT size
-    size_t reverbTotalLatency = m_minFFTSize / 2;
+    // The total latency is zero because the direct-convolution is used in the leading portion.
+    size_t reverbTotalLatency = 0;
 
     size_t stageOffset = 0;
     int i = 0;
@@ -102,7 +100,9 @@ ReverbConvolver::ReverbConvolver(AudioChannel* impulseResponse, size_t renderSli
         // This "staggers" the time when each FFT happens so they don't all happen at the same time
         int renderPhase = convolverRenderPhase + i * renderSliceSize;
 
-        OwnPtr<ReverbConvolverStage> stage = adoptPtr(new ReverbConvolverStage(response, totalResponseLength, reverbTotalLatency, stageOffset, stageSize, fftSize, renderPhase, renderSliceSize, &m_accumulationBuffer));
+        bool useDirectConvolver = !stageOffset;
+
+        OwnPtr<ReverbConvolverStage> stage = adoptPtr(new ReverbConvolverStage(response, totalResponseLength, reverbTotalLatency, stageOffset, stageSize, fftSize, renderPhase, renderSliceSize, &m_accumulationBuffer, useDirectConvolver));
 
         bool isBackgroundStage = false;
 
@@ -115,8 +115,11 @@ ReverbConvolver::ReverbConvolver(AudioChannel* impulseResponse, size_t renderSli
         stageOffset += stageSize;
         ++i;
 
-        // Figure out next FFT size
-        fftSize *= 2;
+        if (!useDirectConvolver) {
+            // Figure out next FFT size
+            fftSize *= 2;
+        }
+
         if (hasRealtimeConstraint && !isBackgroundStage && fftSize > m_maxRealtimeFFTSize)
             fftSize = m_maxRealtimeFFTSize;
         if (fftSize > m_maxFFTSize)
@@ -142,7 +145,7 @@ ReverbConvolver::~ReverbConvolver()
             m_backgroundThreadCondition.signal();
         }
 
-        waitForThreadCompletion(m_backgroundThread, 0);
+        waitForThreadCompletion(m_backgroundThread);
     }
 }
 
@@ -223,6 +226,11 @@ void ReverbConvolver::reset()
 
     m_accumulationBuffer.reset();
     m_inputBuffer.reset();
+}
+
+size_t ReverbConvolver::latencyFrames() const
+{
+    return 0;
 }
 
 } // namespace WebCore

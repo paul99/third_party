@@ -28,24 +28,22 @@
 
 #include "NPV8Object.h"
 
-#include "PlatformSupport.h"
 #include "DOMWindow.h"
 #include "Frame.h"
 #include "NPObjectWrapper.h"
-#include "OwnArrayPtr.h"
-#include "PlatformString.h"
+#include <wtf/OwnArrayPtr.h>
 #include "ScriptSourceCode.h"
 #include "UserGestureIndicator.h"
+#include "V8Binding.h"
 #include "V8GCController.h"
-#include "V8Helpers.h"
 #include "V8NPUtils.h"
-#include "V8Proxy.h"
 #include "WrapperTypeInfo.h"
 #include "npruntime_impl.h"
 #include "npruntime_priv.h"
 
 #include <stdio.h>
 #include <wtf/StringExtras.h>
+#include <wtf/text/WTFString.h>
 
 using namespace WebCore;
 
@@ -53,17 +51,17 @@ namespace WebCore {
 
 WrapperTypeInfo* npObjectTypeInfo()
 {
-    static WrapperTypeInfo typeInfo = { 0, 0, 0, 0 };
+    static WrapperTypeInfo typeInfo = { 0, 0, 0, 0, 0, 0, WrapperTypeObjectPrototype };
     return &typeInfo;
 }
 
-typedef Vector<V8NPObject*> V8NPObjectVector;
-typedef HashMap<int, V8NPObjectVector> V8NPObjectMap;
-
-static V8NPObjectMap* staticV8NPObjectMap()
+static v8::Local<v8::Context> toV8Context(NPP npp, NPObject* npObject)
 {
-    DEFINE_STATIC_LOCAL(V8NPObjectMap, v8npObjectMap, ());
-    return &v8npObjectMap;
+    V8NPObject* object = reinterpret_cast<V8NPObject*>(npObject);
+    DOMWindow* window = object->rootObject;
+    if (!window || !window->isCurrentlyDisplayedInFrame())
+        return v8::Local<v8::Context>();
+    return ScriptController::mainWorldContext(object->rootObject->frame());
 }
 
 // FIXME: Comments on why use malloc and free.
@@ -75,10 +73,15 @@ static NPObject* allocV8NPObject(NPP, NPClass*)
 static void freeV8NPObject(NPObject* npObject)
 {
     V8NPObject* v8NpObject = reinterpret_cast<V8NPObject*>(npObject);
-    if (int v8ObjectHash = v8NpObject->v8Object->GetIdentityHash()) {
-        V8NPObjectMap::iterator iter = staticV8NPObjectMap()->find(v8ObjectHash);
-        if (iter != staticV8NPObjectMap()->end()) {
-            V8NPObjectVector& objects = iter->second;
+    v8::HandleScope scope;
+    ASSERT(!v8NpObject->v8Object->CreationContext().IsEmpty());
+    if (V8PerContextData* perContextData = V8PerContextData::from(v8NpObject->v8Object->CreationContext())) {
+        V8NPObjectMap* v8NPObjectMap = perContextData->v8NPObjectMap();
+        int v8ObjectHash = v8NpObject->v8Object->GetIdentityHash();
+        ASSERT(v8ObjectHash);
+        V8NPObjectMap::iterator iter = v8NPObjectMap->find(v8ObjectHash);
+        if (iter != v8NPObjectMap->end()) {
+            V8NPObjectVector& objects = iter->value;
             for (size_t index = 0; index < objects.size(); ++index) {
                 if (objects.at(index) == v8NpObject) {
                     objects.remove(index);
@@ -86,18 +89,11 @@ static void freeV8NPObject(NPObject* npObject)
                 }
             }
             if (objects.isEmpty())
-                staticV8NPObjectMap()->remove(v8ObjectHash);
-        } else
-            ASSERT_NOT_REACHED();
-    } else {
-        ASSERT(!v8::Context::InContext());
-        staticV8NPObjectMap()->clear();
+                v8NPObjectMap->remove(v8ObjectHash);
+        }
     }
-
-#ifndef NDEBUG
-    V8GCController::unregisterGlobalHandle(v8NpObject, v8NpObject->v8Object);
-#endif
     v8NpObject->v8Object.Dispose();
+    v8NpObject->v8Object.Clear();
     free(v8NpObject);
 }
 
@@ -116,16 +112,16 @@ static v8::Local<v8::String> npIdentifierToV8Identifier(NPIdentifier name)
 {
     PrivateIdentifier* identifier = static_cast<PrivateIdentifier*>(name);
     if (identifier->isString)
-        return v8::String::New(static_cast<const char*>(identifier->value.string));
+        return v8::String::NewSymbol(static_cast<const char*>(identifier->value.string));
 
     char buffer[32];
     snprintf(buffer, sizeof(buffer), "%d", identifier->value.number);
-    return v8::String::New(buffer);
+    return v8::String::NewSymbol(buffer);
 }
 
 NPObject* v8ObjectToNPObject(v8::Handle<v8::Object> object)
 {
-    return reinterpret_cast<NPObject*>(object->GetPointerFromInternalField(v8DOMWrapperObjectIndex)); 
+    return reinterpret_cast<NPObject*>(object->GetAlignedPointerFromInternalField(v8DOMWrapperObjectIndex)); 
 }
 
 static NPClass V8NPObjectClass = { NP_CLASS_STRUCT_VERSION,
@@ -140,7 +136,7 @@ NPObject* npCreateV8ScriptObject(NPP npp, v8::Handle<v8::Object> object, DOMWind
 {
     // Check to see if this object is already wrapped.
     if (object->InternalFieldCount() == npObjectInternalFieldCount) {
-        WrapperTypeInfo* typeInfo = static_cast<WrapperTypeInfo*>(object->GetPointerFromInternalField(v8DOMWrapperTypeIndex));
+        WrapperTypeInfo* typeInfo = static_cast<WrapperTypeInfo*>(object->GetAlignedPointerFromInternalField(v8DOMWrapperTypeIndex));
         if (typeInfo == npObjectTypeInfo()) {
 
             NPObject* returnValue = v8ObjectToNPObject(object);
@@ -149,31 +145,32 @@ NPObject* npCreateV8ScriptObject(NPP npp, v8::Handle<v8::Object> object, DOMWind
         }
     }
 
-    int v8ObjectHash = object->GetIdentityHash();
-    ASSERT(v8ObjectHash);
-    V8NPObjectMap::iterator iter = staticV8NPObjectMap()->find(v8ObjectHash);
-    if (iter != staticV8NPObjectMap()->end()) {
-        V8NPObjectVector& objects = iter->second;
-        for (size_t index = 0; index < objects.size(); ++index) {
-            V8NPObject* v8npObject = objects.at(index);
-            if (v8npObject->rootObject == root) {
-                ASSERT(v8npObject->v8Object == object);
-                _NPN_RetainObject(&v8npObject->object);
-                return reinterpret_cast<NPObject*>(v8npObject);
+    V8NPObjectVector* objectVector = 0;
+    if (V8PerContextData* perContextData = V8PerContextData::from(object->CreationContext())) {
+        int v8ObjectHash = object->GetIdentityHash();
+        ASSERT(v8ObjectHash);
+        V8NPObjectMap* v8NPObjectMap = perContextData->v8NPObjectMap();
+        V8NPObjectMap::iterator iter = v8NPObjectMap->find(v8ObjectHash);
+        if (iter != v8NPObjectMap->end()) {
+            V8NPObjectVector& objects = iter->value;
+            for (size_t index = 0; index < objects.size(); ++index) {
+                V8NPObject* v8npObject = objects.at(index);
+                if (v8npObject->v8Object == object && v8npObject->rootObject == root) {
+                    _NPN_RetainObject(&v8npObject->object);
+                    return reinterpret_cast<NPObject*>(v8npObject);
+                }
             }
+        } else {
+            iter = v8NPObjectMap->set(v8ObjectHash, V8NPObjectVector()).iterator;
         }
-    } else {
-        iter = staticV8NPObjectMap()->set(v8ObjectHash, V8NPObjectVector()).first; 
+        objectVector = &iter->value;
     }
-
     V8NPObject* v8npObject = reinterpret_cast<V8NPObject*>(_NPN_CreateObject(npp, &V8NPObjectClass));
     v8npObject->v8Object = v8::Persistent<v8::Object>::New(object);
-#ifndef NDEBUG
-    V8GCController::registerGlobalHandle(NPOBJECT, v8npObject, v8npObject->v8Object);
-#endif
     v8npObject->rootObject = root;
 
-    iter->second.append(v8npObject);
+    if (objectVector)
+        objectVector->append(v8npObject);
 
     return reinterpret_cast<NPObject*>(v8npObject);
 }
@@ -216,7 +213,7 @@ bool _NPN_Invoke(NPP npp, NPObject* npObject, NPIdentifier methodName, const NPV
     v8::Context::Scope scope(context);
     ExceptionCatcher exceptionCatcher;
 
-    v8::Handle<v8::Value> functionObject = v8NpObject->v8Object->Get(v8::String::New(identifier->value.string));
+    v8::Handle<v8::Value> functionObject = v8NpObject->v8Object->Get(v8::String::NewSymbol(identifier->value.string));
     if (functionObject.IsEmpty() || functionObject->IsNull()) {
         NULL_TO_NPVARIANT(*result);
         return false;
@@ -226,13 +223,13 @@ bool _NPN_Invoke(NPP npp, NPObject* npObject, NPIdentifier methodName, const NPV
         return false;
     }
 
-    V8Proxy* proxy = toV8Proxy(npObject);
-    ASSERT(proxy);
+    Frame* frame = v8NpObject->rootObject->frame();
+    ASSERT(frame);
 
     // Call the function object.
     v8::Handle<v8::Function> function = v8::Handle<v8::Function>::Cast(functionObject);
     OwnArrayPtr<v8::Handle<v8::Value> > argv = createValueListFromVariantArgs(arguments, argumentCount, npObject);
-    v8::Local<v8::Value> resultObject = proxy->callFunction(function, v8NpObject->v8Object, argumentCount, argv.get());
+    v8::Local<v8::Value> resultObject = frame->script()->callFunction(function, v8NpObject->v8Object, argumentCount, argv.get());
 
     // If we had an error, return false.  The spec is a little unclear here, but says "Returns true if the method was
     // successfully invoked".  If we get an error return value, was that successfully invoked?
@@ -277,11 +274,11 @@ bool _NPN_InvokeDefault(NPP npp, NPObject* npObject, const NPVariant* arguments,
     v8::Local<v8::Value> resultObject;
     v8::Handle<v8::Function> function(v8::Function::Cast(*functionObject));
     if (!function->IsNull()) {
-        V8Proxy* proxy = toV8Proxy(npObject);
-        ASSERT(proxy);
+        Frame* frame = v8NpObject->rootObject->frame();
+        ASSERT(frame);
 
         OwnArrayPtr<v8::Handle<v8::Value> > argv = createValueListFromVariantArgs(arguments, argumentCount, npObject);
-        resultObject = proxy->callFunction(function, functionObject, argumentCount, argv.get());
+        resultObject = frame->script()->callFunction(function, functionObject, argumentCount, argv.get());
     }
     // If we had an error, return false.  The spec is a little unclear here, but says "Returns true if the method was
     // successfully invoked".  If we get an error return value, was that successfully invoked?
@@ -294,7 +291,8 @@ bool _NPN_InvokeDefault(NPP npp, NPObject* npObject, const NPVariant* arguments,
 
 bool _NPN_Evaluate(NPP npp, NPObject* npObject, NPString* npScript, NPVariant* result)
 {
-    bool popupsAllowed = PlatformSupport::popupsAllowed(npp);
+    // FIXME: Give the embedder a way to control this.
+    bool popupsAllowed = false;
     return _NPN_EvaluateHelper(npp, popupsAllowed, npObject, npScript, result);
 }
 
@@ -317,9 +315,6 @@ bool _NPN_EvaluateHelper(NPP npp, bool popupsAllowed, NPObject* npObject, NPStri
     if (context.IsEmpty())
         return false;
 
-    V8Proxy* proxy = toV8Proxy(npObject);
-    ASSERT(proxy);
-
     v8::Context::Scope scope(context);
     ExceptionCatcher exceptionCatcher;
 
@@ -328,10 +323,14 @@ bool _NPN_EvaluateHelper(NPP npp, bool popupsAllowed, NPObject* npObject, NPStri
     if (!popupsAllowed)
         filename = "npscript";
 
+    V8NPObject* v8NpObject = reinterpret_cast<V8NPObject*>(npObject);
+    Frame* frame = v8NpObject->rootObject->frame();
+    ASSERT(frame);
+
     String script = String::fromUTF8(npScript->UTF8Characters, npScript->UTF8Length);
 
     UserGestureIndicator gestureIndicator(popupsAllowed ? DefinitelyProcessingUserGesture : PossiblyProcessingUserGesture);
-    v8::Local<v8::Value> v8result = proxy->evaluate(ScriptSourceCode(script, KURL(ParsedURLString, filename)), 0);
+    v8::Local<v8::Value> v8result = frame->script()->compileAndRunScript(ScriptSourceCode(script, KURL(ParsedURLString, filename)));
 
     if (v8result.IsEmpty())
         return false;
@@ -480,7 +479,7 @@ void _NPN_SetException(NPObject* npObject, const NPUTF8 *message)
     if (!npObject || npObject->_class != npScriptObjectClass) {
         // We won't be able to find a proper scope for this exception, so just throw it.
         // This is consistent with JSC, which throws a global exception all the time.
-        V8Proxy::throwError(V8Proxy::GeneralError, message);
+        throwError(v8GeneralError, message);
         return;
     }
     v8::HandleScope handleScope;
@@ -491,7 +490,7 @@ void _NPN_SetException(NPObject* npObject, const NPUTF8 *message)
     v8::Context::Scope scope(context);
     ExceptionCatcher exceptionCatcher;
 
-    V8Proxy::throwError(V8Proxy::GeneralError, message);
+    throwError(v8GeneralError, message);
 }
 
 bool _NPN_Enumerate(NPP npp, NPObject* npObject, NPIdentifier** identifier, uint32_t* count)
@@ -537,7 +536,7 @@ bool _NPN_Enumerate(NPP npp, NPObject* npObject, NPIdentifier** identifier, uint
         *count = props->Length();
         *identifier = static_cast<NPIdentifier*>(malloc(sizeof(NPIdentifier*) * *count));
         for (uint32_t i = 0; i < *count; ++i) {
-            v8::Local<v8::Value> name = props->Get(v8::Integer::New(i));
+            v8::Local<v8::Value> name = props->Get(deprecatedV8Integer(i));
             (*identifier)[i] = getStringIdentifier(v8::Local<v8::String>::Cast(name));
         }
         return true;
@@ -573,11 +572,10 @@ bool _NPN_Construct(NPP npp, NPObject* npObject, const NPVariant* arguments, uin
         v8::Local<v8::Value> resultObject;
         v8::Handle<v8::Function> ctor(v8::Function::Cast(*ctorObj));
         if (!ctor->IsNull()) {
-            V8Proxy* proxy = toV8Proxy(npObject);
-            ASSERT(proxy);
-
+            Frame* frame = object->rootObject->frame();
+            ASSERT(frame);
             OwnArrayPtr<v8::Handle<v8::Value> > argv = createValueListFromVariantArgs(arguments, argumentCount, npObject);
-            resultObject = proxy->newInstance(ctor, argumentCount, argv.get());
+            resultObject = V8ObjectConstructor::newInstanceInDocument(ctor, argumentCount, argv.get(), frame ? frame->document() : 0);
         }
 
         if (resultObject.IsEmpty())

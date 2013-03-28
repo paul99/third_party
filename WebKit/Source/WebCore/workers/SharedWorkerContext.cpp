@@ -50,8 +50,16 @@ PassRefPtr<MessageEvent> createConnectEvent(PassRefPtr<MessagePort> port)
     return event.release();
 }
 
-SharedWorkerContext::SharedWorkerContext(const String& name, const KURL& url, const String& userAgent, SharedWorkerThread* thread, const String& contentSecurityPolicy, ContentSecurityPolicy::HeaderType contentSecurityPolicyType)
-    : WorkerContext(url, userAgent, thread, contentSecurityPolicy, contentSecurityPolicyType)
+// static
+PassRefPtr<SharedWorkerContext> SharedWorkerContext::create(const String& name, const KURL& url, const String& userAgent, PassOwnPtr<GroupSettings> settings, SharedWorkerThread* thread, const String& contentSecurityPolicy, ContentSecurityPolicy::HeaderType contentSecurityPolicyType)
+{
+    RefPtr<SharedWorkerContext> context = adoptRef(new SharedWorkerContext(name, url, userAgent, settings, thread));
+    context->applyContentSecurityPolicyFromString(contentSecurityPolicy, contentSecurityPolicyType);
+    return context.release();
+}
+
+SharedWorkerContext::SharedWorkerContext(const String& name, const KURL& url, const String& userAgent, PassOwnPtr<GroupSettings> settings, SharedWorkerThread* thread)
+    : WorkerContext(url, userAgent, settings, thread, 0)
     , m_name(name)
 {
 }
@@ -73,7 +81,7 @@ SharedWorkerThread* SharedWorkerContext::thread()
 void SharedWorkerContext::logExceptionToConsole(const String& errorMessage, const String& sourceURL, int lineNumber, PassRefPtr<ScriptCallStack> callStack)
 {
     WorkerContext::logExceptionToConsole(errorMessage, sourceURL, lineNumber, callStack);
-    addMessageToWorkerConsole(JSMessageSource, LogMessageType, ErrorMessageLevel, errorMessage, sourceURL, lineNumber, callStack);
+    addMessageToWorkerConsole(JSMessageSource, ErrorMessageLevel, errorMessage, sourceURL, lineNumber, callStack);
 }
 
 } // namespace WebCore

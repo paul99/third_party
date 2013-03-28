@@ -34,7 +34,7 @@
 #include "Page.h"
 #include "RenderLayer.h"
 #include "RenderView.h"
-#include "webkit/WebKitDOMNodePrivate.h"
+#include "WebKitDOMNodePrivate.h"
 #include "webkitglobalsprivate.h"
 #include "webkitmarshal.h"
 #include "webkitwebinspectorprivate.h"
@@ -353,11 +353,7 @@ static void webkit_web_inspector_set_property(GObject* object, guint prop_id, co
     case PROP_JAVASCRIPT_PROFILING_ENABLED: {
 #if ENABLE(JAVASCRIPT_DEBUGGER)
         bool enabled = g_value_get_boolean(value);
-        WebCore::InspectorController* controller = priv->page->inspectorController();
-        if (enabled)
-            controller->enableProfiler();
-        else
-            controller->disableProfiler();
+        priv->page->inspectorController()->setProfilerEnabled(enabled);
 #else
         g_message("PROP_JAVASCRIPT_PROFILING_ENABLED is not work because of the javascript debugger is disabled\n");
 #endif
@@ -577,42 +573,3 @@ void webkit_web_inspector_execute_script(WebKitWebInspector* webInspector, long 
     WebKitWebInspectorPrivate* priv = webInspector->priv;
     priv->page->inspectorController()->evaluateForTestInFrontend(callId, script);
 }
-
-#ifdef HAVE_GSETTINGS
-static bool isSchemaAvailable(const char* schemaID)
-{
-    const char* const* availableSchemas = g_settings_list_schemas();
-    char* const* iter = const_cast<char* const*>(availableSchemas);
-
-    while (*iter) {
-        if (g_str_equal(schemaID, *iter))
-            return true;
-        iter++;
-    }
-
-    return false;
-}
-
-GSettings* inspectorGSettings()
-{
-    static GSettings* settings = 0;
-    if (settings)
-        return settings;
-
-    // Unfortunately GSettings will abort the process execution if the schema is not
-    // installed, which is the case for when running tests, or even the introspection dump
-    // at build time, so check if we have the schema before trying to initialize it.
-    const gchar* schemaID = "org.webkitgtk-"WEBKITGTK_API_VERSION_STRING".inspector";
-    if (!isSchemaAvailable(schemaID)) {
-
-        // This warning is very common on the build bots, which hides valid warnings.
-        // Skip printing it if we are running inside DumpRenderTree.
-        if (!DumpRenderTreeSupportGtk::dumpRenderTreeModeEnabled())
-            g_warning("GSettings schema not found - settings will not be used or saved.");
-        return 0;
-    }
-
-    settings = g_settings_new(schemaID);
-    return settings;
-}
-#endif

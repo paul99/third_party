@@ -32,6 +32,7 @@
 #if ENABLE(ASSEMBLER) && CPU(MIPS)
 
 #include "AssemblerBuffer.h"
+#include "JITCompilationEffort.h"
 #include <wtf/Assertions.h>
 #include <wtf/SegmentedVector.h>
 
@@ -226,20 +227,17 @@ public:
 
     void addiu(RegisterID rt, RegisterID rs, int imm)
     {
-        emitInst(0x24000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS)
-                 | (imm & 0xffff));
+        emitInst(0x24000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (imm & 0xffff));
     }
 
     void addu(RegisterID rd, RegisterID rs, RegisterID rt)
     {
-        emitInst(0x00000021 | (rd << OP_SH_RD) | (rs << OP_SH_RS)
-                 | (rt << OP_SH_RT));
+        emitInst(0x00000021 | (rd << OP_SH_RD) | (rs << OP_SH_RS) | (rt << OP_SH_RT));
     }
 
     void subu(RegisterID rd, RegisterID rs, RegisterID rt)
     {
-        emitInst(0x00000023 | (rd << OP_SH_RD) | (rs << OP_SH_RS)
-                 | (rt << OP_SH_RT));
+        emitInst(0x00000023 | (rd << OP_SH_RD) | (rs << OP_SH_RS) | (rt << OP_SH_RT));
     }
 
     void mult(RegisterID rs, RegisterID rt)
@@ -265,8 +263,7 @@ public:
     void mul(RegisterID rd, RegisterID rs, RegisterID rt)
     {
 #if WTF_MIPS_ISA_AT_LEAST(32) 
-        emitInst(0x70000002 | (rd << OP_SH_RD) | (rs << OP_SH_RS)
-                 | (rt << OP_SH_RT));
+        emitInst(0x70000002 | (rd << OP_SH_RD) | (rs << OP_SH_RS) | (rt << OP_SH_RT));
 #else
         mult(rs, rt);
         mflo(rd);
@@ -275,139 +272,139 @@ public:
 
     void andInsn(RegisterID rd, RegisterID rs, RegisterID rt)
     {
-        emitInst(0x00000024 | (rd << OP_SH_RD) | (rs << OP_SH_RS)
-                 | (rt << OP_SH_RT));
+        emitInst(0x00000024 | (rd << OP_SH_RD) | (rs << OP_SH_RS) | (rt << OP_SH_RT));
     }
 
     void andi(RegisterID rt, RegisterID rs, int imm)
     {
-        emitInst(0x30000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS)
-                 | (imm & 0xffff));
+        emitInst(0x30000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (imm & 0xffff));
     }
 
     void nor(RegisterID rd, RegisterID rs, RegisterID rt)
     {
-        emitInst(0x00000027 | (rd << OP_SH_RD) | (rs << OP_SH_RS)
-                 | (rt << OP_SH_RT));
+        emitInst(0x00000027 | (rd << OP_SH_RD) | (rs << OP_SH_RS) | (rt << OP_SH_RT));
     }
 
     void orInsn(RegisterID rd, RegisterID rs, RegisterID rt)
     {
-        emitInst(0x00000025 | (rd << OP_SH_RD) | (rs << OP_SH_RS)
-                 | (rt << OP_SH_RT));
+        emitInst(0x00000025 | (rd << OP_SH_RD) | (rs << OP_SH_RS) | (rt << OP_SH_RT));
     }
 
     void ori(RegisterID rt, RegisterID rs, int imm)
     {
-        emitInst(0x34000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS)
-                 | (imm & 0xffff));
+        emitInst(0x34000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (imm & 0xffff));
     }
 
     void xorInsn(RegisterID rd, RegisterID rs, RegisterID rt)
     {
-        emitInst(0x00000026 | (rd << OP_SH_RD) | (rs << OP_SH_RS)
-                 | (rt << OP_SH_RT));
+        emitInst(0x00000026 | (rd << OP_SH_RD) | (rs << OP_SH_RS) | (rt << OP_SH_RT));
     }
 
     void xori(RegisterID rt, RegisterID rs, int imm)
     {
-        emitInst(0x38000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS)
-                 | (imm & 0xffff));
+        emitInst(0x38000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (imm & 0xffff));
     }
 
     void slt(RegisterID rd, RegisterID rs, RegisterID rt)
     {
-        emitInst(0x0000002a | (rd << OP_SH_RD) | (rs << OP_SH_RS)
-                 | (rt << OP_SH_RT));
+        emitInst(0x0000002a | (rd << OP_SH_RD) | (rs << OP_SH_RS) | (rt << OP_SH_RT));
     }
 
     void sltu(RegisterID rd, RegisterID rs, RegisterID rt)
     {
-        emitInst(0x0000002b | (rd << OP_SH_RD) | (rs << OP_SH_RS)
-                 | (rt << OP_SH_RT));
+        emitInst(0x0000002b | (rd << OP_SH_RD) | (rs << OP_SH_RS) | (rt << OP_SH_RT));
     }
 
     void sltiu(RegisterID rt, RegisterID rs, int imm)
     {
-        emitInst(0x2c000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS)
-                 | (imm & 0xffff));
+        emitInst(0x2c000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (imm & 0xffff));
     }
 
     void sll(RegisterID rd, RegisterID rt, int shamt)
     {
-        emitInst(0x00000000 | (rd << OP_SH_RD) | (rt << OP_SH_RT)
-                 | ((shamt & 0x1f) << OP_SH_SHAMT));
+        emitInst(0x00000000 | (rd << OP_SH_RD) | (rt << OP_SH_RT) | ((shamt & 0x1f) << OP_SH_SHAMT));
     }
 
     void sllv(RegisterID rd, RegisterID rt, int rs)
     {
-        emitInst(0x00000004 | (rd << OP_SH_RD) | (rt << OP_SH_RT)
-                 | (rs << OP_SH_RS));
+        emitInst(0x00000004 | (rd << OP_SH_RD) | (rt << OP_SH_RT) | (rs << OP_SH_RS));
     }
 
     void sra(RegisterID rd, RegisterID rt, int shamt)
     {
-        emitInst(0x00000003 | (rd << OP_SH_RD) | (rt << OP_SH_RT)
-                 | ((shamt & 0x1f) << OP_SH_SHAMT));
+        emitInst(0x00000003 | (rd << OP_SH_RD) | (rt << OP_SH_RT) | ((shamt & 0x1f) << OP_SH_SHAMT));
     }
 
     void srav(RegisterID rd, RegisterID rt, RegisterID rs)
     {
-        emitInst(0x00000007 | (rd << OP_SH_RD) | (rt << OP_SH_RT)
-                 | (rs << OP_SH_RS));
+        emitInst(0x00000007 | (rd << OP_SH_RD) | (rt << OP_SH_RT) | (rs << OP_SH_RS));
     }
 
     void srl(RegisterID rd, RegisterID rt, int shamt)
     {
-        emitInst(0x00000002 | (rd << OP_SH_RD) | (rt << OP_SH_RT)
-                 | ((shamt & 0x1f) << OP_SH_SHAMT));
+        emitInst(0x00000002 | (rd << OP_SH_RD) | (rt << OP_SH_RT) | ((shamt & 0x1f) << OP_SH_SHAMT));
     }
 
     void srlv(RegisterID rd, RegisterID rt, RegisterID rs)
     {
-        emitInst(0x00000006 | (rd << OP_SH_RD) | (rt << OP_SH_RT)
-                 | (rs << OP_SH_RS));
+        emitInst(0x00000006 | (rd << OP_SH_RD) | (rt << OP_SH_RT) | (rs << OP_SH_RS));
+    }
+
+    void lb(RegisterID rt, RegisterID rs, int offset)
+    {
+        emitInst(0x80000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (offset & 0xffff));
+        loadDelayNop();
     }
 
     void lbu(RegisterID rt, RegisterID rs, int offset)
     {
-        emitInst(0x90000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS)
-                 | (offset & 0xffff));
+        emitInst(0x90000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (offset & 0xffff));
         loadDelayNop();
     }
 
     void lw(RegisterID rt, RegisterID rs, int offset)
     {
-        emitInst(0x8c000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS)
-                 | (offset & 0xffff));
+        emitInst(0x8c000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (offset & 0xffff));
         loadDelayNop();
     }
 
     void lwl(RegisterID rt, RegisterID rs, int offset)
     {
-        emitInst(0x88000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS)
-                 | (offset & 0xffff));
+        emitInst(0x88000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (offset & 0xffff));
         loadDelayNop();
     }
 
     void lwr(RegisterID rt, RegisterID rs, int offset)
     {
-        emitInst(0x98000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS)
-                 | (offset & 0xffff));
+        emitInst(0x98000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (offset & 0xffff));
+        loadDelayNop();
+    }
+
+    void lh(RegisterID rt, RegisterID rs, int offset)
+    {
+        emitInst(0x84000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (offset & 0xffff));
         loadDelayNop();
     }
 
     void lhu(RegisterID rt, RegisterID rs, int offset)
     {
-        emitInst(0x94000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS)
-                 | (offset & 0xffff));
+        emitInst(0x94000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (offset & 0xffff));
         loadDelayNop();
+    }
+
+    void sb(RegisterID rt, RegisterID rs, int offset)
+    {
+        emitInst(0xa0000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (offset & 0xffff));
+    }
+
+    void sh(RegisterID rt, RegisterID rs, int offset)
+    {
+        emitInst(0xa4000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (offset & 0xffff));
     }
 
     void sw(RegisterID rt, RegisterID rs, int offset)
     {
-        emitInst(0xac000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS)
-                 | (offset & 0xffff));
+        emitInst(0xac000000 | (rt << OP_SH_RT) | (rs << OP_SH_RS) | (offset & 0xffff));
     }
 
     void jr(RegisterID rs)
@@ -468,51 +465,43 @@ public:
 
     void addd(FPRegisterID fd, FPRegisterID fs, FPRegisterID ft)
     {
-        emitInst(0x46200000 | (fd << OP_SH_FD) | (fs << OP_SH_FS)
-                 | (ft << OP_SH_FT));
+        emitInst(0x46200000 | (fd << OP_SH_FD) | (fs << OP_SH_FS) | (ft << OP_SH_FT));
     }
 
     void subd(FPRegisterID fd, FPRegisterID fs, FPRegisterID ft)
     {
-        emitInst(0x46200001 | (fd << OP_SH_FD) | (fs << OP_SH_FS)
-                 | (ft << OP_SH_FT));
+        emitInst(0x46200001 | (fd << OP_SH_FD) | (fs << OP_SH_FS) | (ft << OP_SH_FT));
     }
 
     void muld(FPRegisterID fd, FPRegisterID fs, FPRegisterID ft)
     {
-        emitInst(0x46200002 | (fd << OP_SH_FD) | (fs << OP_SH_FS)
-                 | (ft << OP_SH_FT));
+        emitInst(0x46200002 | (fd << OP_SH_FD) | (fs << OP_SH_FS) | (ft << OP_SH_FT));
     }
 
     void divd(FPRegisterID fd, FPRegisterID fs, FPRegisterID ft)
     {
-        emitInst(0x46200003 | (fd << OP_SH_FD) | (fs << OP_SH_FS)
-                 | (ft << OP_SH_FT));
+        emitInst(0x46200003 | (fd << OP_SH_FD) | (fs << OP_SH_FS) | (ft << OP_SH_FT));
     }
 
     void lwc1(FPRegisterID ft, RegisterID rs, int offset)
     {
-        emitInst(0xc4000000 | (ft << OP_SH_FT) | (rs << OP_SH_RS)
-                 | (offset & 0xffff));
+        emitInst(0xc4000000 | (ft << OP_SH_FT) | (rs << OP_SH_RS) | (offset & 0xffff));
         copDelayNop();
     }
 
     void ldc1(FPRegisterID ft, RegisterID rs, int offset)
     {
-        emitInst(0xd4000000 | (ft << OP_SH_FT) | (rs << OP_SH_RS)
-                 | (offset & 0xffff));
+        emitInst(0xd4000000 | (ft << OP_SH_FT) | (rs << OP_SH_RS) | (offset & 0xffff));
     }
 
     void swc1(FPRegisterID ft, RegisterID rs, int offset)
     {
-        emitInst(0xe4000000 | (ft << OP_SH_FT) | (rs << OP_SH_RS)
-                 | (offset & 0xffff));
+        emitInst(0xe4000000 | (ft << OP_SH_FT) | (rs << OP_SH_RS) | (offset & 0xffff));
     }
 
     void sdc1(FPRegisterID ft, RegisterID rs, int offset)
     {
-        emitInst(0xf4000000 | (ft << OP_SH_FT) | (rs << OP_SH_RS)
-                 | (offset & 0xffff));
+        emitInst(0xf4000000 | (ft << OP_SH_FT) | (rs << OP_SH_RS) | (offset & 0xffff));
     }
 
     void mtc1(RegisterID rt, FPRegisterID fs)
@@ -548,9 +537,19 @@ public:
         emitInst(0x46800021 | (fd << OP_SH_FD) | (fs << OP_SH_FS));
     }
 
+    void cvtds(FPRegisterID fd, FPRegisterID fs)
+    {
+        emitInst(0x46000021 | (fd << OP_SH_FD) | (fs << OP_SH_FS));
+    }
+
     void cvtwd(FPRegisterID fd, FPRegisterID fs)
     {
         emitInst(0x46200024 | (fd << OP_SH_FD) | (fs << OP_SH_FS));
+    }
+
+    void cvtsd(FPRegisterID fd, FPRegisterID fs)
+    {
+        emitInst(0x46200020 | (fd << OP_SH_FD) | (fs << OP_SH_FS));
     }
 
     void ceqd(FPRegisterID fs, FPRegisterID ft)
@@ -615,6 +614,11 @@ public:
 
     // General helpers
 
+    AssemblerLabel labelIgnoringWatchpoints()
+    {
+        return m_buffer.label();
+    }
+
     AssemblerLabel label()
     {
         return m_buffer.label();
@@ -645,9 +649,9 @@ public:
         return m_buffer.codeSize();
     }
 
-    PassRefPtr<ExecutableMemoryHandle> executableCopy(JSGlobalData& globalData, void* ownerUID)
+    PassRefPtr<ExecutableMemoryHandle> executableCopy(JSGlobalData& globalData, void* ownerUID, JITCompilationEffort effort)
     {
-        RefPtr<ExecutableMemoryHandle> result = m_buffer.executableCopy(globalData, ownerUID);
+        RefPtr<ExecutableMemoryHandle> result = m_buffer.executableCopy(globalData, ownerUID, effort);
         if (!result)
             return 0;
 
@@ -655,9 +659,20 @@ public:
         return result.release();
     }
 
-#ifndef NDEBUG
     unsigned debugOffset() { return m_buffer.debugOffset(); }
-#endif
+
+    // Assembly helpers for moving data between fp and registers.
+    void vmov(RegisterID rd1, RegisterID rd2, FPRegisterID rn)
+    {
+        mfc1(rd1, rn);
+        mfc1(rd2, FPRegisterID(rn + 1));
+    }
+
+    void vmov(FPRegisterID rd, RegisterID rn1, RegisterID rn2)
+    {
+        mtc1(rn1, rd);
+        mtc1(rn2, FPRegisterID(rd + 1));
+    }
 
     static unsigned getCallReturnOffset(AssemblerLabel call)
     {
@@ -668,7 +683,7 @@ public:
     // Linking & patching:
     //
     // 'link' and 'patch' methods are for use on unprotected code - such as the code
-    // within the AssemblerBuffer, and code being patched by the patch buffer.  Once
+    // within the AssemblerBuffer, and code being patched by the patch buffer. Once
     // code has been finalized it is (platform support permitting) within a non-
     // writable region of memory; to modify the code in an execute-only execuable
     // pool the 'repatch' and 'relink' methods should be used.
@@ -719,7 +734,7 @@ public:
         insn = insn - 6;
         int flushSize = linkWithOffset(insn, to);
 
-        ExecutableAllocator::cacheFlush(insn, flushSize);
+        cacheFlush(insn, flushSize);
     }
 
     static void relinkCall(void* from, void* to)
@@ -731,7 +746,7 @@ public:
         else
             start = reinterpret_cast<void*>(reinterpret_cast<intptr_t>(from) - 4 * sizeof(MIPSWord));
 
-        ExecutableAllocator::cacheFlush(start, size);
+        cacheFlush(start, size);
     }
 
     static void repatchInt32(void* from, int32_t to)
@@ -743,7 +758,7 @@ public:
         ASSERT((*insn & 0xfc000000) == 0x34000000); // ori
         *insn = (*insn & 0xffff0000) | (to & 0xffff);
         insn--;
-        ExecutableAllocator::cacheFlush(insn, 2 * sizeof(MIPSWord));
+        cacheFlush(insn, 2 * sizeof(MIPSWord));
     }
 
     static int32_t readInt32(void* from)
@@ -784,6 +799,79 @@ public:
         return reinterpret_cast<void*>(result);
     }
 
+    static void cacheFlush(void* code, size_t size)
+    {
+#if GCC_VERSION_AT_LEAST(4, 3, 0)
+#if WTF_MIPS_ISA_REV(2) && !GCC_VERSION_AT_LEAST(4, 4, 3)
+        int lineSize;
+        asm("rdhwr %0, $1" : "=r" (lineSize));
+        //
+        // Modify "start" and "end" to avoid GCC 4.3.0-4.4.2 bug in
+        // mips_expand_synci_loop that may execute synci one more time.
+        // "start" points to the fisrt byte of the cache line.
+        // "end" points to the last byte of the line before the last cache line.
+        // Because size is always a multiple of 4, this is safe to set
+        // "end" to the last byte.
+        //
+        intptr_t start = reinterpret_cast<intptr_t>(code) & (-lineSize);
+        intptr_t end = ((reinterpret_cast<intptr_t>(code) + size - 1) & (-lineSize)) - 1;
+        __builtin___clear_cache(reinterpret_cast<char*>(start), reinterpret_cast<char*>(end));
+#else
+        intptr_t end = reinterpret_cast<intptr_t>(code) + size;
+        __builtin___clear_cache(reinterpret_cast<char*>(code), reinterpret_cast<char*>(end));
+#endif
+#else
+        _flush_cache(reinterpret_cast<char*>(code), size, BCACHE);
+#endif
+    }
+
+    static void revertJumpToMove(void* instructionStart, RegisterID rt, int imm)
+    {
+        MIPSWord* insn = static_cast<MIPSWord*>(instructionStart) + 1;
+        ASSERT((*insn & 0xfc000000) == 0x34000000);
+        *insn = (*insn & 0xfc1f0000) | (imm & 0xffff);
+        cacheFlush(insn, sizeof(MIPSWord));
+    }
+
+    static void replaceWithJump(void* instructionStart, void* to)
+    {
+        MIPSWord* instruction = reinterpret_cast<MIPSWord*>(instructionStart);
+        intptr_t jumpTo = reinterpret_cast<intptr_t>(to);
+
+        // lui
+        instruction[0] = 0x3c000000 | (MIPSRegisters::t9 << OP_SH_RT) | ((jumpTo >> 16) & 0xffff);
+        // ori
+        instruction[1] = 0x34000000 | (MIPSRegisters::t9 << OP_SH_RT) | (MIPSRegisters::t9 << OP_SH_RS) | (jumpTo & 0xffff);
+        // jr
+        instruction[2] = 0x00000008 | (MIPSRegisters::t9 << OP_SH_RS);
+        // nop
+        instruction[3] = 0x0;
+
+        cacheFlush(instruction, sizeof(MIPSWord) * 4);
+    }
+
+    static void replaceWithLoad(void* instructionStart)
+    {
+        MIPSWord* insn = reinterpret_cast<MIPSWord*>(instructionStart);
+        ASSERT((*insn & 0xffe00000) == 0x3c000000); // lui
+        insn++;
+        ASSERT((*insn & 0xfc0007ff) == 0x00000021); // addu
+        insn++;
+        *insn = 0x8c000000 | ((*insn) & 0x3ffffff); // lw
+        cacheFlush(insn, 4);
+    }
+
+    static void replaceWithAddressComputation(void* instructionStart)
+    {
+        MIPSWord* insn = reinterpret_cast<MIPSWord*>(instructionStart);
+        ASSERT((*insn & 0xffe00000) == 0x3c000000); // lui
+        insn++;
+        ASSERT((*insn & 0xfc0007ff) == 0x00000021); // addu
+        insn++;
+        *insn = 0x24000000 | ((*insn) & 0x3ffffff); // addiu
+        cacheFlush(insn, 4);
+    }
+
 private:
     /* Update each jump in the buffer of newBase.  */
     void relocateJumps(void* oldBase, void* newBase)
@@ -794,7 +882,7 @@ private:
             MIPSWord* insn = reinterpret_cast<MIPSWord*>(reinterpret_cast<intptr_t>(newBase) + pos);
             insn = insn + 2;
             // Need to make sure we have 5 valid instructions after pos
-            if ((unsigned int)pos >= m_buffer.codeSize() - 5 * sizeof(MIPSWord))
+            if ((unsigned)pos >= m_buffer.codeSize() - 5 * sizeof(MIPSWord))
                 continue;
 
             if ((*insn & 0xfc000000) == 0x08000000) { // j
@@ -830,11 +918,10 @@ private:
     static int linkWithOffset(MIPSWord* insn, void* to)
     {
         ASSERT((*insn & 0xfc000000) == 0x10000000 // beq
-               || (*insn & 0xfc000000) == 0x14000000 // bne
-               || (*insn & 0xffff0000) == 0x45010000 // bc1t
-               || (*insn & 0xffff0000) == 0x45000000); // bc1f
-        intptr_t diff = (reinterpret_cast<intptr_t>(to)
-                         - reinterpret_cast<intptr_t>(insn) - 4) >> 2;
+            || (*insn & 0xfc000000) == 0x14000000 // bne
+            || (*insn & 0xffff0000) == 0x45010000 // bc1t
+            || (*insn & 0xffff0000) == 0x45000000); // bc1f
+        intptr_t diff = (reinterpret_cast<intptr_t>(to) - reinterpret_cast<intptr_t>(insn) - 4) >> 2;
 
         if (diff < -32768 || diff > 32767 || *(insn + 2) != 0x10000003) {
             /*

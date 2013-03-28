@@ -10,6 +10,8 @@ CONFIG += ordered
 WEBKIT_TESTS_DIR = $$PWD/WebKit/qt/tests
 
 SUBDIRS += \
+    $$WEBKIT_TESTS_DIR/cmake \
+    $$WEBKIT_TESTS_DIR/qobjectbridge \
     $$WEBKIT_TESTS_DIR/qwebframe \
     $$WEBKIT_TESTS_DIR/qwebpage \
     $$WEBKIT_TESTS_DIR/qwebelement \
@@ -26,24 +28,27 @@ linux-* {
     SUBDIRS += $$WEBKIT_TESTS_DIR/MIMESniffing
 }
 
-contains(QT_CONFIG, declarative)|contains(QT_CONFIG, qtquick1) {
-    SUBDIRS += $$WEBKIT_TESTS_DIR/qdeclarativewebview
-}
-
 # Benchmarks
 SUBDIRS += \
     $$WEBKIT_TESTS_DIR/benchmarks/painting \
     $$WEBKIT_TESTS_DIR/benchmarks/loading
 
-contains(DEFINES, ENABLE_WEBGL=1) {
-    SUBDIRS += $$WEBKIT_TESTS_DIR/benchmarks/webgl
-}
+# WebGL performance tests are disabled temporarily.
+# https://bugs.webkit.org/show_bug.cgi?id=80503
+#
+#enable?(WEBGL) {
+#    SUBDIRS += $$WEBKIT_TESTS_DIR/benchmarks/webgl
+#}
 
-!no_webkit2 {
+build?(webkit2): {
     WEBKIT2_TESTS_DIR = $$PWD/WebKit2/UIProcess/API/qt/tests
 
-    SUBDIRS += \
+    have?(QTQUICK):SUBDIRS += \
+        $$WEBKIT2_TESTS_DIR/inspectorserver \
         $$WEBKIT2_TESTS_DIR/publicapi \
         $$WEBKIT2_TESTS_DIR/qquickwebview \
         $$WEBKIT2_TESTS_DIR/qmltests
+
+    SUBDIRS += \
+        $$WEBKIT2_TESTS_DIR/qrawwebview
 }

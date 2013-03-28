@@ -35,20 +35,28 @@
 
 namespace WebKit {
 
+class WebStorageArea;
+class WebStorageNamespace;
 class WebURL;
 
-// This is used to dispatch storage events to all pages.
-// FIXME: Make this (or something) work for SessionStorage!
 class WebStorageEventDispatcher {
 public:
-    WEBKIT_EXPORT static WebStorageEventDispatcher* create();
+    // Dispatch a local storage event to appropiate documents.
+    WEBKIT_EXPORT static void dispatchLocalStorageEvent(
+            const WebString& key, const WebString& oldValue,
+            const WebString& newValue, const WebURL& origin,
+            const WebURL& pageUrl, WebStorageArea* sourceAreaInstance,
+            bool originatedInProcess);
 
-    virtual ~WebStorageEventDispatcher() { }
+    // Dispatch a session storage event to appropiate documents.
+    WEBKIT_EXPORT static void dispatchSessionStorageEvent(
+            const WebString& key, const WebString& oldValue,
+            const WebString& newValue, const WebURL& origin,
+            const WebURL& pageUrl, const WebStorageNamespace&,
+            WebStorageArea* sourceAreaInstance, bool originatedInProcess);
 
-    // Dispatch the actual event.  Doesn't yet work for SessionStorage.
-    virtual void dispatchStorageEvent(const WebString& key, const WebString& oldValue,
-                                      const WebString& newValue, const WebString& origin,
-                                      const WebURL& url, bool isLocalStorage) = 0;
+ private:
+    WebStorageEventDispatcher() { }
 };
 
 } // namespace WebKit

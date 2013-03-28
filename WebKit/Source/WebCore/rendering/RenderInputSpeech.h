@@ -31,15 +31,21 @@
 #ifndef RenderInputSpeech_h
 #define RenderInputSpeech_h
 
-#include "RenderObject.h"
-
 #if ENABLE(INPUT_SPEECH)
 
 namespace WebCore {
 
+struct PaintInfo;
+
+class Element;
+class IntRect;
+class RenderObject;
+class RenderStyle;
+class StyleResolver;
+
 class RenderInputSpeech {
 public:
-    static void adjustInputFieldSpeechButtonStyle(CSSStyleSelector*, RenderStyle*, Element*);
+    static void adjustInputFieldSpeechButtonStyle(StyleResolver*, RenderStyle*, Element*);
     static bool paintInputFieldSpeechButton(RenderObject*, const PaintInfo&, const IntRect&);
 };
 

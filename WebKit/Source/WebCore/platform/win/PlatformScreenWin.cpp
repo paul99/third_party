@@ -66,18 +66,6 @@ static DEVMODE deviceInfoForWidget(Widget* widget)
     return deviceInfo;
 }
 
-int screenHorizontalDPI(Widget* widget)
-{
-    notImplemented();
-    return 0;
-}
-
-int screenVerticalDPI(Widget* widget)
-{
-    notImplemented();
-    return 0;
-}
-
 int screenDepth(Widget* widget)
 {
     DEVMODE deviceInfo = deviceInfoForWidget(widget);
@@ -106,16 +94,21 @@ bool screenIsMonochrome(Widget* widget)
 #endif
 }
 
-FloatRect screenRect(FrameView* frameView)
+FloatRect screenRect(Widget* widget)
 {
-    MONITORINFOEX monitorInfo = monitorInfoForWidget(frameView);
+    MONITORINFOEX monitorInfo = monitorInfoForWidget(widget);
     return monitorInfo.rcMonitor;
 }
 
-FloatRect screenAvailableRect(FrameView* frameView)
+FloatRect screenAvailableRect(Widget* widget)
 {
-    MONITORINFOEX monitorInfo = monitorInfoForWidget(frameView);
+    MONITORINFOEX monitorInfo = monitorInfoForWidget(widget);
     return monitorInfo.rcWork;
+}
+
+void screenColorProfile(ColorProfile&)
+{
+    notImplemented();
 }
 
 } // namespace WebCore

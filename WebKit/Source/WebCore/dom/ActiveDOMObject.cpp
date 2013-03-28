@@ -28,38 +28,18 @@
 #include "ActiveDOMObject.h"
 
 #include "ScriptExecutionContext.h"
+#include "WebCoreMemoryInstrumentation.h"
 #include "WorkerContext.h"
 #include "WorkerThread.h"
 
 namespace WebCore {
 
-ContextDestructionObserver::ContextDestructionObserver(ScriptExecutionContext* scriptExecutionContext)
-    : m_scriptExecutionContext(scriptExecutionContext)
-{
-    if (!m_scriptExecutionContext)
-        return;
-
-    ASSERT(m_scriptExecutionContext->isContextThread());
-    m_scriptExecutionContext->didCreateDestructionObserver(this);
-}
-
-ContextDestructionObserver::~ContextDestructionObserver()
-{
-    if (!m_scriptExecutionContext)
-        return;
-
-    ASSERT(m_scriptExecutionContext->isContextThread());
-    m_scriptExecutionContext->willDestroyDestructionObserver(this);
-}
-
-void ContextDestructionObserver::contextDestroyed()
-{
-    m_scriptExecutionContext = 0;
-}
-
 ActiveDOMObject::ActiveDOMObject(ScriptExecutionContext* scriptExecutionContext, void* upcastPointer)
     : ContextDestructionObserver(scriptExecutionContext)
     , m_pendingActivityCount(0)
+#if !ASSERT_DISABLED
+    , m_suspendIfNeededCalled(false)
+#endif
 {
     if (!m_scriptExecutionContext)
         return;
@@ -73,8 +53,21 @@ ActiveDOMObject::~ActiveDOMObject()
     if (!m_scriptExecutionContext)
         return;
 
+    ASSERT(m_suspendIfNeededCalled);
     ASSERT(m_scriptExecutionContext->isContextThread());
     m_scriptExecutionContext->willDestroyActiveDOMObject(this);
+}
+
+void ActiveDOMObject::suspendIfNeeded()
+{
+#if !ASSERT_DISABLED
+    ASSERT(!m_suspendIfNeededCalled);
+    m_suspendIfNeededCalled = true;
+#endif
+    if (!m_scriptExecutionContext)
+        return;
+
+    m_scriptExecutionContext->suspendActiveDOMObjectIfNeeded(this);
 }
 
 bool ActiveDOMObject::hasPendingActivity() const
@@ -98,5 +91,11 @@ void ActiveDOMObject::resume()
 void ActiveDOMObject::stop()
 {
 }
+
+void ActiveDOMObject::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::DOM);
+}
+
 
 } // namespace WebCore

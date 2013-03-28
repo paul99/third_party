@@ -34,7 +34,7 @@ class JSDOMWrapper;
 class ScriptController;
 
 typedef HashMap<void*, JSC::Weak<JSDOMWrapper> > DOMObjectWrapperMap;
-typedef HashMap<StringImpl*, JSC::Weak<JSC::JSString> > JSStringCache;
+typedef HashMap<StringImpl*, JSC::Weak<JSC::JSString>, PtrHash<StringImpl*> > JSStringCache;
 
 class JSStringOwner : public JSC::WeakHandleOwner {
 public:
@@ -91,7 +91,7 @@ inline DOMWrapperWorld* pluginWorld() { return mainThreadNormalWorld(); }
 
 inline DOMWrapperWorld* currentWorld(JSC::ExecState* exec)
 {
-    return static_cast<JSDOMGlobalObject*>(exec->lexicalGlobalObject())->world();
+    return JSC::jsCast<JSDOMGlobalObject*>(exec->lexicalGlobalObject())->world();
 }
 
 } // namespace WebCore

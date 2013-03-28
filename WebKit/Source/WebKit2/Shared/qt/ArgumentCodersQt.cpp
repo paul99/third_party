@@ -33,15 +33,15 @@ namespace CoreIPC {
 
 typedef HashMap<String , Vector<uint8_t> > MIMEDataHashMap;
 
-void ArgumentCoder<WebCore::DragData>::encode(ArgumentEncoder* encoder, const DragData& dragData)
+void ArgumentCoder<WebCore::DragData>::encode(ArgumentEncoder& encoder, const DragData& dragData)
 {
-    encoder->encode(dragData.clientPosition());
-    encoder->encode(dragData.globalPosition());
-    encoder->encode((uint64_t)dragData.draggingSourceOperationMask());
-    encoder->encode((uint64_t)dragData.flags());
+    encoder << dragData.clientPosition();
+    encoder << dragData.globalPosition();
+    encoder << (uint64_t)dragData.draggingSourceOperationMask();
+    encoder << (uint64_t)dragData.flags();
 
     bool hasPlatformData = dragData.platformData();
-    encoder->encodeBool(hasPlatformData);
+    encoder << hasPlatformData;
     if (!hasPlatformData)
         return;
 
@@ -54,7 +54,7 @@ void ArgumentCoder<WebCore::DragData>::encode(ArgumentEncoder* encoder, const Dr
         vdata.append((uint8_t*)(bytes.data()), bytes.size());
         map.add(String(formats[i]), vdata);
     }
-    encoder->encode(map);
+    encoder << map;
 }
 
 bool ArgumentCoder<WebCore::DragData>::decode(ArgumentDecoder* decoder, DragData& dragData)
@@ -86,8 +86,8 @@ bool ArgumentCoder<WebCore::DragData>::decode(ArgumentDecoder* decoder, DragData
         MIMEDataHashMap::iterator it = map.begin();
         MIMEDataHashMap::iterator end = map.end();
         for (; it != end; ++it) {
-            QByteArray bytes((char*)it->second.data(), it->second.size());
-            mimeData->setData(it->first, bytes);
+            QByteArray bytes((char*)it->value.data(), it->value.size());
+            mimeData->setData(it->key, bytes);
         }
     }
 

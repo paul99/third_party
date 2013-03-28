@@ -31,11 +31,16 @@
 #include "config.h"
 #include "Font.h"
 
+#if USE(HARFBUZZ_NG)
+#include "HarfBuzzShaper.h"
+#else
 #include "ComplexTextControllerHarfBuzz.h"
+#include "HarfBuzzSkia.h"
+#endif
+
 #include "FloatRect.h"
 #include "GlyphBuffer.h"
 #include "GraphicsContext.h"
-#include "HarfBuzzSkia.h"
 #include "NotImplemented.h"
 #include "PlatformContextSkia.h"
 #include "SimpleFontData.h"
@@ -58,23 +63,6 @@ bool Font::canReturnFallbackFontsForComplexText()
 bool Font::canExpandAroundIdeographsInComplexText()
 {
     return false;
-}
-
-static bool isCanvasMultiLayered(SkCanvas* canvas)
-{
-    SkCanvas::LayerIter layerIterator(canvas, false);
-    layerIterator.next();
-    return !layerIterator.done();
-}
-
-static void adjustTextRenderMode(SkPaint* paint, PlatformContextSkia* skiaContext)
-{
-    // Our layers only have a single alpha channel. This means that subpixel
-    // rendered text cannot be compositied correctly when the layer is
-    // collapsed. Therefore, subpixel text is disabled when we are drawing
-    // onto a layer or when the compositor is being used.
-    if (isCanvasMultiLayered(skiaContext->canvas()) || skiaContext->isDrawingToImageBuffer())
-        paint->setLCDRenderText(false);
 }
 
 void Font::drawGlyphs(GraphicsContext* gc, const SimpleFontData* font,
@@ -110,7 +98,7 @@ void Font::drawGlyphs(GraphicsContext* gc, const SimpleFontData* font,
         y += SkFloatToScalar(adv[i].height());
     }
 
-    SkCanvas* canvas = gc->platformContext()->canvas();
+    PlatformContextSkia* platformContext = gc->platformContext();
     TextDrawingModeFlags textMode = gc->platformContext()->getTextDrawingMode();
 
     // We draw text up to two times (once for fill, once for stroke).
@@ -118,7 +106,7 @@ void Font::drawGlyphs(GraphicsContext* gc, const SimpleFontData* font,
         SkPaint paint;
         gc->platformContext()->setupPaintForFilling(&paint);
         font->platformData().setupPaint(&paint);
-        adjustTextRenderMode(&paint, gc->platformContext());
+        gc->platformContext()->adjustTextRenderMode(&paint);
         paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
 
         if (isVertical) {
@@ -127,10 +115,10 @@ void Font::drawGlyphs(GraphicsContext* gc, const SimpleFontData* font,
                 path.reset();
                 path.moveTo(vPosBegin[i]);
                 path.lineTo(vPosEnd[i]);
-                canvas->drawTextOnPath(glyphs + i, 2, path, 0, paint);
+                platformContext->drawTextOnPath(glyphs + i, 2, path, 0, paint);
             }
         } else
-            canvas->drawPosText(glyphs, numGlyphs << 1, pos, paint);
+            platformContext->drawPosText(glyphs, numGlyphs << 1, pos, paint);
     }
 
     if ((textMode & TextModeStroke)
@@ -140,7 +128,7 @@ void Font::drawGlyphs(GraphicsContext* gc, const SimpleFontData* font,
         SkPaint paint;
         gc->platformContext()->setupPaintForStroking(&paint, 0, 0);
         font->platformData().setupPaint(&paint);
-        adjustTextRenderMode(&paint, gc->platformContext());
+        gc->platformContext()->adjustTextRenderMode(&paint);
         paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
 
         if (textMode & TextModeFill) {
@@ -156,10 +144,10 @@ void Font::drawGlyphs(GraphicsContext* gc, const SimpleFontData* font,
                 path.reset();
                 path.moveTo(vPosBegin[i]);
                 path.lineTo(vPosEnd[i]);
-                canvas->drawTextOnPath(glyphs + i, 2, path, 0, paint);
+                platformContext->drawTextOnPath(glyphs + i, 2, path, 0, paint);
             }
         } else
-            canvas->drawPosText(glyphs, numGlyphs << 1, pos, paint);
+            platformContext->drawPosText(glyphs, numGlyphs << 1, pos, paint);
     }
 }
 
@@ -175,7 +163,6 @@ void Font::drawComplexText(GraphicsContext* gc, const TextRun& run,
     if (!run.length())
         return;
 
-    SkCanvas* canvas = gc->platformContext()->canvas();
     TextDrawingModeFlags textMode = gc->platformContext()->getTextDrawingMode();
     bool fill = textMode & TextModeFill;
     bool stroke = (textMode & TextModeStroke)
@@ -195,8 +182,17 @@ void Font::drawComplexText(GraphicsContext* gc, const TextRun& run,
         setupForTextPainting(&strokePaint, gc->strokeColor().rgb());
     }
 
-    ComplexTextController controller(run, point.x(), point.y(), wordSpacing(), letterSpacing(), run.expansion(), this);
-
+#if USE(HARFBUZZ_NG)
+    GlyphBuffer glyphBuffer;
+    HarfBuzzShaper shaper(this, run);
+    shaper.setDrawRange(from, to);
+    if (!shaper.shape(&glyphBuffer))
+        return;
+    FloatPoint adjustedPoint = shaper.adjustStartPoint(point);
+    drawGlyphBuffer(gc, run, glyphBuffer, adjustedPoint);
+#else
+    PlatformContextSkia* platformContext = gc->platformContext();
+    ComplexTextController controller(this, run, point.x(), point.y());
     if (run.rtl())
         controller.setupForRTL();
 
@@ -209,16 +205,17 @@ void Font::drawComplexText(GraphicsContext* gc, const TextRun& run,
 
         if (fill) {
             controller.fontPlatformDataForScriptRun()->setupPaint(&fillPaint);
-            adjustTextRenderMode(&fillPaint, gc->platformContext());
-            canvas->drawPosText(controller.glyphs() + fromGlyph, glyphLength << 1, controller.positions() + fromGlyph, fillPaint);
+            gc->platformContext()->adjustTextRenderMode(&fillPaint);
+            platformContext->drawPosText(controller.glyphs() + fromGlyph, glyphLength << 1, controller.positions() + fromGlyph, fillPaint);
         }
 
         if (stroke) {
             controller.fontPlatformDataForScriptRun()->setupPaint(&strokePaint);
-            adjustTextRenderMode(&strokePaint, gc->platformContext());
-            canvas->drawPosText(controller.glyphs() + fromGlyph, glyphLength << 1, controller.positions() + fromGlyph, strokePaint);
+            gc->platformContext()->adjustTextRenderMode(&strokePaint);
+            platformContext->drawPosText(controller.glyphs() + fromGlyph, glyphLength << 1, controller.positions() + fromGlyph, strokePaint);
         }
     }
+#endif
 }
 
 void Font::drawEmphasisMarksForComplexText(GraphicsContext* /* context */, const TextRun& /* run */, const AtomicString& /* mark */, const FloatPoint& /* point */, int /* from */, int /* to */) const
@@ -228,8 +225,15 @@ void Font::drawEmphasisMarksForComplexText(GraphicsContext* /* context */, const
 
 float Font::floatWidthForComplexText(const TextRun& run, HashSet<const SimpleFontData*>* /* fallbackFonts */, GlyphOverflow* /* glyphOverflow */) const
 {
-    ComplexTextController controller(run, 0, 0, wordSpacing(), letterSpacing(), run.expansion(), this);
+#if USE(HARFBUZZ_NG)
+    HarfBuzzShaper shaper(this, run);
+    if (!shaper.shape())
+        return 0;
+    return shaper.totalWidth();
+#else
+    ComplexTextController controller(this, run, 0, 0);
     return controller.widthOfFullRun();
+#endif
 }
 
 // Return the code point index for the given |x| offset into the text run.
@@ -240,12 +244,19 @@ int Font::offsetForPositionForComplexText(const TextRun& run, float xFloat,
     // to Font::offsetForPosition(). Bug http://webkit.org/b/40673 tracks fixing this problem.
     int targetX = static_cast<int>(xFloat);
 
+#if USE(HARFBUZZ_NG)
+    HarfBuzzShaper shaper(this, run);
+    if (!shaper.shape())
+        return 0;
+    return shaper.offsetForPosition(targetX);
+#else
     // (Mac code ignores includePartialGlyphs, and they don't know what it's
     // supposed to do, so we just ignore it as well.)
-    ComplexTextController controller(run, 0, 0, wordSpacing(), letterSpacing(), run.expansion(), this);
+    ComplexTextController controller(this, run, 0, 0);
     if (run.rtl())
         controller.setupForRTL();
     return controller.offsetForPosition(targetX);
+#endif
 }
 
 // Return the rectangle for selecting the given range of code-points in the TextRun.
@@ -253,10 +264,17 @@ FloatRect Font::selectionRectForComplexText(const TextRun& run,
                                             const FloatPoint& point, int height,
                                             int from, int to) const
 {
-    ComplexTextController controller(run, 0, 0, wordSpacing(), letterSpacing(), run.expansion(), this);
+#if USE(HARFBUZZ_NG)
+    HarfBuzzShaper shaper(this, run);
+    if (!shaper.shape())
+        return FloatRect();
+    return shaper.selectionRect(point, height, from, to);
+#else
+    ComplexTextController controller(this, run, 0, 0);
     if (run.rtl())
         controller.setupForRTL();
     return controller.selectionRect(point, height, from, to);
+#endif
 }
 
 } // namespace WebCore

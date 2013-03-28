@@ -40,9 +40,9 @@ public:
 private:
     SVGFontFaceUriElement(const QualifiedName&, Document*);
     
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
     virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
-    virtual void insertedIntoDocument();
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
 
     void loadFont();
 

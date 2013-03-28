@@ -42,53 +42,12 @@
 
 namespace WebCore {
 
-const int secondsPerHour = 3600;
-const int secondsPerMinute = 60;
+const double secondsPerHour = 3600;
+const double secondsPerMinute = 60;
+const double secondsPerMillisecond = 0.001;
 const double malformedTime = -1;
 const unsigned bomLength = 3;
-const unsigned fileIdentiferLength = 6;
-    
-unsigned WebVTTParser::fileIdentifierMaximumLength()
-{
-    return bomLength + fileIdentiferLength;
-}
-
-inline bool hasLongWebVTTIdentifier(String line)
-{
-    // If line is more than six characters ...
-    if (line.length() < fileIdentiferLength)
-        return false;
-
-    // but the first six characters do not exactly equal "WEBVTT" ...
-    if (line.substring(0, fileIdentiferLength) != "WEBVTT")
-        return false;
-
-    // or the seventh character is neither a space nor a tab character, then abort.
-    if (line.length() > fileIdentiferLength && line[fileIdentiferLength] != ' ' && line[fileIdentiferLength] != '\t')
-        return false;
-
-    return true;
-}
-
-bool WebVTTParser::hasRequiredFileIdentifier(const char* data, unsigned length)
-{
-    // A WebVTT file identifier consists of an optional BOM character,
-    // the string "WEBVTT" followed by an optional space or tab character,
-    // and any number of characters that are not line terminators ...
-    unsigned position = 0;
-    if (length >= bomLength && data[0] == '\xEF' && data[1] == '\xBB' && data[2] == '\xBF')
-        position += bomLength;
-    String line = collectNextLine(data, length, &position);
-
-    if (line.length() < fileIdentiferLength)
-        return false;
-    if (line.length() == fileIdentiferLength && line != "WEBVTT")
-        return false;
-    if (!hasLongWebVTTIdentifier(line))
-        return false;
-
-    return true;
-}
+const unsigned fileIdentifierLength = 6;
 
 String WebVTTParser::collectDigits(const String& input, unsigned* position)
 {
@@ -133,10 +92,20 @@ void WebVTTParser::parseBytes(const char* data, unsigned length)
         
         switch (m_state) {
         case Initial:
-            // 4-12 - Collect the first line and check for "WEBVTT".
-            if (!hasRequiredFileIdentifier(data, length))
+            // Buffer up at least 9 bytes before proceeding with checking for the file identifier.
+            m_identifierData.append(data, length);
+            if (m_identifierData.size() < bomLength + fileIdentifierLength)
                 return;
+
+            // 4-12 - Collect the first line and check for "WEBVTT".
+            if (!hasRequiredFileIdentifier()) {
+                if (m_client)
+                    m_client->fileFailedToParse();
+                return;
+            }
+
             m_state = Header;
+            m_identifierData.clear();
             break;
         
         case Header:
@@ -171,6 +140,26 @@ void WebVTTParser::parseBytes(const char* data, unsigned length)
             break;
         }
     }
+}
+
+bool WebVTTParser::hasRequiredFileIdentifier()
+{
+    // A WebVTT file identifier consists of an optional BOM character,
+    // the string "WEBVTT" followed by an optional space or tab character,
+    // and any number of characters that are not line terminators ...
+    unsigned position = 0;
+    if (m_identifierData.size() >= bomLength && m_identifierData[0] == '\xEF' && m_identifierData[1] == '\xBB' && m_identifierData[2] == '\xBF')
+        position += bomLength;
+    String line = collectNextLine(m_identifierData.data(), m_identifierData.size(), &position);
+
+    if (line.length() < fileIdentifierLength)
+        return false;
+    if (line.substring(0, fileIdentifierLength) != "WEBVTT")
+        return false;
+    if (line.length() > fileIdentifierLength && line[fileIdentifierLength] != ' ' && line[fileIdentifierLength] != '\t')
+        return false;
+
+    return true;
 }
 
 WebVTTParser::ParseState WebVTTParser::collectCueId(const String& line)
@@ -273,10 +262,10 @@ void WebVTTParser::createNewCue()
     if (!m_currentContent.length())
         return;
 
-    RefPtr<DocumentFragment> attachmentRoot = createDocumentFragmentFromCueText(m_currentContent.toString());
-    
-    RefPtr<TextTrackCue> cue = TextTrackCue::create(m_scriptExecutionContext, m_currentId, m_currentStartTime, m_currentEndTime, m_currentContent.toString(), m_currentSettings, false);
-    cue->setCueHTML(attachmentRoot);
+    RefPtr<TextTrackCue> cue = TextTrackCue::create(m_scriptExecutionContext, m_currentStartTime, m_currentEndTime, m_currentContent.toString());
+    cue->setId(m_currentId);
+    cue->setCueSettings(m_currentSettings);
+
     m_cuelist.append(cue);
     if (m_client)
         m_client->newCuesParsed();
@@ -348,7 +337,7 @@ double WebVTTParser::collectTimeStamp(const String& line, unsigned* position)
         return malformedTime;
 
     // 20-21 - Calculate result.
-    return (value1 * secondsPerHour) + (value2 * secondsPerMinute) + value3 + ((double)value4 / 1000);
+    return (value1 * secondsPerHour) + (value2 * secondsPerMinute) + value3 + (value4 * secondsPerMillisecond);
 }
 
 void WebVTTParser::constructTreeFromToken(Document* document)
@@ -362,7 +351,7 @@ void WebVTTParser::constructTreeFromToken(Document* document)
     case WebVTTTokenTypes::Character: {
         String content(m_token.characters().data(), m_token.characters().size());
         RefPtr<Text> child = Text::create(document, content);
-        m_currentNode->parserAddChild(child);
+        m_currentNode->parserAppendChild(child);
         break;
     }
     case WebVTTTokenTypes::StartTag: {
@@ -379,7 +368,7 @@ void WebVTTParser::constructTreeFromToken(Document* document)
                 child->setAttribute(classAttr, AtomicString(m_token.classes().data(), m_token.classes().size()));
             if (child->hasTagName(qTag))
                 child->setAttribute(titleAttr, AtomicString(m_token.annotation().data(), m_token.annotation().size()));
-            m_currentNode->parserAddChild(child);
+            m_currentNode->parserAppendChild(child);
             m_currentNode = child;
         }
         break;
@@ -396,7 +385,7 @@ void WebVTTParser::constructTreeFromToken(Document* document)
         unsigned position = 0;
         double time = collectTimeStamp(m_token.characters().data(), &position);
         if (time != malformedTime)
-            m_currentNode->parserAddChild(ProcessingInstruction::create(document, "timestamp", String(m_token.characters().data(), m_token.characters().size())));
+            m_currentNode->parserAppendChild(ProcessingInstruction::create(document, "timestamp", String(m_token.characters().data(), m_token.characters().size())));
         break;
     }
     default:

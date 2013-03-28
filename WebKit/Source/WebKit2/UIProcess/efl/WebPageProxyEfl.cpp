@@ -26,8 +26,13 @@
 #include "config.h"
 #include "WebPageProxy.h"
 
+#include "EwkViewImpl.h"
+#include "NativeWebKeyboardEvent.h"
 #include "NotImplemented.h"
-#include "PageClientImpl.h"
+#include "PageClientBase.h"
+#include "WebKitVersion.h"
+#include "WebPageMessages.h"
+#include "WebProcessProxy.h"
 
 #include <sys/utsname.h>
 
@@ -35,10 +40,10 @@ namespace WebKit {
 
 Evas_Object* WebPageProxy::viewWidget()
 {
-    return static_cast<PageClientImpl*>(m_pageClient)->viewWidget();
+    return static_cast<PageClientBase*>(m_pageClient)->viewImpl()->view();
 }
 
-String WebPageProxy::standardUserAgent(const String& applicationNameForUserAgent)
+String WebPageProxy::standardUserAgent(const String& /*applicationNameForUserAgent*/)
 {
     WTF::String platform;
     WTF::String version;
@@ -49,19 +54,18 @@ String WebPageProxy::standardUserAgent(const String& applicationNameForUserAgent
 #else
     platform = "Unknown";
 #endif
-    version = makeString(String::number(WEBKIT_USER_AGENT_MAJOR_VERSION), '.',
-                         String::number(WEBKIT_USER_AGENT_MINOR_VERSION), '+');
+    version = String::number(WEBKIT_MAJOR_VERSION) + '.' + String::number(WEBKIT_MINOR_VERSION) + '+';
     struct utsname name;
     if (uname(&name) != -1)
         osVersion = WTF::String(name.sysname) + " " + WTF::String(name.machine);
     else
         osVersion = "Unknown";
 
-    return makeString("Mozilla/5.0 (", platform, "; ", osVersion, ") AppleWebKit/", version)
-           + makeString(" (KHTML, like Gecko) Version/5.0 Safari/", version);
+    return "Mozilla/5.0 (" + platform + "; " + osVersion + ") AppleWebKit/" + version
+        + " (KHTML, like Gecko) Version/5.0 Safari/" + version;
 }
 
-void WebPageProxy::getEditorCommandsForKeyEvent(Vector<WTF::String>& commandsList)
+void WebPageProxy::getEditorCommandsForKeyEvent(Vector<WTF::String>& /*commandsList*/)
 {
     notImplemented();
 }
@@ -74,6 +78,50 @@ void WebPageProxy::saveRecentSearches(const String&, const Vector<String>&)
 void WebPageProxy::loadRecentSearches(const String&, Vector<String>&)
 {
     notImplemented();
+}
+
+void WebPageProxy::setThemePath(const String& themePath)
+{
+    process()->send(Messages::WebPage::SetThemePath(themePath), m_pageID, 0);
+}
+
+void WebPageProxy::createPluginContainer(uint64_t&)
+{
+    notImplemented();
+}
+
+void WebPageProxy::windowedPluginGeometryDidChange(const WebCore::IntRect&, const WebCore::IntRect&, uint64_t)
+{
+    notImplemented();
+}
+
+void WebPageProxy::handleInputMethodKeydown(bool& handled)
+{
+    handled = m_keyEventQueue.first().isFiltered();
+}
+
+void WebPageProxy::confirmComposition(const String& compositionString)
+{
+    if (!isValid())
+        return;
+
+    process()->send(Messages::WebPage::ConfirmComposition(compositionString), m_pageID, 0);
+}
+
+void WebPageProxy::setComposition(const String& compositionString, Vector<WebCore::CompositionUnderline>& underlines, int cursorPosition)
+{
+    if (!isValid())
+        return;
+
+    process()->send(Messages::WebPage::SetComposition(compositionString, underlines, cursorPosition), m_pageID, 0);
+}
+
+void WebPageProxy::cancelComposition()
+{
+    if (!isValid())
+        return;
+
+    process()->send(Messages::WebPage::CancelComposition(), m_pageID, 0);
 }
 
 } // namespace WebKit

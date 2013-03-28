@@ -39,19 +39,15 @@ for %%d in (
     assembler
     bytecode
     dfg
+    disassembler
     heap
     debugger
     interpreter
     jit
+    llint
     parser
     profiler
     runtime
-    wtf
-    wtf\dtoa
-    wtf\text
-    wtf\threads
-    wtf\unicode
-    wtf\unicode\icu
     yarr
 ) do (
     xcopy /y /d ..\..\%%d\*.h "%PrivateHeadersDirectory%" >NUL
@@ -60,17 +56,6 @@ for %%d in (
 echo Copying resources...
 mkdir "%ResourcesDirectory%" 2>NUL
 xcopy /y /d ..\JavaScriptCore.resources\* "%ResourcesDirectory%" >NUL
-
-echo Copying other files...
-for %%f in (
-    create_hash_table
-    wtf\text\AtomicString.cpp
-    wtf\text\StringBuilder.cpp
-    wtf\text\StringImpl.cpp
-    wtf\text\WTFString.cpp
-) do (
-    xcopy /y /d ..\..\%%f "%PrivateHeadersDirectory%" >NUL
-)
 
 goto :EOF
 

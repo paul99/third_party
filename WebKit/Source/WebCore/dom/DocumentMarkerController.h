@@ -28,12 +28,14 @@
 #define DocumentMarkerController_h
 
 #include "DocumentMarker.h"
-#include "LayoutTypes.h"
+#include "IntRect.h"
 #include <wtf/HashMap.h>
 #include <wtf/Vector.h>
 
 namespace WebCore {
 
+class LayoutPoint;
+class LayoutRect;
 class Node;
 class Range;
 class RenderedDocumentMarker;
@@ -48,7 +50,9 @@ public:
     void detach();
     void addMarker(Range*, DocumentMarker::MarkerType);
     void addMarker(Range*, DocumentMarker::MarkerType, const String& description);
-    void addTextMatchMarker(Range*, bool activeMatch);
+    void addMarkerToNode(Node*, unsigned startOffset, unsigned length, DocumentMarker::MarkerType);
+    void addMarkerToNode(Node*, unsigned startOffset, unsigned length, DocumentMarker::MarkerType, PassRefPtr<DocumentMarkerDetails>);
+    void addTextMatchMarker(const Range*, bool activeMatch);
 
     void copyMarkers(Node* srcNode, unsigned startOffset, int length, Node* dstNode, int delta);
     bool hasMarkers(Range*, DocumentMarker::MarkerTypes = DocumentMarker::AllMarkers());
@@ -72,7 +76,7 @@ public:
     Vector<DocumentMarker*> markersFor(Node*, DocumentMarker::MarkerTypes = DocumentMarker::AllMarkers());
     Vector<DocumentMarker*> markersInRange(Range*, DocumentMarker::MarkerTypes);
     Vector<DocumentMarker> markersForNode(Node*);
-    Vector<LayoutRect> renderedRectsForMarkers(DocumentMarker::MarkerType);
+    Vector<IntRect> renderedRectsForMarkers(DocumentMarker::MarkerType);
     void clearDescriptionOnMarkersIntersectingRange(Range*, DocumentMarker::MarkerTypes);
 
 #ifndef NDEBUG

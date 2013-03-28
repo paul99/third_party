@@ -30,6 +30,7 @@
 #include "PageOverlay.h"
 
 #include "GraphicsLayer.h"
+#include "GraphicsLayerChromium.h"
 #include "GraphicsLayerClient.h"
 #include "Page.h"
 #include "PlatformContextSkia.h"
@@ -37,6 +38,7 @@
 #include "WebPageOverlay.h"
 #include "WebViewClient.h"
 #include "WebViewImpl.h"
+#include <public/WebLayer.h>
 
 using namespace WebCore;
 
@@ -46,11 +48,7 @@ namespace {
 
 WebCanvas* ToWebCanvas(GraphicsContext* gc)
 {
-#if WEBKIT_USING_SKIA
     return gc->platformContext()->canvas();
-#elif WEBKIT_USING_CG
-    return gc->platformContext();
-#endif
 }
 
 } // namespace
@@ -79,7 +77,7 @@ public:
 
     virtual void notifyAnimationStarted(const GraphicsLayer*, double time) { }
 
-    virtual void notifySyncRequired(const GraphicsLayer*) { }
+    virtual void notifyFlushRequired(const GraphicsLayer*) { }
 
     virtual void paintContents(const GraphicsLayer*, GraphicsContext& gc, GraphicsLayerPaintingPhase, const IntRect& inClip)
     {
@@ -96,16 +94,6 @@ public:
     virtual float pageScaleFactor() const
     {
         return m_webViewImpl->pageScaleFactor();
-    }
-
-    virtual bool showDebugBorders(const GraphicsLayer*) const
-    {
-        return m_webViewImpl->page()->settings()->showDebugBorders();
-    }
-
-    virtual bool showRepaintCounter(const GraphicsLayer*) const
-    {
-        return m_webViewImpl->page()->settings()->showRepaintCounter();
     }
 
 private:
@@ -155,6 +143,9 @@ void PageOverlay::update()
 
     m_viewImpl->setOverlayLayer(m_layer.get());
     m_layer->setNeedsDisplay();
+
+    WebLayer* platformLayer = static_cast<GraphicsLayerChromium*>(m_layer.get())->platformLayer();
+    platformLayer->setShouldScrollOnMainThread(true);
 #endif
 }
 

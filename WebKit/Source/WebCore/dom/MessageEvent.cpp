@@ -73,31 +73,35 @@ MessageEvent::MessageEvent(PassRefPtr<SerializedScriptValue> data, const String&
     , m_source(source)
     , m_ports(ports)
 {
+#if USE(V8)
+    if (m_dataAsSerializedScriptValue)
+        m_dataAsSerializedScriptValue->registerMemoryAllocatedWithCurrentScriptContext();
+#endif
 }
 
-MessageEvent::MessageEvent(const String& data)
+MessageEvent::MessageEvent(const String& data, const String& origin)
     : Event(eventNames().messageEvent, false, false)
     , m_dataType(DataTypeString)
     , m_dataAsString(data)
-    , m_origin("")
+    , m_origin(origin)
     , m_lastEventId("")
 {
 }
 
-MessageEvent::MessageEvent(PassRefPtr<Blob> data)
+MessageEvent::MessageEvent(PassRefPtr<Blob> data, const String& origin)
     : Event(eventNames().messageEvent, false, false)
     , m_dataType(DataTypeBlob)
     , m_dataAsBlob(data)
-    , m_origin("")
+    , m_origin(origin)
     , m_lastEventId("")
 {
 }
 
-MessageEvent::MessageEvent(PassRefPtr<ArrayBuffer> data)
+MessageEvent::MessageEvent(PassRefPtr<ArrayBuffer> data, const String& origin)
     : Event(eventNames().messageEvent, false, false)
     , m_dataType(DataTypeArrayBuffer)
     , m_dataAsArrayBuffer(data)
-    , m_origin("")
+    , m_origin(origin)
     , m_lastEventId("")
 {
 }
@@ -134,6 +138,11 @@ void MessageEvent::initMessageEvent(const AtomicString& type, bool canBubble, bo
     m_lastEventId = lastEventId;
     m_source = source;
     m_ports = ports;
+
+#if USE(V8)
+    if (m_dataAsSerializedScriptValue)
+        m_dataAsSerializedScriptValue->registerMemoryAllocatedWithCurrentScriptContext();
+#endif
 }
 
 // FIXME: Remove this when we have custom ObjC binding support.

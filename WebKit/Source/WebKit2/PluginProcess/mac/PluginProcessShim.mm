@@ -30,7 +30,7 @@
 #import <Carbon/Carbon.h>
 #import <WebKitSystemInterface.h>
 #import <stdio.h>
-#import <objc/objc-runtime.h>
+#import <objc/message.h>
 
 #define DYLD_INTERPOSE(_replacement,_replacee) \
     __attribute__((used)) static struct{ const void* replacement; const void* replacee; } _interpose_##_replacee \
@@ -41,35 +41,6 @@ namespace WebKit {
 extern "C" void WebKitPluginProcessShimInitialize(const PluginProcessShimCallbacks& callbacks);
 
 static PluginProcessShimCallbacks pluginProcessShimCallbacks;
-
-static IMP NSApplication_RunModalForWindow;
-static unsigned modalCount = 0;
-
-static void beginModal()
-{
-    // Make sure to make ourselves the front process
-    ProcessSerialNumber psn;
-    GetCurrentProcess(&psn);
-    SetFrontProcess(&psn);
-    
-    if (!modalCount++)
-        pluginProcessShimCallbacks.setModal(true);
-}
-
-static void endModal()
-{
-    if (!--modalCount)
-        pluginProcessShimCallbacks.setModal(false);
-}    
-
-static NSInteger shim_NSApplication_RunModalForWindow(id self, SEL _cmd, NSWindow* window)
-{
-    beginModal();
-    NSInteger result = ((NSInteger (*)(id, SEL, NSWindow *))NSApplication_RunModalForWindow)(self, _cmd, window);
-    endModal();
-
-    return result;
-}
 
 #ifndef __LP64__
 
@@ -102,16 +73,16 @@ static Boolean shimIsWindowActive(WindowRef window)
 
 static void shimModalDialog(ModalFilterUPP modalFilter, DialogItemIndex *itemHit)
 {
-    beginModal();
+    pluginProcessShimCallbacks.beginModal();
     ModalDialog(modalFilter, itemHit);
-    endModal();
+    pluginProcessShimCallbacks.endModal();
 }
 
 static DialogItemIndex shimAlert(SInt16 alertID, ModalFilterUPP modalFilter)
 {
-    beginModal();
+    pluginProcessShimCallbacks.beginModal();
     DialogItemIndex index = Alert(alertID, modalFilter);
-    endModal();
+    pluginProcessShimCallbacks.endModal();
     
     return index;
 }
@@ -146,27 +117,6 @@ __attribute__((visibility("default")))
 void WebKitPluginProcessShimInitialize(const PluginProcessShimCallbacks& callbacks)
 {
     pluginProcessShimCallbacks = callbacks;
-
-    // Override -[NSApplication runModalForWindow:]
-    Method runModalForWindowMethod = class_getInstanceMethod(objc_getClass("NSApplication"), @selector(runModalForWindow:));
-    NSApplication_RunModalForWindow = method_setImplementation(runModalForWindowMethod, reinterpret_cast<IMP>(shim_NSApplication_RunModalForWindow));
-
-    NSNotificationCenter *defaultCenter = [NSNotificationCenter defaultCenter];
-
-    // Track when any Cocoa window is about to be be shown.
-    id orderOnScreenObserver = [defaultCenter addObserverForName:WKWindowWillOrderOnScreenNotification()
-                                                          object:nil
-                                                           queue:nil
-                                                           usingBlock:^(NSNotification *notification) { pluginProcessShimCallbacks.cocoaWindowShown([notification object]); }];
-    // Track when any cocoa window is about to be hidden.
-    id orderOffScreenObserver = [defaultCenter addObserverForName:WKWindowWillOrderOffScreenNotification()
-                                                           object:nil
-                                                            queue:nil
-                                                       usingBlock:^(NSNotification *notification) { pluginProcessShimCallbacks.cocoaWindowHidden([notification object]); }];
-
-    // Leak the two observers so that they observe notifications for the lifetime of the process.
-    CFRetain(orderOnScreenObserver);
-    CFRetain(orderOffScreenObserver);
 }
 
 } // namespace WebKit

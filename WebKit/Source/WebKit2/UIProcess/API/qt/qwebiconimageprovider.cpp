@@ -24,12 +24,13 @@
 #include "QtWebIconDatabaseClient.h"
 #include <QtCore/QUrl>
 #include <QtGui/QImage>
+#include <wtf/text/StringHash.h>
 #include <wtf/text/WTFString.h>
 
 using namespace WebKit;
 
 QWebIconImageProvider::QWebIconImageProvider()
-    : QDeclarativeImageProvider(QDeclarativeImageProvider::Image)
+    : QQuickImageProvider(QQuickImageProvider::Image)
 {
 }
 
@@ -37,25 +38,39 @@ QWebIconImageProvider::~QWebIconImageProvider()
 {
 }
 
+WTF::String QWebIconImageProvider::iconURLForPageURLInContext(const WTF::String &pageURL, QtWebContext* context)
+{
+    QtWebIconDatabaseClient* iconDatabase = context->iconDatabase();
+    WTF::String iconURL = iconDatabase->iconForPageURL(pageURL);
+
+    if (iconURL.isEmpty())
+        return String();
+
+    QUrl url;
+    url.setScheme(QStringLiteral("image"));
+    url.setHost(QWebIconImageProvider::identifier());
+    // Make sure that QML doesn't show cached versions of the previous icon if the icon location changed.
+    url.setPath(QLatin1Char('/') + QString::number(WTF::StringHash::hash(iconURL)));
+
+    // FIXME: Use QUrl::DecodedMode when landed in Qt
+    url.setFragment(QString::fromLatin1(QByteArray(QString(pageURL).toUtf8()).toBase64()));
+
+    // FIXME: We can't know when the icon url is no longer in use,
+    // so we never release these icons. At some point we might want
+    // to introduce expiry of icons to elevate this issue.
+    iconDatabase->retainIconForPageURL(pageURL);
+
+    return url.toString(QUrl::FullyEncoded);
+}
+
 QImage QWebIconImageProvider::requestImage(const QString& id, QSize* size, const QSize& requestedSize)
 {
-    QString decodedIconUrl = id;
-    decodedIconUrl.remove(0, decodedIconUrl.indexOf('#') + 1);
-    String pageURL = QString::fromUtf8(QUrl(decodedIconUrl).toEncoded());
+    QString pageURL = QString::fromUtf8(QByteArray::fromBase64(id.midRef(id.indexOf('#') + 1).toLatin1()));
 
-    // The string identifier has the leading image://webicon/ already stripped, so we just
-    // need to truncate from the first slash to get the context id.
-    QString contextIDAsString = id;
-    contextIDAsString.truncate(contextIDAsString.indexOf(QLatin1Char('/')));
-    bool ok = false;
-    uint64_t contextId = contextIDAsString.toUInt(&ok);
-    if (!ok)
-        return QImage();
-    QtWebContext* context = QtWebContext::contextByID(contextId);
-    if (!context)
+    QtWebIconDatabaseClient* iconDatabase = QtWebContext::iconDatabase();
+    if (!iconDatabase)
         return QImage();
 
-    QtWebIconDatabaseClient* iconDatabase = context->iconDatabase();
     QImage icon = requestedSize.isValid() ? iconDatabase->iconImageForPageURL(pageURL, requestedSize) : iconDatabase->iconImageForPageURL(pageURL);
     ASSERT(!icon.isNull());
 

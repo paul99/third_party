@@ -76,6 +76,7 @@ const char STR_FROM[] = "from";
 const char STR_TO[] = "to";
 const char STR_BOTH[] = "both";
 const char STR_REMOVE[] = "remove";
+const char STR_TRUE[] = "true";
 
 const char STR_TYPE[] = "type";
 const char STR_NAME[] = "name";
@@ -100,11 +101,23 @@ const char STR_OUTGOINGVOICEMAIL[] = "outgoingvoicemail";
 
 const char STR_UNAVAILABLE[] = "unavailable";
 
+const char NS_PING[] = "urn:xmpp:ping";
+const StaticQName QN_PING = { NS_PING, "ping" };
+
+const char NS_MUC_UNIQUE[] = "http://jabber.org/protocol/muc#unique";
+const StaticQName QN_MUC_UNIQUE_QUERY = { NS_MUC_UNIQUE, "unique" };
+const StaticQName QN_HANGOUT_ID = { STR_EMPTY, "hangout-id" };
+
 const char STR_GOOGLE_MUC_LOOKUP_JID[] = "lookup.groupchat.google.com";
+
 const char STR_MUC_ROOMCONFIG_ROOMNAME[] = "muc#roomconfig_roomname";
 const char STR_MUC_ROOMCONFIG_FEATURES[] = "muc#roomconfig_features";
 const char STR_MUC_ROOM_FEATURE_ENTERPRISE[] = "muc_enterprise";
 const char STR_MUC_ROOMCONFIG[] = "http://jabber.org/protocol/muc#roomconfig";
+const char STR_MUC_ROOM_FEATURE_HANGOUT[] = "muc_es";
+const char STR_MUC_ROOM_FEATURE_HANGOUT_LITE[] = "muc_lite";
+const char STR_MUC_ROOM_FEATURE_BROADCAST[] = "broadcast";
+const char STR_MUC_ROOM_FEATURE_MULTI_USER_VC[] = "muc_muvc";
 
 const StaticQName QN_STREAM_STREAM = { NS_STREAM, STR_STREAM };
 const StaticQName QN_STREAM_FEATURES = { NS_STREAM, "features" };
@@ -182,6 +195,8 @@ const StaticQName QN_GOOGLE_AUTH_CLIENT_USES_FULL_BIND_RESULT =
 const char NS_GOOGLE_AUTH_OLD[] = "google:auth";
 const StaticQName QN_GOOGLE_ALLOW_NON_GOOGLE_ID_XMPP_LOGIN =
     { NS_GOOGLE_AUTH_PROTOCOL, "allow-non-google-login" };
+const StaticQName QN_GOOGLE_AUTH_SERVICE =
+    { NS_GOOGLE_AUTH_PROTOCOL, "service" };
 
 const StaticQName QN_DIALBACK_RESULT = { NS_DIALBACK, "result" };
 const StaticQName QN_DIALBACK_VERIFY = { NS_DIALBACK, "verify" };
@@ -321,6 +336,15 @@ const char STR_SHOW_DND[] = "dnd";
 const char STR_SHOW_XA[] = "xa";
 const char STR_SHOW_OFFLINE[] = "offline";
 
+const char NS_GOOGLE_PSTN_CONFERENCE[] = "http://www.google.com/pstn-conference";
+const StaticQName QN_GOOGLE_PSTN_CONFERENCE_STATUS = { NS_GOOGLE_PSTN_CONFERENCE, "status" };
+const StaticQName QN_ATTR_STATUS = { STR_EMPTY, "status" };
+
+// Presence connection status
+const char STR_PSTN_CONFERENCE_STATUS_CONNECTING[] = "connecting";
+const char STR_PSTN_CONFERENCE_STATUS_CONNECTED[] = "connected";
+const char STR_PSTN_CONFERENCE_STATUS_HANGUP[] = "hangup";
+
 // Subscription
 const char STR_SUBSCRIBE[] = "subscribe";
 const char STR_SUBSCRIBED[] = "subscribed";
@@ -328,11 +352,19 @@ const char STR_UNSUBSCRIBE[] = "unsubscribe";
 const char STR_UNSUBSCRIBED[] = "unsubscribed";
 
 // Google Invite
-const char NS_GOOGLE_INVITE[] = "google:subscribe";
-const StaticQName QN_INVITATION = { NS_GOOGLE_INVITE, "invitation" };
-const StaticQName QN_INVITE_NAME = { NS_GOOGLE_INVITE, "name" };
-const StaticQName QN_INVITE_SUBJECT = { NS_GOOGLE_INVITE, "subject" };
-const StaticQName QN_INVITE_MESSAGE = { NS_GOOGLE_INVITE, "body" };
+const char NS_GOOGLE_SUBSCRIBE[] = "google:subscribe";
+const StaticQName QN_INVITATION = { NS_GOOGLE_SUBSCRIBE, "invitation" };
+const StaticQName QN_INVITE_NAME = { NS_GOOGLE_SUBSCRIBE, "name" };
+const StaticQName QN_INVITE_SUBJECT = { NS_GOOGLE_SUBSCRIBE, "subject" };
+const StaticQName QN_INVITE_MESSAGE = { NS_GOOGLE_SUBSCRIBE, "body" };
+
+// Kick
+const char NS_GOOGLE_MUC_ADMIN[] = "google:muc#admin";
+const StaticQName QN_GOOGLE_MUC_ADMIN_QUERY = { NS_GOOGLE_MUC_ADMIN, "query" };
+const StaticQName QN_GOOGLE_MUC_ADMIN_QUERY_ITEM =
+    { NS_GOOGLE_MUC_ADMIN, "item" };
+const StaticQName QN_GOOGLE_MUC_ADMIN_QUERY_ITEM_REASON =
+    { NS_GOOGLE_MUC_ADMIN, "reason" };
 
 // PubSub: http://xmpp.org/extensions/xep-0060.html
 const char NS_PUBSUB[] = "http://jabber.org/protocol/pubsub";
@@ -398,6 +430,13 @@ const StaticQName QN_MUC_ROLE = { NS_MUC, "role" };
 const char STR_AFFILIATION_NONE[] = "none";
 const char STR_ROLE_PARTICIPANT[] = "participant";
 
+const char NS_GOOGLE_SESSION[] = "http://www.google.com/session";
+const StaticQName QN_GOOGLE_CIRCLE_ID = { STR_EMPTY, "google-circle-id" };
+const StaticQName QN_GOOGLE_USER_ID = { STR_EMPTY, "google-user-id" };
+const StaticQName QN_GOOGLE_SESSION_BLOCKED = { NS_GOOGLE_SESSION, "blocked" };
+const StaticQName QN_GOOGLE_SESSION_BLOCKING =
+    { NS_GOOGLE_SESSION, "blocking" };
+
 const char NS_MUC_OWNER[] = "http://jabber.org/protocol/muc#owner";
 const StaticQName QN_MUC_OWNER_QUERY = { NS_MUC_OWNER, "query" };
 
@@ -406,6 +445,8 @@ const StaticQName QN_MUC_USER_CONTINUE = { NS_MUC_USER, "continue" };
 const StaticQName QN_MUC_USER_X = { NS_MUC_USER, "x" };
 const StaticQName QN_MUC_USER_ITEM = { NS_MUC_USER, "item" };
 const StaticQName QN_MUC_USER_STATUS = { NS_MUC_USER, "status" };
+const StaticQName QN_MUC_USER_REASON = { NS_MUC_USER, "reason" };
+const StaticQName QN_MUC_USER_ABUSE_VIOLATION = { NS_MUC_USER, "abuse-violation" };
 
 // JEP 0055 - Jabber Search
 const char NS_SEARCH[] = "jabber:iq:search";
@@ -414,6 +455,8 @@ const StaticQName QN_SEARCH_ITEM = { NS_SEARCH, "item" };
 const StaticQName QN_SEARCH_ROOM_NAME = { NS_SEARCH, "room-name" };
 const StaticQName QN_SEARCH_ROOM_DOMAIN = { NS_SEARCH, "room-domain" };
 const StaticQName QN_SEARCH_ROOM_JID = { NS_SEARCH, "room-jid" };
+const StaticQName QN_SEARCH_HANGOUT_ID = { NS_SEARCH, "hangout-id" };
+const StaticQName QN_SEARCH_EXTERNAL_ID = { NS_SEARCH, "external-id" };
 
 // JEP 0115
 const char NS_CAPS[] = "http://jabber.org/protocol/caps";
@@ -541,6 +584,7 @@ const StaticQName QN_GOOGLE_MUC_USER_MEDIA = { NS_GOOGLE_MUC_USER, "media" };
 const StaticQName QN_GOOGLE_MUC_USER_TYPE = { NS_GOOGLE_MUC_USER, "type" };
 const StaticQName QN_GOOGLE_MUC_USER_SRC_ID = { NS_GOOGLE_MUC_USER, "src-id" };
 const StaticQName QN_GOOGLE_MUC_USER_STATUS = { NS_GOOGLE_MUC_USER, "status" };
+const StaticQName QN_CLIENT_VERSION = { NS_GOOGLE_MUC_USER, "client-version" };
 const StaticQName QN_LABEL = { STR_EMPTY, "label" };
 
 const char NS_GOOGLE_MUC_MEDIA[] = "google:muc#media";
@@ -548,9 +592,16 @@ const StaticQName QN_GOOGLE_MUC_AUDIO_MUTE =
     { NS_GOOGLE_MUC_MEDIA, "audio-mute" };
 const StaticQName QN_GOOGLE_MUC_VIDEO_MUTE =
     { NS_GOOGLE_MUC_MEDIA, "video-mute" };
+const StaticQName QN_GOOGLE_MUC_VIDEO_PAUSE =
+    { NS_GOOGLE_MUC_MEDIA, "video-pause" };
 const StaticQName QN_GOOGLE_MUC_RECORDING =
     { NS_GOOGLE_MUC_MEDIA, "recording" };
 const StaticQName QN_GOOGLE_MUC_MEDIA_BLOCK = { NS_GOOGLE_MUC_MEDIA, "block" };
 const StaticQName QN_STATE_ATTR = { STR_EMPTY, "state" };
 
-}
+const char AUTH_MECHANISM_GOOGLE_COOKIE[] = "X-GOOGLE-COOKIE";
+const char AUTH_MECHANISM_GOOGLE_TOKEN[] = "X-GOOGLE-TOKEN";
+const char AUTH_MECHANISM_OAUTH2[] = "X-OAUTH2";
+const char AUTH_MECHANISM_PLAIN[] = "PLAIN";
+
+}  // namespace buzz

@@ -82,7 +82,7 @@ void ResourceRequest::doUpdateResourceRequest()
         m_httpMethod = method;
     m_allowCookies = [m_nsRequest.get() HTTPShouldHandleCookies];
 
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
     if (ResourceRequest::httpPipeliningEnabled())
         m_priority = toResourceLoadPriority(wkGetHTTPPipeliningPriority([m_nsRequest.get() _CFURLRequest]));
 #endif
@@ -129,12 +129,15 @@ void ResourceRequest::doUpdatePlatformRequest()
         nsRequest = [[NSMutableURLRequest alloc] initWithURL:url()];
 
 
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
     if (ResourceRequest::httpPipeliningEnabled())
         wkSetHTTPPipeliningPriority([nsRequest _CFURLRequest], toHTTPPipeliningPriority(m_priority));
 #endif
 
     [nsRequest setCachePolicy:(NSURLRequestCachePolicy)cachePolicy()];
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
+    wkCFURLRequestAllowAllPostCaching([nsRequest _CFURLRequest]);
+#endif
 
     double timeoutInterval = ResourceRequestBase::timeoutInterval();
     if (timeoutInterval)
@@ -152,7 +155,7 @@ void ResourceRequest::doUpdatePlatformRequest()
         [nsRequest setValue:nil forHTTPHeaderField:[oldHeaderFieldNames objectAtIndex:i - 1]];
     HTTPHeaderMap::const_iterator end = httpHeaderFields().end();
     for (HTTPHeaderMap::const_iterator it = httpHeaderFields().begin(); it != end; ++it)
-        [nsRequest setValue:it->second forHTTPHeaderField:it->first];
+        [nsRequest setValue:it->value forHTTPHeaderField:it->key];
 
     // The below check can be removed once we require a version of Foundation with -[NSMutableURLRequest setContentDispositionEncodingFallbackArray:] method.
     static bool supportsContentDispositionEncodingFallbackArray = [NSMutableURLRequest instancesRespondToSelector:@selector(setContentDispositionEncodingFallbackArray:)];
@@ -160,9 +163,9 @@ void ResourceRequest::doUpdatePlatformRequest()
         NSMutableArray *encodingFallbacks = [NSMutableArray array];
         unsigned count = m_responseContentDispositionEncodingFallbackArray.size();
         for (unsigned i = 0; i != count; ++i) {
-            CFStringRef encodingName = m_responseContentDispositionEncodingFallbackArray[i].createCFString();
-            unsigned long nsEncoding = CFStringConvertEncodingToNSStringEncoding(CFStringConvertIANACharSetNameToEncoding(encodingName));
-            CFRelease(encodingName);
+            RetainPtr<CFStringRef> encodingName = m_responseContentDispositionEncodingFallbackArray[i].createCFString();
+            unsigned long nsEncoding = CFStringConvertEncodingToNSStringEncoding(CFStringConvertIANACharSetNameToEncoding(encodingName.get()));
+
             if (nsEncoding != kCFStringEncodingInvalidId)
                 [encodingFallbacks addObject:[NSNumber numberWithUnsignedLong:nsEncoding]];
         }
@@ -182,14 +185,10 @@ void ResourceRequest::applyWebArchiveHackForMail()
     [NSURLProtocol setProperty:@"" forKey:@"WebDataRequest" inRequest:(NSMutableURLRequest *)nsURLRequest()];
 }
 
-#if USE(CFURLSTORAGESESSIONS)
-
 void ResourceRequest::setStorageSession(CFURLStorageSessionRef storageSession)
 {
     m_nsRequest.adoptNS(wkCopyRequestWithStorageSession(storageSession, m_nsRequest.get()));
 }
-
-#endif
     
 #endif // USE(CFNETWORK)
 

@@ -31,7 +31,6 @@
 #include <QObject>
 #include <QThread>
 #include <QProcess>
-#include <WebCore/NotImplemented.h>
 #include <wtf/Threading.h>
 
 class WorkQueue::WorkItemQt : public QObject {
@@ -90,7 +89,7 @@ QSocketNotifier* WorkQueue::registerSocketEventHandler(int socketDescriptor, QSo
     notifier->moveToThread(m_workThread);
     WorkQueue::WorkItemQt* itemQt = new WorkQueue::WorkItemQt(this, notifier, SIGNAL(activated(int)), function);
     itemQt->moveToThread(m_workThread);
-    notifier->setEnabled(true);
+    QMetaObject::invokeMethod(notifier, "setEnabled", Q_ARG(bool, true));
     return notifier;
 }
 

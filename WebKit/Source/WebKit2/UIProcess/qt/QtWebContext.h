@@ -21,11 +21,12 @@
 #ifndef QtWebContext_h
 #define QtWebContext_h
 
+#include <QtGlobal>
 #include <WKContext.h>
 #include <wtf/OwnPtr.h>
+#include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
-#include <qglobal.h>
 
 QT_BEGIN_NAMESPACE
 class QString;
@@ -50,33 +51,20 @@ public:
     PassRefPtr<WebPageProxy> createWebPage(PageClient*, WebPageGroup*);
 
     WebContext* context() { return m_context.get(); }
-    QtDownloadManager* downloadManager() { return m_downloadManager.get(); }
-    QtWebIconDatabaseClient* iconDatabase() { return m_iconDatabase.get(); }
 
     void setNavigatorQtObjectEnabled(WebPageProxy*, bool);
     void postMessageToNavigatorQtObject(WebPageProxy*, const QString&);
 
-    uint64_t contextID() const { return m_contextID; }
-
-    static QtWebContext* contextByID(uint64_t id);
+    static QtDownloadManager* downloadManager();
+    static QtWebIconDatabaseClient* iconDatabase();
+    static void invalidateContext(WebContext*);
 
 private:
     explicit QtWebContext(WebContext*);
 
-    void initialize();
-    void initializeContextInjectedBundleClient();
-
-    static void didReceiveMessageFromInjectedBundle(WKContextRef, WKStringRef messageName, WKTypeRef messageBody, const void*);
-    void didReceiveMessageFromInjectedBundle(WKStringRef messageName, WKTypeRef messageBody);
-
-    static QtWebContext* s_defaultContext;
-
-    uint64_t m_contextID;
     RefPtr<WebContext> m_context;
-    OwnPtr<QtDownloadManager> m_downloadManager;
-    OwnPtr<QtWebIconDatabaseClient> m_iconDatabase;
 };
 
-}
+} // namespace WebKit
 
 #endif // QtWebContext_h

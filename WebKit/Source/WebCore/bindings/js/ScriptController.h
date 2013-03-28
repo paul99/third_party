@@ -40,6 +40,7 @@ struct NPObject;
 
 namespace JSC {
     class JSGlobalObject;
+    class ExecState;
 
     namespace Bindings {
         class RootObject;
@@ -52,6 +53,7 @@ class HTMLPlugInElement;
 class Frame;
 class ScriptSourceCode;
 class ScriptValue;
+class SecurityOrigin;
 class Widget;
 
 typedef HashMap<void*, RefPtr<JSC::Bindings::RootObject> > RootObjectMap;
@@ -72,19 +74,19 @@ public:
     JSDOMWindowShell* windowShell(DOMWrapperWorld* world)
     {
         ShellMap::iterator iter = m_windowShells.find(world);
-        return (iter != m_windowShells.end()) ? iter->second.get() : initScript(world);
+        return (iter != m_windowShells.end()) ? iter->value.get() : initScript(world);
     }
     JSDOMWindowShell* existingWindowShell(DOMWrapperWorld* world) const
     {
         ShellMap::const_iterator iter = m_windowShells.find(world);
-        return (iter != m_windowShells.end()) ? iter->second.get() : 0;
+        return (iter != m_windowShells.end()) ? iter->value.get() : 0;
     }
     JSDOMWindow* globalObject(DOMWrapperWorld* world)
     {
         return windowShell(world)->window();
     }
 
-    static void getAllWorlds(Vector<DOMWrapperWorld*>&);
+    static void getAllWorlds(Vector<RefPtr<DOMWrapperWorld> >&);
 
     ScriptValue executeScript(const ScriptSourceCode&);
     ScriptValue executeScript(const String& script, bool forceUserGesture = false);
@@ -102,7 +104,8 @@ public:
 
     WTF::TextPosition eventHandlerPosition() const;
 
-    void disableEval();
+    void enableEval();
+    void disableEval(const String& errorMessage);
 
     static bool processingUserGesture();
 
@@ -118,7 +121,7 @@ public:
 
     const String* sourceURL() const { return m_sourceURL; } // 0 if we are not evaluating any script
 
-    void clearWindowShell(bool goingIntoPageCache = false);
+    void clearWindowShell(DOMWindow* newDOMWindow, bool goingIntoPageCache);
     void updateDocument();
 
     void namedItemAdded(HTMLDocument*, const AtomicString&) { }
@@ -143,12 +146,10 @@ public:
 
 #if ENABLE(INSPECTOR)
     static void setCaptureCallStackForUncaughtExceptions(bool);
+    void collectIsolatedContexts(Vector<std::pair<JSC::ExecState*, SecurityOrigin*> >&);
 #endif
 
 #if PLATFORM(MAC)
-#if ENABLE(JAVA_BRIDGE)
-    static void initJavaJSBindings();
-#endif
     WebScriptObject* windowScriptObject();
 #endif
 
@@ -158,6 +159,9 @@ public:
     NPObject* createScriptObjectForPluginElement(HTMLPlugInElement*);
     NPObject* windowScriptNPObject();
 #endif
+
+    // FIXME: Stub for parity with V8 implementation. http://webkit.org/b/100815
+    bool shouldBypassMainWorldContentSecurityPolicy() { return false; }
 
 private:
     JSDOMWindowShell* initScript(DOMWrapperWorld* world);

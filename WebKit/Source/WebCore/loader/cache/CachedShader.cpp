@@ -1,5 +1,5 @@
 /*
- * Copyright 2011 Adobe Systems Incorporated. All Rights Reserved.
+ * Copyright (C) 2011 Adobe Systems Incorporated. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,8 +32,9 @@
 #if ENABLE(CSS_SHADERS)
 
 #include "CachedShader.h"
-#include "SharedBuffer.h"
+#include "ResourceBuffer.h"
 #include "TextResourceDecoder.h"
+#include "WebCoreMemoryInstrumentation.h"
 #include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
@@ -60,11 +61,19 @@ const String& CachedShader::shaderString()
     return m_shaderString;
 }
 
-void CachedShader::data(PassRefPtr<SharedBuffer> data, bool allDataReceived)
+void CachedShader::data(PassRefPtr<ResourceBuffer> data, bool allDataReceived)
 {
     if (allDataReceived)
         m_data = data;
     CachedResource::data(data, allDataReceived);
+}
+
+void CachedShader::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CachedResourceShader);
+    CachedResource::reportMemoryUsage(memoryObjectInfo);
+    info.addMember(m_decoder);
+    info.addMember(m_shaderString);
 }
 
 } // namespace WebCore

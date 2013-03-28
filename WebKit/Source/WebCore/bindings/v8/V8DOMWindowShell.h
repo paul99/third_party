@@ -31,6 +31,10 @@
 #ifndef V8DOMWindowShell_h
 #define V8DOMWindowShell_h
 
+#include "DOMWrapperWorld.h"
+#include "ScopedPersistent.h"
+#include "SecurityOrigin.h"
+#include "V8PerContextData.h"
 #include "WrapperTypeInfo.h"
 #include <wtf/Forward.h>
 #include <wtf/HashMap.h>
@@ -47,11 +51,11 @@ class HTMLDocument;
 
 // V8WindowShell represents all the per-global object state for a Frame that
 // persist between navigations.
-class V8DOMWindowShell : public RefCounted<V8DOMWindowShell> {
+class V8DOMWindowShell {
 public:
-    static PassRefPtr<V8DOMWindowShell> create(Frame*);
+    static PassOwnPtr<V8DOMWindowShell> create(Frame*, PassRefPtr<DOMWrapperWorld>);
 
-    v8::Handle<v8::Context> context() const { return m_context; }
+    v8::Persistent<v8::Context> context() const { return m_context.get(); }
 
     // Update document object of the frame.
     void updateDocument();
@@ -63,62 +67,46 @@ public:
     // (e.g., after setting docoument.domain).
     void updateSecurityOrigin();
 
-    bool isContextInitialized();
+    bool isContextInitialized() { return !m_context.isEmpty(); }
+    bool isGlobalInitialized() { return !m_global.isEmpty(); }
 
-    v8::Persistent<v8::Context> createNewContext(v8::Handle<v8::Object> global, int extensionGroup, int worldId);
-    void setContext(v8::Handle<v8::Context>);
-    static bool installDOMWindow(v8::Handle<v8::Context> context, DOMWindow*);
-
-    bool initContextIfNeeded();
+    bool initializeIfNeeded();
     void updateDocumentWrapper(v8::Handle<v8::Object> wrapper);
 
     void clearForNavigation();
-    void clearForClose();
+    void clearForClose(bool destroyGlobal);
 
-    void destroyGlobal();
+    DOMWrapperWorld* world() { return m_world.get(); }
 
-    static v8::Handle<v8::Value> getHiddenObjectPrototype(v8::Handle<v8::Context>);
-    // WARNING: Call |installHiddenObjectPrototype| only on fresh contexts!
-    static bool installHiddenObjectPrototype(v8::Handle<v8::Context>);
-
-    // To create JS Wrapper objects, we create a cache of a 'boiler plate'
-    // object, and then simply Clone that object each time we need a new one.
-    // This is faster than going through the full object creation process.
-    v8::Local<v8::Object> createWrapperFromCache(WrapperTypeInfo* type)
-    {
-        v8::Persistent<v8::Object> boilerplate = m_wrapperBoilerplates.get(type);
-        return boilerplate.IsEmpty() ? createWrapperFromCacheSlowCase(type) : boilerplate->Clone();
-    }
-
-    static void setLocation(DOMWindow*, const String& relativeURL);
+    void destroyIsolatedShell();
 
 private:
-    V8DOMWindowShell(Frame*);
+    V8DOMWindowShell(Frame*, PassRefPtr<DOMWrapperWorld>);
 
-    void disposeContextHandles();
+    void disposeContext();
 
     void setSecurityToken();
-    void clearDocumentWrapper();
 
     // The JavaScript wrapper for the document object is cached on the global
-    // object for fast access. UpdateDocumentWrapperCache sets the wrapper
-    // for the current document on the global object. ClearDocumentWrapperCache
+    // object for fast access. UpdateDocumentProperty sets the wrapper
+    // for the current document on the global object. ClearDocumentProperty
     // deletes the document wrapper from the global object.
-    void updateDocumentWrapperCache();
-    void clearDocumentWrapperCache();
+    void updateDocumentProperty();
+    void clearDocumentProperty();
 
-    v8::Local<v8::Object> createWrapperFromCacheSlowCase(WrapperTypeInfo*);
+    void createContext();
+    bool installDOMWindow();
+
+    static V8DOMWindowShell* enteredIsolatedWorldContext();
 
     Frame* m_frame;
+    RefPtr<DOMWrapperWorld> m_world;
 
-    // For each possible type of wrapper, we keep a boilerplate object.
-    // The boilerplate is used to create additional wrappers of the same type.
-    typedef WTF::HashMap<WrapperTypeInfo*, v8::Persistent<v8::Object> > WrapperBoilerplateMap;
-    WrapperBoilerplateMap m_wrapperBoilerplates;
+    OwnPtr<V8PerContextData> m_perContextData;
 
-    v8::Persistent<v8::Context> m_context;
-    v8::Persistent<v8::Object> m_global;
-    v8::Persistent<v8::Object> m_document;
+    ScopedPersistent<v8::Context> m_context;
+    ScopedPersistent<v8::Object> m_global;
+    ScopedPersistent<v8::Object> m_document;
 };
 
 } // namespace WebCore

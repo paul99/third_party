@@ -32,14 +32,15 @@
 #include "EditorClientWinCE.h"
 #include "FocusController.h"
 #include "Frame.h"
+#include "FrameLoadRequest.h"
 #include "FrameLoader.h"
 #include "FrameLoaderClientWinCE.h"
 #include "FrameView.h"
 #include "GraphicsContext.h"
+#include "HTMLFormElement.h"
 #include "InitializeThreading.h"
 #include "InspectorClientWinCE.h"
 #include "IntSize.h"
-#include "MainThread.h"
 #include "NotImplemented.h"
 #include "Page.h"
 #include "PlatformKeyboardEvent.h"
@@ -50,6 +51,7 @@
 #include "Settings.h"
 #include "SharedBuffer.h"
 #include "WebCoreInstanceHandle.h"
+#include <wtf/MainThread.h>
 
 using namespace WebCore;
 
@@ -217,7 +219,7 @@ void WebView::load(const String &url)
 
 void WebView::load(const WebCore::ResourceRequest &request)
 {
-    frame()->loader()->load(request, false);
+    frame()->loader()->load(FrameLoadRequest(frame(), request));
 }
 
 void WebView::reload()

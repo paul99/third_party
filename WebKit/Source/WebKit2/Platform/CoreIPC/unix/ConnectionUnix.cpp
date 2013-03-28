@@ -28,7 +28,7 @@
 #include "config.h"
 #include "Connection.h"
 
-#include "ArgumentEncoder.h"
+#include "DataReference.h"
 #include "SharedMemory.h"
 #include <sys/socket.h>
 #include <unistd.h>
@@ -39,13 +39,11 @@
 #include <wtf/OwnArrayPtr.h>
 
 #if PLATFORM(QT)
+#include <QPointer>
 #include <QSocketNotifier>
-#include <QWeakPointer>
 #elif PLATFORM(GTK)
 #include <glib.h>
 #endif
-
-using namespace std;
 
 namespace CoreIPC {
 
@@ -153,6 +151,10 @@ void Connection::platformInvalidate()
     m_socketNotifier = 0;
 #endif
 
+#if PLATFORM(EFL)
+    m_connectionQueue.unregisterSocketEventHandler(m_socketDescriptor);
+#endif
+
     m_socketDescriptor = -1;
     m_isConnected = false;
 }
@@ -173,7 +175,7 @@ public:
     }
 
 private:
-    QWeakPointer<QSocketNotifier> const m_socketNotifier;
+    QPointer<QSocketNotifier> const m_socketNotifier;
 };
 #endif
 
@@ -280,13 +282,13 @@ bool Connection::processMessage()
     if (messageInfo.isMessageBodyOOL())
         messageBody = reinterpret_cast<uint8_t*>(oolMessageBody->data());
 
-    ArgumentDecoder* argumentDecoder;
+    OwnPtr<MessageDecoder> decoder;
     if (attachments.isEmpty())
-        argumentDecoder = new ArgumentDecoder(messageBody, messageInfo.bodySize());
+        decoder = MessageDecoder::create(DataReference(messageBody, messageInfo.bodySize()));
     else
-        argumentDecoder = new ArgumentDecoder(messageBody, messageInfo.bodySize(), attachments);
+        decoder = MessageDecoder::create(DataReference(messageBody, messageInfo.bodySize()), attachments);
 
-    processIncomingMessage(messageInfo.messageID(), adoptPtr(argumentDecoder));
+    processIncomingMessage(messageInfo.messageID(), decoder.release());
 
     if (m_readBufferSize > messageLength) {
         memmove(m_readBuffer.data(), m_readBuffer.data() + messageLength, m_readBufferSize - messageLength);
@@ -419,15 +421,17 @@ bool Connection::open()
 
     m_isConnected = true;
 #if PLATFORM(QT)
-    m_socketNotifier = m_connectionQueue.registerSocketEventHandler(m_socketDescriptor, QSocketNotifier::Read, bind(&Connection::readyReadHandler, this));
+    m_socketNotifier = m_connectionQueue.registerSocketEventHandler(m_socketDescriptor, QSocketNotifier::Read, WTF::bind(&Connection::readyReadHandler, this));
 #elif PLATFORM(GTK)
-    m_connectionQueue.registerEventSourceHandler(m_socketDescriptor, (G_IO_HUP | G_IO_ERR), bind(&Connection::connectionDidClose, this));
-    m_connectionQueue.registerEventSourceHandler(m_socketDescriptor, G_IO_IN, bind(&Connection::readyReadHandler, this));
+    m_connectionQueue.registerEventSourceHandler(m_socketDescriptor, (G_IO_HUP | G_IO_ERR), WTF::bind(&Connection::connectionDidClose, this));
+    m_connectionQueue.registerEventSourceHandler(m_socketDescriptor, G_IO_IN, WTF::bind(&Connection::readyReadHandler, this));
+#elif PLATFORM(EFL)
+    m_connectionQueue.registerSocketEventHandler(m_socketDescriptor, WTF::bind(&Connection::readyReadHandler, this));
 #endif
 
     // Schedule a call to readyReadHandler. Data may have arrived before installation of the signal
     // handler.
-    m_connectionQueue.dispatch(bind(&Connection::readyReadHandler, this));
+    m_connectionQueue.dispatch(WTF::bind(&Connection::readyReadHandler, this));
 
     return true;
 }
@@ -437,7 +441,7 @@ bool Connection::platformCanSendOutgoingMessages() const
     return m_isConnected;
 }
 
-bool Connection::sendOutgoingMessage(MessageID messageID, PassOwnPtr<ArgumentEncoder> arguments)
+bool Connection::sendOutgoingMessage(MessageID messageID, PassOwnPtr<MessageEncoder> encoder)
 {
 #if PLATFORM(QT)
     ASSERT(m_socketNotifier);
@@ -445,7 +449,7 @@ bool Connection::sendOutgoingMessage(MessageID messageID, PassOwnPtr<ArgumentEnc
 
     COMPILE_ASSERT(sizeof(MessageInfo) + attachmentMaxAmount * sizeof(size_t) <= messageMaxSize, AttachmentsFitToMessageInline);
 
-    Vector<Attachment> attachments = arguments->releaseAttachments();
+    Vector<Attachment> attachments = encoder->releaseAttachments();
     AttachmentResourceGuard<Vector<Attachment>, Vector<Attachment>::iterator> attachementDisposer(attachments);
 
     if (attachments.size() > (attachmentMaxAmount - 1)) {
@@ -453,10 +457,10 @@ bool Connection::sendOutgoingMessage(MessageID messageID, PassOwnPtr<ArgumentEnc
         return false;
     }
 
-    MessageInfo messageInfo(messageID, arguments->bufferSize(), attachments.size());
-    size_t messageSizeWithBodyInline = sizeof(messageInfo) + (attachments.size() * sizeof(AttachmentInfo)) + arguments->bufferSize();
-    if (messageSizeWithBodyInline > messageMaxSize && arguments->bufferSize()) {
-        RefPtr<WebKit::SharedMemory> oolMessageBody = WebKit::SharedMemory::create(arguments->bufferSize());
+    MessageInfo messageInfo(messageID, encoder->bufferSize(), attachments.size());
+    size_t messageSizeWithBodyInline = sizeof(messageInfo) + (attachments.size() * sizeof(AttachmentInfo)) + encoder->bufferSize();
+    if (messageSizeWithBodyInline > messageMaxSize && encoder->bufferSize()) {
+        RefPtr<WebKit::SharedMemory> oolMessageBody = WebKit::SharedMemory::create(encoder->bufferSize());
         if (!oolMessageBody)
             return false;
 
@@ -466,7 +470,7 @@ bool Connection::sendOutgoingMessage(MessageID messageID, PassOwnPtr<ArgumentEnc
 
         messageInfo.setMessageBodyOOL();
 
-        memcpy(oolMessageBody->data(), arguments->buffer(), arguments->bufferSize());
+        memcpy(oolMessageBody->data(), encoder->buffer(), encoder->bufferSize());
 
         attachments.append(handle.releaseToAttachment());
     }
@@ -536,9 +540,9 @@ bool Connection::sendOutgoingMessage(MessageID messageID, PassOwnPtr<ArgumentEnc
         ++iovLength;
     }
 
-    if (!messageInfo.isMessageBodyOOL() && arguments->bufferSize()) {
-        iov[iovLength].iov_base = reinterpret_cast<void*>(arguments->buffer());
-        iov[iovLength].iov_len = arguments->bufferSize();
+    if (!messageInfo.isMessageBodyOOL() && encoder->bufferSize()) {
+        iov[iovLength].iov_base = reinterpret_cast<void*>(encoder->buffer());
+        iov[iovLength].iov_len = encoder->bufferSize();
         ++iovLength;
     }
 
@@ -555,7 +559,7 @@ bool Connection::sendOutgoingMessage(MessageID messageID, PassOwnPtr<ArgumentEnc
 #if PLATFORM(QT)
 void Connection::setShouldCloseConnectionOnProcessTermination(WebKit::PlatformProcessIdentifier process)
 {
-    m_connectionQueue.dispatchOnTermination(process, bind(&Connection::connectionDidClose, this));
+    m_connectionQueue.dispatchOnTermination(process, WTF::bind(&Connection::connectionDidClose, this));
 }
 #endif
 

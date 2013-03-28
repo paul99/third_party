@@ -29,9 +29,11 @@
 #ifndef ContentSearchUtils_h
 #define ContentSearchUtils_h
 
-#include "PlatformString.h"
+#if ENABLE(INSPECTOR)
 
+#include "InspectorTypeBuilder.h"
 #include <wtf/Vector.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -42,12 +44,14 @@ namespace ContentSearchUtils {
 
 RegularExpression createSearchRegex(const String& query, bool caseSensitive, bool isRegex);
 int countRegularExpressionMatches(const RegularExpression&, const String&);
-PassRefPtr<InspectorArray> searchInTextByLines(const String& text, const String& query, const bool caseSensitive, const bool isRegex);
+PassRefPtr<TypeBuilder::Array<TypeBuilder::Page::SearchMatch> > searchInTextByLines(const String& text, const String& query, const bool caseSensitive, const bool isRegex);
 
 String findSourceURL(const String& content);
 String findSourceMapURL(const String& content);
 
 } // namespace ContentSearchUtils
 } // namespace WebCore
+
+#endif // ENABLE(INSPECTOR)
 
 #endif // !defined(ContentSearchUtils_h)

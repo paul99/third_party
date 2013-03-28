@@ -32,18 +32,17 @@
 #define EditingStyle_h
 
 #include "CSSPropertyNames.h"
-#include "PlatformString.h"
 #include "WritingDirection.h"
 #include <wtf/Forward.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 class CSSStyleDeclaration;
 class CSSComputedStyleDeclaration;
-class CSSMutableStyleDeclaration;
 class CSSPrimitiveValue;
 class CSSValue;
 class Document;
@@ -53,6 +52,7 @@ class Node;
 class Position;
 class QualifiedName;
 class RenderStyle;
+class StylePropertySet;
 class StyledElement;
 class VisibleSelection;
 
@@ -81,23 +81,28 @@ public:
         return adoptRef(new EditingStyle(position, propertiesToInclude));
     }
 
+    static PassRefPtr<EditingStyle> create(const StylePropertySet* style)
+    {
+        return adoptRef(new EditingStyle(style));
+    }
+
     static PassRefPtr<EditingStyle> create(const CSSStyleDeclaration* style)
     {
         return adoptRef(new EditingStyle(style));
     }
 
-    static PassRefPtr<EditingStyle> create(int propertyID, const String& value)
+    static PassRefPtr<EditingStyle> create(CSSPropertyID propertyID, const String& value)
     {
         return adoptRef(new EditingStyle(propertyID, value));
     }
 
     ~EditingStyle();
 
-    CSSMutableStyleDeclaration* style() { return m_mutableStyle.get(); }
+    StylePropertySet* style() { return m_mutableStyle.get(); }
     bool textDirection(WritingDirection&) const;
     bool isEmpty() const;
-    void setStyle(PassRefPtr<CSSMutableStyleDeclaration>);
-    void overrideWithStyle(const CSSMutableStyleDeclaration*);
+    void setStyle(PassRefPtr<StylePropertySet>);
+    void overrideWithStyle(const StylePropertySet*);
     void clear();
     PassRefPtr<EditingStyle> copy() const;
     PassRefPtr<EditingStyle> extractAndRemoveBlockProperties();
@@ -140,23 +145,25 @@ public:
     bool shouldUseFixedDefaultFontSize() const { return m_shouldUseFixedDefaultFontSize; }
 
     static PassRefPtr<EditingStyle> styleAtSelectionStart(const VisibleSelection&, bool shouldUseBackgroundColorInEffect = false);
+    static WritingDirection textDirectionForSelection(const VisibleSelection&, EditingStyle* typingStyle, bool& hasNestedOrMultipleEmbeddings);
 private:
     EditingStyle();
     EditingStyle(Node*, PropertiesToInclude);
     EditingStyle(const Position&, PropertiesToInclude);
-    EditingStyle(const CSSStyleDeclaration*);
-    EditingStyle(int propertyID, const String& value);
+    explicit EditingStyle(const StylePropertySet*);
+    explicit EditingStyle(const CSSStyleDeclaration*);
+    EditingStyle(CSSPropertyID, const String& value);
     void init(Node*, PropertiesToInclude);
     void removeTextFillAndStrokeColorsIfNeeded(RenderStyle*);
-    void setProperty(int propertyID, const String& value, bool important = false);
+    void setProperty(CSSPropertyID, const String& value, bool important = false);
     void replaceFontSizeByKeywordIfPossible(RenderStyle*, CSSComputedStyleDeclaration*);
     void extractFontSizeDelta();
     TriState triStateOfStyle(CSSStyleDeclaration* styleToCompare, ShouldIgnoreTextOnlyProperties) const;
     bool conflictsWithInlineStyleOfElement(StyledElement*, EditingStyle* extractedStyle, Vector<CSSPropertyID>* conflictingProperties) const;
     void mergeInlineAndImplicitStyleOfElement(StyledElement*, CSSPropertyOverrideMode, PropertiesToInclude);
-    void mergeStyle(CSSMutableStyleDeclaration*, CSSPropertyOverrideMode);
+    void mergeStyle(const StylePropertySet*, CSSPropertyOverrideMode);
 
-    RefPtr<CSSMutableStyleDeclaration> m_mutableStyle;
+    RefPtr<StylePropertySet> m_mutableStyle;
     bool m_shouldUseFixedDefaultFontSize;
     float m_fontSizeDelta;
 
@@ -166,6 +173,15 @@ private:
 
 class StyleChange {
 public:
+    StyleChange()
+        : m_applyBold(false)
+        , m_applyItalic(false)
+        , m_applyUnderline(false)
+        , m_applyLineThrough(false)
+        , m_applySubscript(false)
+        , m_applySuperscript(false)
+    { }
+
     StyleChange(EditingStyle*, const Position&);
 
     String cssStyle() const { return m_cssStyle; }
@@ -201,7 +217,7 @@ public:
         return !(*this == other);
     }
 private:
-    void extractTextStyles(Document*, CSSMutableStyleDeclaration*, bool shouldUseFixedFontDefaultSize);
+    void extractTextStyles(Document*, StylePropertySet*, bool shouldUseFixedFontDefaultSize);
 
     String m_cssStyle;
     bool m_applyBold;
@@ -217,6 +233,7 @@ private:
 
 // FIXME: Remove these functions or make them non-global to discourage using CSSStyleDeclaration directly.
 int getIdentifierValue(CSSStyleDeclaration*, CSSPropertyID);
+int getIdentifierValue(StylePropertySet*, CSSPropertyID);
 
 } // namespace WebCore
 

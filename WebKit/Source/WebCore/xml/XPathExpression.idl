@@ -17,14 +17,12 @@
  * the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
  * Boston, MA 02110-1301, USA.
  */
+[
+     ImplementationLacksVTable
+] interface XPathExpression {
+    [ObjCLegacyUnnamedParameters] XPathResult evaluate(in [Optional=DefaultIsUndefined] Node contextNode, 
+                                        in [Optional=DefaultIsUndefined] unsigned short type, 
+                                        in [Optional=DefaultIsUndefined] XPathResult inResult)
+        raises(DOMException);
+};
 
-module xpath {
-
-    interface XPathExpression {
-        [OldStyleObjC] XPathResult evaluate(in [Optional=CallWithDefaultValue] Node contextNode, 
-                                            in [Optional=CallWithDefaultValue] unsigned short type, 
-                                            in [Optional=CallWithDefaultValue] XPathResult inResult)
-            raises(DOMException);
-    };
-
-}

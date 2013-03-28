@@ -34,20 +34,27 @@
 #import "WebTypesInternal.h"
 
 #ifdef __cplusplus
+#import <WebCore/AlternativeTextClient.h>
 #import <WebCore/FindOptions.h>
+#import <WebCore/FloatRect.h>
+#import <WebCore/LayoutMilestones.h>
+#import <WebCore/TextAlternativeWithRange.h>
 #import <WebCore/WebCoreKeyboardUIMode.h>
 
 #include <wtf/Forward.h>
+#include <wtf/RetainPtr.h>
 
 namespace WebCore {
-    class Element;
-    class Frame;
-    class HistoryItem;
-    class KURL;
-    class KeyboardEvent;
-    class Page;
-    class RenderBox;
-    class Node;
+class Element;
+class Event;
+class Frame;
+class HistoryItem;
+class KURL;
+class KeyboardEvent;
+class Page;
+class RenderBox;
+class Node;
+struct DictationAlternative;
 }
 #endif
 
@@ -58,6 +65,13 @@ namespace WebCore {
 #ifdef __cplusplus
 
 WebCore::FindOptions coreOptions(WebFindOptions options);
+
+WebCore::LayoutMilestones coreLayoutMilestones(WebLayoutMilestones);
+WebLayoutMilestones kitLayoutMilestones(WebCore::LayoutMilestones);
+
+#if USE(DICTATION_ALTERNATIVES)
+OBJC_CLASS NSTextAlternatives;
+#endif
 
 @interface WebView (WebViewEditingExtras)
 - (BOOL)_shouldChangeSelectedDOMRange:(DOMRange *)currentRange toDOMRange:(DOMRange *)proposedRange affinity:(NSSelectionAffinity)selectionAffinity stillSelecting:(BOOL)flag;
@@ -88,11 +102,23 @@ WebCore::FindOptions coreOptions(WebFindOptions options);
 #if USE(ACCELERATED_COMPOSITING)
 - (BOOL)_needsOneShotDrawingSynchronization;
 - (void)_setNeedsOneShotDrawingSynchronization:(BOOL)needsSynchronization;
-- (void)_scheduleCompositingLayerSync;
+- (void)_scheduleCompositingLayerFlush;
 #endif
 
 #if ENABLE(GLIB_SUPPORT)
 - (void)_scheduleGlibContextIterations;
+#endif
+
+#if USE(AUTOCORRECTION_PANEL)
+- (void)handleAcceptedAlternativeText:(NSString*)text;
+#endif
+
+#if USE(DICTATION_ALTERNATIVES)
+- (void)_getWebCoreDictationAlternatives:(Vector<WebCore::DictationAlternative>&)alternatives fromTextAlternatives:(const Vector<WebCore::TextAlternativeWithRange>&)alternativesWithRange;
+- (void)_showDictationAlternativeUI:(const WebCore::FloatRect&)boundingBoxOfDictatedText forDictationContext:(uint64_t)dictationContext;
+- (void)_dismissDictationAlternativeUI;
+- (void)_removeDictationAlternatives:(uint64_t)dictationContext;
+- (Vector<String>)_dictationAlternatives:(uint64_t)dictationContext;
 #endif
 
 @end

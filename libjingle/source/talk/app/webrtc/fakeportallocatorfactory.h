@@ -31,14 +31,14 @@
 #ifndef TALK_APP_WEBRTC_FAKEPORTALLOCATORFACTORY_H_
 #define TALK_APP_WEBRTC_FAKEPORTALLOCATORFACTORY_H_
 
-#include "talk/app/webrtc/peerconnection.h"
+#include "talk/app/webrtc/peerconnectioninterface.h"
 #include "talk/p2p/client/fakeportallocator.h"
 
 namespace webrtc {
 
 class FakePortAllocatorFactory : public PortAllocatorFactoryInterface {
  public:
-  static PortAllocatorFactoryInterface* Create() {
+  static FakePortAllocatorFactory* Create() {
     talk_base::RefCountedObject<FakePortAllocatorFactory>* allocator =
           new talk_base::RefCountedObject<FakePortAllocatorFactory>();
     return allocator;
@@ -47,12 +47,26 @@ class FakePortAllocatorFactory : public PortAllocatorFactoryInterface {
   virtual cricket::PortAllocator* CreatePortAllocator(
       const std::vector<StunConfiguration>& stun_configurations,
       const std::vector<TurnConfiguration>& turn_configurations) {
+    stun_configs_ = stun_configurations;
+    turn_configs_ = turn_configurations;
     return new cricket::FakePortAllocator(talk_base::Thread::Current(), NULL);
+  }
+
+  const std::vector<StunConfiguration>& stun_configs() const {
+    return stun_configs_;
+  }
+
+  const std::vector<TurnConfiguration>& turn_configs() const {
+    return turn_configs_;
   }
 
  protected:
   FakePortAllocatorFactory() {}
   ~FakePortAllocatorFactory() {}
+
+ private:
+  std::vector<PortAllocatorFactoryInterface::StunConfiguration> stun_configs_;
+  std::vector<PortAllocatorFactoryInterface::TurnConfiguration> turn_configs_;
 };
 
 }  // namespace webrtc

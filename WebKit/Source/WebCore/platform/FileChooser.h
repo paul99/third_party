@@ -30,13 +30,24 @@
 #ifndef FileChooser_h
 #define FileChooser_h
 
-#include "PlatformString.h"
 #include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 class FileChooser;
+
+struct FileChooserFileInfo {
+    FileChooserFileInfo(const String& path, const String& displayName = String())
+        : path(path)
+        , displayName(displayName)
+    {
+    }
+
+    const String path;
+    const String displayName;
+};
 
 struct FileChooserSettings {
     bool allowsMultipleFiles;
@@ -44,15 +55,19 @@ struct FileChooserSettings {
     bool allowsDirectoryUpload;
 #endif
     Vector<String> acceptMIMETypes;
+    Vector<String> acceptFileExtensions;
     Vector<String> selectedFiles;
-#if OS(ANDROID) && ENABLE(MEDIA_CAPTURE)
+#if ENABLE(MEDIA_CAPTURE)
     String capture;
 #endif
+
+    // Returns a combined vector of acceptMIMETypes and acceptFileExtensions.
+    Vector<String> acceptTypes() const;
 };
 
 class FileChooserClient {
 public:
-    virtual void filesChosen(const Vector<String>&) = 0;
+    virtual void filesChosen(const Vector<FileChooserFileInfo>&) = 0;
     virtual ~FileChooserClient();
 
 protected:
@@ -73,6 +88,9 @@ public:
 
     void chooseFile(const String& path);
     void chooseFiles(const Vector<String>& paths);
+
+    // FIXME: We should probably just pass file paths that could be virtual paths with proper display names rather than passing structs.
+    void chooseFiles(const Vector<FileChooserFileInfo>& files);
 
     const FileChooserSettings& settings() const { return m_settings; }
 

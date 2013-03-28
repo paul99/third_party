@@ -27,6 +27,7 @@
 #define CSSCrossfadeValue_h
 
 #include "CachedImage.h"
+#include "CachedImageClient.h"
 #include "CachedResourceHandle.h"
 #include "CSSImageGeneratorValue.h"
 #include "CSSPrimitiveValue.h"
@@ -57,9 +58,15 @@ public:
     IntSize fixedSize(const RenderObject*);
 
     bool isPending() const;
+    bool hasAlpha(const RenderObject*) const;
+
     void loadSubimages(CachedResourceLoader*);
 
     void setPercentage(PassRefPtr<CSSPrimitiveValue> percentageValue) { m_percentageValue = percentageValue; }
+
+    bool hasFailedOrCanceledSubresources() const;
+
+    void reportDescendantMemoryUsage(MemoryObjectInfo*) const;
 
 private:
     CSSCrossfadeValue(PassRefPtr<CSSValue> fromValue, PassRefPtr<CSSValue> toValue)

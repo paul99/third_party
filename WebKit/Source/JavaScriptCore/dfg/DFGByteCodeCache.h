@@ -132,21 +132,20 @@ public:
         Map::iterator begin = m_map.begin();
         Map::iterator end = m_map.end();
         for (Map::iterator iter = begin; iter != end; ++iter) {
-            if (!iter->second.codeBlock)
+            if (!iter->value.codeBlock)
                 continue;
-            if (iter->second.owned) {
-                delete iter->second.codeBlock;
+            if (iter->value.owned) {
+                delete iter->value.codeBlock;
                 continue;
             }
-            iter->second.codeBlock->m_shouldDiscardBytecode = iter->second.oldValueOfShouldDiscardBytecode;
         }
     }
     
-    CodeBlock* get(const CodeBlockKey& key, ScopeChainNode* scope)
+    CodeBlock* get(const CodeBlockKey& key, JSScope* scope)
     {
         Map::iterator iter = m_map.find(key);
         if (iter != m_map.end())
-            return iter->second.codeBlock;
+            return iter->value.codeBlock;
         
         ByteCodeCacheValue value;
         
@@ -155,12 +154,11 @@ public:
         value.codeBlock = key.executable()->codeBlockWithBytecodeFor(key.kind());
         if (value.codeBlock) {
             value.owned = false;
-            value.oldValueOfShouldDiscardBytecode = value.codeBlock->m_shouldDiscardBytecode;
         } else {
             // Nope, so try to parse one.
             JSObject* exception;
             value.owned = true;
-            value.codeBlock = key.executable()->produceCodeBlockFor(scope, OptimizingCompilation, key.kind(), exception).leakPtr();
+            value.codeBlock = key.executable()->produceCodeBlockFor(scope, key.kind(), exception).leakPtr();
         }
         
         // Check if there is any reason to reject this from our cache. If so, then
@@ -170,13 +168,6 @@ public:
                 delete value.codeBlock;
             value.codeBlock = 0;
         }
-        
-        // If we're about to return a code block, make sure that we're not going
-        // to be discarding its bytecode if a GC were to happen during DFG
-        // compilation. That's unlikely, but it's good to thoroughly enjoy this
-        // kind of paranoia.
-        if (!!value.codeBlock)
-            value.codeBlock->m_shouldDiscardBytecode = false;
         
         m_map.add(key, value);
         

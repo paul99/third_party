@@ -36,7 +36,6 @@
 #include "FrameLoaderClientBlackBerry.h"
 #include "KURL.h"
 #include "Logging.h"
-#include "NotImplemented.h"
 #include "Page.h"
 #include "PageClientBlackBerry.h"
 #include "PageGroup.h"
@@ -65,16 +64,14 @@ SocketStreamHandle::SocketStreamHandle(const String& groupName, const KURL& url,
     // Create a platform socket stream
     BlackBerry::Platform::NetworkStreamFactory* factory = page->chrome()->platformPageClient()->networkStreamFactory();
     ASSERT(factory);
-    m_socketStream = adoptPtr(factory->createSocketStream(playerId));
-    ASSERT(m_socketStream);
-    m_socketStream->setListener(this);
 
     // Open the socket
     BlackBerry::Platform::NetworkRequest request;
-    request.setRequestUrl(url.string().latin1().data(), "CONNECT");
+    request.setRequestUrl(url.string(), "CONNECT");
+    m_socketStream = adoptPtr(factory->createNetworkStream(request, playerId));
+    ASSERT(m_socketStream);
 
-    m_socketStream->setRequest(request);
-
+    m_socketStream->setListener(this);
     m_socketStream->streamOpen();
 }
 
@@ -98,35 +95,15 @@ void SocketStreamHandle::platformClose()
     m_socketStream->streamClose();
 }
 
-void SocketStreamHandle::didReceiveAuthenticationChallenge(const AuthenticationChallenge&)
-{
-    notImplemented();
-}
-
-void SocketStreamHandle::receivedCredential(const AuthenticationChallenge&, const Credential&)
-{
-    notImplemented();
-}
-
-void SocketStreamHandle::receivedRequestToContinueWithoutCredential(const AuthenticationChallenge&)
-{
-    notImplemented();
-}
-
-void SocketStreamHandle::receivedCancellation(const AuthenticationChallenge&)
-{
-    notImplemented();
-}
-
 // FilterStream interface
 
-void SocketStreamHandle::notifyStatusReceived(int status, const char* message)
+void SocketStreamHandle::notifyStatusReceived(int status, const BlackBerry::Platform::String& message)
 {
     ASSERT(m_client);
 
     // The client can close the handle, potentially removing the last reference.
     RefPtr<SocketStreamHandle> protect(this);
-
+    m_status = status;
     if (FilterStream::StatusSuccess != status)
         m_client->didFailSocketStream(this, SocketStreamError(status));
     else {
@@ -155,6 +132,9 @@ void SocketStreamHandle::notifyClose(int status)
 
     // The client can close the handle, potentially removing the last reference.
     RefPtr<SocketStreamHandle> protect(this);
+
+    if (status < 0 || (400 <= status && status < 600))
+        m_status = status;
 
     if (FilterStream::StatusSuccess != status)
         m_client->didFailSocketStream(this, SocketStreamError(status));

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2012 Apple Inc. All rights reserved.
  * Copyright (C) 2009, 2010 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,23 +34,25 @@
 #include "Editor.h"
 #include "HTMLElement.h"
 #include "HTMLNames.h"
+#include "HTMLTemplateElement.h"
 #include "KURL.h"
 #include "ProcessingInstruction.h"
+#include "XLinkNames.h"
 #include "XMLNSNames.h"
-#include <wtf/text/StringBuilder.h>
+#include "XMLNames.h"
 #include <wtf/unicode/CharacterNames.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-void appendCharactersReplacingEntities(StringBuilder& out, const UChar* content, size_t length, EntityMask entityMask)
+void MarkupAccumulator::appendCharactersReplacingEntities(StringBuilder& result, const String& source, unsigned offset, unsigned length, EntityMask entityMask)
 {
-    DEFINE_STATIC_LOCAL(const String, ampReference, ("&amp;"));
-    DEFINE_STATIC_LOCAL(const String, ltReference, ("&lt;"));
-    DEFINE_STATIC_LOCAL(const String, gtReference, ("&gt;"));
-    DEFINE_STATIC_LOCAL(const String, quotReference, ("&quot;"));
-    DEFINE_STATIC_LOCAL(const String, nbspReference, ("&nbsp;"));
+    DEFINE_STATIC_LOCAL(const String, ampReference, (ASCIILiteral("&amp;")));
+    DEFINE_STATIC_LOCAL(const String, ltReference, (ASCIILiteral("&lt;")));
+    DEFINE_STATIC_LOCAL(const String, gtReference, (ASCIILiteral("&gt;")));
+    DEFINE_STATIC_LOCAL(const String, quotReference, (ASCIILiteral("&quot;")));
+    DEFINE_STATIC_LOCAL(const String, nbspReference, (ASCIILiteral("&nbsp;")));
 
     static const EntityDescription entityMaps[] = {
         { '&', ampReference, EntityAmp },
@@ -60,18 +62,42 @@ void appendCharactersReplacingEntities(StringBuilder& out, const UChar* content,
         { noBreakSpace, nbspReference, EntityNbsp },
     };
 
-    size_t positionAfterLastEntity = 0;
-    for (size_t i = 0; i < length; ++i) {
-        for (size_t m = 0; m < WTF_ARRAY_LENGTH(entityMaps); ++m) {
-            if (content[i] == entityMaps[m].entity && entityMaps[m].mask & entityMask) {
-                out.append(content + positionAfterLastEntity, i - positionAfterLastEntity);
-                out.append(entityMaps[m].reference);
-                positionAfterLastEntity = i + 1;
-                break;
+    if (!(offset + length))
+        return;
+
+    ASSERT(offset + length <= source.length());
+
+    if (source.is8Bit()) {
+        const LChar* text = source.characters8() + offset;
+
+        size_t positionAfterLastEntity = 0;
+        for (size_t i = 0; i < length; ++i) {
+            for (size_t entityIndex = 0; entityIndex < WTF_ARRAY_LENGTH(entityMaps); ++entityIndex) {
+                if (text[i] == entityMaps[entityIndex].entity && entityMaps[entityIndex].mask & entityMask) {
+                    result.append(text + positionAfterLastEntity, i - positionAfterLastEntity);
+                    result.append(entityMaps[entityIndex].reference);
+                    positionAfterLastEntity = i + 1;
+                    break;
+                }
             }
         }
+        result.append(text + positionAfterLastEntity, length - positionAfterLastEntity);
+    } else {
+        const UChar* text = source.characters16() + offset;
+
+        size_t positionAfterLastEntity = 0;
+        for (size_t i = 0; i < length; ++i) {
+            for (size_t entityIndex = 0; entityIndex < WTF_ARRAY_LENGTH(entityMaps); ++entityIndex) {
+                if (text[i] == entityMaps[entityIndex].entity && entityMaps[entityIndex].mask & entityMask) {
+                    result.append(text + positionAfterLastEntity, i - positionAfterLastEntity);
+                    result.append(entityMaps[entityIndex].reference);
+                    positionAfterLastEntity = i + 1;
+                    break;
+                }
+            }
+        }
+        result.append(text + positionAfterLastEntity, length - positionAfterLastEntity);
     }
-    out.append(content + positionAfterLastEntity, length - positionAfterLastEntity);
 }
 
 MarkupAccumulator::MarkupAccumulator(Vector<Node*>* nodes, EAbsoluteURLs resolveUrlsMethod, const Range* range)
@@ -85,34 +111,48 @@ MarkupAccumulator::~MarkupAccumulator()
 {
 }
 
-String MarkupAccumulator::serializeNodes(Node* node, Node* nodeToSkip, EChildrenOnly childrenOnly)
+String MarkupAccumulator::serializeNodes(Node* targetNode, Node* nodeToSkip, EChildrenOnly childrenOnly)
 {
-    StringBuilder out;
-    serializeNodesWithNamespaces(node, nodeToSkip, childrenOnly, 0);
-    out.reserveCapacity(length());
-    concatenateMarkup(out);
-    return out.toString();
+    return serializeNodes(targetNode, nodeToSkip, childrenOnly, 0);
 }
 
-void MarkupAccumulator::serializeNodesWithNamespaces(Node* node, Node* nodeToSkip, EChildrenOnly childrenOnly, const Namespaces* namespaces)
+String MarkupAccumulator::serializeNodes(Node* targetNode, Node* nodeToSkip, EChildrenOnly childrenOnly, Vector<QualifiedName>* tagNamesToSkip)
 {
-    if (node == nodeToSkip)
+    serializeNodesWithNamespaces(targetNode, nodeToSkip, childrenOnly, 0, tagNamesToSkip);
+    return m_markup.toString();
+}
+
+void MarkupAccumulator::serializeNodesWithNamespaces(Node* targetNode, Node* nodeToSkip, EChildrenOnly childrenOnly, const Namespaces* namespaces, Vector<QualifiedName>* tagNamesToSkip)
+{
+    if (targetNode == nodeToSkip)
         return;
+    
+    if (tagNamesToSkip) {
+        for (size_t i = 0; i < tagNamesToSkip->size(); ++i) {
+            if (targetNode->hasTagName(tagNamesToSkip->at(i)))
+                return;
+        }
+    }
 
     Namespaces namespaceHash;
     if (namespaces)
         namespaceHash = *namespaces;
 
     if (!childrenOnly)
-        appendStartTag(node, &namespaceHash);
+        appendStartTag(targetNode, &namespaceHash);
 
-    if (!(node->document()->isHTMLDocument() && elementCannotHaveEndTag(node))) {
-        for (Node* current = node->firstChild(); current; current = current->nextSibling())
-            serializeNodesWithNamespaces(current, nodeToSkip, IncludeNode, &namespaceHash);
+    if (!(targetNode->document()->isHTMLDocument() && elementCannotHaveEndTag(targetNode))) {
+#if ENABLE(TEMPLATE_ELEMENT)
+        Node* current = targetNode->hasTagName(templateTag) ? toHTMLTemplateElement(targetNode)->content()->firstChild() : targetNode->firstChild();
+#else
+        Node* current = targetNode->firstChild();
+#endif
+        for ( ; current; current = current->nextSibling())
+            serializeNodesWithNamespaces(current, nodeToSkip, IncludeNode, &namespaceHash, tagNamesToSkip);
     }
 
     if (!childrenOnly)
-        appendEndTag(node);
+        appendEndTag(targetNode);
 }
 
 String MarkupAccumulator::resolveURLIfNeeded(const Element* element, const String& urlString) const
@@ -134,23 +174,19 @@ String MarkupAccumulator::resolveURLIfNeeded(const Element* element, const Strin
 
 void MarkupAccumulator::appendString(const String& string)
 {
-    m_succeedingMarkup.append(string);
+    m_markup.append(string);
 }
 
 void MarkupAccumulator::appendStartTag(Node* node, Namespaces* namespaces)
 {
-    StringBuilder markup;
-    appendStartMarkup(markup, node, namespaces);
-    appendString(markup.toString());
+    appendStartMarkup(m_markup, node, namespaces);
     if (m_nodes)
         m_nodes->append(node);
 }
 
 void MarkupAccumulator::appendEndTag(Node* node)
 {
-    StringBuilder markup;
-    appendEndMarkup(markup, node);
-    appendString(markup.toString());
+    appendEndMarkup(m_markup, node);
 }
 
 size_t MarkupAccumulator::totalLength(const Vector<String>& strings)
@@ -161,18 +197,14 @@ size_t MarkupAccumulator::totalLength(const Vector<String>& strings)
     return length;
 }
 
-// FIXME: This is a very inefficient way of accumulating the markup.
-// We're converting results of appendStartMarkup and appendEndMarkup from StringBuilder to String
-// and then back to StringBuilder and again to String here.
-void MarkupAccumulator::concatenateMarkup(StringBuilder& out)
+void MarkupAccumulator::concatenateMarkup(StringBuilder& result)
 {
-    for (size_t i = 0; i < m_succeedingMarkup.size(); ++i)
-        out.append(m_succeedingMarkup[i]);
+    result.append(m_markup);
 }
 
 void MarkupAccumulator::appendAttributeValue(StringBuilder& result, const String& attribute, bool documentIsHTML)
 {
-    appendCharactersReplacingEntities(result, attribute.characters(), attribute.length(),
+    appendCharactersReplacingEntities(result, attribute, 0, attribute.length(),
         documentIsHTML ? EntityMaskInHTMLAttributeValue : EntityMaskInAttributeValue);
 }
 
@@ -182,15 +214,15 @@ void MarkupAccumulator::appendCustomAttributes(StringBuilder&, Element*, Namespa
 
 void MarkupAccumulator::appendQuotedURLAttributeValue(StringBuilder& result, const Element* element, const Attribute& attribute)
 {
-    ASSERT(element->isURLAttribute(const_cast<Attribute*>(&attribute)));
+    ASSERT(element->isURLAttribute(attribute));
     const String resolvedURLString = resolveURLIfNeeded(element, attribute.value());
-    UChar quoteChar = '\"';
+    UChar quoteChar = '"';
     String strippedURLString = resolvedURLString.stripWhiteSpace();
     if (protocolIsJavaScript(strippedURLString)) {
         // minimal escaping for javascript urls
         if (strippedURLString.contains('"')) {
             if (strippedURLString.contains('\''))
-                strippedURLString.replace('\"', "&quot;");
+                strippedURLString.replaceWithLiteral('"', "&quot;");
             else
                 quoteChar = '\'';
         }
@@ -206,24 +238,23 @@ void MarkupAccumulator::appendQuotedURLAttributeValue(StringBuilder& result, con
     result.append(quoteChar);
 }
 
-void MarkupAccumulator::appendNodeValue(StringBuilder& out, const Node* node, const Range* range, EntityMask entityMask)
+void MarkupAccumulator::appendNodeValue(StringBuilder& result, const Node* node, const Range* range, EntityMask entityMask)
 {
-    String str = node->nodeValue();
-    const UChar* characters = str.characters();
-    size_t length = str.length();
+    const String str = node->nodeValue();
+    unsigned length = str.length();
+    unsigned start = 0;
 
     if (range) {
         ExceptionCode ec;
         if (node == range->endContainer(ec))
             length = range->endOffset(ec);
         if (node == range->startContainer(ec)) {
-            size_t start = range->startOffset(ec);
-            characters += start;
+            start = range->startOffset(ec);
             length -= start;
         }
     }
 
-    appendCharactersReplacingEntities(out, characters, length, entityMask);
+    appendCharactersReplacingEntities(result, str, start, length, entityMask);
 }
 
 bool MarkupAccumulator::shouldAddNamespaceElement(const Element* element)
@@ -233,7 +264,7 @@ bool MarkupAccumulator::shouldAddNamespaceElement(const Element* element)
     if (prefix.isEmpty())
         return !element->hasAttribute(xmlnsAtom);
 
-    DEFINE_STATIC_LOCAL(String, xmlnsWithColon, ("xmlns:"));
+    DEFINE_STATIC_LOCAL(String, xmlnsWithColon, (ASCIILiteral("xmlns:")));
     return !element->hasAttribute(xmlnsWithColon + prefix);
 }
 
@@ -246,13 +277,13 @@ bool MarkupAccumulator::shouldAddNamespaceAttribute(const Attribute& attribute, 
         namespaces.set(emptyAtom.impl(), attribute.value().impl());
         return false;
     }
-    
+
     QualifiedName xmlnsPrefixAttr(xmlnsAtom, attribute.localName(), XMLNSNames::xmlnsNamespaceURI);
     if (attribute.name() == xmlnsPrefixAttr) {
         namespaces.set(attribute.localName().impl(), attribute.value().impl());
         return false;
     }
-    
+
     return true;
 }
 
@@ -261,7 +292,7 @@ void MarkupAccumulator::appendNamespace(StringBuilder& result, const AtomicStrin
     namespaces.checkConsistency();
     if (namespaceURI.isEmpty())
         return;
-        
+
     // Use emptyAtoms's impl() for both null and empty strings since the HashMap can't handle 0 as a key
     AtomicStringImpl* pre = prefix.isEmpty() ? emptyAtom.impl() : prefix.impl();
     AtomicStringImpl* foundNS = namespaces.get(pre);
@@ -286,24 +317,47 @@ EntityMask MarkupAccumulator::entityMaskForText(Text* text) const
     const QualifiedName* parentName = 0;
     if (text->parentElement())
         parentName = &static_cast<Element*>(text->parentElement())->tagQName();
-    
+
     if (parentName && (*parentName == scriptTag || *parentName == styleTag || *parentName == xmpTag))
         return EntityMaskInCDATA;
 
     return text->document()->isHTMLDocument() ? EntityMaskInHTMLPCDATA : EntityMaskInPCDATA;
 }
 
-void MarkupAccumulator::appendText(StringBuilder& out, Text* text)
+void MarkupAccumulator::appendText(StringBuilder& result, Text* text)
 {
-    appendNodeValue(out, text, m_range, entityMaskForText(text));
+    appendNodeValue(result, text, m_range, entityMaskForText(text));
 }
 
-void MarkupAccumulator::appendComment(StringBuilder& out, const String& comment)
+void MarkupAccumulator::appendComment(StringBuilder& result, const String& comment)
 {
     // FIXME: Comment content is not escaped, but XMLSerializer (and possibly other callers) should raise an exception if it includes "-->".
-    out.append("<!--");
-    out.append(comment);
-    out.append("-->");
+    result.appendLiteral("<!--");
+    result.append(comment);
+    result.appendLiteral("-->");
+}
+
+void MarkupAccumulator::appendXMLDeclaration(StringBuilder& result, const Document* document)
+{
+    if (!document->hasXMLDeclaration())
+        return;
+
+    result.appendLiteral("<?xml version=\"");
+    result.append(document->xmlVersion());
+    const String& encoding = document->xmlEncoding();
+    if (!encoding.isEmpty()) {
+        result.appendLiteral("\" encoding=\"");
+        result.append(encoding);
+    }
+    if (document->xmlStandaloneStatus() != Document::StandaloneUnspecified) {
+        result.appendLiteral("\" standalone=\"");
+        if (document->xmlStandalone())
+            result.appendLiteral("yes");
+        else
+            result.appendLiteral("no");
+    }
+
+    result.appendLiteral("\"?>");
 }
 
 void MarkupAccumulator::appendDocumentType(StringBuilder& result, const DocumentType* n)
@@ -311,104 +365,128 @@ void MarkupAccumulator::appendDocumentType(StringBuilder& result, const Document
     if (n->name().isEmpty())
         return;
 
-    result.append("<!DOCTYPE ");
+    result.appendLiteral("<!DOCTYPE ");
     result.append(n->name());
     if (!n->publicId().isEmpty()) {
-        result.append(" PUBLIC \"");
+        result.appendLiteral(" PUBLIC \"");
         result.append(n->publicId());
-        result.append("\"");
+        result.append('"');
         if (!n->systemId().isEmpty()) {
-            result.append(" \"");
+            result.append(' ');
+            result.append('"');
             result.append(n->systemId());
-            result.append("\"");
+            result.append('"');
         }
     } else if (!n->systemId().isEmpty()) {
-        result.append(" SYSTEM \"");
+        result.appendLiteral(" SYSTEM \"");
         result.append(n->systemId());
-        result.append("\"");
+        result.append('"');
     }
     if (!n->internalSubset().isEmpty()) {
-        result.append(" [");
+        result.append(' ');
+        result.append('[');
         result.append(n->internalSubset());
-        result.append("]");
+        result.append(']');
     }
-    result.append(">");
+    result.append('>');
 }
 
-void MarkupAccumulator::appendProcessingInstruction(StringBuilder& out, const String& target, const String& data)
+void MarkupAccumulator::appendProcessingInstruction(StringBuilder& result, const String& target, const String& data)
 {
     // FIXME: PI data is not escaped, but XMLSerializer (and possibly other callers) this should raise an exception if it includes "?>".
-    out.append("<?");
-    out.append(target);
-    out.append(" ");
-    out.append(data);
-    out.append("?>");
+    result.append('<');
+    result.append('?');
+    result.append(target);
+    result.append(' ');
+    result.append(data);
+    result.append('?');
+    result.append('>');
 }
 
-void MarkupAccumulator::appendElement(StringBuilder& out, Element* element, Namespaces* namespaces)
+void MarkupAccumulator::appendElement(StringBuilder& result, Element* element, Namespaces* namespaces)
 {
-    appendOpenTag(out, element, namespaces);
+    appendOpenTag(result, element, namespaces);
 
-    NamedNodeMap* attributes = element->attributes();
-    unsigned length = attributes->length();
-    for (unsigned int i = 0; i < length; i++)
-        appendAttribute(out, element, *attributes->attributeItem(i), namespaces);
+    if (element->hasAttributes()) {
+        unsigned length = element->attributeCount();
+        for (unsigned int i = 0; i < length; i++)
+            appendAttribute(result, element, *element->attributeItem(i), namespaces);
+    }
 
     // Give an opportunity to subclasses to add their own attributes.
-    appendCustomAttributes(out, element, namespaces);
+    appendCustomAttributes(result, element, namespaces);
 
-    appendCloseTag(out, element);
+    appendCloseTag(result, element);
 }
 
-void MarkupAccumulator::appendOpenTag(StringBuilder& out, Element* element, Namespaces* namespaces)
+void MarkupAccumulator::appendOpenTag(StringBuilder& result, Element* element, Namespaces* namespaces)
 {
-    out.append('<');
-    out.append(element->nodeNamePreservingCase());
+    result.append('<');
+    result.append(element->nodeNamePreservingCase());
     if (!element->document()->isHTMLDocument() && namespaces && shouldAddNamespaceElement(element))
-        appendNamespace(out, element->prefix(), element->namespaceURI(), *namespaces);    
+        appendNamespace(result, element->prefix(), element->namespaceURI(), *namespaces);
 }
 
-void MarkupAccumulator::appendCloseTag(StringBuilder& out, Element* element)
+void MarkupAccumulator::appendCloseTag(StringBuilder& result, Element* element)
 {
     if (shouldSelfClose(element)) {
         if (element->isHTMLElement())
-            out.append(' '); // XHTML 1.0 <-> HTML compatibility.
-        out.append('/');
+            result.append(' '); // XHTML 1.0 <-> HTML compatibility.
+        result.append('/');
     }
-    out.append('>');
+    result.append('>');
 }
 
-void MarkupAccumulator::appendAttribute(StringBuilder& out, Element* element, const Attribute& attribute, Namespaces* namespaces)
+static inline bool attributeIsInSerializedNamespace(const Attribute& attribute)
+{
+    return attribute.namespaceURI() == XMLNames::xmlNamespaceURI
+        || attribute.namespaceURI() == XLinkNames::xlinkNamespaceURI
+        || attribute.namespaceURI() == XMLNSNames::xmlnsNamespaceURI;
+}
+
+void MarkupAccumulator::appendAttribute(StringBuilder& result, Element* element, const Attribute& attribute, Namespaces* namespaces)
 {
     bool documentIsHTML = element->document()->isHTMLDocument();
 
-    out.append(' ');
+    result.append(' ');
 
-    if (documentIsHTML)
-        out.append(attribute.name().localName());
-    else
-        out.append(attribute.name().toString());
-
-    out.append('=');
-
-    if (element->isURLAttribute(const_cast<Attribute*>(&attribute)))
-        appendQuotedURLAttributeValue(out, element, attribute);
+    if (documentIsHTML && !attributeIsInSerializedNamespace(attribute))
+        result.append(attribute.name().localName());
     else {
-        out.append('\"');
-        appendAttributeValue(out, attribute.value(), documentIsHTML);
-        out.append('\"');
+        QualifiedName prefixedName = attribute.name();
+        if (attribute.namespaceURI() == XLinkNames::xlinkNamespaceURI) {
+            if (!attribute.prefix())
+                prefixedName.setPrefix(xlinkAtom);
+        } else if (attribute.namespaceURI() == XMLNames::xmlNamespaceURI) {
+            if (!attribute.prefix())
+                prefixedName.setPrefix(xmlAtom);
+        } else if (attribute.namespaceURI() == XMLNSNames::xmlnsNamespaceURI) {
+            if (attribute.name() != XMLNSNames::xmlnsAttr && !attribute.prefix())
+                prefixedName.setPrefix(xmlnsAtom);
+        }
+        result.append(prefixedName.toString());
+    }
+
+    result.append('=');
+
+    if (element->isURLAttribute(attribute))
+        appendQuotedURLAttributeValue(result, element, attribute);
+    else {
+        result.append('"');
+        appendAttributeValue(result, attribute.value(), documentIsHTML);
+        result.append('"');
     }
 
     if (!documentIsHTML && namespaces && shouldAddNamespaceAttribute(attribute, *namespaces))
-        appendNamespace(out, attribute.prefix(), attribute.namespaceURI(), *namespaces);
+        appendNamespace(result, attribute.prefix(), attribute.namespaceURI(), *namespaces);
 }
 
-void MarkupAccumulator::appendCDATASection(StringBuilder& out, const String& section)
+void MarkupAccumulator::appendCDATASection(StringBuilder& result, const String& section)
 {
     // FIXME: CDATA content is not escaped, but XMLSerializer (and possibly other callers) should raise an exception if it includes "]]>".
-    out.append("<![CDATA[");
-    out.append(section);
-    out.append("]]>");
+    result.appendLiteral("<![CDATA[");
+    result.append(section);
+    result.appendLiteral("]]>");
 }
 
 void MarkupAccumulator::appendStartMarkup(StringBuilder& result, const Node* node, Namespaces* namespaces)
@@ -418,12 +496,14 @@ void MarkupAccumulator::appendStartMarkup(StringBuilder& result, const Node* nod
 
     switch (node->nodeType()) {
     case Node::TEXT_NODE:
-        appendText(result, static_cast<Text*>(const_cast<Node*>(node)));
+        appendText(result, toText(const_cast<Node*>(node)));
         break;
     case Node::COMMENT_NODE:
         appendComment(result, static_cast<const Comment*>(node)->data());
         break;
     case Node::DOCUMENT_NODE:
+        appendXMLDeclaration(result, static_cast<const Document*>(node));
+        break;
     case Node::DOCUMENT_FRAGMENT_NODE:
         break;
     case Node::DOCUMENT_TYPE_NODE:
@@ -443,7 +523,6 @@ void MarkupAccumulator::appendStartMarkup(StringBuilder& result, const Node* nod
     case Node::ENTITY_REFERENCE_NODE:
     case Node::NOTATION_NODE:
     case Node::XPATH_NAMESPACE_NODE:
-    case Node::SHADOW_ROOT_NODE:
         ASSERT_NOT_REACHED();
         break;
     }
@@ -469,7 +548,7 @@ bool MarkupAccumulator::elementCannotHaveEndTag(const Node* node)
 {
     if (!node->isHTMLElement())
         return false;
-    
+
     // FIXME: ieForbidsInsertHTML may not be the right function to call here
     // ieForbidsInsertHTML is used to disallow setting innerHTML/outerHTML
     // or createContextualFragment.  It does not necessarily align with

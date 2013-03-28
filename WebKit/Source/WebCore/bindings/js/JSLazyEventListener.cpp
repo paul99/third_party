@@ -80,7 +80,7 @@ JSObject* JSLazyEventListener::initializeJSFunction(ScriptExecutionContext* exec
     if (!document->frame())
         return 0;
 
-    if (!document->contentSecurityPolicy()->allowInlineEventHandlers())
+    if (!document->contentSecurityPolicy()->allowInlineEventHandlers(m_sourceURL, m_position.m_line))
         return 0;
 
     ScriptController* script = document->frame()->script();
@@ -94,28 +94,28 @@ JSObject* JSLazyEventListener::initializeJSFunction(ScriptExecutionContext* exec
     ExecState* exec = globalObject->globalExec();
 
     MarkedArgumentBuffer args;
-    args.append(jsNontrivialString(exec, stringToUString(m_eventParameterName)));
-    args.append(jsString(exec, m_code));
+    args.append(jsNontrivialString(exec, m_eventParameterName));
+    args.append(jsStringWithCache(exec, m_code));
 
-    JSObject* jsFunction = constructFunctionSkippingEvalEnabledCheck(exec, exec->lexicalGlobalObject(), args, Identifier(exec, stringToUString(m_functionName)), stringToUString(m_sourceURL), m_position); // FIXME: is globalExec ok?
+    JSObject* jsFunction = constructFunctionSkippingEvalEnabledCheck(exec, exec->lexicalGlobalObject(), args, Identifier(exec, m_functionName), m_sourceURL, m_position); // FIXME: is globalExec ok?
     if (exec->hadException()) {
         reportCurrentException(exec);
         exec->clearException();
         return 0;
     }
 
-    JSFunction* listenerAsFunction = static_cast<JSFunction*>(jsFunction);
+    JSFunction* listenerAsFunction = jsCast<JSFunction*>(jsFunction);
     if (m_originalNode) {
         if (!wrapper()) {
             // Ensure that 'node' has a JavaScript wrapper to mark the event listener we're creating.
-            JSLock lock(SilenceAssertionsOnly);
+            JSLockHolder lock(exec);
             // FIXME: Should pass the global object associated with the node
             setWrapper(exec->globalData(), asObject(toJS(exec, globalObject, m_originalNode)));
         }
 
         // Add the event's home element to the scope
         // (and the document, and the form - see JSHTMLElement::eventHandlerScope)
-        listenerAsFunction->setScope(exec->globalData(), static_cast<JSNode*>(wrapper())->pushEventHandlerScope(exec, listenerAsFunction->scope()));
+        listenerAsFunction->setScope(exec->globalData(), jsCast<JSNode*>(wrapper())->pushEventHandlerScope(exec, listenerAsFunction->scope()));
     }
 
     // Since we only parse once, there's no need to keep data used for parsing around anymore.

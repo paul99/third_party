@@ -47,10 +47,14 @@ InsertIntoTextNodeCommand::InsertIntoTextNodeCommand(PassRefPtr<Text> node, unsi
 
 void InsertIntoTextNodeCommand::doApply()
 {
+    bool passwordEchoEnabled = document()->settings() && document()->settings()->passwordEchoEnabled();
+    if (passwordEchoEnabled)
+        document()->updateLayoutIgnorePendingStylesheets();
+
     if (!m_node->rendererIsEditable())
         return;
 
-    if (document()->settings() && document()->settings()->passwordEchoEnabled()) {
+    if (passwordEchoEnabled) {
         RenderText* renderText = toRenderText(m_node->renderer());
         if (renderText && renderText->isSecure())
             renderText->momentarilyRevealLastTypedCharacter(m_offset + m_text.length() - 1);
@@ -60,7 +64,7 @@ void InsertIntoTextNodeCommand::doApply()
     m_node->insertData(m_offset, m_text, ec);
 
     if (AXObjectCache::accessibilityEnabled())
-        document()->axObjectCache()->nodeTextChangeNotification(m_node->renderer(), AXObjectCache::AXTextInserted, m_offset, m_text);
+        document()->axObjectCache()->nodeTextChangeNotification(m_node.get(), AXObjectCache::AXTextInserted, m_offset, m_text);
 }
 
 void InsertIntoTextNodeCommand::doUnapply()
@@ -70,7 +74,7 @@ void InsertIntoTextNodeCommand::doUnapply()
         
     // Need to notify this before actually deleting the text
     if (AXObjectCache::accessibilityEnabled())
-        document()->axObjectCache()->nodeTextChangeNotification(m_node->renderer(), AXObjectCache::AXTextDeleted, m_offset, m_text);
+        document()->axObjectCache()->nodeTextChangeNotification(m_node.get(), AXObjectCache::AXTextDeleted, m_offset, m_text);
 
     ExceptionCode ec;
     m_node->deleteData(m_offset, m_text.length(), ec);

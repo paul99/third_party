@@ -43,6 +43,38 @@ using namespace WebCore;
 
 namespace WebKit {
 
+struct SameSizeAsWebInputEvent {
+    int inputData[5];
+};
+
+struct SameSizeAsWebKeyboardEvent : public SameSizeAsWebInputEvent {
+    int keyboardData[12];
+};
+
+struct SameSizeAsWebMouseEvent : public SameSizeAsWebInputEvent {
+    int mouseData[10];
+};
+
+struct SameSizeAsWebMouseWheelEvent : public SameSizeAsWebMouseEvent {
+    int mousewheelData[8];
+};
+
+struct SameSizeAsWebGestureEvent : public SameSizeAsWebInputEvent {
+    int gestureData[9];
+};
+
+struct SameSizeAsWebTouchEvent : public SameSizeAsWebInputEvent {
+    WebTouchPoint touchPoints[3 * WebTouchEvent::touchesLengthCap];
+    int touchData[3];
+};
+
+COMPILE_ASSERT(sizeof(WebInputEvent) == sizeof(SameSizeAsWebInputEvent), WebInputEvent_has_gaps);
+COMPILE_ASSERT(sizeof(WebKeyboardEvent) == sizeof(SameSizeAsWebKeyboardEvent), WebKeyboardEvent_has_gaps);
+COMPILE_ASSERT(sizeof(WebMouseEvent) == sizeof(SameSizeAsWebMouseEvent), WebMouseEvent_has_gaps);
+COMPILE_ASSERT(sizeof(WebMouseWheelEvent) == sizeof(SameSizeAsWebMouseWheelEvent), WebMouseWheelEvent_has_gaps);
+COMPILE_ASSERT(sizeof(WebGestureEvent) == sizeof(SameSizeAsWebGestureEvent), WebGestureEvent_has_gaps);
+COMPILE_ASSERT(sizeof(WebTouchEvent) == sizeof(SameSizeAsWebTouchEvent), WebTouchEvent_has_gaps);
+
 static const char* staticKeyIdentifiers(unsigned short keyCode)
 {
     switch (keyCode) {
@@ -168,6 +200,43 @@ void WebKeyboardEvent::setKeyIdentifierFromWindowsKeyCode()
         keyIdentifier[sizeof(keyIdentifier) - 1] = '\0';
     } else
         snprintf(keyIdentifier, sizeof(keyIdentifier), "U+%04X", toupper(windowsKeyCode));
+}
+
+// static
+int WebKeyboardEvent::windowsKeyCodeWithoutLocation(int keycode)
+{
+    switch (keycode) {
+    case VK_LCONTROL:
+    case VK_RCONTROL:
+        return VK_CONTROL;
+    case VK_LSHIFT:
+    case VK_RSHIFT:
+        return VK_SHIFT;
+    case VK_LMENU:
+    case VK_RMENU:
+        return VK_MENU;
+    default:
+        return keycode;
+    }
+}
+
+// static
+int WebKeyboardEvent::locationModifiersFromWindowsKeyCode(int keycode)
+{
+    switch (keycode) {
+    case VK_LCONTROL:
+    case VK_LSHIFT:
+    case VK_LMENU:
+    case VK_LWIN:
+        return IsLeft;
+    case VK_RCONTROL:
+    case VK_RSHIFT:
+    case VK_RMENU:
+    case VK_RWIN:
+        return IsRight;
+    default:
+        return 0;
+    }
 }
 
 } // namespace WebKit

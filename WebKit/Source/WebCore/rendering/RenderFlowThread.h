@@ -1,5 +1,5 @@
 /*
- * Copyright 2011 Adobe Systems Incorporated. All Rights Reserved.
+ * Copyright (C) 2011 Adobe Systems Incorporated. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,7 +13,7 @@
  *    disclaimer in the documentation and/or other materials
  *    provided with the distribution.
  * 
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER “AS IS” AND ANY
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER "AS IS" AND ANY
  * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
  * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
@@ -36,17 +36,13 @@
 #include <wtf/ListHashSet.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/UnusedParam.h>
-#include <wtf/text/AtomicString.h>
 
 namespace WebCore {
 
 class RenderFlowThread;
 class RenderStyle;
 class RenderRegion;
-class WebKitNamedFlow;
 
-typedef ListHashSet<RenderFlowThread*> RenderFlowThreadList;
-typedef HashCountedSet<RenderFlowThread*> RenderFlowThreadCountedSet;
 typedef ListHashSet<RenderRegion*> RenderRegionList;
 
 // RenderFlowThread is used to collect all the render objects that participate in a
@@ -57,59 +53,51 @@ typedef ListHashSet<RenderRegion*> RenderRegionList;
 
 class RenderFlowThread: public RenderBlock {
 public:
-    RenderFlowThread(Node*, const AtomicString& flowThread);
-
+    RenderFlowThread(Node*);
+    virtual ~RenderFlowThread() { };
+    
     virtual bool isRenderFlowThread() const { return true; }
 
     virtual void layout();
 
-    AtomicString flowThread() const { return m_flowThread; }
-
-    // Always create a RenderLayer for the RenderFlowThread, so that we 
-    // can easily avoid to draw it's children directly.
+    // Always create a RenderLayer for the RenderFlowThread so that we 
+    // can easily avoid drawing the children directly.
     virtual bool requiresLayer() const { return true; }
-
-    RenderObject* nextRendererForNode(Node*) const;
-    RenderObject* previousRendererForNode(Node*) const;
     
-    void addFlowChild(RenderObject* newChild, RenderObject* beforeChild = 0);
-    void removeFlowChild(RenderObject*);
     void removeFlowChildInfo(RenderObject*);
-    bool hasChildren() const { return !m_flowThreadChildList.isEmpty(); }
 #ifndef NDEBUG
-    bool hasChild(RenderObject* child) const { return m_flowThreadChildList.contains(child); }
     bool hasChildInfo(RenderObject* child) const { return child && child->isBox() && m_regionRangeMap.contains(toRenderBox(child)); }
 #endif
 
-    void addRegionToThread(RenderRegion*);
-    void removeRegionFromThread(RenderRegion*);
+    virtual void addRegionToThread(RenderRegion*);
+    virtual void removeRegionFromThread(RenderRegion*);
     const RenderRegionList& renderRegionList() const { return m_regionList; }
 
-    void computeLogicalWidth();
-    void computeLogicalHeight();
+    virtual void updateLogicalWidth() OVERRIDE;
+    virtual void computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues&) const OVERRIDE;
 
-    void paintIntoRegion(PaintInfo&, RenderRegion*, const LayoutPoint& paintOffset);
-    bool hitTestRegion(RenderRegion*, const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset);
+    void paintFlowThreadPortionInRegion(PaintInfo&, RenderRegion*, LayoutRect flowThreadPortionRect, LayoutRect flowThreadPortionOverflowRect, const LayoutPoint&) const;
+    bool hitTestFlowThreadPortionInRegion(RenderRegion*, LayoutRect flowThreadPortionRect, LayoutRect flowThreadPortionOverflowRect, const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset) const;
 
     bool hasRegions() const { return m_regionList.size(); }
-    bool hasValidRegions() const { ASSERT(!m_regionsInvalidated); return m_hasValidRegions; }
+    // Check if the content is flown into at least a region with region styling rules.
+    bool hasRegionsWithStyling() const { return m_hasRegionsWithStyling; }
+    void checkRegionsWithStyling();
 
     void invalidateRegions() { m_regionsInvalidated = true; setNeedsLayout(true); }
-    bool hasValidRegionInfo() const { return !m_regionsInvalidated && hasValidRegions(); }
+    bool hasValidRegionInfo() const { return !m_regionsInvalidated && !m_regionList.isEmpty(); }
 
     static PassRefPtr<RenderStyle> createFlowThreadStyle(RenderStyle* parentStyle);
 
     void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
 
-    void pushDependencies(RenderFlowThreadList&);
+    void repaintRectangleInRegions(const LayoutRect&, bool immediate) const;
 
-    void repaintRectangleInRegions(const LayoutRect&, bool immediate);
-
-    LayoutUnit regionLogicalTopForLine(LayoutUnit position) const;
-    LayoutUnit regionLogicalWidthForLine(LayoutUnit position) const;
-    LayoutUnit regionLogicalHeightForLine(LayoutUnit position) const;
-    LayoutUnit regionRemainingLogicalHeightForLine(LayoutUnit position, PageBoundaryRule = IncludePageBoundary) const;
-    RenderRegion* renderRegionForLine(LayoutUnit position, bool extendLastRegion = false) const;
+    LayoutUnit pageLogicalTopForOffset(LayoutUnit) const;
+    LayoutUnit pageLogicalWidthForOffset(LayoutUnit) const;
+    LayoutUnit pageLogicalHeightForOffset(LayoutUnit) const;
+    LayoutUnit pageRemainingLogicalHeightForOffset(LayoutUnit, PageBoundaryRule = IncludePageBoundary) const;
+    RenderRegion* regionAtBlockOffset(LayoutUnit, bool extendLastRegion = false) const;
 
     bool regionsHaveUniformLogicalWidth() const { return m_regionsHaveUniformLogicalWidth; }
     bool regionsHaveUniformLogicalHeight() const { return m_regionsHaveUniformLogicalHeight; }
@@ -129,25 +117,43 @@ public:
     void setRegionRangeForBox(const RenderBox*, LayoutUnit offsetFromLogicalTopOfFirstPage);
     void getRegionRangeForBox(const RenderBox*, RenderRegion*& startRegion, RenderRegion*& endRegion) const;
 
-    void clearRenderBoxCustomStyle(const RenderBox*,
-                                      const RenderRegion* oldStartRegion = 0, const RenderRegion* oldEndRegion = 0,
-                                      const RenderRegion* newStartRegion = 0, const RenderRegion* newEndRegion = 0);
-    WebKitNamedFlow* ensureNamedFlow();
+    void clearRenderObjectCustomStyle(const RenderObject*,
+        const RenderRegion* oldStartRegion = 0, const RenderRegion* oldEndRegion = 0,
+        const RenderRegion* newStartRegion = 0, const RenderRegion* newEndRegion = 0);
+    
+    void computeOverflowStateForRegions(LayoutUnit oldClientAfterEdge);
 
-private:
-    virtual const char* renderName() const { return "RenderFlowThread"; }
+    bool overset() const { return m_overset; }
 
-    bool dependsOn(RenderFlowThread* otherRenderFlowThread) const;
-    void addDependencyOnFlowThread(RenderFlowThread*);
-    void removeDependencyOnFlowThread(RenderFlowThread*);
-    void checkInvalidRegions();
+    // Check if the object is in region and the region is part of this flow thread.
+    bool objectInFlowRegion(const RenderObject*, const RenderRegion*) const;
 
+    void resetRegionsOverrideLogicalContentHeight();
+    void markAutoLogicalHeightRegionsForLayout();
+
+    bool addForcedRegionBreak(LayoutUnit, RenderObject* breakChild, bool isBefore, LayoutUnit* offsetBreakAdjustment = 0);
+
+    bool pageLogicalHeightChanged() const { return m_pageLogicalHeightChanged; }
+
+#ifndef NDEBUG
+    unsigned autoLogicalHeightRegionsCount() const;
+#endif
+
+protected:
+    virtual const char* renderName() const = 0;
+
+    void updateRegionsFlowThreadPortionRect();
     bool shouldRepaint(const LayoutRect&) const;
+    bool regionInRange(const RenderRegion* targetRegion, const RenderRegion* startRegion, const RenderRegion* endRegion) const;
+    
+    void setDispatchRegionLayoutUpdateEvent(bool value) { m_dispatchRegionLayoutUpdateEvent = value; }
+    bool shouldDispatchRegionLayoutUpdateEvent() { return m_dispatchRegionLayoutUpdateEvent; }
+    
+    // Override if the flow thread implementation supports dispatching events when the flow layout is updated (e.g. for named flows)
+    virtual void dispatchRegionLayoutUpdateEvent() { m_dispatchRegionLayoutUpdateEvent = false; }
 
-    typedef ListHashSet<RenderObject*> FlowThreadChildList;
-    FlowThreadChildList m_flowThreadChildList;
+    void clearOverrideLogicalContentHeightInRegions(RenderRegion* startRegion = 0);
 
-    AtomicString m_flowThread;
     RenderRegionList m_regionList;
 
     class RenderRegionRange {
@@ -176,25 +182,21 @@ private:
         RenderRegion* m_endRegion;
     };
 
-    // Observer flow threads have invalid regions that depend on the state of this thread
-    // to re-validate their regions. Keeping a set of observer threads make it easy
-    // to notify them when a region was removed from this flow.
-    RenderFlowThreadCountedSet m_observerThreadsSet;
-
-    // Some threads need to have a complete layout before we layout this flow.
-    // That's because they contain a RenderRegion that should display this thread. The set makes it
-    // easy to sort the order of threads layout.
-    RenderFlowThreadCountedSet m_layoutBeforeThreadsSet;
-
     // A maps from RenderBox
     typedef HashMap<const RenderBox*, RenderRegionRange> RenderRegionRangeMap;
     RenderRegionRangeMap m_regionRangeMap;
 
-    bool m_hasValidRegions;
-    bool m_regionsInvalidated;
-    bool m_regionsHaveUniformLogicalWidth;
-    bool m_regionsHaveUniformLogicalHeight;
-    RefPtr<WebKitNamedFlow> m_namedFlow;
+    typedef HashMap<RenderObject*, RenderRegion*> RenderObjectToRegionMap;
+    RenderObjectToRegionMap m_breakBeforeToRegionMap;
+    RenderObjectToRegionMap m_breakAfterToRegionMap;
+
+    bool m_regionsInvalidated : 1;
+    bool m_regionsHaveUniformLogicalWidth : 1;
+    bool m_regionsHaveUniformLogicalHeight : 1;
+    bool m_overset : 1;
+    bool m_hasRegionsWithStyling : 1;
+    bool m_dispatchRegionLayoutUpdateEvent : 1;
+    bool m_pageLogicalHeightChanged : 1;
 };
 
 inline RenderFlowThread* toRenderFlowThread(RenderObject* object)
@@ -211,6 +213,15 @@ inline const RenderFlowThread* toRenderFlowThread(const RenderObject* object)
 
 // This will catch anyone doing an unnecessary cast.
 void toRenderFlowThread(const RenderFlowThread*);
+
+class CurrentRenderFlowThreadMaintainer {
+    WTF_MAKE_NONCOPYABLE(CurrentRenderFlowThreadMaintainer);
+public:
+    CurrentRenderFlowThreadMaintainer(RenderFlowThread*);
+    ~CurrentRenderFlowThreadMaintainer();
+private:
+    RenderFlowThread* m_renderFlowThread;
+};
 
 } // namespace WebCore
 

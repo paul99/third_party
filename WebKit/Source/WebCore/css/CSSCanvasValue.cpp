@@ -28,6 +28,8 @@
 
 #include "ImageBuffer.h"
 #include "RenderObject.h"
+#include "WebCoreMemoryInstrumentation.h"
+#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
@@ -39,9 +41,11 @@ CSSCanvasValue::~CSSCanvasValue()
 
 String CSSCanvasValue::customCssText() const
 {
-    String result = "-webkit-canvas(";
-    result += m_name  + ")";
-    return result;
+    StringBuilder result;
+    result.appendLiteral("-webkit-canvas(");
+    result.append(m_name);
+    result.append(')');
+    return result.toString();
 }
 
 void CSSCanvasValue::canvasChanged(HTMLCanvasElement*, const FloatRect& changedRect)
@@ -49,14 +53,14 @@ void CSSCanvasValue::canvasChanged(HTMLCanvasElement*, const FloatRect& changedR
     IntRect imageChangeRect = enclosingIntRect(changedRect);
     RenderObjectSizeCountMap::const_iterator end = clients().end();
     for (RenderObjectSizeCountMap::const_iterator curr = clients().begin(); curr != end; ++curr)
-        const_cast<RenderObject*>(curr->first)->imageChanged(static_cast<WrappedImagePtr>(this), &imageChangeRect);
+        const_cast<RenderObject*>(curr->key)->imageChanged(static_cast<WrappedImagePtr>(this), &imageChangeRect);
 }
 
 void CSSCanvasValue::canvasResized(HTMLCanvasElement*)
 {
     RenderObjectSizeCountMap::const_iterator end = clients().end();
     for (RenderObjectSizeCountMap::const_iterator curr = clients().begin(); curr != end; ++curr)
-        const_cast<RenderObject*>(curr->first)->imageChanged(static_cast<WrappedImagePtr>(this));
+        const_cast<RenderObject*>(curr->key)->imageChanged(static_cast<WrappedImagePtr>(this));
 }
 
 void CSSCanvasValue::canvasDestroyed(HTMLCanvasElement* element)
@@ -90,6 +94,14 @@ PassRefPtr<Image> CSSCanvasValue::image(RenderObject* renderer, const IntSize& /
     if (!elt || !elt->buffer())
         return 0;
     return elt->copiedImage();
+}
+
+void CSSCanvasValue::reportDescendantMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CSS);
+    CSSImageGeneratorValue::reportBaseClassMemoryUsage(memoryObjectInfo);
+    info.addMember(m_name);
+    info.addMember(m_element);
 }
 
 } // namespace WebCore

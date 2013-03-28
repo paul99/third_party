@@ -64,8 +64,11 @@ extern const buzz::StaticQName QN_JINGLE_CONTENT;
 extern const buzz::StaticQName QN_JINGLE_CONTENT_NAME;
 extern const buzz::StaticQName QN_JINGLE_CONTENT_MEDIA;
 extern const buzz::StaticQName QN_JINGLE_REASON;
+extern const buzz::StaticQName QN_JINGLE_DRAFT_GROUP;
+extern const buzz::StaticQName QN_JINGLE_DRAFT_GROUP_TYPE;
 extern const char JINGLE_CONTENT_MEDIA_AUDIO[];
 extern const char JINGLE_CONTENT_MEDIA_VIDEO[];
+extern const char JINGLE_CONTENT_MEDIA_DATA[];
 extern const char JINGLE_ACTION_SESSION_INITIATE[];
 extern const char JINGLE_ACTION_SESSION_INFO[];
 extern const char JINGLE_ACTION_SESSION_ACCEPT[];
@@ -115,10 +118,11 @@ extern const char LN_BANDWIDTH[];
 // these values being the same as the ones received.
 extern const char CN_AUDIO[];
 extern const char CN_VIDEO[];
+extern const char CN_DATA[];
 extern const char CN_OTHER[];
 // other SDP related strings
 // GN stands for group name
-extern const char GN_BUNDLE[];
+extern const char GROUP_TYPE_BUNDLE[];
 
 extern const char NS_JINGLE_RTP[];
 extern const buzz::StaticQName QN_JINGLE_RTP_CONTENT;
@@ -148,7 +152,7 @@ extern const buzz::StaticQName QN_CRYPTO_KEY_PARAMS;
 extern const buzz::StaticQName QN_CRYPTO_TAG;
 extern const buzz::StaticQName QN_CRYPTO_SESSION_PARAMS;
 
-// transports and candidates
+// Transports and candidates.
 extern const char LN_TRANSPORT[];
 extern const char LN_CANDIDATE[];
 extern const buzz::StaticQName QN_JINGLE_P2P_TRANSPORT;
@@ -162,11 +166,21 @@ extern const buzz::StaticQName QN_NETWORK;
 extern const buzz::StaticQName QN_GENERATION;
 extern const buzz::StaticQName QN_PRIORITY;
 extern const buzz::StaticQName QN_PROTOCOL;
-extern const char JINGLE_CANDIDATE_TYPE_PEER_STUN[];
-extern const char JINGLE_CANDIDATE_TYPE_SERVER_STUN[];
-extern const char JINGLE_CANDIDATE_NAME_RTP[];
-extern const char JINGLE_CANDIDATE_NAME_RTCP[];
+extern const char ICE_CANDIDATE_TYPE_PEER_STUN[];
+extern const char ICE_CANDIDATE_TYPE_SERVER_STUN[];
+extern const int ICE_UFRAG_LENGTH;
+extern const int ICE_PWD_LENGTH;
+extern const int ICE_CANDIDATE_COMPONENT_RTP;
+extern const int ICE_CANDIDATE_COMPONENT_RTCP;
+extern const int ICE_CANDIDATE_COMPONENT_DEFAULT;
 
+extern const buzz::StaticQName QN_FINGERPRINT;
+extern const buzz::StaticQName QN_FINGERPRINT_ALGORITHM;
+extern const buzz::StaticQName QN_FINGERPRINT_DIGEST;
+
+extern const char NS_JINGLE_ICE_UDP[];
+
+extern const char ICE_OPTION_GICE[];
 extern const char NS_GINGLE_P2P[];
 extern const buzz::StaticQName QN_GINGLE_P2P_TRANSPORT;
 extern const buzz::StaticQName QN_GINGLE_P2P_CANDIDATE;
@@ -177,10 +191,12 @@ extern const buzz::StaticQName QN_USERNAME;
 extern const buzz::StaticQName QN_PASSWORD;
 extern const buzz::StaticQName QN_PREFERENCE;
 extern const char GINGLE_CANDIDATE_TYPE_STUN[];
-extern const char GINGLE_CANDIDATE_NAME_RTP[];
-extern const char GINGLE_CANDIDATE_NAME_RTCP[];
-extern const char GINGLE_CANDIDATE_NAME_VIDEO_RTP[];
-extern const char GINGLE_CANDIDATE_NAME_VIDEO_RTCP[];
+extern const char GICE_CHANNEL_NAME_RTP[];
+extern const char GICE_CHANNEL_NAME_RTCP[];
+extern const char GICE_CHANNEL_NAME_VIDEO_RTP[];
+extern const char GICE_CHANNEL_NAME_VIDEO_RTCP[];
+extern const char GICE_CHANNEL_NAME_DATA_RTP[];
+extern const char GICE_CHANNEL_NAME_DATA_RTCP[];
 
 extern const char NS_GINGLE_RAW[];
 extern const buzz::StaticQName QN_GINGLE_RAW_TRANSPORT;

@@ -30,7 +30,6 @@
 #define AnimationControllerPrivate_h
 
 #include "CSSPropertyNames.h"
-#include "PlatformString.h"
 #include "Timer.h"
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
@@ -38,6 +37,7 @@
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
 #include <wtf/text/AtomicString.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -49,7 +49,11 @@ class Frame;
 class Node;
 class RenderObject;
 class RenderStyle;
-class WebKitAnimationList;
+
+enum SetChanged {
+    DoNotCallSetChanged = 0,
+    CallSetChanged = 1
+};
 
 class AnimationControllerPrivate {
     WTF_MAKE_NONCOPYABLE(AnimationControllerPrivate); WTF_MAKE_FAST_ALLOCATED;
@@ -57,7 +61,9 @@ public:
     AnimationControllerPrivate(Frame*);
     ~AnimationControllerPrivate();
 
-    void updateAnimationTimer(bool callSetChanged = false);
+    // Returns the time until the next animation needs to be serviced, or -1 if there are none.
+    double updateAnimations(SetChanged callSetChanged = DoNotCallSetChanged);
+    void updateAnimationTimer(SetChanged callSetChanged = DoNotCallSetChanged);
 
     PassRefPtr<CompositeAnimation> accessCompositeAnimation(RenderObject*);
     bool clear(RenderObject*);
@@ -71,6 +77,9 @@ public:
 
     void suspendAnimations();
     void resumeAnimations();
+#if ENABLE(REQUEST_ANIMATION_FRAME)
+    void animationFrameCallbackFired();
+#endif
 
     void suspendAnimationsForDocument(Document*);
     void resumeAnimationsForDocument(Document*);
@@ -97,7 +106,7 @@ public:
 
     void animationWillBeRemoved(AnimationBase*);
 
-    PassRefPtr<WebKitAnimationList> animationsForRenderer(RenderObject*) const;
+    void updateAnimationTimerForRenderer(RenderObject*);
     
 private:
     void animationTimerFired(Timer<AnimationControllerPrivate>*);
@@ -130,6 +139,7 @@ private:
     WaitingAnimationsSet m_animationsWaitingForStyle;
     WaitingAnimationsSet m_animationsWaitingForStartTimeResponse;
     bool m_waitingForAsyncStartNotification;
+    double m_previousTimeToNextService;
 };
 
 } // namespace WebCore

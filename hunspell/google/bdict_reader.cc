@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@ class NodeReader {
     FIND_NODE,
 
     // There are no more children for this node, no child node is returned.
-    FIND_DONE,  
+    FIND_DONE,
 
     // There is no node at this location, but there are more if you continue
     // iterating. This happens when there is a lookup node with empty entries.
@@ -31,7 +31,7 @@ class NodeReader {
              size_t node_offset, int node_depth);
 
   // Returns true if the reader is valid. False means you shouldn't use it.
-  bool is_valid() const { return !!bdict_data_; }
+  bool is_valid() const { return is_valid_; }
 
   // Recursively finds the given NULL terminated word.
   // See BDictReader::FindWord.
@@ -47,8 +47,10 @@ class NodeReader {
   // Leaf ----------------------------------------------------------------------
 
   inline bool is_leaf() const {
+    // If id_byte() sets is_valid_ to false, we need an extra check to avoid
+    // returning true for this type.
     return (id_byte() & BDict::LEAF_NODE_TYPE_MASK) ==
-        BDict::LEAF_NODE_TYPE_VALUE;
+        BDict::LEAF_NODE_TYPE_VALUE && is_valid_;
   }
 
   // If this is a leaf node with an additional string, this function will return
@@ -58,8 +60,12 @@ class NodeReader {
   inline const unsigned char* additional_string_for_leaf() const {
     // Leaf nodes with additional strings start with bits "01" in the ID byte.
     if ((id_byte() & BDict::LEAF_NODE_ADDITIONAL_MASK) ==
-        BDict::LEAF_NODE_ADDITIONAL_VALUE)
-      return &bdict_data_[node_offset_ + 2];  // Starts after the 2 byte ID.
+      BDict::LEAF_NODE_ADDITIONAL_VALUE) {
+      if (node_offset_ < (bdict_length_ - 2))
+        return &bdict_data_[node_offset_ + 2];  // Starts after the 2 byte ID.
+      // Otherwise the dictionary is corrupt.
+      is_valid_ = false;
+    }
     return NULL;
   }
 
@@ -68,6 +74,10 @@ class NodeReader {
   // additional affix IDs following the node when leaf_has_following is set,
   // but this will not handle those.
   inline int affix_id_for_leaf() const {
+    if (node_offset_ >= bdict_length_ - 2) {
+      is_valid_ = false;
+      return 0;
+    }
     // Take the lowest 6 bits of the first byte, and all 8 bits of the second.
     return ((bdict_data_[node_offset_ + 0] &
              BDict::LEAF_NODE_FIRST_BYTE_AFFIX_MASK) << 8) +
@@ -108,12 +118,14 @@ class NodeReader {
 
   // Returns the first entry after the lookup table header. When there is a
   // magic 0th entry, it will be that address.
+  // The caller checks that the result is in-bounds.
   inline size_t zeroth_entry_offset() const {
     return node_offset_ + 3;
   }
 
   // Returns the index of the first element in the lookup table. This skips any
   // magic 0th entry.
+  // The caller checks that the result is in-bounds.
   size_t lookup_table_offset() const {
     size_t table_offset = zeroth_entry_offset();
     if (lookup_has_0th())
@@ -121,11 +133,19 @@ class NodeReader {
     return table_offset;
   }
 
-  inline unsigned char lookup_first_char() const {
+  inline int lookup_first_char() const {
+    if (node_offset_ >= bdict_length_ - 1) {
+      is_valid_ = false;
+      return 0;
+    }
     return bdict_data_[node_offset_ + 1];
   }
 
   inline int lookup_num_chars() const {
+    if (node_offset_ >= bdict_length_ - 2) {
+      is_valid_ = false;
+      return 0;
+    }
     return bdict_data_[node_offset_ + 2];
   }
 
@@ -169,7 +189,13 @@ class NodeReader {
 
  private:
   inline unsigned char id_byte() const {
-    DCHECK(node_offset_ < bdict_length_);
+    if (!is_valid_)
+      return 0;  // Don't continue with a corrupt node.
+    if (node_offset_ >= bdict_length_) {
+      // Return zero if out of bounds; we'll check is_valid_ in caller.
+      is_valid_ = false;
+      return 0;
+    }
     return bdict_data_[node_offset_];
   }
 
@@ -187,27 +213,36 @@ class NodeReader {
   // The entire bdict file. This will be NULL if it is invalid.
   const unsigned char* bdict_data_;
   size_t bdict_length_;
+  // Points to the end of the file (for length checking convenience).
+  const unsigned char* bdict_end_;
 
   // Absolute offset within |bdict_data_| of the beginning of this node.
   size_t node_offset_;
 
   // The character index into the word that this node represents.
   int node_depth_;
+
+  // Signals that dictionary corruption was found during node traversal.
+  mutable bool is_valid_;
 };
 
 NodeReader::NodeReader()
     : bdict_data_(NULL),
       bdict_length_(0),
+      bdict_end_(NULL),
       node_offset_(0),
-      node_depth_(0) {
+      node_depth_(0),
+      is_valid_(false) {
 }
 
 NodeReader::NodeReader(const unsigned char* bdict_data, size_t bdict_length,
                        size_t node_offset, int node_depth)
     : bdict_data_(bdict_data),
       bdict_length_(bdict_length),
+      bdict_end_(bdict_data + bdict_length),
       node_offset_(node_offset),
-      node_depth_(node_depth) {
+      node_depth_(node_depth),
+      is_valid_(bdict_data != NULL && node_offset < bdict_length) {
 }
 
 int NodeReader::FindWord(const unsigned char* word,
@@ -259,10 +294,15 @@ int NodeReader::CompareLeafNode(
 
   // Check the additional string.
   int cur = 0;
-  while (additional[cur]) {
+  while (&additional[cur] < bdict_end_ && additional[cur]) {
     if (word[node_depth_ + cur] != additional[cur])
       return 0;  // Not a match.
     cur++;
+  }
+
+  if (&additional[cur] == bdict_end_) {
+    is_valid_ = false;
+    return 0;
   }
 
   // Got to the end of the additional string, the word should also be over for
@@ -290,11 +330,18 @@ int NodeReader::FillAffixesForLeafMatch(
   if (affix_indices[0] == BDict::FIRST_AFFIX_IS_UNUSED)
     list_offset = 0;
 
+  // Save the end pointer (accounting for an odd number of bytes).
+  size_t array_start = node_offset_ + additional_bytes + 2;
+  const uint16* const bdict_short_end = reinterpret_cast<const uint16*>(
+      &bdict_data_[((bdict_length_ - array_start) & -2) + array_start]);
   // Process all remaining matches.
-  const unsigned short* following_array =
-      reinterpret_cast<const unsigned short*>(
-          &bdict_data_[node_offset_ + additional_bytes + 2]);
+  const uint16* following_array = reinterpret_cast<const uint16*>(
+      &bdict_data_[array_start]);
   for (int i = 0; i < BDict::MAX_AFFIXES_PER_WORD - list_offset; i++) {
+    if (&following_array[i] >= bdict_short_end) {
+      is_valid_ = false;
+      return 0;
+    }
     if (following_array[i] == BDict::LEAF_NODE_FOLLOWING_LIST_TERMINATOR)
       return i + list_offset;  // Found the end of the list.
     affix_indices[i + list_offset] = following_array[i];
@@ -344,8 +391,10 @@ NodeReader::FindResult NodeReader::ReaderForLookup0th(
   }
 
   // Range check the offset;
-  if (child_offset > bdict_length_)
+  if (child_offset >= bdict_length_) {
+    is_valid_ = false;
     return FIND_DONE;
+  }
 
   // Now recurse into that child node. We don't advance to the next character
   // here since the 0th element will be a leaf (see ReaderForLookupAt).
@@ -359,9 +408,9 @@ NodeReader::FindResult NodeReader::ReaderForLookupAt(
     NodeReader* result) const {
   const unsigned char* table_begin = &bdict_data_[lookup_table_offset()];
 
-  if (index >= static_cast<size_t>(lookup_num_chars()))
+  if (index >= static_cast<size_t>(lookup_num_chars()) || !is_valid_)
     return FIND_DONE;
-  
+
   size_t child_offset;
   if (is_lookup_32()) {
     // Table contains 32-bit absolute offsets.
@@ -379,8 +428,10 @@ NodeReader::FindResult NodeReader::ReaderForLookupAt(
   }
 
   // Range check the offset;
-  if (child_offset > bdict_length_)
+  if (child_offset >= bdict_length_) {
+    is_valid_ = false;
     return FIND_DONE;  // Error.
+  }
 
   // This is a bit tricky. When we've just reached the end of a word, the word
   // itself will be stored in a leaf "node" off of this node. That node, of
@@ -395,6 +446,8 @@ NodeReader::FindResult NodeReader::ReaderForLookupAt(
   // child node is a leaf, it will have an additional character that it will
   // want to check.
   *found_char = static_cast<char>(index + lookup_first_char());
+  if (!is_valid_)
+    return FIND_DONE;
   int char_advance = *found_char == 0 ? 0 : 1;
 
   *result = NodeReader(bdict_data_, bdict_length_,
@@ -414,7 +467,12 @@ int NodeReader::FindInList(
   int bytes_per_index = (is_list_16() ? 3 : 2);
 
   for (size_t i = 0; i < list_count; i++) {
-    if (list_begin[i * bytes_per_index] == next_char) {
+    const unsigned char* list_current = &list_begin[i * bytes_per_index];
+    if (list_current >= bdict_end_) {
+      is_valid_ = false;
+      return 0;
+    }
+    if (*list_current == next_char) {
       // Found a match.
       char dummy_char;
       NodeReader child_reader;
@@ -453,8 +511,10 @@ NodeReader::FindResult NodeReader::ReaderForListAt(
     offset = children_begin + list_item_begin[1];
   }
 
-  if (offset == 0 || node_offset_ > bdict_length_)
+  if (offset == 0 || node_offset_ >= bdict_length_) {
+    is_valid_ = false;
     return FIND_DONE;  // Error, should not happen except for corruption.
+  }
 
   int char_advance = *found_char == 0 ? 0 : 1;  // See ReaderForLookupAt.
   *result = NodeReader(bdict_data_, bdict_length_,
@@ -531,7 +591,7 @@ int WordIterator::Advance(char* output_buffer, size_t output_len,
         // Not a leaf. Add the new node to our stack and try again.
         stack_.push_back(NodeInfo(child_reader, cur_char));
         break;
-    
+
       case NodeReader::FIND_NOTHING:
         // This one is empty, but we're not done. Continue on.
         break;
@@ -553,7 +613,7 @@ int WordIterator::FoundLeaf(const NodeReader& reader, char cur_char,
   for (i = 0; i < static_cast<int>(stack_.size()) - 1 && i < static_cast<int>(output_len) - 1; i++)
     output_buffer[i] = stack_[i + 1].addition;
   output_buffer[i++] = cur_char;  // The one we just found.
-  
+
   // Possibly add any extra parts.
   size_t additional_string_length = 0;
   const char* additional = reinterpret_cast<const char*>(
@@ -662,7 +722,7 @@ bool BDictReader::Init(const unsigned char* bdict_data, size_t bdict_length) {
       &bdict_data[header_->aff_offset]);
 
   // Make sure there is enough room for the affix group count dword.
-  if (aff_header_->affix_group_offset + sizeof(uint32) > bdict_length)
+  if (aff_header_->affix_group_offset > bdict_length - sizeof(uint32))
     return false;
 
   // This function is called from SpellCheck::SpellCheckWord(), which blocks
@@ -681,7 +741,7 @@ int BDictReader::FindWord(
     const char* word,
     int affix_indices[BDict::MAX_AFFIXES_PER_WORD]) const {
   if (!bdict_data_ ||
-      header_->dic_offset > bdict_length_) {
+      header_->dic_offset >= bdict_length_) {
     // When the dictionary is corrupt, we return 0 which means the word is valid
     // and has no rules. This means when there is some problem, we'll default
     // to no spellchecking rather than marking everything as misspelled.

@@ -24,6 +24,7 @@
 #include "libGLESv2/Fence.h"
 #include "libGLESv2/Framebuffer.h"
 #include "libGLESv2/Program.h"
+#include "libGLESv2/ProgramBinary.h"
 #include "libGLESv2/Renderbuffer.h"
 #include "libGLESv2/Shader.h"
 #include "libGLESv2/Texture.h"
@@ -54,26 +55,126 @@ bool validImageSize(GLint level, GLsizei width, GLsizei height)
     return false;
 }
 
-bool validateSubImageParams(bool compressed, GLsizei width, GLsizei height, GLint xoffset, GLint yoffset, GLint level, GLenum format, gl::Texture *texture)
+// Verify that format/type are one of the combinations from table 3.4.
+bool checkTextureFormatType(GLenum format, GLenum type)
+{
+    // validate <format> by itself (used as secondary key below)
+    switch (format)
+    {
+      case GL_RGBA:
+      case GL_BGRA_EXT:
+      case GL_RGB:
+      case GL_ALPHA:
+      case GL_LUMINANCE:
+      case GL_LUMINANCE_ALPHA:
+      case GL_DEPTH_COMPONENT:
+      case GL_DEPTH_STENCIL_OES:
+        break;
+      default:
+        return error(GL_INVALID_ENUM, false);
+    }
+
+    // invalid <type> -> sets INVALID_ENUM
+    // invalid <format>+<type> combination -> sets INVALID_OPERATION
+    switch (type)
+    {
+      case GL_UNSIGNED_BYTE:
+        switch (format)
+        {
+          case GL_RGBA:
+          case GL_BGRA_EXT:
+          case GL_RGB:
+          case GL_ALPHA:
+          case GL_LUMINANCE:
+          case GL_LUMINANCE_ALPHA:
+            return true;
+          default:
+            return error(GL_INVALID_OPERATION, false);
+        }
+
+      case GL_FLOAT:
+      case GL_HALF_FLOAT_OES:
+        switch (format)
+        {
+          case GL_RGBA:
+          case GL_RGB:
+          case GL_ALPHA:
+          case GL_LUMINANCE:
+          case GL_LUMINANCE_ALPHA:
+            return true;
+          default:
+            return error(GL_INVALID_OPERATION, false);
+        }
+
+      case GL_UNSIGNED_SHORT_4_4_4_4:
+      case GL_UNSIGNED_SHORT_5_5_5_1:
+        switch (format)
+        {
+          case GL_RGBA:
+            return true;
+          default:
+            return error(GL_INVALID_OPERATION, false);
+        }
+
+      case GL_UNSIGNED_SHORT_5_6_5:
+        switch (format)
+        {
+          case GL_RGB:
+            return true;
+          default:
+            return error(GL_INVALID_OPERATION, false);
+        }
+
+      case GL_UNSIGNED_SHORT:
+      case GL_UNSIGNED_INT:
+        switch (format)
+        {
+          case GL_DEPTH_COMPONENT:
+            return true;
+          default:
+            return error(GL_INVALID_OPERATION, false);
+        }
+
+      case GL_UNSIGNED_INT_24_8_OES:
+        switch (format)
+        {
+          case GL_DEPTH_STENCIL_OES:
+            return true;
+          default:
+            return error(GL_INVALID_OPERATION, false);
+        }
+
+      default:
+        return error(GL_INVALID_ENUM, false);
+    }
+}
+
+bool validateSubImageParams2D(bool compressed, GLsizei width, GLsizei height,
+                              GLint xoffset, GLint yoffset, GLint level, GLenum format, GLenum type,
+                              gl::Texture2D *texture)
 {
     if (!texture)
     {
         return error(GL_INVALID_OPERATION, false);
     }
 
-    if (compressed != texture->isCompressed())
+    if (compressed != texture->isCompressed(level))
     {
         return error(GL_INVALID_OPERATION, false);
     }
 
-    if (format != GL_NONE && format != texture->getInternalFormat())
+    if (format != GL_NONE)
     {
-        return error(GL_INVALID_OPERATION, false);
+        GLenum internalformat = gl::ConvertSizedInternalFormat(format, type);
+        if (internalformat != texture->getInternalFormat(level))
+        {
+            return error(GL_INVALID_OPERATION, false);
+        }
     }
 
     if (compressed)
     {
-        if ((width % 4 != 0 && width != texture->getWidth(0)) || 
+        if ((width % 4 != 0 && width != texture->getWidth(0)) ||
             (height % 4 != 0 && height != texture->getHeight(0)))
         {
             return error(GL_INVALID_OPERATION, false);
@@ -82,6 +183,47 @@ bool validateSubImageParams(bool compressed, GLsizei width, GLsizei height, GLin
 
     if (xoffset + width > texture->getWidth(level) ||
         yoffset + height > texture->getHeight(level))
+    {
+        return error(GL_INVALID_VALUE, false);
+    }
+
+    return true;
+}
+
+bool validateSubImageParamsCube(bool compressed, GLsizei width, GLsizei height,
+                                GLint xoffset, GLint yoffset, GLenum target, GLint level, GLenum format, GLenum type,
+                                gl::TextureCubeMap *texture)
+{
+    if (!texture)
+    {
+        return error(GL_INVALID_OPERATION, false);
+    }
+
+    if (compressed != texture->isCompressed(target, level))
+    {
+        return error(GL_INVALID_OPERATION, false);
+    }
+
+    if (format != GL_NONE)
+    {
+        GLenum internalformat = gl::ConvertSizedInternalFormat(format, type);
+        if (internalformat != texture->getInternalFormat(target, level))
+        {
+            return error(GL_INVALID_OPERATION, false);
+        }
+    }
+
+    if (compressed)
+    {
+        if ((width % 4 != 0 && width != texture->getWidth(target, 0)) ||
+            (height % 4 != 0 && height != texture->getHeight(target, 0)))
+        {
+            return error(GL_INVALID_OPERATION, false);
+        }
+    }
+
+    if (xoffset + width > texture->getWidth(target, level) ||
+        yoffset + height > texture->getHeight(target, level))
     {
         return error(GL_INVALID_VALUE, false);
     }
@@ -109,15 +251,6 @@ bool validReadFormatType(GLenum format, GLenum type)
           case GL_UNSIGNED_BYTE:
           case GL_UNSIGNED_SHORT_4_4_4_4_REV_EXT:
           case GL_UNSIGNED_SHORT_1_5_5_5_REV_EXT:
-            break;
-          default:
-            return false;
-        }
-        break;
-      case gl::IMPLEMENTATION_COLOR_READ_FORMAT:
-        switch (type)
-        {
-          case gl::IMPLEMENTATION_COLOR_READ_TYPE:
             break;
           default:
             return false;
@@ -1094,7 +1227,7 @@ void __stdcall glCompressedTexSubImage2D(GLenum target, GLint level, GLint xoffs
             if (target == GL_TEXTURE_2D)
             {
                 gl::Texture2D *texture = context->getTexture2D();
-                if (validateSubImageParams(true, width, height, xoffset, yoffset, level, GL_NONE, texture))
+                if (validateSubImageParams2D(true, width, height, xoffset, yoffset, level, format, GL_NONE, texture))
                 {
                     texture->subImageCompressed(level, xoffset, yoffset, width, height, format, imageSize, data);
                 }
@@ -1102,7 +1235,7 @@ void __stdcall glCompressedTexSubImage2D(GLenum target, GLint level, GLint xoffs
             else if (gl::IsCubemapTextureTarget(target))
             {
                 gl::TextureCubeMap *texture = context->getTextureCubeMap();
-                if (validateSubImageParams(true, width, height, xoffset, yoffset, level, GL_NONE, texture))
+                if (validateSubImageParamsCube(true, width, height, xoffset, yoffset, target, level, format, GL_NONE, texture))
                 {
                     texture->subImageCompressed(target, level, xoffset, yoffset, width, height, format, imageSize, data);
                 }
@@ -1195,8 +1328,7 @@ void __stdcall glCopyTexImage2D(GLenum target, GLint level, GLenum internalforma
             switch (internalformat)
             {
               case GL_ALPHA:
-                if (colorbufferFormat != GL_ALPHA &&
-                    colorbufferFormat != GL_RGBA &&
+                if (colorbufferFormat != GL_ALPHA8_EXT &&
                     colorbufferFormat != GL_RGBA4 &&
                     colorbufferFormat != GL_RGB5_A1 &&
                     colorbufferFormat != GL_RGBA8_OES)
@@ -1206,10 +1338,8 @@ void __stdcall glCopyTexImage2D(GLenum target, GLint level, GLenum internalforma
                 break;
               case GL_LUMINANCE:
               case GL_RGB:
-                if (colorbufferFormat != GL_RGB &&
-                    colorbufferFormat != GL_RGB565 &&
+                if (colorbufferFormat != GL_RGB565 &&
                     colorbufferFormat != GL_RGB8_OES &&
-                    colorbufferFormat != GL_RGBA &&
                     colorbufferFormat != GL_RGBA4 &&
                     colorbufferFormat != GL_RGB5_A1 &&
                     colorbufferFormat != GL_RGBA8_OES)
@@ -1219,8 +1349,7 @@ void __stdcall glCopyTexImage2D(GLenum target, GLint level, GLenum internalforma
                 break;
               case GL_LUMINANCE_ALPHA:
               case GL_RGBA:
-                if (colorbufferFormat != GL_RGBA &&
-                    colorbufferFormat != GL_RGBA4 &&
+                if (colorbufferFormat != GL_RGBA4 &&
                     colorbufferFormat != GL_RGB5_A1 &&
                     colorbufferFormat != GL_RGBA8_OES)
                  {
@@ -1258,6 +1387,19 @@ void __stdcall glCopyTexImage2D(GLenum target, GLint level, GLenum internalforma
                     return error(GL_INVALID_ENUM);
                 }
                 break;
+              case GL_DEPTH_COMPONENT:
+              case GL_DEPTH_COMPONENT16:
+              case GL_DEPTH_COMPONENT32_OES:
+              case GL_DEPTH_STENCIL_OES:
+              case GL_DEPTH24_STENCIL8_OES:
+                  if (context->supportsDepthTextures())
+                  {
+                      return error(GL_INVALID_OPERATION);
+                  }
+                  else
+                  {
+                      return error(GL_INVALID_ENUM);
+                  }
               default:
                 return error(GL_INVALID_ENUM);
             }
@@ -1355,30 +1497,37 @@ void __stdcall glCopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GL
             gl::Renderbuffer *source = framebuffer->getColorbuffer();
             GLenum colorbufferFormat = source->getInternalFormat();
             gl::Texture *texture = NULL;
+            GLenum textureFormat = GL_RGBA;
 
             if (target == GL_TEXTURE_2D)
             {
-                texture = context->getTexture2D();
+                gl::Texture2D *tex2d = context->getTexture2D();
+
+                if (!validateSubImageParams2D(false, width, height, xoffset, yoffset, level, GL_NONE, GL_NONE, tex2d))
+                {
+                    return; // error already registered by validateSubImageParams
+                }
+                textureFormat = gl::ExtractFormat(tex2d->getInternalFormat(level));
+                texture = tex2d;
             }
             else if (gl::IsCubemapTextureTarget(target))
             {
-                texture = context->getTextureCubeMap();
+                gl::TextureCubeMap *texcube = context->getTextureCubeMap();
+
+                if (!validateSubImageParamsCube(false, width, height, xoffset, yoffset, target, level, GL_NONE, GL_NONE, texcube))
+                {
+                    return; // error already registered by validateSubImageParams
+                }
+                textureFormat = gl::ExtractFormat(texcube->getInternalFormat(target, level));
+                texture = texcube;
             }
             else UNREACHABLE();
-
-            if (!validateSubImageParams(false, width, height, xoffset, yoffset, level, GL_NONE, texture))
-            {
-                return; // error already registered by validateSubImageParams
-            }
-
-            GLenum textureFormat = texture->getInternalFormat();
 
             // [OpenGL ES 2.0.24] table 3.9
             switch (textureFormat)
             {
               case GL_ALPHA:
-                if (colorbufferFormat != GL_ALPHA &&
-                    colorbufferFormat != GL_RGBA &&
+                if (colorbufferFormat != GL_ALPHA8_EXT &&
                     colorbufferFormat != GL_RGBA4 &&
                     colorbufferFormat != GL_RGB5_A1 &&
                     colorbufferFormat != GL_RGBA8_OES)
@@ -1388,10 +1537,8 @@ void __stdcall glCopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GL
                 break;
               case GL_LUMINANCE:
               case GL_RGB:
-                if (colorbufferFormat != GL_RGB &&
-                    colorbufferFormat != GL_RGB565 &&
+                if (colorbufferFormat != GL_RGB565 &&
                     colorbufferFormat != GL_RGB8_OES &&
-                    colorbufferFormat != GL_RGBA &&
                     colorbufferFormat != GL_RGBA4 &&
                     colorbufferFormat != GL_RGB5_A1 &&
                     colorbufferFormat != GL_RGBA8_OES)
@@ -1401,8 +1548,7 @@ void __stdcall glCopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GL
                 break;
               case GL_LUMINANCE_ALPHA:
               case GL_RGBA:
-                if (colorbufferFormat != GL_RGBA &&
-                    colorbufferFormat != GL_RGBA4 &&
+                if (colorbufferFormat != GL_RGBA4 &&
                     colorbufferFormat != GL_RGB5_A1 &&
                     colorbufferFormat != GL_RGBA8_OES)
                 {
@@ -1413,6 +1559,9 @@ void __stdcall glCopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GL
               case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
               case GL_COMPRESSED_RGBA_S3TC_DXT3_ANGLE:
               case GL_COMPRESSED_RGBA_S3TC_DXT5_ANGLE:
+                return error(GL_INVALID_OPERATION);
+              case GL_DEPTH_COMPONENT:
+              case GL_DEPTH_STENCIL_OES:
                 return error(GL_INVALID_OPERATION);
               default:
                 return error(GL_INVALID_OPERATION);
@@ -2306,19 +2455,21 @@ void __stdcall glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum t
                     return error(GL_INVALID_OPERATION);
                 }
 
-                if (tex->isCompressed())
-                {
-                    return error(GL_INVALID_OPERATION);
-                }
-
                 switch (textarget)
                 {
                   case GL_TEXTURE_2D:
-                    if (tex->getTarget() != GL_TEXTURE_2D)
                     {
-                        return error(GL_INVALID_OPERATION);
+                        if (tex->getTarget() != GL_TEXTURE_2D)
+                        {
+                            return error(GL_INVALID_OPERATION);
+                        }
+                        gl::Texture2D *tex2d = static_cast<gl::Texture2D *>(tex);
+                        if (tex2d->isCompressed(0))
+                        {
+                            return error(GL_INVALID_OPERATION);
+                        }
+                        break;
                     }
-                    break;
 
                   case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
                   case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
@@ -2326,11 +2477,18 @@ void __stdcall glFramebufferTexture2D(GLenum target, GLenum attachment, GLenum t
                   case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
                   case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
                   case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
-                    if (tex->getTarget() != GL_TEXTURE_CUBE_MAP)
                     {
-                        return error(GL_INVALID_OPERATION);
+                        if (tex->getTarget() != GL_TEXTURE_CUBE_MAP)
+                        {
+                            return error(GL_INVALID_OPERATION);
+                        }
+                        gl::TextureCubeMap *texcube = static_cast<gl::TextureCubeMap *>(tex);
+                        if (texcube->isCompressed(textarget, level))
+                        {
+                            return error(GL_INVALID_OPERATION);
+                        }
+                        break;
                     }
-                    break;
 
                   default:
                     return error(GL_INVALID_ENUM);
@@ -2440,28 +2598,41 @@ void __stdcall glGenerateMipmap(GLenum target)
 
         if (context)
         {
-            gl::Texture *texture;
-
             switch (target)
             {
               case GL_TEXTURE_2D:
-                texture = context->getTexture2D();
-                break;
+                {
+                    gl::Texture2D *tex2d = context->getTexture2D();
+
+                    if (tex2d->isCompressed(0))
+                    {
+                        return error(GL_INVALID_OPERATION);
+                    }
+                    if (tex2d->isDepth(0))
+                    {
+                        return error(GL_INVALID_OPERATION);
+                    }
+
+                    tex2d->generateMipmaps();
+                    break;
+                }
 
               case GL_TEXTURE_CUBE_MAP:
-                texture = context->getTextureCubeMap();
-                break;
+                {
+                    gl::TextureCubeMap *texcube = context->getTextureCubeMap();
+
+                    if (texcube->isCompressed(GL_TEXTURE_CUBE_MAP_POSITIVE_X, 0))
+                    {
+                        return error(GL_INVALID_OPERATION);
+                    }
+
+                    texcube->generateMipmaps();
+                    break;
+                }
 
               default:
                 return error(GL_INVALID_ENUM);
             }
-
-            if (texture->isCompressed())
-            {
-                return error(GL_INVALID_OPERATION);
-            }
-
-            texture->generateMipmaps();
         }
     }
     catch(std::bad_alloc&)
@@ -2759,12 +2930,13 @@ int __stdcall glGetAttribLocation(GLuint program, const GLchar* name)
                 }
             }
 
-            if (!programObject->isLinked())
+            gl::ProgramBinary *programBinary = programObject->getProgramBinary();
+            if (!programObject->isLinked() || !programBinary)
             {
                 return error(GL_INVALID_OPERATION, -1);
             }
 
-            return programObject->getAttributeLocation(name);
+            return programBinary->getAttributeLocation(name);
         }
     }
     catch(std::bad_alloc&)
@@ -3241,6 +3413,9 @@ void __stdcall glGetProgramiv(GLuint program, GLenum pname, GLint* params)
               case GL_ACTIVE_UNIFORM_MAX_LENGTH:
                 *params = programObject->getActiveUniformMaxLength();
                 return;
+              case GL_PROGRAM_BINARY_LENGTH_OES:
+                *params = programObject->getProgramBinaryLength();
+                return;
               default:
                 return error(GL_INVALID_ENUM);
             }
@@ -3618,9 +3793,9 @@ const GLubyte* __stdcall glGetString(GLenum name)
           case GL_RENDERER:
             return (GLubyte*)((context != NULL) ? context->getRendererString() : "ANGLE");
           case GL_VERSION:
-            return (GLubyte*)"OpenGL ES 2.0 (ANGLE "VERSION_STRING")";
+            return (GLubyte*)"OpenGL ES 2.0 (ANGLE " VERSION_STRING ")";
           case GL_SHADING_LANGUAGE_VERSION:
-            return (GLubyte*)"OpenGL ES GLSL ES 1.00 (ANGLE "VERSION_STRING")";
+            return (GLubyte*)"OpenGL ES GLSL ES 1.00 (ANGLE " VERSION_STRING ")";
           case GL_EXTENSIONS:
             return (GLubyte*)((context != NULL) ? context->getExtensionString() : "");
           default:
@@ -3677,6 +3852,13 @@ void __stdcall glGetTexParameterfv(GLenum target, GLenum pname, GLfloat* params)
               case GL_TEXTURE_USAGE_ANGLE:
                 *params = (GLfloat)texture->getUsage();
                 break;
+              case GL_TEXTURE_MAX_ANISOTROPY_EXT:
+                if (!context->supportsTextureFilterAnisotropy())
+                {
+                    return error(GL_INVALID_ENUM);
+                }
+                *params = (GLfloat)texture->getMaxAnisotropy();
+                break;
               default:
                 return error(GL_INVALID_ENUM);
             }
@@ -3732,6 +3914,13 @@ void __stdcall glGetTexParameteriv(GLenum target, GLenum pname, GLint* params)
               case GL_TEXTURE_USAGE_ANGLE:
                 *params = texture->getUsage();
                 break;
+              case GL_TEXTURE_MAX_ANISOTROPY_EXT:
+                if (!context->supportsTextureFilterAnisotropy())
+                {
+                    return error(GL_INVALID_ENUM);
+                }
+                *params = (GLint)texture->getMaxAnisotropy();
+                break;
               default:
                 return error(GL_INVALID_ENUM);
             }
@@ -3771,7 +3960,13 @@ void __stdcall glGetnUniformfvEXT(GLuint program, GLint location, GLsizei bufSiz
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!programObject->getUniformfv(location, &bufSize, params))
+            gl::ProgramBinary *programBinary = programObject->getProgramBinary();
+            if (!programBinary)
+            {
+                return error(GL_INVALID_OPERATION);
+            }
+
+            if (!programBinary->getUniformfv(location, &bufSize, params))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -3805,7 +4000,13 @@ void __stdcall glGetUniformfv(GLuint program, GLint location, GLfloat* params)
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!programObject->getUniformfv(location, NULL, params))
+            gl::ProgramBinary *programBinary = programObject->getProgramBinary();
+            if (!programBinary)
+            {
+                return error(GL_INVALID_OPERATION);
+            }
+
+            if (!programBinary->getUniformfv(location, NULL, params))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -3845,12 +4046,13 @@ void __stdcall glGetnUniformivEXT(GLuint program, GLint location, GLsizei bufSiz
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!programObject)
+            gl::ProgramBinary *programBinary = programObject->getProgramBinary();
+            if (!programBinary)
             {
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!programObject->getUniformiv(location, &bufSize, params))
+            if (!programBinary->getUniformiv(location, &bufSize, params))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -3884,12 +4086,13 @@ void __stdcall glGetUniformiv(GLuint program, GLint location, GLint* params)
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!programObject)
+            gl::ProgramBinary *programBinary = programObject->getProgramBinary();
+            if (!programBinary)
             {
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!programObject->getUniformiv(location, NULL, params))
+            if (!programBinary->getUniformiv(location, NULL, params))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -3930,12 +4133,13 @@ int __stdcall glGetUniformLocation(GLuint program, const GLchar* name)
                 }
             }
 
-            if (!programObject->isLinked())
+            gl::ProgramBinary *programBinary = programObject->getProgramBinary();
+            if (!programObject->isLinked() || !programBinary)
             {
                 return error(GL_INVALID_OPERATION, -1);
             }
 
-            return programObject->getUniformLocation(name);
+            return programBinary->getUniformLocation(name);
         }
     }
     catch(std::bad_alloc&)
@@ -4420,7 +4624,7 @@ void __stdcall glLinkProgram(GLuint program)
                 }
             }
 
-            programObject->link();
+            context->linkProgram(program);
         }
     }
     catch(std::bad_alloc&)
@@ -4508,15 +4712,23 @@ void __stdcall glReadnPixelsEXT(GLint x, GLint y, GLsizei width, GLsizei height,
             return error(GL_INVALID_VALUE);
         }
 
-        if (!validReadFormatType(format, type))
-        {
-            return error(GL_INVALID_OPERATION);
-        }
-
         gl::Context *context = gl::getNonLostContext();
 
         if (context)
         {
+            GLenum currentFormat, currentType;
+    
+            // Failure in getCurrentReadFormatType indicates that no color attachment is currently bound,
+            // and attempting to read back if that's the case is an error. The error will be registered
+            // by getCurrentReadFormat.
+            if (!context->getCurrentReadFormatType(&currentFormat, &currentType))
+                return;
+
+            if (!(currentFormat == format && currentType == type) && !validReadFormatType(format, type))
+            {
+                return error(GL_INVALID_OPERATION);
+            }
+
             context->readPixels(x, y, width, height, format, type, &bufSize, data);
         }
     }
@@ -4540,15 +4752,23 @@ void __stdcall glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height,
             return error(GL_INVALID_VALUE);
         }
 
-        if (!validReadFormatType(format, type))
-        {
-            return error(GL_INVALID_OPERATION);
-        }
-
         gl::Context *context = gl::getNonLostContext();
 
         if (context)
         {
+            GLenum currentFormat, currentType;
+    
+            // Failure in getCurrentReadFormatType indicates that no color attachment is currently bound,
+            // and attempting to read back if that's the case is an error. The error will be registered
+            // by getCurrentReadFormat.
+            if (!context->getCurrentReadFormatType(&currentFormat, &currentType))
+                return;
+
+            if (!(currentFormat == format && currentType == type) && !validReadFormatType(format, type))
+            {
+                return error(GL_INVALID_OPERATION);
+            }
+
             context->readPixels(x, y, width, height, format, type, NULL, pixels);
         }
     }
@@ -5012,6 +5232,26 @@ void __stdcall glTexImage2D(GLenum target, GLint level, GLint internalformat, GL
             return error(GL_INVALID_OPERATION);
         }
 
+        // validate <type> by itself (used as secondary key below)
+        switch (type)
+        {
+          case GL_UNSIGNED_BYTE:
+          case GL_UNSIGNED_SHORT_5_6_5:
+          case GL_UNSIGNED_SHORT_4_4_4_4:
+          case GL_UNSIGNED_SHORT_5_5_5_1:
+          case GL_UNSIGNED_SHORT:
+          case GL_UNSIGNED_INT:
+          case GL_UNSIGNED_INT_24_8_OES:
+          case GL_HALF_FLOAT_OES:
+          case GL_FLOAT:
+            break;
+          default:
+            return error(GL_INVALID_ENUM);
+        }
+
+        // validate <format> + <type> combinations
+        // - invalid <format> -> sets INVALID_ENUM
+        // - invalid <format>+<type> combination -> sets INVALID_OPERATION
         switch (format)
         {
           case GL_ALPHA:
@@ -5024,7 +5264,7 @@ void __stdcall glTexImage2D(GLenum target, GLint level, GLint internalformat, GL
               case GL_HALF_FLOAT_OES:
                 break;
               default:
-                return error(GL_INVALID_ENUM);
+                return error(GL_INVALID_OPERATION);
             }
             break;
           case GL_RGB:
@@ -5036,7 +5276,7 @@ void __stdcall glTexImage2D(GLenum target, GLint level, GLint internalformat, GL
               case GL_HALF_FLOAT_OES:
                 break;
               default:
-                return error(GL_INVALID_ENUM);
+                return error(GL_INVALID_OPERATION);
             }
             break;
           case GL_RGBA:
@@ -5049,7 +5289,7 @@ void __stdcall glTexImage2D(GLenum target, GLint level, GLint internalformat, GL
               case GL_HALF_FLOAT_OES:
                 break;
               default:
-                return error(GL_INVALID_ENUM);
+                return error(GL_INVALID_OPERATION);
             }
             break;
           case GL_BGRA_EXT:
@@ -5058,7 +5298,7 @@ void __stdcall glTexImage2D(GLenum target, GLint level, GLint internalformat, GL
               case GL_UNSIGNED_BYTE:
                 break;
               default:
-                return error(GL_INVALID_ENUM);
+                return error(GL_INVALID_OPERATION);
             }
             break;
           case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:  // error cases for compressed textures are handled below
@@ -5066,8 +5306,27 @@ void __stdcall glTexImage2D(GLenum target, GLint level, GLint internalformat, GL
           case GL_COMPRESSED_RGBA_S3TC_DXT3_ANGLE:
           case GL_COMPRESSED_RGBA_S3TC_DXT5_ANGLE:
             break; 
+          case GL_DEPTH_COMPONENT:
+            switch (type)
+            {
+              case GL_UNSIGNED_SHORT:
+              case GL_UNSIGNED_INT:
+                break;
+              default:
+                return error(GL_INVALID_OPERATION);
+            }
+            break;
+          case GL_DEPTH_STENCIL_OES:
+            switch (type)
+            {
+              case GL_UNSIGNED_INT_24_8_OES:
+                break;
+              default:
+                return error(GL_INVALID_OPERATION);
+            }
+            break;
           default:
-            return error(GL_INVALID_VALUE);
+            return error(GL_INVALID_ENUM);
         }
 
         if (border != 0)
@@ -5144,6 +5403,23 @@ void __stdcall glTexImage2D(GLenum target, GLint level, GLint internalformat, GL
                 else
                 {
                     return error(GL_INVALID_ENUM);
+                }
+                break;
+              case GL_DEPTH_COMPONENT:
+              case GL_DEPTH_STENCIL_OES:
+                if (!context->supportsDepthTextures())
+                {
+                    return error(GL_INVALID_VALUE);
+                }
+                if (target != GL_TEXTURE_2D)
+                {
+                    return error(GL_INVALID_OPERATION);
+                }
+                // OES_depth_texture supports loading depth data and multiple levels,
+                // but ANGLE_depth_texture does not
+                if (pixels != NULL || level != 0)
+                {
+                    return error(GL_INVALID_OPERATION);
                 }
                 break;
               default:
@@ -5228,12 +5504,84 @@ void __stdcall glTexImage2D(GLenum target, GLint level, GLint internalformat, GL
 
 void __stdcall glTexParameterf(GLenum target, GLenum pname, GLfloat param)
 {
-    glTexParameteri(target, pname, (GLint)param);
+    EVENT("(GLenum target = 0x%X, GLenum pname = 0x%X, GLint param = %f)", target, pname, param);
+
+    try
+    {
+        gl::Context *context = gl::getNonLostContext();
+
+        if (context)
+        {
+            gl::Texture *texture;
+
+            switch (target)
+            {
+              case GL_TEXTURE_2D:
+                texture = context->getTexture2D();
+                break;
+              case GL_TEXTURE_CUBE_MAP:
+                texture = context->getTextureCubeMap();
+                break;
+              default:
+                return error(GL_INVALID_ENUM);
+            }
+
+            switch (pname)
+            {
+              case GL_TEXTURE_WRAP_S:
+                if (!texture->setWrapS((GLenum)param))
+                {
+                    return error(GL_INVALID_ENUM);
+                }
+                break;
+              case GL_TEXTURE_WRAP_T:
+                if (!texture->setWrapT((GLenum)param))
+                {
+                    return error(GL_INVALID_ENUM);
+                }
+                break;
+              case GL_TEXTURE_MIN_FILTER:
+                if (!texture->setMinFilter((GLenum)param))
+                {
+                    return error(GL_INVALID_ENUM);
+                }
+                break;
+              case GL_TEXTURE_MAG_FILTER:
+                if (!texture->setMagFilter((GLenum)param))
+                {
+                    return error(GL_INVALID_ENUM);
+                }
+                break;
+              case GL_TEXTURE_USAGE_ANGLE:
+                if (!texture->setUsage((GLenum)param))
+                {
+                    return error(GL_INVALID_ENUM);
+                }
+                break;
+              case GL_TEXTURE_MAX_ANISOTROPY_EXT:
+                if (!context->supportsTextureFilterAnisotropy())
+                {
+                    return error(GL_INVALID_ENUM);
+                }
+                if (!texture->setMaxAnisotropy((float)param, context->getTextureMaxAnisotropy()))
+                {
+                    return error(GL_INVALID_VALUE);
+                }
+                break;
+              default:
+                return error(GL_INVALID_ENUM);
+            }
+        }
+    }
+    catch(std::bad_alloc&)
+    {
+        return error(GL_OUT_OF_MEMORY);
+    }
 }
 
 void __stdcall glTexParameterfv(GLenum target, GLenum pname, const GLfloat* params)
 {
-    glTexParameteri(target, pname, (GLint)*params);
+    glTexParameterf(target, pname, (GLfloat)*params);
 }
 
 void __stdcall glTexParameteri(GLenum target, GLenum pname, GLint param)
@@ -5290,6 +5638,16 @@ void __stdcall glTexParameteri(GLenum target, GLenum pname, GLint param)
                 if (!texture->setUsage((GLenum)param))
                 {
                     return error(GL_INVALID_ENUM);
+                }
+                break;
+              case GL_TEXTURE_MAX_ANISOTROPY_EXT:
+                if (!context->supportsTextureFilterAnisotropy())
+                {
+                    return error(GL_INVALID_ENUM);
+                }
+                if (!texture->setMaxAnisotropy((float)param, context->getTextureMaxAnisotropy()))
+                {
+                    return error(GL_INVALID_VALUE);
                 }
                 break;
               default:
@@ -5416,6 +5774,25 @@ void __stdcall glTexStorage2DEXT(GLenum target, GLsizei levels, GLenum internalf
                     return error(GL_INVALID_ENUM);
                 }
                 break;
+              case GL_DEPTH_COMPONENT16:
+              case GL_DEPTH_COMPONENT32_OES:
+              case GL_DEPTH24_STENCIL8_OES:
+                if (!context->supportsDepthTextures())
+                {
+                    return error(GL_INVALID_ENUM);
+                }
+                if (target != GL_TEXTURE_2D)
+                {
+                    return error(GL_INVALID_OPERATION);
+                }
+                // ANGLE_depth_texture only supports 1-level textures
+                if (levels != 1)
+                {
+                    return error(GL_INVALID_OPERATION);
+                }
+                break;
+              default:
+                break;
             }
 
             if (target == GL_TEXTURE_2D)
@@ -5484,14 +5861,9 @@ void __stdcall glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint 
             return error(GL_INVALID_VALUE);
         }
 
-        if (!gl::CheckTextureFormatType(format, type))
+        if (!checkTextureFormatType(format, type))
         {
-            return error(GL_INVALID_ENUM);
-        }
-
-        if (width == 0 || height == 0 || pixels == NULL)
-        {
-            return;
+            return; // error is set by helper function
         }
 
         gl::Context *context = gl::getNonLostContext();
@@ -5517,11 +5889,29 @@ void __stdcall glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint 
                     return error(GL_INVALID_ENUM);
                 }
             }
+            else if (gl::IsDepthTexture(format))
+            {
+                if (!context->supportsDepthTextures())
+                {
+                    return error(GL_INVALID_ENUM);
+                }
+                if (target != GL_TEXTURE_2D)
+                {
+                    return error(GL_INVALID_OPERATION);
+                }
+                // OES_depth_texture supports loading depth data, but ANGLE_depth_texture does not
+                return error(GL_INVALID_OPERATION);
+            }
+
+            if (width == 0 || height == 0 || pixels == NULL)
+            {
+                return;
+            }
 
             if (target == GL_TEXTURE_2D)
             {
                 gl::Texture2D *texture = context->getTexture2D();
-                if (validateSubImageParams(false, width, height, xoffset, yoffset, level, format, texture))
+                if (validateSubImageParams2D(false, width, height, xoffset, yoffset, level, format, type, texture))
                 {
                     texture->subImage(level, xoffset, yoffset, width, height, format, type, context->getUnpackAlignment(), pixels);
                 }
@@ -5529,7 +5919,7 @@ void __stdcall glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint 
             else if (gl::IsCubemapTextureTarget(target))
             {
                 gl::TextureCubeMap *texture = context->getTextureCubeMap();
-                if (validateSubImageParams(false, width, height, xoffset, yoffset, level, format, texture))
+                if (validateSubImageParamsCube(false, width, height, xoffset, yoffset, target, level, format, type, texture))
                 {
                     texture->subImage(target, level, xoffset, yoffset, width, height, format, type, context->getUnpackAlignment(), pixels);
                 }
@@ -5571,14 +5961,13 @@ void __stdcall glUniform1fv(GLint location, GLsizei count, const GLfloat* v)
 
         if (context)
         {
-            gl::Program *program = context->getCurrentProgram();
-
-            if (!program)
+            gl::ProgramBinary *programBinary = context->getCurrentProgramBinary();
+            if (!programBinary)
             {
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!program->setUniform1fv(location, count, v))
+            if (!programBinary->setUniform1fv(location, count, v))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -5615,14 +6004,13 @@ void __stdcall glUniform1iv(GLint location, GLsizei count, const GLint* v)
 
         if (context)
         {
-            gl::Program *program = context->getCurrentProgram();
-
-            if (!program)
+            gl::ProgramBinary *programBinary = context->getCurrentProgramBinary();
+            if (!programBinary)
             {
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!program->setUniform1iv(location, count, v))
+            if (!programBinary->setUniform1iv(location, count, v))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -5661,14 +6049,13 @@ void __stdcall glUniform2fv(GLint location, GLsizei count, const GLfloat* v)
 
         if (context)
         {
-            gl::Program *program = context->getCurrentProgram();
-
-            if (!program)
+            gl::ProgramBinary *programBinary = context->getCurrentProgramBinary();
+            if (!programBinary)
             {
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!program->setUniform2fv(location, count, v))
+            if (!programBinary->setUniform2fv(location, count, v))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -5707,14 +6094,13 @@ void __stdcall glUniform2iv(GLint location, GLsizei count, const GLint* v)
 
         if (context)
         {
-            gl::Program *program = context->getCurrentProgram();
-
-            if (!program)
+            gl::ProgramBinary *programBinary = context->getCurrentProgramBinary();
+            if (!programBinary)
             {
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!program->setUniform2iv(location, count, v))
+            if (!programBinary->setUniform2iv(location, count, v))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -5753,14 +6139,13 @@ void __stdcall glUniform3fv(GLint location, GLsizei count, const GLfloat* v)
 
         if (context)
         {
-            gl::Program *program = context->getCurrentProgram();
-
-            if (!program)
+            gl::ProgramBinary *programBinary = context->getCurrentProgramBinary();
+            if (!programBinary)
             {
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!program->setUniform3fv(location, count, v))
+            if (!programBinary->setUniform3fv(location, count, v))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -5799,14 +6184,13 @@ void __stdcall glUniform3iv(GLint location, GLsizei count, const GLint* v)
 
         if (context)
         {
-            gl::Program *program = context->getCurrentProgram();
-
-            if (!program)
+            gl::ProgramBinary *programBinary = context->getCurrentProgramBinary();
+            if (!programBinary)
             {
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!program->setUniform3iv(location, count, v))
+            if (!programBinary->setUniform3iv(location, count, v))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -5845,14 +6229,13 @@ void __stdcall glUniform4fv(GLint location, GLsizei count, const GLfloat* v)
 
         if (context)
         {
-            gl::Program *program = context->getCurrentProgram();
-
-            if (!program)
+            gl::ProgramBinary *programBinary = context->getCurrentProgramBinary();
+            if (!programBinary)
             {
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!program->setUniform4fv(location, count, v))
+            if (!programBinary->setUniform4fv(location, count, v))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -5891,14 +6274,13 @@ void __stdcall glUniform4iv(GLint location, GLsizei count, const GLint* v)
 
         if (context)
         {
-            gl::Program *program = context->getCurrentProgram();
-
-            if (!program)
+            gl::ProgramBinary *programBinary = context->getCurrentProgramBinary();
+            if (!programBinary)
             {
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!program->setUniform4iv(location, count, v))
+            if (!programBinary->setUniform4iv(location, count, v))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -5931,14 +6313,13 @@ void __stdcall glUniformMatrix2fv(GLint location, GLsizei count, GLboolean trans
 
         if (context)
         {
-            gl::Program *program = context->getCurrentProgram();
-
-            if (!program)
+            gl::ProgramBinary *programBinary = context->getCurrentProgramBinary();
+            if (!programBinary)
             {
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!program->setUniformMatrix2fv(location, count, value))
+            if (!programBinary->setUniformMatrix2fv(location, count, value))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -5971,14 +6352,13 @@ void __stdcall glUniformMatrix3fv(GLint location, GLsizei count, GLboolean trans
 
         if (context)
         {
-            gl::Program *program = context->getCurrentProgram();
-
-            if (!program)
+            gl::ProgramBinary *programBinary = context->getCurrentProgramBinary();
+            if (!programBinary)
             {
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!program->setUniformMatrix3fv(location, count, value))
+            if (!programBinary->setUniformMatrix3fv(location, count, value))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -6011,14 +6391,13 @@ void __stdcall glUniformMatrix4fv(GLint location, GLsizei count, GLboolean trans
 
         if (context)
         {
-            gl::Program *program = context->getCurrentProgram();
-
-            if (!program)
+            gl::ProgramBinary *programBinary = context->getCurrentProgramBinary();
+            if (!programBinary)
             {
                 return error(GL_INVALID_OPERATION);
             }
 
-            if (!program->setUniformMatrix4fv(location, count, value))
+            if (!programBinary->setUniformMatrix4fv(location, count, value))
             {
                 return error(GL_INVALID_OPERATION);
             }
@@ -6463,6 +6842,79 @@ void __stdcall glTexImage3DOES(GLenum target, GLint level, GLenum internalformat
     }
 }
 
+void __stdcall glGetProgramBinaryOES(GLuint program, GLsizei bufSize, GLsizei *length, 
+                                     GLenum *binaryFormat, void *binary)
+{
+    EVENT("(GLenum program = 0x%X, bufSize = %d, length = 0x%0.8p, binaryFormat = 0x%0.8p, binary = 0x%0.8p)",
+          program, bufSize, length, binaryFormat, binary);
+
+    try
+    {
+        gl::Context *context = gl::getNonLostContext();
+
+        if (context)
+        {
+            gl::Program *programObject = context->getProgram(program);
+
+            if (!programObject || !programObject->isLinked())
+            {
+                return error(GL_INVALID_OPERATION);
+            }
+
+            gl::ProgramBinary *programBinary = programObject->getProgramBinary();
+
+            if (!programBinary)
+            {
+                return error(GL_INVALID_OPERATION);
+            }
+
+            if (!programBinary->save(binary, bufSize, length))
+            {
+                return error(GL_INVALID_OPERATION);
+            }
+
+            *binaryFormat = GL_PROGRAM_BINARY_ANGLE;
+        }
+    }
+    catch(std::bad_alloc&)
+    {
+        return error(GL_OUT_OF_MEMORY);
+    }
+}
+
+void __stdcall glProgramBinaryOES(GLuint program, GLenum binaryFormat,
+                                  const void *binary, GLint length)
+{
+    EVENT("(GLenum program = 0x%X, binaryFormat = 0x%x, binary = 0x%0.8p, length = %d)",
+          program, binaryFormat, binary, length);
+
+    try
+    {
+        gl::Context *context = gl::getNonLostContext();
+
+        if (context)
+        {
+            if (binaryFormat != GL_PROGRAM_BINARY_ANGLE)
+            {
+                return error(GL_INVALID_ENUM);
+            }
+
+            gl::Program *programObject = context->getProgram(program);
+
+            if (!programObject)
+            {
+                return error(GL_INVALID_OPERATION);
+            }
+
+            context->setProgramBinary(program, binary, length);
+        }
+    }
+    catch(std::bad_alloc&)
+    {
+        return error(GL_OUT_OF_MEMORY);
+    }
+}
+
 __eglMustCastToProperFunctionPointerType __stdcall glGetProcAddress(const char *procname)
 {
     struct Extension
@@ -6499,7 +6951,8 @@ __eglMustCastToProperFunctionPointerType __stdcall glGetProcAddress(const char *
         {"glVertexAttribDivisorANGLE", (__eglMustCastToProperFunctionPointerType)glVertexAttribDivisorANGLE},
         {"glDrawArraysInstancedANGLE", (__eglMustCastToProperFunctionPointerType)glDrawArraysInstancedANGLE},
         {"glDrawElementsInstancedANGLE", (__eglMustCastToProperFunctionPointerType)glDrawElementsInstancedANGLE},
-    };
+        {"glGetProgramBinaryOES", (__eglMustCastToProperFunctionPointerType)glGetProgramBinaryOES},
+        {"glProgramBinaryOES", (__eglMustCastToProperFunctionPointerType)glProgramBinaryOES},    };
 
     for (int ext = 0; ext < sizeof(glExtensions) / sizeof(Extension); ext++)
     {

@@ -49,7 +49,7 @@ LayerChangesFlusher::LayerChangesFlusher()
 
 void LayerChangesFlusher::flushPendingLayerChangesSoon(AbstractCACFLayerTreeHost* host)
 {
-    if (!m_hostsWithChangesToFlush.add(host).second || m_hook)
+    if (!m_hostsWithChangesToFlush.add(host).isNewEntry || m_hook)
         return;
 
     setHook();
@@ -95,7 +95,7 @@ LRESULT LayerChangesFlusher::hookFired(int code, WPARAM wParam, LPARAM lParam)
 
     LRESULT result = ::CallNextHookEx(m_hook, code, wParam, lParam);
 
-    if (m_hostsWithChangesToFlush.isEmpty()) {
+    if (m_hook && m_hostsWithChangesToFlush.isEmpty()) {
         // We won't have any work to do next time around, so just remove our hook.
         removeHook();
     }

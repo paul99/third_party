@@ -52,12 +52,10 @@ using namespace std;
 
 namespace WebCore {
   
-const float smallCapsFontSizeMultiplier = 0.7f;
-
 static bool fontHasVerticalGlyphs(CTFontRef ctFont)
 {
     // The check doesn't look neat but this is what AppKit does for vertical writing...
-    RetainPtr<CFArrayRef> tableTags(AdoptCF, CTFontCopyAvailableTables(ctFont, kCTFontTableOptionExcludeSynthetic));
+    RetainPtr<CFArrayRef> tableTags(AdoptCF, CTFontCopyAvailableTables(ctFont, kCTFontTableOptionNoOptions));
     CFIndex numTables = CFArrayGetCount(tableTags.get());
     for (CFIndex index = 0; index < numTables; ++index) {
         CTFontTableTag tag = (CTFontTableTag)(uintptr_t)CFArrayGetValueAtIndex(tableTags.get(), index);
@@ -72,7 +70,6 @@ static bool initFontData(SimpleFontData* fontData)
     if (!fontData->platformData().cgFont())
         return false;
 
-
     return true;
 }
 
@@ -83,7 +80,7 @@ static NSString *webFallbackFontFamily(void)
 }
 
 #if !ERROR_DISABLED
-#if defined(__LP64__) || (!defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD))
+#if defined(__LP64__) || PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070 || (__MAC_OS_X_VERSION_MAX_ALLOWED >= 107 && __MAC_OS_X_VERSION_MIN_REQUIRED >= 106)
 static NSString* pathFromFont(NSFont*)
 {
     // FMGetATSFontRefFromFont is not available. As pathFromFont is only used for debugging purposes,
@@ -110,14 +107,39 @@ static NSString* pathFromFont(NSFont *font)
 #endif // __LP64__
 #endif // !ERROR_DISABLED
 
+const SimpleFontData* SimpleFontData::getCompositeFontReferenceFontData(NSFont *key) const
+{
+    if (key && !CFEqual(RetainPtr<CFStringRef>(AdoptCF, CTFontCopyPostScriptName(CTFontRef(key))).get(), CFSTR("LastResort"))) {
+        if (!m_derivedFontData)
+            m_derivedFontData = DerivedFontData::create(isCustomFont());
+        if (!m_derivedFontData->compositeFontReferences)
+            m_derivedFontData->compositeFontReferences.adoptCF(CFDictionaryCreateMutable(kCFAllocatorDefault, 1, &kCFTypeDictionaryKeyCallBacks, NULL));
+        else {
+            const SimpleFontData* found = static_cast<const SimpleFontData*>(CFDictionaryGetValue(m_derivedFontData->compositeFontReferences.get(), static_cast<const void *>(key)));
+            if (found)
+                return found;
+        }
+        if (CFMutableDictionaryRef dictionary = m_derivedFontData->compositeFontReferences.get()) {
+            bool isUsingPrinterFont = platformData().isPrinterFont();
+            NSFont *substituteFont = isUsingPrinterFont ? [key printerFont] : [key screenFont];
+
+            CTFontSymbolicTraits traits = CTFontGetSymbolicTraits(toCTFontRef(substituteFont));
+            bool syntheticBold = platformData().syntheticBold() && !(traits & kCTFontBoldTrait);
+            bool syntheticOblique = platformData().syntheticOblique() && !(traits & kCTFontItalicTrait);
+
+            FontPlatformData substitutePlatform(substituteFont, platformData().size(), isUsingPrinterFont, syntheticBold, syntheticOblique, platformData().orientation(), platformData().widthVariant());
+            SimpleFontData* value = new SimpleFontData(substitutePlatform, isCustomFont());
+            if (value) {
+                CFDictionaryAddValue(dictionary, key, value);
+                return value;
+            }
+        }
+    }
+    return 0;
+}
+
 void SimpleFontData::platformInit()
 {
-#if USE(ATSUI)
-    m_ATSUMirrors = false;
-    m_checkedShapesArabic = false;
-    m_shapesArabic = false;
-#endif
-
     m_syntheticBoldOffset = m_platformData.m_syntheticBold ? 1.0f : 0.f;
 
     bool failedSetup = false;
@@ -203,7 +225,7 @@ void SimpleFontData::platformInit()
     NSString *familyName = [m_platformData.font() familyName];
     if ([familyName isEqualToString:@"Times"] || [familyName isEqualToString:@"Helvetica"] || [familyName isEqualToString:@"Courier"])
         ascent += floorf(((ascent + descent) * 0.15f) + 0.5f);
-#if defined(BUILDING_ON_LEOPARD)
+#if !PLATFORM(IOS) && __MAC_OS_X_VERSION_MIN_REQUIRED == 1050
     else if ([familyName isEqualToString:@"Geeza Pro"]) {
         // Geeza Pro has glyphs that draw slightly above the ascent or far below the descent. Adjust
         // those vertical metrics to better match reality, so that diacritics at the bottom of one line
@@ -284,30 +306,24 @@ void SimpleFontData::platformDestroy()
     if (!isCustomFont() && m_derivedFontData) {
         // These come from the cache.
         if (m_derivedFontData->smallCaps)
-            fontCache()->releaseFontData(m_derivedFontData->smallCaps.leakPtr());
+            fontCache()->releaseFontData(m_derivedFontData->smallCaps.get());
 
         if (m_derivedFontData->emphasisMark)
-            fontCache()->releaseFontData(m_derivedFontData->emphasisMark.leakPtr());
+            fontCache()->releaseFontData(m_derivedFontData->emphasisMark.get());
     }
-
-#if USE(ATSUI)
-    HashMap<unsigned, ATSUStyle>::iterator end = m_ATSUStyleMap.end();
-    for (HashMap<unsigned, ATSUStyle>::iterator it = m_ATSUStyleMap.begin(); it != end; ++it)
-        ATSUDisposeStyle(it->second);
-#endif
 }
 
-PassOwnPtr<SimpleFontData> SimpleFontData::createScaledFontData(const FontDescription& fontDescription, float scaleFactor) const
+PassRefPtr<SimpleFontData> SimpleFontData::createScaledFontData(const FontDescription& fontDescription, float scaleFactor) const
 {
     if (isCustomFont()) {
         FontPlatformData scaledFontData(m_platformData);
         scaledFontData.m_size = scaledFontData.m_size * scaleFactor;
-        return adoptPtr(new SimpleFontData(scaledFontData, true, false));
+        return SimpleFontData::create(scaledFontData, true, false);
     }
 
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
     float size = m_platformData.size() * scaleFactor;
-    FontPlatformData scaledFontData([[NSFontManager sharedFontManager] convertFont:m_platformData.font() toSize:size], size, false, false, m_platformData.orientation());
+    FontPlatformData scaledFontData([[NSFontManager sharedFontManager] convertFont:m_platformData.font() toSize:size], size, m_platformData.isPrinterFont(), false, false, m_platformData.orientation());
 
     // AppKit resets the type information (screen/printer) when you convert a font to a different size.
     // We have to fix up the font that we're handed back.
@@ -327,31 +343,11 @@ PassOwnPtr<SimpleFontData> SimpleFontData::createScaledFontData(const FontDescri
         scaledFontData.m_syntheticOblique = (fontTraits & NSItalicFontMask) && !(scaledFontTraits & NSItalicFontMask);
 
         // SimpleFontData::platformDestroy() takes care of not deleting the cached font data twice.
-        return adoptPtr(fontCache()->getCachedFontData(&scaledFontData));
+        return fontCache()->getCachedFontData(&scaledFontData);
     }
     END_BLOCK_OBJC_EXCEPTIONS;
 
-    return nullptr;
-}
-
-SimpleFontData* SimpleFontData::smallCapsFontData(const FontDescription& fontDescription) const
-{
-    if (!m_derivedFontData)
-        m_derivedFontData = DerivedFontData::create(isCustomFont());
-    if (!m_derivedFontData->smallCaps)
-        m_derivedFontData->smallCaps = createScaledFontData(fontDescription, smallCapsFontSizeMultiplier);
-
-    return m_derivedFontData->smallCaps.get();
-}
-
-SimpleFontData* SimpleFontData::emphasisMarkFontData(const FontDescription& fontDescription) const
-{
-    if (!m_derivedFontData)
-        m_derivedFontData = DerivedFontData::create(isCustomFont());
-    if (!m_derivedFontData->emphasisMark)
-        m_derivedFontData->emphasisMark = createScaledFontData(fontDescription, .5f);
-
-    return m_derivedFontData->emphasisMark.get();
+    return 0;
 }
 
 bool SimpleFontData::containsCharacters(const UChar* characters, int length) const
@@ -441,9 +437,9 @@ bool SimpleFontData::canRenderCombiningCharacterSequence(const UChar* characters
     if (!m_combiningCharacterSequenceSupport)
         m_combiningCharacterSequenceSupport = adoptPtr(new HashMap<String, bool>);
 
-    pair<WTF::HashMap<String, bool>::iterator, bool> addResult = m_combiningCharacterSequenceSupport->add(String(characters, length), false);
-    if (!addResult.second)
-        return addResult.first->second;
+    WTF::HashMap<String, bool>::AddResult addResult = m_combiningCharacterSequenceSupport->add(String(characters, length), false);
+    if (!addResult.isNewEntry)
+        return addResult.iterator->value;
 
     RetainPtr<CGFontRef> cgFont(AdoptCF, CTFontCopyGraphicsFont(platformData().ctFont(), 0));
 
@@ -463,7 +459,7 @@ bool SimpleFontData::canRenderCombiningCharacterSequence(const UChar* characters
             return false;
     }
 
-    addResult.first->second = true;
+    addResult.iterator->value = true;
     return true;
 }
 

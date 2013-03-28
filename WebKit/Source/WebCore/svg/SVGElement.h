@@ -27,6 +27,7 @@
 #include "SVGParsingError.h"
 #include "SVGPropertyInfo.h"
 #include "StyledElement.h"
+#include "Timer.h"
 #include <wtf/HashMap.h>
 
 namespace WebCore {
@@ -45,6 +46,8 @@ class SVGElement : public StyledElement {
 public:
     static PassRefPtr<SVGElement> create(const QualifiedName&, Document*);
     virtual ~SVGElement();
+
+    bool isOutermostSVGSVGElement() const;
 
     String xmlbase() const;
     void setXmlbase(const String&, ExceptionCode&);
@@ -67,17 +70,25 @@ public:
 
     virtual void svgAttributeChanged(const QualifiedName&) { }
 
+    bool hasPendingResources() const;
+    void setHasPendingResources();
+    void clearHasPendingResourcesIfPossible();
+    virtual void buildPendingResource() { }
+
     virtual void animatedPropertyTypeForAttribute(const QualifiedName&, Vector<AnimatedPropertyType>&);
 
     void sendSVGLoadEventIfPossible(bool sendParentLoadEvents = false);
+    void sendSVGLoadEventIfPossibleAsynchronously();
+    void svgLoadEventTimerFired(Timer<SVGElement>*);
+    virtual Timer<SVGElement>* svgLoadEventTimer();
 
     virtual AffineTransform* supplementalTransform() { return 0; }
 
-    void invalidateSVGAttributes() { clearAreSVGAttributesValid(); }
+    void invalidateSVGAttributes() { ensureAttributeData()->m_animatedSVGAttributesAreDirty = true; }
 
     const HashSet<SVGElementInstance*>& instancesForElement() const;
 
-    bool boundingBox(FloatRect&, SVGLocatable::StyleUpdateStrategy = SVGLocatable::AllowStyleUpdate);
+    bool getBoundingBox(FloatRect&, SVGLocatable::StyleUpdateStrategy = SVGLocatable::AllowStyleUpdate);
 
     void setCursorElement(SVGCursorElement*);
     void cursorElementRemoved();
@@ -89,7 +100,7 @@ public:
 
     virtual void updateAnimatedSVGAttribute(const QualifiedName&) const;
  
-    virtual PassRefPtr<RenderStyle> customStyleForRenderer();
+    virtual PassRefPtr<RenderStyle> customStyleForRenderer() OVERRIDE;
 
     static void synchronizeRequiredFeatures(void* contextElement);
     static void synchronizeRequiredExtensions(void* contextElement);
@@ -105,24 +116,41 @@ public:
     static bool isAnimatableAttribute(const QualifiedName&);
 #endif
 
+    StylePropertySet* animatedSMILStyleProperties() const;
+    StylePropertySet* ensureAnimatedSMILStyleProperties();
+    void setUseOverrideComputedStyle(bool);
+
+    virtual bool haveLoadedRequiredResources();
+
+    virtual bool addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture) OVERRIDE;
+    virtual bool removeEventListener(const AtomicString& eventType, EventListener*, bool useCapture) OVERRIDE;
+
 protected:
     SVGElement(const QualifiedName&, Document*, ConstructionType = CreateSVGElement);
 
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
 
     virtual void finishParsingChildren();
-    virtual void attributeChanged(Attribute*, bool preserveDecls = false);
-    virtual bool childShouldCreateRenderer(Node*) const;
+    virtual void attributeChanged(const QualifiedName&, const AtomicString&) OVERRIDE;
+    virtual bool childShouldCreateRenderer(const NodeRenderingContext&) const OVERRIDE;
     
-    virtual void removedFromDocument();
+    virtual void removedFrom(ContainerNode*) OVERRIDE;
 
-    SVGElementRareData* rareSVGData() const;
-    SVGElementRareData* ensureRareSVGData();
+    SVGElementRareData* svgRareData() const;
+    SVGElementRareData* ensureSVGRareData();
 
-    void reportAttributeParsingError(SVGParsingError, Attribute*);
+    void reportAttributeParsingError(SVGParsingError, const QualifiedName&, const AtomicString&);
+
+    // FIXME: Author shadows should be allowed
+    // https://bugs.webkit.org/show_bug.cgi?id=77938
+    virtual bool areAuthorShadowsAllowed() const OVERRIDE { return false; }
 
 private:
     friend class SVGElementInstance;
+
+    RenderStyle* computedStyle(PseudoId = NOPSEUDO);
+    virtual RenderStyle* virtualComputedStyle(PseudoId pseudoElementSpecifier = NOPSEUDO) { return computedStyle(pseudoElementSpecifier); }
+    virtual bool willRecalcStyle(StyleChange);
 
     virtual bool rendererIsNeeded(const NodeRenderingContext&) { return false; }
 
@@ -131,17 +159,25 @@ private:
     void mapInstanceToElement(SVGElementInstance*);
     void removeInstanceMapping(SVGElementInstance*);
 
-    virtual bool haveLoadedRequiredResources();
 };
 
 struct SVGAttributeHashTranslator {
-    static unsigned hash(QualifiedName key)
+    static unsigned hash(const QualifiedName& key)
     {
-        key.setPrefix(nullAtom);
+        if (key.hasPrefix()) {
+            QualifiedNameComponents components = { nullAtom.impl(), key.localName().impl(), key.namespaceURI().impl() };
+            return hashComponents(components);
+        }
         return DefaultHash<QualifiedName>::Hash::hash(key);
     }
-    static bool equal(QualifiedName a, QualifiedName b) { return a.matches(b); }
+    static bool equal(const QualifiedName& a, const QualifiedName& b) { return a.matches(b); }
 };
+
+inline SVGElement* toSVGElement(Element* element)
+{
+    ASSERT(!element || element->isSVGElement());
+    return static_cast<SVGElement*>(element);
+}
 
 }
 

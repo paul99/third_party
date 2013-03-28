@@ -31,14 +31,14 @@
 #include "config.h"
 #include "SpeechInputClientImpl.h"
 
-#include "PlatformString.h"
 #include "SecurityOrigin.h"
 #include "SpeechInputListener.h"
 #include "WebSecurityOrigin.h"
 #include "WebSpeechInputController.h"
-#include "platform/WebString.h"
 #include "WebViewClient.h"
+#include <public/WebString.h>
 #include <wtf/PassOwnPtr.h>
+#include <wtf/text/WTFString.h>
 
 #if ENABLE(INPUT_SPEECH)
 

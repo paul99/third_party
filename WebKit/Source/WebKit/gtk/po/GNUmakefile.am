@@ -27,7 +27,15 @@ MSGMERGE_UPDATE := $(MSGMERGE) --update
 
 POFILES += $(shell ls $(srcdir)/Source/WebKit/gtk/po/*.po)
 
-MOFILES += $(shell echo $(POFILES) | tr ' ' '\n' | sed "s,^$(srcdir)/,,g" | sed 's/\.po/.mo/g')
+PO_LINGUAS += $(patsubst $(srcdir)/Source/WebKit/gtk/po/%.po,%,$(POFILES))
+
+USER_LINGUAS += $(filter $(LINGUAS),$(PO_LINGUAS))
+
+USE_LINGUAS += $(shell if test -n "$(USER_LINGUAS)" -o -n "$(LINGUAS)"; then LLINGUAS="$(USER_LINGUAS)"; else LLINGUAS="$(PO_LINGUAS)"; fi; for lang in $$LLINGUAS; do printf "$$lang "; done)
+
+MOFILES += $(USE_LINGUAS:%=Source/WebKit/gtk/po/%.mo)
+
+ALL_MOFILES += $(shell echo $(POFILES) | tr ' ' '\n' | sed "s,^$(srcdir)/,,g" | sed 's/\.po/.mo/g')
 
 .po.mo:
 	test -d Source/WebKit/gtk/po/ || mkdir -p Source/WebKit/gtk/po/
@@ -61,7 +69,7 @@ stamp-po: $(top_builddir)/Source/WebKit/gtk/po/$(DOMAIN).pot $(MOFILES)
 
 # This target rebuilds $(DOMAIN).pot; it is an expensive operation.
 # Note that $(DOMAIN).pot is not touched if it doesn't need to be changed.
-$(DOMAIN).pot-update: $(POTFILES) $(srcdir)/Source/WebKit/gtk/po/POTFILES
+$(DOMAIN).pot-update: $(POTFILES) $(top_builddir)/Source/WebKit/gtk/po/POTFILES
 	test -d Source/WebKit/gtk/po/ || mkdir -p Source/WebKit/gtk/po/
 	package_gnu=''; \
 	if test -n '$(MSGID_BUGS_ADDRESS)' || test '$(PACKAGE_BUGREPORT)' = '@'PACKAGE_BUGREPORT'@'; then \
@@ -71,22 +79,32 @@ $(DOMAIN).pot-update: $(POTFILES) $(srcdir)/Source/WebKit/gtk/po/POTFILES
 	fi; \
 	case `$(XGETTEXT) --version | sed 1q | sed -e 's,^[^0-9]*,,'` in \
 	  '' | 0.[0-9] | 0.[0-9].* | 0.1[0-5] | 0.1[0-5].* | 0.16 | 0.16.[0-1]*) \
-	    $(XGETTEXT) --default-domain=$(DOMAIN) --directory=$(srcdir) \
-	      --add-comments=TRANSLATORS: $(XGETTEXT_OPTIONS) \
-	      --files-from=$(srcdir)/Source/WebKit/gtk/po/POTFILES \
-	      --copyright-holder='$(COPYRIGHT_HOLDER)' \
-	      --msgid-bugs-address="$$msgid_bugs_address" \
-	      --keyword=_ --keyword=N_ -o $(top_builddir)/Source/WebKit/gtk/po/$(DOMAIN).pot \
+	    $(XGETTEXT) \
+	        --default-domain=$(DOMAIN) \
+	        --directory=$(srcdir) \
+	        --directory=$(srcdir)/Source/WebKit/gtk \
+	        --add-comments=TRANSLATORS: $(XGETTEXT_OPTIONS) \
+	        --files-from=$(top_builddir)/Source/WebKit/gtk/po/POTFILES \
+	        --copyright-holder='$(COPYRIGHT_HOLDER)' \
+	        --msgid-bugs-address="$$msgid_bugs_address" \
+	        --keyword=_ \
+	        --keyword=N_ \
+	        -o $(top_builddir)/Source/WebKit/gtk/po/$(DOMAIN).pot \
 	    ;; \
 	  *) \
-	    $(XGETTEXT) --default-domain=$(DOMAIN) --directory=$(srcdir) \
-	      --add-comments=TRANSLATORS: $(XGETTEXT_OPTIONS) \
-	      --files-from=$(srcdir)/Source/WebKit/gtk/po/POTFILES \
-	      --copyright-holder='$(COPYRIGHT_HOLDER)' \
-	      --package-name="$${package_gnu}@PACKAGE@" \
-	      --package-version='@VERSION@' \
-	      --msgid-bugs-address="$$msgid_bugs_address" \
-	      --keyword=_ --keyword=N_ -o $(top_builddir)/Source/WebKit/gtk/po/$(DOMAIN).pot \
+	    $(XGETTEXT) \
+	        --default-domain=$(DOMAIN) \
+	        --directory=$(srcdir) \
+	        --directory=$(srcdir)/Source/WebKit/gtk \
+	        --add-comments=TRANSLATORS: $(XGETTEXT_OPTIONS) \
+	        --files-from=$(top_builddir)/Source/WebKit/gtk/po/POTFILES \
+	        --copyright-holder='$(COPYRIGHT_HOLDER)' \
+	        --package-name="$${package_gnu}@PACKAGE@" \
+	        --package-version='@VERSION@' \
+	        --msgid-bugs-address="$$msgid_bugs_address" \
+	        --keyword=_ \
+	        --keyword=N_ \
+	        -o $(top_builddir)/Source/WebKit/gtk/po/$(DOMAIN).pot \
 	    ;; \
 	esac
 
@@ -124,21 +142,21 @@ CLEANFILES += \
 	$(top_builddir)/stamp-po
 
 MAINTAINERCLEANFILES += \
-	$(MOFILES) \
+	$(ALL_MOFILES) \
 	$(top_builddir)/Source/WebKit/gtk/po/$(DOMAIN).pot
 
 DISTCLEANFILES += \
-	$(MOFILES) \
+	$(ALL_MOFILES) \
 	$(top_builddir)/Source/WebKit/gtk/po/$(DOMAIN).pot
 
 po-install-data-local: all
-	$(mkdir_p) $(DESTDIR)$(datadir)
+	$(MKDIR_P) $(DESTDIR)$(datadir)
 	@catalogs='$(MOFILES)'; \
 	for cat in $$catalogs; do \
 	  cat=`basename $$cat`; \
 	  lang=`echo $$cat | sed -e 's/\.mo$$//'`; \
 	  dir=$(localedir)/$$lang/LC_MESSAGES; \
-	  $(mkdir_p) $(DESTDIR)$$dir; \
+	  $(MKDIR_P) $(DESTDIR)$$dir; \
 	  if test -r Source/WebKit/gtk/po/$$cat; then realcat=Source/WebKit/gtk/po/$$cat; else realcat=$(srcdir)/$$cat; fi; \
 	  $(INSTALL_DATA) $$realcat $(DESTDIR)$$dir/$(DOMAIN).mo; \
 	  echo "installing $$realcat as $(DESTDIR)$$dir/$(DOMAIN).mo"; \
@@ -173,13 +191,13 @@ po-install-data-local: all
 	done
 
 po-installdirs-data-local:
-	$(mkdir_p) $(DESTDIR)$(datadir)
+	$(MKDIR_P) $(DESTDIR)$(datadir)
 	@catalogs='$(MOFILES)'; \
 	for cat in $$catalogs; do \
 	  cat=`basename $$cat`; \
 	  lang=`echo $$cat | sed -e 's/\.gmo$$//'`; \
 	  dir=$(localedir)/$$lang/LC_MESSAGES; \
-	  $(mkdir_p) $(DESTDIR)$$dir; \
+	  $(MKDIR_P) $(DESTDIR)$$dir; \
 	  for lc in '' $(EXTRA_LOCALE_CATEGORIES); do \
 	    if test -n "$$lc"; then \
 	      if (cd $(DESTDIR)$(localedir)/$$lang && LC_ALL=C ls -l -d $$lc 2>/dev/null) | grep ' -> ' >/dev/null; then \

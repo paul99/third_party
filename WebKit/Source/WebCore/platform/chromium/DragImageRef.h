@@ -29,19 +29,16 @@
 #ifndef DragImageRef_h
 #define DragImageRef_h
 
-#if USE(CG)
-typedef struct CGImage* CGImageRef;
-#else
 class SkBitmap;
-#endif
 
 namespace WebCore {
 
-#if USE(CG)
-typedef CGImageRef DragImageRef;
-#else
-typedef SkBitmap* DragImageRef;
-#endif
+struct DragImageChromium {
+    SkBitmap* bitmap;
+    float resolutionScale;
+};
+
+typedef DragImageChromium* DragImageRef;
 
 } // namespace WebCore
 

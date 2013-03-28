@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,11 +26,13 @@
 #ifndef NotificationPermissionRequestManager_h
 #define NotificationPermissionRequestManager_h
 
-#include <WebCore/NotificationPresenter.h>
+#include <WebCore/NotificationClient.h>
+#include <WebCore/NotificationPermissionCallback.h>
 #include <WebCore/VoidCallback.h>
 #include <wtf/HashMap.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 class Notification;    
@@ -45,23 +47,38 @@ class WebPage;
 class NotificationPermissionRequestManager : public RefCounted<NotificationPermissionRequestManager> {
 public:
     static PassRefPtr<NotificationPermissionRequestManager> create(WebPage*);
-    
+
+#if ENABLE(NOTIFICATIONS)
+    void startRequest(WebCore::SecurityOrigin*, PassRefPtr<WebCore::NotificationPermissionCallback>);
+#endif
+#if ENABLE(LEGACY_NOTIFICATIONS)
     void startRequest(WebCore::SecurityOrigin*, PassRefPtr<WebCore::VoidCallback>);
+#endif
     void cancelRequest(WebCore::SecurityOrigin*);
     
-    // Synchronous call to retrieve permission level for given security origin
-    WebCore::NotificationPresenter::Permission permissionLevel(WebCore::SecurityOrigin*);
+    WebCore::NotificationClient::Permission permissionLevel(WebCore::SecurityOrigin*);
+
+    // For testing purposes only.
+    void setPermissionLevelForTesting(const String& originString, bool allowed);
+    void removeAllPermissionsForTesting();
     
     void didReceiveNotificationPermissionDecision(uint64_t notificationID, bool allowed);
     
 private:
     NotificationPermissionRequestManager(WebPage*);
-    
-    HashMap<uint64_t, RefPtr<WebCore::VoidCallback> > m_idToCallbackMap;
+
+#if ENABLE(NOTIFICATIONS)
+    HashMap<uint64_t, RefPtr<WebCore::NotificationPermissionCallback> > m_idToCallbackMap;
+#endif
+#if ENABLE(LEGACY_NOTIFICATIONS)
+    HashMap<uint64_t, RefPtr<WebCore::VoidCallback> > m_idToVoidCallbackMap;
+#endif
     HashMap<RefPtr<WebCore::SecurityOrigin>, uint64_t> m_originToIDMap;
     HashMap<uint64_t, RefPtr<WebCore::SecurityOrigin> > m_idToOriginMap;
 
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     WebPage* m_page;
+#endif
 };
 
 inline bool isRequestIDValid(uint64_t id)

@@ -27,6 +27,7 @@
 #include "EventNames.h"
 #include "EventTarget.h"
 #include "UserGestureIndicator.h"
+#include "WebCoreMemoryInstrumentation.h"
 #include <wtf/CurrentTime.h>
 #include <wtf/text/AtomicString.h>
 
@@ -92,6 +93,10 @@ void Event::initEvent(const AtomicString& eventTypeArg, bool canBubbleArg, bool 
     if (dispatched())
         return;
 
+    m_propagationStopped = false;
+    m_immediatePropagationStopped = false;
+    m_defaultPrevented = false;
+
     m_type = eventTypeArg;
     m_canBubble = canBubbleArg;
     m_cancelable = cancelableArg;
@@ -122,6 +127,11 @@ bool Event::isKeyboardEvent() const
     return false;
 }
 
+bool Event::isTouchEvent() const
+{
+    return false;
+}
+
 bool Event::isDragEvent() const
 {
     return false;
@@ -144,6 +154,20 @@ bool Event::isBeforeTextInsertedEvent() const
 
 void Event::storeResult(const String&)
 {
+}
+
+void Event::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::DOM);
+    info.addMember(m_type);
+    info.addMember(m_currentTarget);
+    info.addMember(m_target);
+    info.addMember(m_underlyingEvent);
+}
+
+PassRefPtr<Event> Event::cloneFor(HTMLIFrameElement*) const
+{
+    return Event::create(type(), bubbles(), cancelable());
 }
 
 void Event::setTarget(PassRefPtr<EventTarget> target)

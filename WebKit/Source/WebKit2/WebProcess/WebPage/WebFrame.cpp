@@ -27,9 +27,13 @@
 #include "WebFrame.h"
 
 #include "DownloadManager.h"
+#include "InjectedBundleHitTestResult.h"
 #include "InjectedBundleNodeHandle.h"
 #include "InjectedBundleRangeHandle.h"
 #include "InjectedBundleScriptWorld.h"
+#include "PluginView.h"
+#include "WKAPICast.h"
+#include "WKBundleAPICast.h"
 #include "WebChromeClient.h"
 #include "WebPage.h"
 #include "WebPageProxyMessages.h"
@@ -50,15 +54,33 @@
 #include <WebCore/JSCSSStyleDeclaration.h>
 #include <WebCore/JSElement.h>
 #include <WebCore/JSRange.h>
+#include <WebCore/MainResourceLoader.h>
+#include <WebCore/NodeTraversal.h>
 #include <WebCore/Page.h>
+#include <WebCore/PluginDocument.h>
 #include <WebCore/RenderTreeAsText.h>
+#include <WebCore/ResourceBuffer.h>
 #include <WebCore/SecurityOrigin.h>
 #include <WebCore/TextIterator.h>
 #include <WebCore/TextResourceDecoder.h>
 #include <wtf/text/StringBuilder.h>
 
+#if ENABLE(WEB_INTENTS)
+#include "IntentData.h"
+#include <WebCore/DOMWindowIntents.h>
+#include <WebCore/DeliveredIntent.h>
+#include <WebCore/Intent.h>
+#include <WebCore/PlatformMessagePortChannel.h>
+#endif
+
 #if PLATFORM(MAC) || PLATFORM(WIN)
 #include <WebCore/LegacyWebArchive.h>
+#endif
+
+#if ENABLE(NETWORK_PROCESS)
+#include "NetworkConnectionToWebProcessMessages.h"
+#include "NetworkProcessConnection.h"
+#include "WebCoreArgumentCoders.h"
 #endif
 
 #ifndef NDEBUG
@@ -221,18 +243,75 @@ void WebFrame::startDownload(const WebCore::ResourceRequest& request)
 {
     ASSERT(m_policyDownloadID);
 
-    DownloadManager::shared().startDownload(m_policyDownloadID, page(), request);
-
+    uint64_t policyDownloadID = m_policyDownloadID;
     m_policyDownloadID = 0;
+
+#if ENABLE(NETWORK_PROCESS)
+    if (WebProcess::shared().usesNetworkProcess()) {
+        bool privateBrowsingEnabled = m_coreFrame->loader()->networkingContext()->inPrivateBrowsingMode();
+        WebProcess::shared().networkConnection()->connection()->send(Messages::NetworkConnectionToWebProcess::StartDownload(privateBrowsingEnabled, policyDownloadID, request), 0);
+        return;
+    }
+#endif
+
+    WebProcess::shared().downloadManager().startDownload(policyDownloadID, request);
 }
 
-void WebFrame::convertHandleToDownload(ResourceHandle* handle, const ResourceRequest& request, const ResourceResponse& response)
+void WebFrame::convertMainResourceLoadToDownload(MainResourceLoader* mainResourceLoader, const ResourceRequest& request, const ResourceResponse& response)
 {
     ASSERT(m_policyDownloadID);
 
-    DownloadManager::shared().convertHandleToDownload(m_policyDownloadID, page(), handle, request, response);
+    uint64_t policyDownloadID = m_policyDownloadID;
     m_policyDownloadID = 0;
+
+#if ENABLE(NETWORK_PROCESS)
+    if (WebProcess::shared().usesNetworkProcess()) {
+        // FIXME: Handle this case.
+        return;
+    }
+#endif
+
+    WebProcess::shared().downloadManager().convertHandleToDownload(policyDownloadID, mainResourceLoader->loader()->handle(), request, response);
 }
+
+#if ENABLE(WEB_INTENTS)
+void WebFrame::deliverIntent(const IntentData& intentData)
+{
+    OwnPtr<DeliveredIntentClient> dummyClient;
+    Vector<uint8_t> dataCopy = intentData.data;
+
+    OwnPtr<WebCore::MessagePortChannelArray> channels;
+    if (!intentData.messagePorts.isEmpty()) {
+        channels = adoptPtr(new WebCore::MessagePortChannelArray(intentData.messagePorts.size()));
+        for (size_t i = 0; i < intentData.messagePorts.size(); ++i)
+            (*channels)[i] = MessagePortChannel::create(WebProcess::shared().messagePortChannel(intentData.messagePorts.at(i)));
+    }
+    OwnPtr<WebCore::MessagePortArray> messagePorts = WebCore::MessagePort::entanglePorts(*m_coreFrame->document()->domWindow()->scriptExecutionContext(), channels.release());
+
+    RefPtr<DeliveredIntent> deliveredIntent = DeliveredIntent::create(m_coreFrame, dummyClient.release(), intentData.action, intentData.type,
+                                                                      SerializedScriptValue::adopt(dataCopy), messagePorts.release(),
+                                                                      intentData.extras);
+    WebCore::DOMWindowIntents::from(m_coreFrame->document()->domWindow())->deliver(deliveredIntent.release());
+}
+
+void WebFrame::deliverIntent(WebCore::Intent* intent)
+{
+    OwnPtr<DeliveredIntentClient> dummyClient;
+
+    OwnPtr<WebCore::MessagePortChannelArray> channels;
+    WebCore::MessagePortChannelArray* origChannels = intent->messagePorts();
+    if (origChannels && origChannels->size()) {
+        channels = adoptPtr(new WebCore::MessagePortChannelArray(origChannels->size()));
+        for (size_t i = 0; i < origChannels->size(); ++i)
+            (*channels)[i] = origChannels->at(i).release();
+    }
+    OwnPtr<WebCore::MessagePortArray> messagePorts = WebCore::MessagePort::entanglePorts(*m_coreFrame->document()->domWindow()->scriptExecutionContext(), channels.release());
+
+    RefPtr<DeliveredIntent> deliveredIntent = DeliveredIntent::create(m_coreFrame, dummyClient.release(), intent->action(), intent->type(),
+                                                                      intent->data(), messagePorts.release(), intent->extras());
+    WebCore::DOMWindowIntents::from(m_coreFrame->document()->domWindow())->deliver(deliveredIntent.release());
+}
+#endif
 
 String WebFrame::source() const 
 {
@@ -247,7 +326,7 @@ String WebFrame::source() const
     DocumentLoader* documentLoader = m_coreFrame->loader()->activeDocumentLoader();
     if (!documentLoader)
         return String();
-    RefPtr<SharedBuffer> mainResourceData = documentLoader->mainResourceData();
+    RefPtr<ResourceBuffer> mainResourceData = documentLoader->mainResourceData();
     if (!mainResourceData)
         return String();
     return decoder->encoding().decode(mainResourceData->data(), mainResourceData->size());
@@ -464,7 +543,7 @@ String WebFrame::layerTreeAsText() const
     if (!m_coreFrame)
         return "";
 
-    return m_coreFrame->layerTreeAsText();
+    return m_coreFrame->layerTreeAsText(0);
 }
 
 unsigned WebFrame::pendingUnloadCount() const
@@ -472,7 +551,7 @@ unsigned WebFrame::pendingUnloadCount() const
     if (!m_coreFrame)
         return 0;
 
-    return m_coreFrame->domWindow()->pendingUnloadEventListeners();
+    return m_coreFrame->document()->domWindow()->pendingUnloadEventListeners();
 }
 
 bool WebFrame::allowsFollowingLink(const WebCore::KURL& url) const
@@ -491,6 +570,17 @@ JSGlobalContextRef WebFrame::jsContext()
 JSGlobalContextRef WebFrame::jsContextForWorld(InjectedBundleScriptWorld* world)
 {
     return toGlobalRef(m_coreFrame->script()->globalObject(world->coreWorld())->globalExec());
+}
+
+bool WebFrame::handlesPageScaleGesture() const
+{
+    if (!m_coreFrame->document()->isPluginDocument())
+        return 0;
+
+    PluginDocument* pluginDocument = static_cast<PluginDocument*>(m_coreFrame->document());
+    PluginView* pluginView = static_cast<PluginView*>(pluginDocument->pluginWidget());
+
+    return pluginView->handlesPageScaleFactor();
 }
 
 IntRect WebFrame::contentBounds() const
@@ -567,6 +657,14 @@ bool WebFrame::hasVerticalScrollbar() const
     return view->verticalScrollbar();
 }
 
+PassRefPtr<InjectedBundleHitTestResult> WebFrame::hitTest(const IntPoint point) const
+{
+    if (!m_coreFrame)
+        return 0;
+
+    return InjectedBundleHitTestResult::create(m_coreFrame->eventHandler()->hitTestResultAtPoint(point, false, true));
+}
+
 bool WebFrame::getDocumentBackgroundColor(double* red, double* green, double* blue, double* alpha)
 {
     if (!m_coreFrame)
@@ -593,13 +691,21 @@ bool WebFrame::containsAnyFormElements() const
     if (!document)
         return false;
 
-    for (Node* node = document->documentElement(); node; node = node->traverseNextNode()) {
+    for (Node* node = document->documentElement(); node; node = NodeTraversal::next(node)) {
         if (!node->isElementNode())
             continue;
         if (static_cast<Element*>(node)->hasTagName(HTMLNames::formTag))
             return true;
     }
     return false;
+}
+
+void WebFrame::stopLoading()
+{
+    if (!m_coreFrame)
+        return;
+
+    m_coreFrame->loader()->stopForUserCancel();
 }
 
 WebFrame* WebFrame::frameForContext(JSContextRef context)
@@ -621,7 +727,7 @@ JSValueRef WebFrame::jsWrapperForWorld(InjectedBundleNodeHandle* nodeHandle, Inj
     JSDOMWindow* globalObject = m_coreFrame->script()->globalObject(world->coreWorld());
     ExecState* exec = globalObject->globalExec();
 
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
     return toRef(exec, toJS(exec, globalObject, nodeHandle->coreNode()));
 }
 
@@ -633,7 +739,7 @@ JSValueRef WebFrame::jsWrapperForWorld(InjectedBundleRangeHandle* rangeHandle, I
     JSDOMWindow* globalObject = m_coreFrame->script()->globalObject(world->coreWorld());
     ExecState* exec = globalObject->globalExec();
 
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
     return toRef(exec, toJS(exec, globalObject, rangeHandle->coreRange()));
 }
 
@@ -648,9 +754,9 @@ JSValueRef WebFrame::computedStyleIncludingVisitedInfo(JSObjectRef element)
     if (!toJS(element)->inherits(&JSElement::s_info))
         return JSValueMakeUndefined(toRef(exec));
 
-    RefPtr<CSSComputedStyleDeclaration> style = computedStyle(static_cast<JSElement*>(toJS(element))->impl(), true);
+    RefPtr<CSSComputedStyleDeclaration> style = CSSComputedStyleDeclaration::create(static_cast<JSElement*>(toJS(element))->impl(), true);
 
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
     return toRef(exec, toJS(exec, globalObject, style.get()));
 }
 
@@ -734,9 +840,40 @@ void WebFrame::setTextDirection(const String& direction)
 }
 
 #if PLATFORM(MAC) || PLATFORM(WIN)
-RetainPtr<CFDataRef> WebFrame::webArchiveData() const
+
+class WebFrameFilter : public FrameFilter {
+public:
+    WebFrameFilter(WebFrame*, WebFrame::FrameFilterFunction, void* context);
+        
+private:
+    virtual bool shouldIncludeSubframe(Frame*) const OVERRIDE;
+
+    WebFrame* m_topLevelWebFrame;
+    WebFrame::FrameFilterFunction m_callback;
+    void* m_context;
+};
+
+WebFrameFilter::WebFrameFilter(WebFrame* topLevelWebFrame, WebFrame::FrameFilterFunction callback, void* context)
+    : m_topLevelWebFrame(topLevelWebFrame)
+    , m_callback(callback)
+    , m_context(context)
 {
-    if (RefPtr<LegacyWebArchive> archive = LegacyWebArchive::create(coreFrame()->document()))
+}
+
+bool WebFrameFilter::shouldIncludeSubframe(Frame* frame) const
+{
+    if (!m_callback)
+        return true;
+        
+    WebFrame* webFrame = static_cast<WebFrameLoaderClient*>(frame->loader()->client())->webFrame();
+    return m_callback(toAPI(m_topLevelWebFrame), toAPI(webFrame), m_context);
+}
+
+RetainPtr<CFDataRef> WebFrame::webArchiveData(FrameFilterFunction callback, void* context)
+{
+    WebFrameFilter filter(this, callback, context);
+
+    if (RefPtr<LegacyWebArchive> archive = LegacyWebArchive::create(coreFrame()->document(), &filter))
         return archive->rawDataRepresentation();
     
     return 0;

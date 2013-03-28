@@ -35,7 +35,6 @@
 
 #include "SQLResultSetRowList.h"
 #include "V8Binding.h"
-#include "V8Proxy.h"
 
 namespace WebCore {
 
@@ -43,23 +42,17 @@ v8::Handle<v8::Value> V8SQLResultSetRowList::itemCallback(const v8::Arguments& a
 {
     INC_STATS("DOM.SQLResultSetRowList.item()");
 
-    if (args.Length() == 0) {
-        V8Proxy::throwError(V8Proxy::SyntaxError, "Item index is required.");
-        return v8::Undefined();
-    }
+    if (!args.Length())
+        return throwError(v8SyntaxError, "Item index is required.", args.GetIsolate());
 
-    if (!args[0]->IsNumber()) {
-        V8Proxy::throwError(V8Proxy::TypeError, "Item index must be a number.");
-        return v8::Undefined();
-    }
+    if (!args[0]->IsNumber())
+        return throwTypeError("Item index must be a number.", args.GetIsolate());
 
     SQLResultSetRowList* rowList = V8SQLResultSetRowList::toNative(args.Holder());
 
     unsigned long index = args[0]->IntegerValue();
-    if (index >= rowList->length()) {
-        V8Proxy::throwError(V8Proxy::RangeError, "Item index is out of range.");
-        return v8::Undefined();
-    }
+    if (index >= rowList->length())
+        return throwError(v8RangeError, "Item index is out of range.", args.GetIsolate());
 
     v8::Local<v8::Object> item = v8::Object::New();
     unsigned numColumns = rowList->columnNames().size();
@@ -70,10 +63,10 @@ v8::Handle<v8::Value> V8SQLResultSetRowList::itemCallback(const v8::Arguments& a
         v8::Handle<v8::Value> value;
         switch(sqlValue.type()) {
             case SQLValue::StringValue:
-                value = v8String(sqlValue.string());
+                value = v8String(sqlValue.string(), args.GetIsolate());
                 break;
             case SQLValue::NullValue:
-                value = v8::Null();
+                value = v8Null(args.GetIsolate());
                 break;
             case SQLValue::NumberValue:
                 value = v8::Number::New(sqlValue.number());
@@ -82,7 +75,7 @@ v8::Handle<v8::Value> V8SQLResultSetRowList::itemCallback(const v8::Arguments& a
                 ASSERT_NOT_REACHED();
         }
 
-        item->Set(v8String(rowList->columnNames()[i]), value, static_cast<v8::PropertyAttribute>(v8::DontDelete|v8::ReadOnly));
+        item->Set(v8String(rowList->columnNames()[i], args.GetIsolate()), value, static_cast<v8::PropertyAttribute>(v8::DontDelete | v8::ReadOnly));
     }
 
     return item;

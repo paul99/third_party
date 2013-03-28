@@ -27,6 +27,7 @@
 #include "EventNames.h"
 #include "Frame.h"
 #include "FrameView.h"
+#include "HTMLIFrameElement.h"
 #include "PlatformMouseEvent.h"
 
 namespace WebCore {
@@ -147,6 +148,36 @@ Node* MouseEvent::fromElement() const
     return target() ? target()->toNode() : 0;
 }
 
+// FIXME: Fix positioning. e.g. We need to consider border/padding.
+// https://bugs.webkit.org/show_bug.cgi?id=93696
+inline static int adjustedClientX(int innerClientX, HTMLIFrameElement* iframe, FrameView* frameView)
+{
+    return iframe->offsetLeft() - frameView->scrollX() + innerClientX;
+}
+
+inline static int adjustedClientY(int innerClientY, HTMLIFrameElement* iframe, FrameView* frameView)
+{
+    return iframe->offsetTop() - frameView->scrollY() + innerClientY;
+}
+
+PassRefPtr<Event> MouseEvent::cloneFor(HTMLIFrameElement* iframe) const
+{
+    ASSERT(iframe);
+    RefPtr<MouseEvent> clonedMouseEvent = MouseEvent::create();
+    Frame* frame = iframe->document()->frame();
+    FrameView* frameView = frame ? frame->view() : 0;
+    clonedMouseEvent->initMouseEvent(type(), bubbles(), cancelable(),
+            iframe->document()->defaultView(),
+            detail(), screenX(), screenY(),
+            frameView ? adjustedClientX(clientX(), iframe, frameView) : 0,
+            frameView ? adjustedClientY(clientY(), iframe, frameView) : 0,
+            ctrlKey(), altKey(), shiftKey(), metaKey(),
+            button(),
+            // Nullifies relatedTarget.
+            0);
+    return clonedMouseEvent.release();
+}
+
 PassRefPtr<SimulatedMouseEvent> SimulatedMouseEvent::create(const AtomicString& eventType, PassRefPtr<AbstractView> view, PassRefPtr<Event> underlyingEvent)
 {
     return adoptRef(new SimulatedMouseEvent(eventType, view, underlyingEvent));
@@ -178,13 +209,13 @@ SimulatedMouseEvent::SimulatedMouseEvent(const AtomicString& eventType, PassRefP
     }
 }
 
-PassRefPtr<MouseEventDispatchMediator> MouseEventDispatchMediator::create(PassRefPtr<MouseEvent> mouseEvent)
+PassRefPtr<MouseEventDispatchMediator> MouseEventDispatchMediator::create(PassRefPtr<MouseEvent> mouseEvent, MouseEventType mouseEventType)
 {
-    return adoptRef(new MouseEventDispatchMediator(mouseEvent));
+    return adoptRef(new MouseEventDispatchMediator(mouseEvent, mouseEventType));
 }
 
-MouseEventDispatchMediator::MouseEventDispatchMediator(PassRefPtr<MouseEvent> mouseEvent)
-    : EventDispatchMediator(mouseEvent)
+MouseEventDispatchMediator::MouseEventDispatchMediator(PassRefPtr<MouseEvent> mouseEvent, MouseEventType mouseEventType)
+    : EventDispatchMediator(mouseEvent), m_mouseEventType(mouseEventType)
 {
 }
 
@@ -195,35 +226,42 @@ MouseEvent* MouseEventDispatchMediator::event() const
 
 bool MouseEventDispatchMediator::dispatchEvent(EventDispatcher* dispatcher) const
 {
+    if (isSyntheticMouseEvent()) {
+        dispatcher->adjustRelatedTarget(event(), event()->relatedTarget());
+        return dispatcher->dispatchEvent(event());
+    }
+
     if (dispatcher->node()->disabled()) // Don't even send DOM events for disabled controls..
-        return true;
+        return false;
 
     if (event()->type().isEmpty())
-        return false; // Shouldn't happen.
+        return true; // Shouldn't happen.
 
-    RefPtr<EventTarget> relatedTarget = dispatcher->adjustRelatedTarget(event(), event()->relatedTarget());
-    event()->setRelatedTarget(relatedTarget);
+    ASSERT(!event()->target() || event()->target() != event()->relatedTarget());
+
+    EventTarget* relatedTarget = event()->relatedTarget();
+    dispatcher->adjustRelatedTarget(event(), relatedTarget);
 
     dispatcher->dispatchEvent(event());
     bool swallowEvent = event()->defaultHandled() || event()->defaultPrevented();
 
+    if (event()->type() != eventNames().clickEvent || event()->detail() != 2)
+        return !swallowEvent;
+
     // Special case: If it's a double click event, we also send the dblclick event. This is not part
     // of the DOM specs, but is used for compatibility with the ondblclick="" attribute. This is treated
     // as a separate event in other DOM-compliant browsers like Firefox, and so we do the same.
-    if (event()->type() == eventNames().clickEvent && event()->detail() == 2) {
-        RefPtr<MouseEvent> doubleClickEvent = MouseEvent::create();
-        doubleClickEvent->initMouseEvent(eventNames().dblclickEvent, event()->bubbles(), event()->cancelable(), event()->view(),
-                event()->detail(), event()->screenX(), event()->screenY(), event()->clientX(), event()->clientY(),
-                event()->ctrlKey(), event()->altKey(), event()->shiftKey(), event()->metaKey(),
-                event()->button(), relatedTarget);
-        if (event()->defaultHandled())
-            doubleClickEvent->setDefaultHandled();
-        dispatcher->dispatchEvent(doubleClickEvent);
-        if (doubleClickEvent->defaultHandled() || doubleClickEvent->defaultPrevented())
-            swallowEvent = true;
-    }
-
-    return swallowEvent;
+    RefPtr<MouseEvent> doubleClickEvent = MouseEvent::create();
+    doubleClickEvent->initMouseEvent(eventNames().dblclickEvent, event()->bubbles(), event()->cancelable(), event()->view(),
+                                     event()->detail(), event()->screenX(), event()->screenY(), event()->clientX(), event()->clientY(),
+                                     event()->ctrlKey(), event()->altKey(), event()->shiftKey(), event()->metaKey(),
+                                     event()->button(), relatedTarget);
+    if (event()->defaultHandled())
+        doubleClickEvent->setDefaultHandled();
+    EventDispatcher::dispatchEvent(dispatcher->node(), MouseEventDispatchMediator::create(doubleClickEvent));
+    if (doubleClickEvent->defaultHandled() || doubleClickEvent->defaultPrevented())
+        return false;
+    return !swallowEvent;
 }
 
 } // namespace WebCore

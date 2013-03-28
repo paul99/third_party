@@ -30,11 +30,16 @@
 #include "GraphicsLayer.h"
 
 #include "FloatPoint.h"
+#include "FloatRect.h"
 #include "GraphicsContext.h"
-#include "LayoutTypes.h"
+#include "LayoutRect.h"
+#include "PlatformMemoryInstrumentation.h"
 #include "RotateTransformOperation.h"
 #include "TextStream.h"
+#include <wtf/HashMap.h>
+#include <wtf/MemoryInstrumentationVector.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/StringBuilder.h>
 #include <wtf/text/WTFString.h>
 
 #ifndef NDEBUG
@@ -42,6 +47,13 @@
 #endif
 
 namespace WebCore {
+
+typedef HashMap<const GraphicsLayer*, Vector<FloatRect> > RepaintMap;
+static RepaintMap& repaintRectMap()
+{
+    DEFINE_STATIC_LOCAL(RepaintMap, map, ());
+    return map;
+}
 
 void KeyframeValueList::insert(const AnimationValue* value)
 {
@@ -63,16 +75,11 @@ void KeyframeValueList::insert(const AnimationValue* value)
     m_values.append(value);
 }
 
-#ifndef NDEBUG
-static bool s_inPaintContents = false;
-#endif
-
 GraphicsLayer::GraphicsLayer(GraphicsLayerClient* client)
     : m_client(client)
     , m_anchorPoint(0.5f, 0.5f, 0)
     , m_opacity(1)
     , m_zPosition(0)
-    , m_backgroundColorSet(false)
     , m_contentsOpaque(false)
     , m_preserves3D(false)
     , m_backfaceVisibility(true)
@@ -83,12 +90,9 @@ GraphicsLayer::GraphicsLayer(GraphicsLayerClient* client)
     , m_acceleratesDrawing(false)
     , m_maintainsPixelAlignment(false)
     , m_appliesPageScale(false)
-#if OS(ANDROID)
-    , m_isContainerLayer(false)
-    , m_fixedToContainerLayerVisibleRect(false)
-    , m_acceleratesScrolling(false)
-#endif
-    , m_paintingPhase(GraphicsLayerPaintAll)
+    , m_showDebugBorder(false)
+    , m_showRepaintCounter(false)
+    , m_paintingPhase(GraphicsLayerPaintAllWithOverflowClip)
     , m_contentsOrientation(CompositingCoordinatesTopDown)
     , m_parent(0)
     , m_maskLayer(0)
@@ -96,16 +100,27 @@ GraphicsLayer::GraphicsLayer(GraphicsLayerClient* client)
     , m_replicatedLayer(0)
     , m_repaintCount(0)
 {
-#if !OS(ANDROID) // FIXME: Enable this assert http://b/5633681.
-    ASSERT(!s_inPaintContents);
+#ifndef NDEBUG
+    if (m_client)
+        m_client->verifyNotPainting();
 #endif
 }
 
 GraphicsLayer::~GraphicsLayer()
 {
-#if !OS(ANDROID) // FIXME: Enable this assert http://b/5633681.
-    ASSERT(!s_inPaintContents);
+    resetTrackedRepaints();
+    ASSERT(!m_parent); // willBeDestroyed should have been called already.
+}
+
+void GraphicsLayer::willBeDestroyed()
+{
+#ifndef NDEBUG
+    if (m_client)
+        m_client->verifyNotPainting();
 #endif
+
+    if (m_replicaLayer)
+        m_replicaLayer->setReplicatedLayer(0);
 
     if (m_replicatedLayer)
         m_replicatedLayer->setReplicatedByLayer(0);
@@ -282,40 +297,25 @@ void GraphicsLayer::setReplicatedByLayer(GraphicsLayer* layer)
     m_replicaLayer = layer;
 }
 
-void GraphicsLayer::setOffsetFromRenderer(const IntSize& offset)
+void GraphicsLayer::setOffsetFromRenderer(const IntSize& offset, ShouldSetNeedsDisplay shouldSetNeedsDisplay)
 {
     if (offset == m_offsetFromRenderer)
         return;
 
     m_offsetFromRenderer = offset;
 
-#if OS(ANDROID)
-    // No need to repaint if scrolling is accelerated.
-    if (m_acceleratesScrolling)
-        return;
-#endif
-
     // If the compositing layer offset changes, we need to repaint.
-    setNeedsDisplay();
+    if (shouldSetNeedsDisplay == SetNeedsDisplay)
+        setNeedsDisplay();
 }
 
 void GraphicsLayer::setBackgroundColor(const Color& color)
 {
     m_backgroundColor = color;
-    m_backgroundColorSet = true;
-}
-
-void GraphicsLayer::clearBackgroundColor()
-{
-    m_backgroundColor = Color();
-    m_backgroundColorSet = false;
 }
 
 void GraphicsLayer::paintGraphicsLayerContents(GraphicsContext& context, const IntRect& clip)
 {
-#ifndef NDEBUG
-    s_inPaintContents = true;
-#endif
     if (m_client) {
         LayoutSize offset = offsetFromRenderer();
         context.translate(-offset);
@@ -323,20 +323,18 @@ void GraphicsLayer::paintGraphicsLayerContents(GraphicsContext& context, const I
         LayoutRect clipRect(clip);
         clipRect.move(offset);
 
-        m_client->paintContents(this, context, m_paintingPhase, clipRect);
+        m_client->paintContents(this, context, m_paintingPhase, pixelSnappedIntRect(clipRect));
     }
-#ifndef NDEBUG
-    s_inPaintContents = false;
-#endif
 }
 
 String GraphicsLayer::animationNameForTransition(AnimatedPropertyID property)
 {
     // | is not a valid identifier character in CSS, so this can never conflict with a keyframe identifier.
-    String id = "-|transition";
+    StringBuilder id;
+    id.appendLiteral("-|transition");
     id.append(static_cast<char>(property));
     id.append('-');
-    return id;
+    return id.toString();
 }
 
 void GraphicsLayer::suspendAnimations(double)
@@ -347,23 +345,39 @@ void GraphicsLayer::resumeAnimations()
 {
 }
 
+void GraphicsLayer::getDebugBorderInfo(Color& color, float& width) const
+{
+    if (drawsContent()) {
+        if (m_usingTiledLayer) {
+            color = Color(255, 128, 0, 128); // tiled layer: orange
+            width = 2;
+            return;
+        }
+
+        color = Color(0, 128, 32, 128); // normal layer: green
+        width = 2;
+        return;
+    }
+    
+    if (masksToBounds()) {
+        color = Color(128, 255, 255, 48); // masking layer: pale blue
+        width = 20;
+        return;
+    }
+        
+    color = Color(255, 255, 0, 192); // container: yellow
+    width = 2;
+}
+
 void GraphicsLayer::updateDebugIndicators()
 {
-    if (GraphicsLayer::showDebugBorders()) {
-        if (drawsContent()) {
-            // FIXME: It's weird to ask the client if this layer is a tile cache layer.
-            // Maybe we should just cache that information inside GraphicsLayer?
-            if (m_client->shouldUseTileCache(this)) // tile cache layer: dark blue
-                setDebugBorder(Color(0, 0, 128, 128), 0.5);
-            else if (m_usingTiledLayer)
-                setDebugBorder(Color(255, 128, 0, 128), 2); // tiled layer: orange
-            else
-                setDebugBorder(Color(0, 128, 32, 128), 2); // normal layer: green
-        } else if (masksToBounds()) {
-            setDebugBorder(Color(128, 255, 255, 48), 20); // masking layer: pale blue
-        } else
-            setDebugBorder(Color(255, 255, 0, 192), 2); // container: yellow
-    }
+    if (!isShowingDebugBorder())
+        return;
+
+    Color borderColor;
+    float width = 0;
+    getDebugBorderInfo(borderColor, width);
+    setDebugBorder(borderColor, width);
 }
 
 void GraphicsLayer::setZPosition(float position)
@@ -396,12 +410,52 @@ void GraphicsLayer::distributeOpacity(float accumulatedOpacity)
     }
 }
 
-#if PLATFORM(QT) || PLATFORM(GTK)
-GraphicsLayer::GraphicsLayerFactory* GraphicsLayer::s_graphicsLayerFactory = 0;
+#if PLATFORM(QT) || PLATFORM(GTK) || PLATFORM(EFL)
+GraphicsLayer::GraphicsLayerFactoryCallback* GraphicsLayer::s_graphicsLayerFactory = 0;
 
-void GraphicsLayer::setGraphicsLayerFactory(GraphicsLayer::GraphicsLayerFactory factory)
+void GraphicsLayer::setGraphicsLayerFactory(GraphicsLayer::GraphicsLayerFactoryCallback factory)
 {
     s_graphicsLayerFactory = factory;
+}
+#endif
+
+#if ENABLE(CSS_FILTERS)
+static inline const FilterOperations* filterOperationsAt(const KeyframeValueList& valueList, size_t index)
+{
+    return static_cast<const FilterAnimationValue*>(valueList.at(index))->value();
+}
+
+int GraphicsLayer::validateFilterOperations(const KeyframeValueList& valueList)
+{
+    ASSERT(valueList.property() == AnimatedPropertyWebkitFilter);
+
+    if (valueList.size() < 2)
+        return -1;
+
+    // Empty filters match anything, so find the first non-empty entry as the reference
+    size_t firstIndex = 0;
+    for ( ; firstIndex < valueList.size(); ++firstIndex) {
+        if (filterOperationsAt(valueList, firstIndex)->operations().size() > 0)
+            break;
+    }
+
+    if (firstIndex >= valueList.size())
+        return -1;
+
+    const FilterOperations* firstVal = filterOperationsAt(valueList, firstIndex);
+    
+    for (size_t i = firstIndex + 1; i < valueList.size(); ++i) {
+        const FilterOperations* val = filterOperationsAt(valueList, i);
+        
+        // An emtpy filter list matches anything.
+        if (val->operations().isEmpty())
+            continue;
+        
+        if (!firstVal->operationsMatch(*val))
+            return -1;
+    }
+    
+    return firstIndex;
 }
 #endif
 
@@ -480,8 +534,38 @@ int GraphicsLayer::validateTransformOperations(const KeyframeValueList& valueLis
     return firstIndex;
 }
 
+double GraphicsLayer::backingStoreMemoryEstimate() const
+{
+    if (!drawsContent())
+        return 0;
+    
+    // Effects of page and device scale are ignored; subclasses should override to take these into account.
+    return static_cast<double>(4 * size().width()) * size().height();
+}
 
-static void writeIndent(TextStream& ts, int indent)
+void GraphicsLayer::resetTrackedRepaints()
+{
+    repaintRectMap().remove(this);
+}
+
+void GraphicsLayer::addRepaintRect(const FloatRect& repaintRect)
+{
+    if (m_client->isTrackingRepaints()) {
+        FloatRect largestRepaintRect(FloatPoint(), m_size);
+        largestRepaintRect.intersect(repaintRect);
+        RepaintMap::iterator repaintIt = repaintRectMap().find(this);
+        if (repaintIt == repaintRectMap().end()) {
+            Vector<FloatRect> repaintRects;
+            repaintRects.append(largestRepaintRect);
+            repaintRectMap().set(this, repaintRects);
+        } else {
+            Vector<FloatRect>& repaintRects = repaintIt->value;
+            repaintRects.append(largestRepaintRect);
+        }
+    }
+}
+
+void GraphicsLayer::writeIndent(TextStream& ts, int indent)
 {
     for (int i = 0; i != indent; ++i)
         ts << "  ";
@@ -565,7 +649,7 @@ void GraphicsLayer::dumpProperties(TextStream& ts, int indent, LayerTreeAsTextBe
         ts << ")\n";
     }
 
-    if (m_backgroundColorSet) {
+    if (m_backgroundColor.isValid()) {
         writeIndent(ts, indent + 1);
         ts << "(backgroundColor " << m_backgroundColor.nameForRenderTreeAsText() << ")\n";
     }
@@ -603,10 +687,30 @@ void GraphicsLayer::dumpProperties(TextStream& ts, int indent, LayerTreeAsTextBe
         writeIndent(ts, indent + 1);
         ts << "(replicated layer";
         if (behavior & LayerTreeAsTextDebug)
-            ts << " " << m_replicatedLayer;;
+            ts << " " << m_replicatedLayer;
         ts << ")\n";
     }
 
+    if (behavior & LayerTreeAsTextIncludeRepaintRects && repaintRectMap().contains(this) && !repaintRectMap().get(this).isEmpty()) {
+        writeIndent(ts, indent + 1);
+        ts << "(repaint rects\n";
+        for (size_t i = 0; i < repaintRectMap().get(this).size(); ++i) {
+            if (repaintRectMap().get(this)[i].isEmpty())
+                continue;
+            writeIndent(ts, indent + 2);
+            ts << "(rect ";
+            ts << repaintRectMap().get(this)[i].x() << " ";
+            ts << repaintRectMap().get(this)[i].y() << " ";
+            ts << repaintRectMap().get(this)[i].width() << " ";
+            ts << repaintRectMap().get(this)[i].height();
+            ts << ")\n";
+        }
+        writeIndent(ts, indent + 1);
+        ts << ")\n";
+    }
+    
+    dumpAdditionalProperties(ts, indent, behavior);
+    
     if (m_children.size()) {
         writeIndent(ts, indent + 1);
         ts << "(children " << m_children.size() << "\n";
@@ -627,6 +731,16 @@ String GraphicsLayer::layerTreeAsText(LayerTreeAsTextBehavior behavior) const
     return ts.release();
 }
 
+void GraphicsLayer::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, PlatformMemoryTypes::Layers);
+    info.addMember(m_children);
+    info.addMember(m_parent);
+    info.addMember(m_maskLayer);
+    info.addMember(m_replicaLayer);
+    info.addMember(m_replicatedLayer);
+}
+
 } // namespace WebCore
 
 #ifndef NDEBUG
@@ -635,7 +749,7 @@ void showGraphicsLayerTree(const WebCore::GraphicsLayer* layer)
     if (!layer)
         return;
 
-    WTF::String output = layer->layerTreeAsText(LayerTreeAsTextDebug);
+    String output = layer->layerTreeAsText(LayerTreeAsTextDebug | LayerTreeAsTextIncludeVisibleRects | LayerTreeAsTextIncludeTileCaches);
     fprintf(stderr, "%s\n", output.utf8().data());
 }
 #endif

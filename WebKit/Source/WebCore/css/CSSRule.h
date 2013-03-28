@@ -1,7 +1,7 @@
 /*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2002, 2006, 2007, 2012 Apple Inc. All rights reserved.
  * Copyright (C) 2011 Andreas Kling (kling@webkit.org)
  *
  * This library is free software; you can redistribute it and/or
@@ -23,23 +23,19 @@
 #ifndef CSSRule_h
 #define CSSRule_h
 
-#include "CSSStyleSheet.h"
-#include "KURLHash.h"
-#include <wtf/ListHashSet.h>
+#include "WebCoreMemoryInstrumentation.h"
+#include <wtf/RefCounted.h>
 
 namespace WebCore {
 
+class CSSStyleSheet;
+class StyleRuleBase;
+struct CSSParserContext;
 typedef int ExceptionCode;
 
 class CSSRule : public RefCounted<CSSRule> {
 public:
-    // Override RefCounted's deref() to ensure operator delete is called on
-    // the appropriate subclass type.
-    void deref()
-    {
-        if (derefBase())
-            destroy();
-    }
+    virtual ~CSSRule() { }
 
     enum Type {
         UNKNOWN_RULE,
@@ -49,32 +45,23 @@ public:
         MEDIA_RULE,
         FONT_FACE_RULE,
         PAGE_RULE,
-        // 7 used to be VARIABLES_RULE
-        WEBKIT_KEYFRAMES_RULE = 8,
+        // 7 was VARIABLES_RULE; we now match other browsers with 7 as
+        // KEYFRAMES_RULE:
+        // <https://bugs.webkit.org/show_bug.cgi?id=71293>.
+        WEBKIT_KEYFRAMES_RULE,
         WEBKIT_KEYFRAME_RULE,
-        WEBKIT_REGION_RULE
+#if ENABLE(CSS_DEVICE_ADAPTATION)
+        WEBKIT_VIEWPORT_RULE = 15,
+#endif
+#if ENABLE(CSS_REGIONS)
+        WEBKIT_REGION_RULE = 16
+#endif
     };
 
-    Type type() const { return static_cast<Type>(m_type); }
-
-    bool isCharsetRule() const { return type() == CHARSET_RULE; }
-    bool isFontFaceRule() const { return type() == FONT_FACE_RULE; }
-    bool isKeyframeRule() const { return type() == WEBKIT_KEYFRAME_RULE; }
-    bool isKeyframesRule() const { return type() == WEBKIT_KEYFRAMES_RULE; }
-    bool isMediaRule() const { return type() == MEDIA_RULE; }
-    bool isPageRule() const { return type() == PAGE_RULE; }
-    bool isStyleRule() const { return type() == STYLE_RULE; }
-    bool isRegionRule() const { return type() == WEBKIT_REGION_RULE; }
-    bool isImportRule() const { return type() == IMPORT_RULE; }
-
-    bool useStrictParsing() const
-    {
-        if (parentRule())
-            return parentRule()->useStrictParsing();
-        if (parentStyleSheet())
-            return parentStyleSheet()->useStrictParsing();
-        return true;
-    }
+    virtual Type type() const = 0;
+    virtual String cssText() const = 0;
+    virtual void reattach(StyleRuleBase*) = 0;
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const;
 
     void setParentStyleSheet(CSSStyleSheet* styleSheet)
     {
@@ -97,48 +84,30 @@ public:
 
     CSSRule* parentRule() const { return m_parentIsRule ? m_parentRule : 0; }
 
-    String cssText() const;
+    // NOTE: Just calls notImplemented().
     void setCssText(const String&, ExceptionCode&);
 
-    KURL baseURL() const
-    {
-        if (CSSStyleSheet* parentSheet = parentStyleSheet())
-            return parentSheet->baseURL();
-        return KURL();
-    }
-
 protected:
-    CSSRule(CSSStyleSheet* parent, Type type)
-        : m_sourceLine(0)
-        , m_hasCachedSelectorText(false)
+    CSSRule(CSSStyleSheet* parent)
+        : m_hasCachedSelectorText(false)
         , m_parentIsRule(false)
-        , m_type(type)
         , m_parentStyleSheet(parent)
     {
     }
 
-    // NOTE: This class is non-virtual for memory and performance reasons.
-    // Don't go making it virtual again unless you know exactly what you're doing!
-
-    ~CSSRule() { }
-
-    int sourceLine() const { return m_sourceLine; }
-    void setSourceLine(int sourceLine) { m_sourceLine = sourceLine; }
     bool hasCachedSelectorText() const { return m_hasCachedSelectorText; }
     void setHasCachedSelectorText(bool hasCachedSelectorText) const { m_hasCachedSelectorText = hasCachedSelectorText; }
 
+    const CSSParserContext& parserContext() const;
+
 private:
-    // Only used by CSSStyleRule but kept here to maximize struct packing.
-    signed m_sourceLine : 26;
-    mutable unsigned m_hasCachedSelectorText : 1;
-    unsigned m_parentIsRule : 1;
-    unsigned m_type : 4;
+    mutable unsigned char m_hasCachedSelectorText : 1;
+    unsigned char m_parentIsRule : 1;
+
     union {
         CSSRule* m_parentRule;
         CSSStyleSheet* m_parentStyleSheet;
     };
-
-    void destroy();
 };
 
 } // namespace WebCore

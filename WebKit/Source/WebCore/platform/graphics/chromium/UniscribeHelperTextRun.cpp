@@ -32,7 +32,7 @@
 #include "UniscribeHelperTextRun.h"
 
 #include "Font.h"
-#include "PlatformSupport.h"
+#include "FontPlatformDataChromiumWin.h"
 #include "SimpleFontData.h"
 #include "TextRun.h"
 
@@ -40,7 +40,7 @@ namespace WebCore {
 
 UniscribeHelperTextRun::UniscribeHelperTextRun(const TextRun& run,
                                                const Font& font)
-    : UniscribeHelper(run.characters(), run.length(), run.rtl(),
+    : UniscribeHelper(run.characters16(), run.length(), run.rtl(),
                       font.primaryFont()->platformData().hfont(),
                       font.primaryFont()->platformData().scriptCache(),
                       font.primaryFont()->platformData().scriptFontProperties(),
@@ -82,7 +82,7 @@ void UniscribeHelperTextRun::tryToPreloadFont(HFONT font)
     // Ask the browser to get the font metrics for this font.
     // That will preload the font and it should now be accessible
     // from the renderer.
-    PlatformSupport::ensureFontLoaded(font);
+    FontPlatformData::ensureFontLoaded(font);
 }
 
 bool UniscribeHelperTextRun::nextWinFontData(

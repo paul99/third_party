@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006, 2007, 2008, 2009, 2010, 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,7 +30,6 @@
 
 #import "AuthenticationChallenge.h"
 #import "AuthenticationMac.h"
-#import "Base64.h"
 #import "BlobRegistry.h"
 #import "BlockExceptions.h"
 #import "CookieStorage.h"
@@ -52,8 +51,9 @@
 #import "SubresourceLoader.h"
 #import "WebCoreSystemInterface.h"
 #import "WebCoreURLResponse.h"
-#import <wtf/text/CString.h>
 #import <wtf/UnusedParam.h>
+#import <wtf/text/Base64.h>
+#import <wtf/text/CString.h>
 
 using namespace WebCore;
 
@@ -124,10 +124,6 @@ private:
 
 namespace WebCore {
 
-#ifndef NDEBUG
-static bool isInitializingConnection;
-#endif
-    
 static void applyBasicAuthorizationHeader(ResourceRequest& request, const Credential& credential)
 {
     String authenticationHeader = "Basic " + base64Encode(String(credential.user() + ":" + credential.password()).utf8());
@@ -147,55 +143,35 @@ ResourceHandle::~ResourceHandle()
     LOG(Network, "Handle %p destroyed", this);
 }
 
-static const double MaxFoundationVersionWithoutdidSendBodyDataDelegate = 677.21;
-bool ResourceHandle::didSendBodyDataDelegateExists()
-{
-    return NSFoundationVersionNumber > MaxFoundationVersionWithoutdidSendBodyDataDelegate;
-}
-
-static bool shouldRelaxThirdPartyCookiePolicy(const KURL& url)
+static bool shouldRelaxThirdPartyCookiePolicy(NetworkingContext* context, const KURL& url)
 {
     // If a URL already has cookies, then we'll relax the 3rd party cookie policy and accept new cookies.
 
-    NSHTTPCookieStorage *sharedStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-
-    NSHTTPCookieAcceptPolicy cookieAcceptPolicy;
-#if USE(CFURLSTORAGESESSIONS)
-    RetainPtr<CFHTTPCookieStorageRef> cfCookieStorage = currentCFHTTPCookieStorage();
-    if (cfCookieStorage)
-        cookieAcceptPolicy = wkGetHTTPCookieAcceptPolicy(cfCookieStorage.get());
-    else
-#endif
-        cookieAcceptPolicy = [sharedStorage cookieAcceptPolicy];
+    RetainPtr<CFHTTPCookieStorageRef> cfCookieStorage = currentCFHTTPCookieStorage(context);
+    NSHTTPCookieAcceptPolicy cookieAcceptPolicy = static_cast<NSHTTPCookieAcceptPolicy>(wkGetHTTPCookieAcceptPolicy(cfCookieStorage.get()));
 
     if (cookieAcceptPolicy != NSHTTPCookieAcceptPolicyOnlyFromMainDocumentDomain)
         return false;
 
-    NSArray *cookies;
-#if USE(CFURLSTORAGESESSIONS)
-    if (cfCookieStorage)
-        cookies = wkHTTPCookiesForURL(cfCookieStorage.get(), url);
-    else
-#endif
-        cookies = [sharedStorage cookiesForURL:url];
+    NSArray *cookies = wkHTTPCookiesForURL(cfCookieStorage.get(), url);
 
     return [cookies count];
 }
 
-void ResourceHandle::createNSURLConnection(id delegate, bool shouldUseCredentialStorage, bool shouldContentSniff)
+void ResourceHandle::createNSURLConnection(id delegate, bool shouldUseCredentialStorage, bool shouldRelaxThirdPartyCookiePolicy, bool shouldContentSniff)
 {
     // Credentials for ftp can only be passed in URL, the connection:didReceiveAuthenticationChallenge: delegate call won't be made.
-    if ((!d->m_user.isEmpty() || !d->m_pass.isEmpty()) && !firstRequest().url().protocolInHTTPFamily()) {
+    if ((!d->m_user.isEmpty() || !d->m_pass.isEmpty()) && !firstRequest().url().protocolIsInHTTPFamily()) {
         KURL urlWithCredentials(firstRequest().url());
         urlWithCredentials.setUser(d->m_user);
         urlWithCredentials.setPass(d->m_pass);
         firstRequest().setURL(urlWithCredentials);
     }
 
-    if (shouldRelaxThirdPartyCookiePolicy(firstRequest().url()))
+    if (shouldRelaxThirdPartyCookiePolicy)
         firstRequest().setFirstPartyForCookies(firstRequest().url());
 
-    if (shouldUseCredentialStorage && firstRequest().url().protocolInHTTPFamily()) {
+    if (shouldUseCredentialStorage && firstRequest().url().protocolIsInHTTPFamily()) {
         if (d->m_user.isEmpty() && d->m_pass.isEmpty()) {
             // <rdar://problem/7174050> - For URLs that match the paths of those previously challenged for HTTP Basic authentication, 
             // try and reuse the credential preemptively, as allowed by RFC 2617.
@@ -215,22 +191,20 @@ void ResourceHandle::createNSURLConnection(id delegate, bool shouldUseCredential
 
     NSURLRequest *nsRequest = firstRequest().nsURLRequest();
     if (!shouldContentSniff) {
-        NSMutableURLRequest *mutableRequest = [[nsRequest copy] autorelease];
+        NSMutableURLRequest *mutableRequest = [[nsRequest mutableCopy] autorelease];
         wkSetNSURLRequestShouldContentSniff(mutableRequest, NO);
         nsRequest = mutableRequest;
     }
 
-#if !defined(BUILDING_ON_LEOPARD)
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
     ASSERT([NSURLConnection instancesRespondToSelector:@selector(_initWithRequest:delegate:usesCache:maxContentLength:startImmediately:connectionProperties:)]);
     static bool supportsSettingConnectionProperties = true;
 #else
     static bool supportsSettingConnectionProperties = [NSURLConnection instancesRespondToSelector:@selector(_initWithRequest:delegate:usesCache:maxContentLength:startImmediately:connectionProperties:)];
 #endif
 
-#if USE(CFURLSTORAGESESSIONS)
-    if (CFURLStorageSessionRef storageSession = currentStorageSession())
-        nsRequest = [wkCopyRequestWithStorageSession(storageSession, nsRequest) autorelease];
-#endif
+    if (d->m_storageSession)
+        nsRequest = [wkCopyRequestWithStorageSession(d->m_storageSession.get(), nsRequest) autorelease];
 
     if (supportsSettingConnectionProperties) {
         NSDictionary *sessionID = shouldUseCredentialStorage ? [NSDictionary dictionary] : [NSDictionary dictionaryWithObject:@"WebKitPrivateSession" forKey:@"_kCFURLConnectionSessionID"];
@@ -256,9 +230,7 @@ bool ResourceHandle::start(NetworkingContext* context)
     if (!context->isValid())
         return false;
 
-#ifndef NDEBUG
-    isInitializingConnection = YES;
-#endif
+    d->m_storageSession = context->storageSession();
 
     ASSERT(!d->m_proxy);
     d->m_proxy.adoptNS(wkCreateNSURLConnectionDelegateProxy());
@@ -266,15 +238,12 @@ bool ResourceHandle::start(NetworkingContext* context)
 
     bool shouldUseCredentialStorage = !client() || client()->shouldUseCredentialStorage(this);
 
-    if (!ResourceHandle::didSendBodyDataDelegateExists())
-        associateStreamWithResourceHandle([firstRequest().nsURLRequest() HTTPBodyStream], this);
-
-
     d->m_needsSiteSpecificQuirks = context->needsSiteSpecificQuirks();
 
     createNSURLConnection(
         d->m_proxy.get(),
         shouldUseCredentialStorage,
+        shouldRelaxThirdPartyCookiePolicy(context, firstRequest().url()),
         d->m_shouldContentSniff || context->localFileContentSniffingEnabled());
 
     bool scheduled = false;
@@ -288,16 +257,18 @@ bool ResourceHandle::start(NetworkingContext* context)
         }
     }
 
+    if (NSOperationQueue *operationQueue = context->scheduledOperationQueue()) {
+        ASSERT(!scheduled);
+        [connection() setDelegateQueue:operationQueue];
+        scheduled = true;
+    }
+
     // Start the connection if we did schedule with at least one runloop.
     // We can't start the connection until we have one runloop scheduled.
     if (scheduled)
         [connection() start];
     else
         d->m_startWhenScheduled = true;
-
-#ifndef NDEBUG
-    isInitializingConnection = NO;
-#endif
 
     LOG(Network, "Handle %p starting connection %p for %@", this, connection(), firstRequest().nsURLRequest());
     
@@ -317,12 +288,16 @@ void ResourceHandle::cancel()
 {
     LOG(Network, "Handle %p cancel connection %p", this, d->m_connection.get());
 
+    if (!d->m_proxy) {
+        // If the proxy is null, the connection has been handed off to NSURLDownload, so ResourceHandle should not cancel it.
+        // FIXME: We should do what we do in the CFNetwork port and null out the NSURLConnection object instead.
+        return;
+    }
+
     // Leaks were seen on HTTP tests without this; can be removed once <rdar://problem/6886937> is fixed.
     if (d->m_currentMacChallenge)
         [[d->m_currentMacChallenge sender] cancelAuthenticationChallenge:d->m_currentMacChallenge];
 
-    if (!ResourceHandle::didSendBodyDataDelegateExists())
-        disassociateStreamWithResourceHandle([firstRequest().nsURLRequest() HTTPBodyStream]);
     [d->m_connection.get() cancel];
 }
 
@@ -393,8 +368,8 @@ bool ResourceHandle::willLoadFromCache(ResourceRequest& request, Frame*)
     request.setCachePolicy(ReturnCacheDataDontLoad);
     NSURLResponse *nsURLResponse = nil;
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    
-   [NSURLConnection sendSynchronousRequest:request.nsURLRequest() returningResponse:&nsURLResponse error:nil];
+
+    [NSURLConnection sendSynchronousRequest:request.nsURLRequest() returningResponse:&nsURLResponse error:nil];
     
     END_BLOCK_OBJC_EXCEPTIONS;
     
@@ -427,6 +402,8 @@ void ResourceHandle::loadResourceSynchronously(NetworkingContext* context, const
 
     RefPtr<ResourceHandle> handle = adoptRef(new ResourceHandle(request, client.get(), false /*defersLoading*/, true /*shouldContentSniff*/));
 
+    handle->d->m_storageSession = context->storageSession();
+
     if (context && handle->d->m_scheduledFailureType != NoFailure) {
         error = context->blockedError(request);
         return;
@@ -435,7 +412,8 @@ void ResourceHandle::loadResourceSynchronously(NetworkingContext* context, const
     handle->createNSURLConnection(
         handle->delegate(), // A synchronous request cannot turn into a download, so there is no need to proxy the delegate.
         storedCredentials == AllowStoredCredentials,
-        handle->shouldContentSniff() || (context && context->localFileContentSniffingEnabled()));
+        shouldRelaxThirdPartyCookiePolicy(context, request.url()),
+        handle->shouldContentSniff() || context->localFileContentSniffingEnabled());
 
     [handle->connection() scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:(NSString *)synchronousLoadRunLoopMode()];
     [handle->connection() start];
@@ -500,10 +478,8 @@ void ResourceHandle::willSendRequest(ResourceRequest& request, const ResourceRes
         }
     }
 
-#if USE(CFURLSTORAGESESSIONS)
-    if (CFURLStorageSessionRef storageSession = currentStorageSession())
-        request.setStorageSession(storageSession);
-#endif
+    if (d->m_storageSession)
+        request.setStorageSession(d->m_storageSession.get());
 
     client()->willSendRequest(this, request, redirectResponse);
 }
@@ -524,7 +500,7 @@ void ResourceHandle::didReceiveAuthenticationChallenge(const AuthenticationChall
     // we make sure that is actually present
     ASSERT(challenge.nsURLAuthenticationChallenge());
 
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOWLEOPARD)
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
     // Proxy authentication is handled by CFNetwork internally. We can get here if the user cancels
     // CFNetwork authentication dialog, and we shouldn't ask the client to display another one in that case.
     if (challenge.protectionSpace().isProxy()) {
@@ -562,7 +538,7 @@ void ResourceHandle::didReceiveAuthenticationChallenge(const AuthenticationChall
                 ASSERT(credential.persistence() == CredentialPersistenceNone);
                 if (challenge.failureResponse().httpStatusCode() == 401) {
                     // Store the credential back, possibly adding it as a default for this directory.
-                    CredentialStorage::set(credential, challenge.protectionSpace(), firstRequest().url());
+                    CredentialStorage::set(credential, challenge.protectionSpace(), challenge.failureResponse().url());
                 }
                 [challenge.sender() useCredential:mac(credential) forAuthenticationChallenge:mac(challenge)];
                 return;
@@ -620,7 +596,7 @@ void ResourceHandle::receivedCredential(const AuthenticationChallenge& challenge
         Credential webCredential(credential, CredentialPersistenceNone);
         KURL urlToStore;
         if (challenge.failureResponse().httpStatusCode() == 401)
-            urlToStore = firstRequest().url();
+            urlToStore = challenge.failureResponse().url();
         CredentialStorage::set(webCredential, core([d->m_currentMacChallenge protectionSpace]), urlToStore);
         [[d->m_currentMacChallenge sender] useCredential:mac(webCredential) forAuthenticationChallenge:d->m_currentMacChallenge];
     } else
@@ -648,15 +624,6 @@ void ResourceHandle::receivedCancellation(const AuthenticationChallenge& challen
     if (client())
         client()->receivedCancellation(this, challenge);
 }
-
-#if USE(CFURLSTORAGESESSIONS)
-
-String ResourceHandle::privateBrowsingStorageSessionIdentifierDefaultBase()
-{
-    return String([[NSBundle mainBundle] bundleIdentifier]);
-}
-
-#endif
 
 } // namespace WebCore
 
@@ -722,17 +689,6 @@ String ResourceHandle::privateBrowsingStorageSessionIdentifierDefaultBase()
         request.clearHTTPReferrer();
 
     m_handle->willSendRequest(request, redirectResponse);
-
-    if (!ResourceHandle::didSendBodyDataDelegateExists()) {
-        // The client may change the request's body stream, in which case we have to re-associate
-        // the handle with the new stream so upload progress callbacks continue to work correctly.
-        NSInputStream* oldBodyStream = [newRequest HTTPBodyStream];
-        NSInputStream* newBodyStream = [request.nsURLRequest() HTTPBodyStream];
-        if (oldBodyStream != newBodyStream) {
-            disassociateStreamWithResourceHandle(oldBodyStream);
-            associateStreamWithResourceHandle(newBodyStream, m_handle);
-        }
-    }
 
     return request.nsURLRequest();
 }
@@ -809,7 +765,7 @@ String ResourceHandle::privateBrowsingStorageSessionIdentifierDefaultBase()
     m_handle->client()->didReceiveResponse(m_handle, r);
 }
 
-#if HAVE(NETWORK_CFDATA_ARRAY_CALLBACK)
+#if USE(NETWORK_CFDATA_ARRAY_CALLBACK)
 - (void)connection:(NSURLConnection *)connection didReceiveDataArray:(NSArray *)dataArray
 {
     UNUSED_PARAM(connection);
@@ -880,9 +836,6 @@ String ResourceHandle::privateBrowsingStorageSessionIdentifierDefaultBase()
     if (!m_handle || !m_handle->client())
         return;
 
-    if (!ResourceHandle::didSendBodyDataDelegateExists())
-        disassociateStreamWithResourceHandle([m_handle->firstRequest().nsURLRequest() HTTPBodyStream]);
-
     m_handle->client()->didFinishLoading(m_handle, 0);
 }
 
@@ -895,9 +848,6 @@ String ResourceHandle::privateBrowsingStorageSessionIdentifierDefaultBase()
     if (!m_handle || !m_handle->client())
         return;
 
-    if (!ResourceHandle::didSendBodyDataDelegateExists())
-        disassociateStreamWithResourceHandle([m_handle->firstRequest().nsURLRequest() HTTPBodyStream]);
-
     m_handle->client()->didFail(m_handle, error);
 }
 
@@ -908,28 +858,19 @@ String ResourceHandle::privateBrowsingStorageSessionIdentifierDefaultBase()
 
     UNUSED_PARAM(connection);
 
-#ifndef NDEBUG
-    if (isInitializingConnection)
-        LOG_ERROR("connection:willCacheResponse: was called inside of [NSURLConnection initWithRequest:delegate:] (4067625)");
-#endif
-
     if (!m_handle || !m_handle->client())
+        return nil;
+
+    // Workaround for <rdar://problem/6300990> Caching does not respect Vary HTTP header.
+    // FIXME: WebCore cache has issues with Vary, too (bug 58797, bug 71509).
+    if ([[cachedResponse response] isKindOfClass:[NSHTTPURLResponse class]]
+        && [[(NSHTTPURLResponse *)[cachedResponse response] allHeaderFields] objectForKey:@"Vary"])
         return nil;
 
     NSCachedURLResponse *newResponse = m_handle->client()->willCacheResponse(m_handle, cachedResponse);
     if (newResponse != cachedResponse)
         return newResponse;
     
-    CacheStoragePolicy policy = static_cast<CacheStoragePolicy>([newResponse storagePolicy]);
-        
-    m_handle->client()->willCacheResponse(m_handle, policy);
-
-    if (static_cast<NSURLCacheStoragePolicy>(policy) != [newResponse storagePolicy])
-        newResponse = [[[NSCachedURLResponse alloc] initWithResponse:[newResponse response]
-                                                                data:[newResponse data]
-                                                            userInfo:[newResponse userInfo]
-                                                       storagePolicy:static_cast<NSURLCacheStoragePolicy>(policy)] autorelease];
-
     return newResponse;
 }
 

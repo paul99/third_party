@@ -32,6 +32,7 @@
 #ifndef ProgressShadowElement_h
 #define ProgressShadowElement_h
 
+#if ENABLE(PROGRESS_ELEMENT)
 #include "HTMLDivElement.h"
 #include <wtf/Forward.h>
 
@@ -44,7 +45,17 @@ public:
     ProgressShadowElement(Document*);
     HTMLProgressElement* progressElement() const;
 
+protected:
+    virtual bool rendererIsNeeded(const NodeRenderingContext&);
+};
+
+class ProgressInnerElement : public ProgressShadowElement {
+public:
+    ProgressInnerElement(Document*);
+
+    static PassRefPtr<ProgressInnerElement> create(Document*);
 private:
+    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*) OVERRIDE;
     virtual bool rendererIsNeeded(const NodeRenderingContext&);
 };
 
@@ -53,10 +64,11 @@ public:
     ProgressBarElement(Document* document) 
         : ProgressShadowElement(document)
     {
+        DEFINE_STATIC_LOCAL(AtomicString, pseudoId, ("-webkit-progress-bar", AtomicString::ConstructFromLiteral));
+        setPseudo(pseudoId);
     }
 
     static PassRefPtr<ProgressBarElement> create(Document*);
-    virtual const AtomicString& shadowPseudoId() const;
 };
 
 inline PassRefPtr<ProgressBarElement> ProgressBarElement::create(Document* document)
@@ -64,15 +76,15 @@ inline PassRefPtr<ProgressBarElement> ProgressBarElement::create(Document* docum
     return adoptRef(new ProgressBarElement(document));
 }
 
-
 class ProgressValueElement : public ProgressShadowElement {
 public:
     ProgressValueElement(Document* document) 
         : ProgressShadowElement(document)
     {
+        DEFINE_STATIC_LOCAL(AtomicString, pseudoId, ("-webkit-progress-value", AtomicString::ConstructFromLiteral));
+        setPseudo(pseudoId);
     }
 
-    virtual const AtomicString& shadowPseudoId() const;
     static PassRefPtr<ProgressValueElement> create(Document*);
     void setWidthPercentage(double);
 };
@@ -83,5 +95,5 @@ inline PassRefPtr<ProgressValueElement> ProgressValueElement::create(Document* d
 }
 
 }
-
-#endif
+#endif // ENABLE(PROGRESS_ELEMENT)
+#endif // ProgressShadowElement_h

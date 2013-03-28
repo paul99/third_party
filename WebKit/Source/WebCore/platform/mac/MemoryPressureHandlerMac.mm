@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,30 +26,39 @@
 #import "config.h"
 #import "MemoryPressureHandler.h"
 
+#import <WebCore/CSSValuePool.h>
 #import <WebCore/GCController.h>
 #import <WebCore/FontCache.h>
 #import <WebCore/MemoryCache.h>
 #import <WebCore/PageCache.h>
+#import <WebCore/LayerPool.h>
+#import <wtf/CurrentTime.h>
 #import <wtf/FastMalloc.h>
 
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD) && !PLATFORM(IOS)
+#if !PLATFORM(IOS) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
 #import "WebCoreSystemInterface.h"
 #import <notify.h>
 #endif
 
+using std::max;
+
 namespace WebCore {
 
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
 
 #if !PLATFORM(IOS)
 static dispatch_source_t _cache_event_source = 0;
 static dispatch_source_t _timer_event_source = 0;
 static int _notifyToken;
 
-// Disable memory event reception for 5 seconds after receiving an event. 
-// This value seems reasonable and testing verifies that it throttles frequent
+// Disable memory event reception for a minimum of s_minimumHoldOffTime
+// seconds after receiving an event.  Don't let events fire any sooner than
+// s_holdOffMultiplier times the last cleanup processing time.  Effectively 
+// this is 1 / s_holdOffMultiplier percent of the time.
+// These value seems reasonable and testing verifies that it throttles frequent
 // low memory events, greatly reducing CPU usage.
-static const time_t s_secondsBetweenMemoryCleanup = 5;
+static const unsigned s_minimumHoldOffTime = 5;
+static const unsigned s_holdOffMultiplier = 20;
 
 void MemoryPressureHandler::install()
 {
@@ -93,17 +102,17 @@ void MemoryPressureHandler::uninstall()
 
 void MemoryPressureHandler::holdOff(unsigned seconds)
 {
-    uninstall();
-
     dispatch_async(dispatch_get_main_queue(), ^{
         _timer_event_source = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
         if (_timer_event_source) {
             dispatch_set_context(_timer_event_source, this);
-            dispatch_source_set_timer(_timer_event_source, dispatch_time(DISPATCH_TIME_NOW, seconds * NSEC_PER_SEC), DISPATCH_TIME_FOREVER, 1 * s_secondsBetweenMemoryCleanup);
+            dispatch_source_set_timer(_timer_event_source, dispatch_time(DISPATCH_TIME_NOW, seconds * NSEC_PER_SEC), DISPATCH_TIME_FOREVER, 1 * s_minimumHoldOffTime);
             dispatch_source_set_event_handler(_timer_event_source, ^{
-                dispatch_source_cancel(_timer_event_source);
-                dispatch_release(_timer_event_source);
-                _timer_event_source = 0;
+                if (_timer_event_source) {
+                    dispatch_source_cancel(_timer_event_source);
+                    dispatch_release(_timer_event_source);
+                    _timer_event_source = 0;
+                }
                 memoryPressureHandler().install();
             });
             dispatch_resume(_timer_event_source);
@@ -113,9 +122,15 @@ void MemoryPressureHandler::holdOff(unsigned seconds)
 
 void MemoryPressureHandler::respondToMemoryPressure()
 {
-    holdOff(s_secondsBetweenMemoryCleanup);
+    uninstall();
+
+    double startTime = monotonicallyIncreasingTime();
 
     releaseMemory(false);
+
+    unsigned holdOffTime = (monotonicallyIncreasingTime() - startTime) * s_holdOffMultiplier;
+
+    holdOff(max(holdOffTime, s_minimumHoldOffTime));
 }
 #endif // !PLATFORM(IOS)
 
@@ -135,7 +150,11 @@ void MemoryPressureHandler::releaseMemory(bool critical)
 
     memoryCache()->pruneToPercentage(critical ? 0 : 0.5f);
 
-    gcController().garbageCollectNow();
+    LayerPool::sharedPool()->drain();
+
+    cssValuePool().drain();
+
+    gcController().discardAllCompiledCode();
 
     WTF::releaseFastMallocFreeMemory();
 }

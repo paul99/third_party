@@ -25,6 +25,9 @@
  */
 
 #include "config.h"
+
+#if HAVE(ACCESSIBILITY)
+
 #include "AXObjectCache.h"
 
 #include "AccessibilityObject.h"
@@ -39,16 +42,15 @@
 
 namespace WebCore {
 
+
 void AXObjectCache::detachWrapper(AccessibilityObject* obj)
 {
-    // In Chromium, AccessibilityObjects are wrapped lazily.
-    if (AccessibilityObjectWrapper* wrapper = obj->wrapper())
-        wrapper->detach();
+    // In Chromium, AccessibilityObjects are not wrapped.
 }
 
 void AXObjectCache::attachWrapper(AccessibilityObject*)
 {
-    // In Chromium, AccessibilityObjects are wrapped lazily.
+    // In Chromium, AccessibilityObjects are not wrapped.
 }
 
 void AXObjectCache::postPlatformNotification(AccessibilityObject* obj, AXNotification notification)
@@ -78,12 +80,14 @@ void AXObjectCache::postPlatformNotification(AccessibilityObject* obj, AXNotific
 
         // Calling handleFocusedUIElementChanged will focus the new active
         // descendant and send the AXFocusedUIElementChanged notification.
-        handleFocusedUIElementChanged(0, obj->document()->focusedNode()->renderer());
+        handleFocusedUIElementChanged(0, obj->document()->focusedNode());
         break;
+    case AXAriaAttributeChanged:
     case AXAutocorrectionOccured:
     case AXCheckedStateChanged:
     case AXChildrenChanged:
     case AXFocusedUIElementChanged:
+    case AXInvalidStatusChanged:
     case AXLayoutComplete:
     case AXLiveRegionChanged:
     case AXLoadComplete:
@@ -95,8 +99,8 @@ void AXObjectCache::postPlatformNotification(AccessibilityObject* obj, AXNotific
     case AXScrolledToAnchor:
     case AXSelectedChildrenChanged:
     case AXSelectedTextChanged:
+    case AXTextChanged:
     case AXValueChanged:
-    case AXInvalidStatusChanged:
         break;
     }
 
@@ -111,12 +115,12 @@ void AXObjectCache::frameLoadingEventPlatformNotification(AccessibilityObject*, 
 {
 }
 
-void AXObjectCache::handleFocusedUIElementChanged(RenderObject*, RenderObject* newFocusedRenderer)
+void AXObjectCache::handleFocusedUIElementChanged(Node*, Node* newFocusedNode)
 {
-    if (!newFocusedRenderer)
+    if (!newFocusedNode)
         return;
 
-    Page* page = newFocusedRenderer->document()->page();
+    Page* page = newFocusedNode->document()->page();
     if (!page)
         return;
 
@@ -135,3 +139,5 @@ void AXObjectCache::handleScrolledToAnchor(const Node* anchorNode)
 }
 
 } // namespace WebCore
+
+#endif // HAVE(ACCESSIBILITY)

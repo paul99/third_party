@@ -1,7 +1,7 @@
 /*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2002, 2006, 2008, 2012 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,38 +22,32 @@
 #ifndef CSSFontFaceRule_h
 #define CSSFontFaceRule_h
 
-#include "CSSMutableStyleDeclaration.h"
 #include "CSSRule.h"
-#include <wtf/PassRefPtr.h>
-#include <wtf/RefPtr.h>
 
 namespace WebCore {
 
+class CSSStyleDeclaration;
+class StyleRuleFontFace;
+class StyleRuleCSSStyleDeclaration;
+
 class CSSFontFaceRule : public CSSRule {
 public:
-    static PassRefPtr<CSSFontFaceRule> create()
-    {
-        return adoptRef(new CSSFontFaceRule(0));
-    }
-    static PassRefPtr<CSSFontFaceRule> create(CSSStyleSheet* parent)
-    {
-        return adoptRef(new CSSFontFaceRule(parent));
-    }
+    static PassRefPtr<CSSFontFaceRule> create(StyleRuleFontFace* rule, CSSStyleSheet* sheet) { return adoptRef(new CSSFontFaceRule(rule, sheet)); }
 
-    ~CSSFontFaceRule();
+    virtual ~CSSFontFaceRule();
 
-    CSSMutableStyleDeclaration* style() const { return m_style.get(); }
+    virtual CSSRule::Type type() const OVERRIDE { return FONT_FACE_RULE; }
+    virtual String cssText() const OVERRIDE;
+    virtual void reattach(StyleRuleBase*) OVERRIDE;
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
 
-    String cssText() const;
-
-    void setDeclaration(PassRefPtr<CSSMutableStyleDeclaration> style) { m_style = style; }
-
-    void addSubresourceStyleURLs(ListHashSet<KURL>& urls);
+    CSSStyleDeclaration* style() const;
 
 private:
-    CSSFontFaceRule(CSSStyleSheet* parent);
+    CSSFontFaceRule(StyleRuleFontFace*, CSSStyleSheet* parent);
 
-    RefPtr<CSSMutableStyleDeclaration> m_style;
+    RefPtr<StyleRuleFontFace> m_fontFaceRule;
+    mutable RefPtr<StyleRuleCSSStyleDeclaration> m_propertiesCSSOMWrapper;
 };
 
 } // namespace WebCore

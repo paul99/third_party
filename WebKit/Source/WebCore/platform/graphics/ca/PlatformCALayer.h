@@ -31,7 +31,6 @@
 #include "GraphicsContext.h"
 #include "PlatformCAAnimation.h"
 #include "PlatformCALayerClient.h"
-#include "PlatformString.h"
 #include <QuartzCore/CABase.h>
 #include <wtf/CurrentTime.h>
 #include <wtf/HashMap.h>
@@ -40,6 +39,7 @@
 #include <wtf/RetainPtr.h>
 #include <wtf/Vector.h>
 #include <wtf/text/StringHash.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -60,6 +60,7 @@ public:
         LayerTypeTransformLayer,
         LayerTypeWebTiledLayer,
         LayerTypeTileCacheLayer,
+        LayerTypePageTileCacheLayer,
         LayerTypeRootLayer,
         LayerTypeCustom
     };
@@ -78,6 +79,12 @@ public:
     static PlatformCALayer* platformCALayer(void* platformLayer);
     
     PlatformLayer* platformLayer() const;
+
+#if PLATFORM(WIN)
+    bool usesTileCacheLayer() const { return false; }
+#else
+    bool usesTileCacheLayer() const { return m_layerType == LayerTypePageTileCacheLayer || m_layerType == LayerTypeTileCacheLayer; }
+#endif
 
     PlatformCALayer* rootLayer() const;
     
@@ -186,6 +193,7 @@ public:
 #if ENABLE(CSS_FILTERS)
     void setFilters(const FilterOperations&);
     static bool filtersCanBeComposited(const FilterOperations&);
+    void copyFiltersFrom(const PlatformCALayer*);
 #endif
 
     String name() const;
@@ -203,6 +211,8 @@ public:
     float contentsScale() const;
     void setContentsScale(float);
 
+    TiledBacking* tiledBacking();
+
 #if PLATFORM(WIN)
     HashMap<String, RefPtr<PlatformCAAnimation> >& animations() { return m_animations; }
 #endif
@@ -211,7 +221,7 @@ public:
     void printTree() const;
 #endif
 
-#if PLATFORM(MAC) && !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#if PLATFORM(MAC) && (PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070)
     void synchronouslyDisplayTilesInRect(const FloatRect&);
 #endif
 

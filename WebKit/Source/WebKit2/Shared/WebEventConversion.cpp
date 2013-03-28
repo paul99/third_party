@@ -136,6 +136,9 @@ public:
         m_phase = static_cast<WebCore::PlatformWheelEventPhase>(webEvent.phase());
         m_momentumPhase = static_cast<WebCore::PlatformWheelEventPhase>(webEvent.momentumPhase());
         m_hasPreciseScrollingDeltas = webEvent.hasPreciseScrollingDeltas();
+        m_scrollCount = webEvent.scrollCount();
+        m_unacceleratedScrollingDeltaX = webEvent.unacceleratedScrollingDelta().width();
+        m_unacceleratedScrollingDeltaY = webEvent.unacceleratedScrollingDelta().height();
 #endif
     }
 };
@@ -232,6 +235,10 @@ public:
         // PlatformGestureEvent
         m_position = webEvent.position();
         m_globalPosition = webEvent.globalPosition();
+
+        m_area = webEvent.area();
+        m_deltaX = webEvent.delta().x();
+        m_deltaY = webEvent.delta().y();
     }
 };
 
@@ -270,6 +277,10 @@ public:
 
         m_screenPos = webTouchPoint.screenPosition();
         m_pos = webTouchPoint.position();
+        m_radiusX = webTouchPoint.radius().width();
+        m_radiusY = webTouchPoint.radius().height();
+        m_force = webTouchPoint.force();
+        m_rotationAngle = webTouchPoint.rotationAngle();
     }
 };
 
@@ -308,7 +319,7 @@ public:
         m_timestamp = webEvent.timestamp();
 
         // PlatformTouchEvent
-        for (int i = 0; i < webEvent.touchPoints().size(); ++i)
+        for (size_t i = 0; i < webEvent.touchPoints().size(); ++i)
             m_touchPoints.append(WebKit2PlatformTouchPoint(webEvent.touchPoints().at(i)));
     }
 };

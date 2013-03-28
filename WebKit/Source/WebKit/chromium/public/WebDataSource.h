@@ -76,6 +76,10 @@ public:
     // URL).
     virtual void redirectChain(WebVector<WebURL>&) const = 0;
 
+    // Returns whether the navigation associated with this datasource is a
+    // client redirect that should replace the current history item.
+    virtual bool isClientRedirect() const = 0;
+
     // Returns the title for the current page.
     virtual WebString pageTitle() const = 0;
 
@@ -102,6 +106,14 @@ public:
     // Set deferMainResourceDataLoad flag on the loader.  This is used for
     // testing.
     virtual void setDeferMainResourceDataLoad(bool) = 0;
+
+    // Sets the navigation start time for this datasource. Ordinarily,
+    // navigation start is determined in WebCore. But, in some situations,
+    // the embedder might have a better value and can override it here. This
+    // should be called before WebFrameClient::didCommitProvisionalLoad.
+    // Calling it later may confuse users, because JavaScript may have run and
+    // the user may have already recorded the original value.
+    virtual void setNavigationStartTime(double) = 0;
 
 protected:
     ~WebDataSource() { }

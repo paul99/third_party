@@ -31,7 +31,7 @@
 #include "SVGInlineFlowBox.h"
 #include "SVGInlineTextBox.h"
 #include "SVGNames.h"
-#include "SVGRenderSupport.h"
+#include "SVGRenderingContext.h"
 #include "SVGTextPositioningElement.h"
 
 namespace WebCore {
@@ -57,18 +57,15 @@ void SVGRootInlineBox::paint(PaintInfo& paintInfo, const LayoutPoint&, LayoutUni
         }
     }
 
-    GraphicsContextStateSaver stateSaver(*childPaintInfo.context);
-
-    if (SVGRenderSupport::prepareToRenderSVGContent(boxRenderer, childPaintInfo)) {
+    SVGRenderingContext renderingContext(boxRenderer, paintInfo, SVGRenderingContext::SaveGraphicsContext);
+    if (renderingContext.isRenderingPrepared()) {
         for (InlineBox* child = firstChild(); child; child = child->nextOnLine()) {
             if (child->isSVGInlineTextBox())
                 SVGInlineFlowBox::computeTextMatchMarkerRectForRenderer(toRenderSVGInlineText(static_cast<SVGInlineTextBox*>(child)->textRenderer()));
 
-            child->paint(childPaintInfo, LayoutPoint(), 0, 0);
+            child->paint(paintInfo, LayoutPoint(), 0, 0);
         }
     }
-
-    SVGRenderSupport::finishRenderSVGContent(boxRenderer, childPaintInfo, paintInfo.context);
 }
 
 void SVGRootInlineBox::computePerCharacterLayoutInformation()
@@ -76,7 +73,6 @@ void SVGRootInlineBox::computePerCharacterLayoutInformation()
     RenderSVGText* textRoot = toRenderSVGText(block());
     ASSERT(textRoot);
 
-    textRoot->rebuildLayoutAttributes();
     Vector<SVGTextLayoutAttributes*>& layoutAttributes = textRoot->layoutAttributes();
     if (layoutAttributes.isEmpty())
         return;
@@ -230,17 +226,17 @@ static inline void swapItemsInLayoutAttributes(SVGTextLayoutAttributes* firstAtt
         return;
 
     if (firstPresent && lastPresent) {
-        std::swap(itFirst->second, itLast->second);
+        std::swap(itFirst->value, itLast->value);
         return;
     }
 
     if (firstPresent && !lastPresent) {
-        lastAttributes->characterDataMap().set(lastPosition + 1, itFirst->second);
+        lastAttributes->characterDataMap().set(lastPosition + 1, itFirst->value);
         return;
     }
 
     // !firstPresent && lastPresent
-    firstAttributes->characterDataMap().set(firstPosition + 1, itLast->second);
+    firstAttributes->characterDataMap().set(firstPosition + 1, itLast->value);
 }
 
 static inline void findFirstAndLastAttributesInVector(Vector<SVGTextLayoutAttributes*>& attributes, RenderSVGInlineText* firstContext, RenderSVGInlineText* lastContext,

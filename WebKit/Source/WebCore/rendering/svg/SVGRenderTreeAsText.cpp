@@ -65,7 +65,7 @@
 #include "SVGLinearGradientElement.h"
 #include "SVGNames.h"
 #include "SVGPathElement.h"
-#include "SVGPathParserFactory.h"
+#include "SVGPathUtilities.h"
 #include "SVGPatternElement.h"
 #include "SVGPointList.h"
 #include "SVGPolyElement.h"
@@ -134,10 +134,10 @@ static void writeIfNotDefault(TextStream& ts, const char* name, ValueType value,
 
 TextStream& operator<<(TextStream& ts, const FloatRect& r)
 {
-    ts << "at (" << formatNumberRespectingIntegers(r.x()); 
-    ts << "," << formatNumberRespectingIntegers(r.y());
-    ts << ") size " << formatNumberRespectingIntegers(r.width());
-    ts << "x" << formatNumberRespectingIntegers(r.height());
+    ts << "at (" << TextStream::FormatNumberRespectingIntegers(r.x());
+    ts << "," << TextStream::FormatNumberRespectingIntegers(r.y());
+    ts << ") size " << TextStream::FormatNumberRespectingIntegers(r.width());
+    ts << "x" << TextStream::FormatNumberRespectingIntegers(r.height());
     return ts;
 }
 
@@ -326,7 +326,7 @@ static void writeStyle(TextStream& ts, const RenderObject& object)
 
 static TextStream& writePositionAndStyle(TextStream& ts, const RenderObject& object)
 {
-    ts << " " << const_cast<RenderObject&>(object).absoluteClippedOverflowRect();
+    ts << " " << enclosingIntRect(const_cast<RenderObject&>(object).absoluteClippedOverflowRect());
     writeStyle(ts, object);
     return ts;
 }
@@ -369,7 +369,7 @@ static TextStream& operator<<(TextStream& ts, const RenderSVGShape& shape)
         SVGPathElement* element = static_cast<SVGPathElement*>(svgElement);
         String pathString;
         // FIXME: We should switch to UnalteredParsing here - this will affect the path dumping output of dozens of tests.
-        SVGPathParserFactory::self()->buildStringFromByteStream(element->pathByteStream(), pathString, NormalizedParsing);
+        buildStringFromByteStream(element->pathByteStream(), pathString, NormalizedParsing);
         writeNameAndQuotedValue(ts, "data", pathString);
     } else
         ASSERT_NOT_REACHED();
@@ -387,7 +387,7 @@ static void writeRenderSVGTextBox(TextStream& ts, const RenderSVGText& text)
     if (!box)
         return;
 
-    ts << " " << enclosingIntRect(FloatRect(text.x(), text.y(), box->logicalWidth(), box->logicalHeight()));
+    ts << " " << enclosingIntRect(FloatRect(text.location(), FloatSize(box->logicalWidth(), box->logicalHeight())));
     
     // FIXME: Remove this hack, once the new text layout engine is completly landed. We want to preserve the old layout test results for now.
     ts << " contains 1 chunk(s)";
@@ -443,9 +443,9 @@ static inline void writeSVGInlineTextBox(TextStream& ts, SVGInlineTextBox* textB
         else
             ts << " width " << fragment.width;
 
-        if (!textBox->isLeftToRightDirection() || textBox->m_dirOverride) {
+        if (!textBox->isLeftToRightDirection() || textBox->dirOverride()) {
             ts << (textBox->isLeftToRightDirection() ? " LTR" : " RTL");
-            if (textBox->m_dirOverride)
+            if (textBox->dirOverride())
                 ts << " override";
         }
 
@@ -573,9 +573,9 @@ void writeSVGResourceContainer(TextStream& ts, const RenderObject& object, int i
         FloatPoint focalPoint = gradient->focalPoint(attributes);
         FloatPoint centerPoint = gradient->centerPoint(attributes);
         float radius = gradient->radius(attributes);
-        gradient->adjustFocalPointIfNeeded(radius, centerPoint, focalPoint);
+        float focalRadius = gradient->focalRadius(attributes);
 
-        ts << " [center=" << centerPoint << "] [focal=" << focalPoint << "] [radius=" << radius << "]\n";
+        ts << " [center=" << centerPoint << "] [focal=" << focalPoint << "] [radius=" << radius << "] [focalRadius=" << focalRadius << "]\n";
     } else
         ts << "\n";
     writeChildren(ts, object, indent);

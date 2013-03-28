@@ -2,6 +2,7 @@
  * Copyright (C) 2008 Alex Mathews <possessedpenguinbob@gmail.com>
  * Copyright (C) 2009 Dirk Schulze <krit@webkit.org>
  * Copyright (C) Research In Motion Limited 2010. All rights reserved.
+ * Copyright (C) 2012 University of Szeged
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -27,7 +28,11 @@
 #include "Filter.h"
 #include "ImageBuffer.h"
 #include "TextStream.h"
-#include <wtf/ByteArray.h>
+#include <wtf/Uint8ClampedArray.h>
+
+#if HAVE(ARM_NEON_INTRINSICS)
+#include <arm_neon.h>
+#endif
 
 namespace WebCore {
 
@@ -39,6 +44,8 @@ FilterEffect::FilterEffect(Filter* filter)
     , m_hasWidth(false)
     , m_hasHeight(false)
     , m_clipsToBounds(true)
+    , m_colorSpace(ColorSpaceLinearRGB)
+    , m_resultColorSpace(ColorSpaceDeviceRGB)
 {
     ASSERT(m_filter);
 }
@@ -100,11 +107,106 @@ void FilterEffect::apply()
         in->apply();
         if (!in->hasResult())
             return;
+
+        // Convert input results to the current effect's color space.
+        in->transformResultColorSpace(m_colorSpace);
     }
+
     determineAbsolutePaintRect();
+    m_resultColorSpace = m_colorSpace;
+
+    if (!isFilterSizeValid(m_absolutePaintRect))
+        return;
+
+    if (requiresValidPreMultipliedPixels()) {
+        for (unsigned i = 0; i < size; ++i)
+            inputEffect(i)->correctFilterResultIfNeeded();
+    }
     
     // Add platform specific apply functions here and return earlier.
+#if ENABLE(OPENCL)
+    if (platformApplyOpenCL())
+        return;
+#endif
+#if USE(SKIA)
+    if (platformApplySkia())
+        return;
+#endif
     platformApplySoftware();
+}
+
+#if ENABLE(OPENCL)
+// This function will be changed to abstract virtual when all filters are landed.
+bool FilterEffect::platformApplyOpenCL()
+{
+    if (!FilterContextOpenCL::context())
+        return false;
+
+    unsigned size = m_inputEffects.size();
+    for (unsigned i = 0; i < size; ++i) {
+        FilterEffect* in = m_inputEffects.at(i).get();
+        // Software code path expects that at least one of the following fileds is valid.
+        if (!in->m_imageBufferResult && !in->m_unmultipliedImageResult && !in->m_premultipliedImageResult)
+            in->asImageBuffer();
+    }
+
+    platformApplySoftware();
+    ImageBuffer* sourceImage = asImageBuffer();
+    if (sourceImage) {
+        RefPtr<Uint8ClampedArray> sourceImageData = sourceImage->getUnmultipliedImageData(IntRect(IntPoint(), sourceImage->internalSize()));
+        createOpenCLImageResult(sourceImageData->data());
+    }
+    return true;
+}
+#endif
+
+void FilterEffect::forceValidPreMultipliedPixels()
+{
+    // Must operate on pre-multiplied results; other formats cannot have invalid pixels.
+    if (!m_premultipliedImageResult)
+        return;
+
+    Uint8ClampedArray* imageArray = m_premultipliedImageResult.get();
+    unsigned char* pixelData = imageArray->data();
+    int pixelArrayLength = imageArray->length();
+
+    // We must have four bytes per pixel, and complete pixels
+    ASSERT(!(pixelArrayLength % 4));
+
+#if HAVE(ARM_NEON_INTRINSICS)
+    if (pixelArrayLength >= 64) {
+        unsigned char* lastPixel = pixelData + (pixelArrayLength & ~0x3f);
+        do {
+            // Increments pixelData by 64.
+            uint8x16x4_t sixteenPixels = vld4q_u8(pixelData);
+            sixteenPixels.val[0] = vminq_u8(sixteenPixels.val[0], sixteenPixels.val[3]);
+            sixteenPixels.val[1] = vminq_u8(sixteenPixels.val[1], sixteenPixels.val[3]);
+            sixteenPixels.val[2] = vminq_u8(sixteenPixels.val[2], sixteenPixels.val[3]);
+            vst4q_u8(pixelData, sixteenPixels);
+            pixelData += 64;
+        } while (pixelData < lastPixel);
+
+        pixelArrayLength &= 0x3f;
+        if (!pixelArrayLength)
+            return;
+    }
+#endif
+
+    int numPixels = pixelArrayLength / 4;
+
+    // Iterate over each pixel, checking alpha and adjusting color components if necessary
+    while (--numPixels >= 0) {
+        // Alpha is the 4th byte in a pixel
+        unsigned char a = *(pixelData + 3);
+        // Clamp each component to alpha, and increment the pixel location
+        for (int i = 0; i < 3; ++i) {
+            if (*pixelData > a)
+                *pixelData = a;
+            ++pixelData;
+        }
+        // Increment for alpha
+        ++pixelData;
+    }
 }
 
 void FilterEffect::clearResult()
@@ -115,6 +217,10 @@ void FilterEffect::clearResult()
         m_unmultipliedImageResult.clear();
     if (m_premultipliedImageResult)
         m_premultipliedImageResult.clear();
+#if ENABLE(OPENCL)
+    if (m_openCLImageResult)
+        m_openCLImageResult.clear();
+#endif
 }
 
 ImageBuffer* FilterEffect::asImageBuffer()
@@ -123,32 +229,58 @@ ImageBuffer* FilterEffect::asImageBuffer()
         return 0;
     if (m_imageBufferResult)
         return m_imageBufferResult.get();
-    m_imageBufferResult = ImageBuffer::create(m_absolutePaintRect.size(), ColorSpaceLinearRGB, m_filter->renderingMode());
+#if ENABLE(OPENCL)
+    if (m_openCLImageResult)
+        return openCLImageToImageBuffer();
+#endif
+    m_imageBufferResult = ImageBuffer::create(m_absolutePaintRect.size(), 1, m_resultColorSpace, m_filter->renderingMode());
     IntRect destinationRect(IntPoint(), m_absolutePaintRect.size());
     if (m_premultipliedImageResult)
-        m_imageBufferResult->putPremultipliedImageData(m_premultipliedImageResult.get(), destinationRect.size(), destinationRect, IntPoint());
+        m_imageBufferResult->putByteArray(Premultiplied, m_premultipliedImageResult.get(), destinationRect.size(), destinationRect, IntPoint());
     else
-        m_imageBufferResult->putUnmultipliedImageData(m_unmultipliedImageResult.get(), destinationRect.size(), destinationRect, IntPoint());
+        m_imageBufferResult->putByteArray(Unmultiplied, m_unmultipliedImageResult.get(), destinationRect.size(), destinationRect, IntPoint());
     return m_imageBufferResult.get();
 }
 
-PassRefPtr<ByteArray> FilterEffect::asUnmultipliedImage(const IntRect& rect)
+#if ENABLE(OPENCL)
+ImageBuffer* FilterEffect::openCLImageToImageBuffer()
+{
+    FilterContextOpenCL* context = FilterContextOpenCL::context();
+    ASSERT(context);
+
+    size_t origin[3] = { 0, 0, 0 };
+    size_t region[3] = { m_absolutePaintRect.width(), m_absolutePaintRect.height(), 1 };
+
+    RefPtr<Uint8ClampedArray> destinationPixelArray = Uint8ClampedArray::create(m_absolutePaintRect.width() * m_absolutePaintRect.height() * 4);
+
+    clFinish(context->commandQueue());
+    clEnqueueReadImage(context->commandQueue(), m_openCLImageResult, CL_TRUE, origin, region, 0, 0, destinationPixelArray->data(), 0, 0, 0);
+
+    m_imageBufferResult = ImageBuffer::create(m_absolutePaintRect.size());
+    IntRect destinationRect(IntPoint(), m_absolutePaintRect.size());
+    m_imageBufferResult->putByteArray(Unmultiplied, destinationPixelArray.get(), destinationRect.size(), destinationRect, IntPoint());
+
+    return m_imageBufferResult.get();
+}
+#endif
+
+PassRefPtr<Uint8ClampedArray> FilterEffect::asUnmultipliedImage(const IntRect& rect)
 {
     ASSERT(isFilterSizeValid(rect));
-    RefPtr<ByteArray> imageData = ByteArray::create(rect.width() * rect.height() * 4);
+    RefPtr<Uint8ClampedArray> imageData = Uint8ClampedArray::createUninitialized(rect.width() * rect.height() * 4);
     copyUnmultipliedImage(imageData.get(), rect);
     return imageData.release();
 }
 
-PassRefPtr<ByteArray> FilterEffect::asPremultipliedImage(const IntRect& rect)
+PassRefPtr<Uint8ClampedArray> FilterEffect::asPremultipliedImage(const IntRect& rect)
 {
     ASSERT(isFilterSizeValid(rect));
-    RefPtr<ByteArray> imageData = ByteArray::create(rect.width() * rect.height() * 4);
+    RefPtr<Uint8ClampedArray> imageData = Uint8ClampedArray::createUninitialized(rect.width() * rect.height() * 4);
     copyPremultipliedImage(imageData.get(), rect);
     return imageData.release();
 }
 
-inline void FilterEffect::copyImageBytes(ByteArray* source, ByteArray* destination, const IntRect& rect)
+inline void FilterEffect::copyImageBytes(Uint8ClampedArray* source, Uint8ClampedArray* destination, const IntRect& rect)
 {
     // Initialize the destination to transparent black, if not entirely covered by the source.
     if (rect.x() < 0 || rect.y() < 0 || rect.maxX() > m_absolutePaintRect.width() || rect.maxY() > m_absolutePaintRect.height())
@@ -192,7 +324,7 @@ inline void FilterEffect::copyImageBytes(ByteArray* source, ByteArray* destinati
     }
 }
 
-void FilterEffect::copyUnmultipliedImage(ByteArray* destination, const IntRect& rect)
+void FilterEffect::copyUnmultipliedImage(Uint8ClampedArray* destination, const IntRect& rect)
 {
     ASSERT(hasResult());
 
@@ -202,7 +334,7 @@ void FilterEffect::copyUnmultipliedImage(ByteArray* destination, const IntRect& 
             m_unmultipliedImageResult = m_imageBufferResult->getUnmultipliedImageData(IntRect(IntPoint(), m_absolutePaintRect.size()));
         else {
             ASSERT(isFilterSizeValid(m_absolutePaintRect));
-            m_unmultipliedImageResult = ByteArray::create(m_absolutePaintRect.width() * m_absolutePaintRect.height() * 4);
+            m_unmultipliedImageResult = Uint8ClampedArray::createUninitialized(m_absolutePaintRect.width() * m_absolutePaintRect.height() * 4);
             unsigned char* sourceComponent = m_premultipliedImageResult->data();
             unsigned char* destinationComponent = m_unmultipliedImageResult->data();
             unsigned char* end = sourceComponent + (m_absolutePaintRect.width() * m_absolutePaintRect.height() * 4);
@@ -226,7 +358,7 @@ void FilterEffect::copyUnmultipliedImage(ByteArray* destination, const IntRect& 
     copyImageBytes(m_unmultipliedImageResult.get(), destination, rect);
 }
 
-void FilterEffect::copyPremultipliedImage(ByteArray* destination, const IntRect& rect)
+void FilterEffect::copyPremultipliedImage(Uint8ClampedArray* destination, const IntRect& rect)
 {
     ASSERT(hasResult());
 
@@ -236,7 +368,7 @@ void FilterEffect::copyPremultipliedImage(ByteArray* destination, const IntRect&
             m_premultipliedImageResult = m_imageBufferResult->getPremultipliedImageData(IntRect(IntPoint(), m_absolutePaintRect.size()));
         else {
             ASSERT(isFilterSizeValid(m_absolutePaintRect));
-            m_premultipliedImageResult = ByteArray::create(m_absolutePaintRect.width() * m_absolutePaintRect.height() * 4);
+            m_premultipliedImageResult = Uint8ClampedArray::createUninitialized(m_absolutePaintRect.width() * m_absolutePaintRect.height() * 4);
             unsigned char* sourceComponent = m_unmultipliedImageResult->data();
             unsigned char* destinationComponent = m_premultipliedImageResult->data();
             unsigned char* end = sourceComponent + (m_absolutePaintRect.width() * m_absolutePaintRect.height() * 4);
@@ -260,14 +392,14 @@ ImageBuffer* FilterEffect::createImageBufferResult()
     ASSERT(!hasResult());
     if (m_absolutePaintRect.isEmpty())
         return 0;
-    m_imageBufferResult = ImageBuffer::create(m_absolutePaintRect.size(), ColorSpaceLinearRGB, m_filter->renderingMode());
+    m_imageBufferResult = ImageBuffer::create(m_absolutePaintRect.size(), 1, m_colorSpace, m_filter->renderingMode());
     if (!m_imageBufferResult)
         return 0;
     ASSERT(m_imageBufferResult->context());
     return m_imageBufferResult.get();
 }
 
-ByteArray* FilterEffect::createUnmultipliedImageResult()
+Uint8ClampedArray* FilterEffect::createUnmultipliedImageResult()
 {
     // Only one result type is allowed.
     ASSERT(!hasResult());
@@ -275,11 +407,11 @@ ByteArray* FilterEffect::createUnmultipliedImageResult()
 
     if (m_absolutePaintRect.isEmpty())
         return 0;
-    m_unmultipliedImageResult = ByteArray::create(m_absolutePaintRect.width() * m_absolutePaintRect.height() * 4);
+    m_unmultipliedImageResult = Uint8ClampedArray::createUninitialized(m_absolutePaintRect.width() * m_absolutePaintRect.height() * 4);
     return m_unmultipliedImageResult.get();
 }
 
-ByteArray* FilterEffect::createPremultipliedImageResult()
+Uint8ClampedArray* FilterEffect::createPremultipliedImageResult()
 {
     // Only one result type is allowed.
     ASSERT(!hasResult());
@@ -287,8 +419,65 @@ ByteArray* FilterEffect::createPremultipliedImageResult()
 
     if (m_absolutePaintRect.isEmpty())
         return 0;
-    m_premultipliedImageResult = ByteArray::create(m_absolutePaintRect.width() * m_absolutePaintRect.height() * 4);
+    m_premultipliedImageResult = Uint8ClampedArray::createUninitialized(m_absolutePaintRect.width() * m_absolutePaintRect.height() * 4);
     return m_premultipliedImageResult.get();
+}
+
+#if ENABLE(OPENCL)
+OpenCLHandle FilterEffect::createOpenCLImageResult(uint8_t* source)
+{
+    ASSERT(!hasResult());
+    cl_image_format clImageFormat;
+    clImageFormat.image_channel_order = CL_RGBA;
+    clImageFormat.image_channel_data_type = CL_UNORM_INT8;
+
+    FilterContextOpenCL* context = FilterContextOpenCL::context();
+    ASSERT(context);
+    m_openCLImageResult = clCreateImage2D(context->deviceContext(), CL_MEM_READ_WRITE | (source ? CL_MEM_COPY_HOST_PTR : 0),
+        &clImageFormat, m_absolutePaintRect.width(), m_absolutePaintRect.height(), 0, source, 0);
+    return m_openCLImageResult;
+}
+#endif
+
+void FilterEffect::transformResultColorSpace(ColorSpace dstColorSpace)
+{
+#if USE(CG)
+    // CG handles color space adjustments internally.
+    UNUSED_PARAM(dstColorSpace);
+#else
+    if (!hasResult() || dstColorSpace == m_resultColorSpace)
+        return;
+
+    // FIXME: We can avoid this potentially unnecessary ImageBuffer conversion by adding
+    // color space transform support for the {pre,un}multiplied arrays.
+#if ENABLE(OPENCL)
+    if (openCLImage()) {
+        FilterContextOpenCL* context = FilterContextOpenCL::context();
+        ASSERT(context);
+        context->openCLTransformColorSpace(m_openCLImageResult, absolutePaintRect(), m_resultColorSpace, dstColorSpace);
+        if (m_imageBufferResult)
+            m_imageBufferResult.clear();
+        goto skipSoftwareCodePath;
+    }
+#endif
+    if (!m_imageBufferResult) {
+        asImageBuffer();
+        ASSERT(m_imageBufferResult);
+    }
+
+    m_imageBufferResult->transformColorSpace(m_resultColorSpace, dstColorSpace);
+
+#if ENABLE(OPENCL)
+skipSoftwareCodePath:
+#endif
+
+    m_resultColorSpace = dstColorSpace;
+
+    if (m_unmultipliedImageResult)
+        m_unmultipliedImageResult.clear();
+    if (m_premultipliedImageResult)
+        m_premultipliedImageResult.clear();
+#endif
 }
 
 TextStream& FilterEffect::externalRepresentation(TextStream& ts, int) const

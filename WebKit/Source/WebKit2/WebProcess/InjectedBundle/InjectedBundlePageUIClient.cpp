@@ -28,8 +28,9 @@
 
 #include "InjectedBundleHitTestResult.h"
 #include "WKAPICast.h"
-#include "WebGraphicsContext.h"
 #include "WKBundleAPICast.h"
+#include "WebGraphicsContext.h"
+#include "WebSecurityOrigin.h"
 #include <wtf/text/WTFString.h>
 
 using namespace WebCore;
@@ -144,6 +145,42 @@ WKBundlePageUIElementVisibility InjectedBundlePageUIClient::toolbarsAreVisible(W
         return WKBundlePageUIElementVisibilityUnknown;
     
     return m_client.toolbarsAreVisible(toAPI(page), m_client.clientInfo);
+}
+
+void InjectedBundlePageUIClient::didReachApplicationCacheOriginQuota(WebPage* page, WebSecurityOrigin* origin, int64_t totalBytesNeeded)
+{
+    if (!m_client.didReachApplicationCacheOriginQuota)
+        return;
+
+    m_client.didReachApplicationCacheOriginQuota(toAPI(page), toAPI(origin), totalBytesNeeded, m_client.clientInfo);
+}
+
+uint64_t InjectedBundlePageUIClient::didExceedDatabaseQuota(WebPage* page, WebSecurityOrigin* origin, const String& databaseName, const String& databaseDisplayName, uint64_t currentQuotaBytes, uint64_t currentOriginUsageBytes, uint64_t currentDatabaseUsageBytes, uint64_t expectedUsageBytes)
+{
+    if (!m_client.didExceedDatabaseQuota)
+        return 0;
+
+    return m_client.didExceedDatabaseQuota(toAPI(page), toAPI(origin), toAPI(databaseName.impl()), toAPI(databaseDisplayName.impl()), currentQuotaBytes, currentOriginUsageBytes, currentDatabaseUsageBytes, expectedUsageBytes, m_client.clientInfo);
+}
+
+PassRefPtr<WebImage> InjectedBundlePageUIClient::plugInStartLabelImage(RenderSnapshottedPlugIn::LabelSize size) const
+{
+    if (!m_client.plugInStartLabelImage)
+        return 0;
+
+    WKBundlePageLabelSize wkSize;
+    switch (size) {
+    case RenderSnapshottedPlugIn::LabelSizeSmall:
+        wkSize = WKBundlePageLabelSizeSmall;
+        break;
+    case RenderSnapshottedPlugIn::LabelSizeLarge:
+        wkSize = WKBundlePageLabelSizeLarge;
+        break;
+    default:
+        return 0;
+    }
+
+    return adoptRef(toImpl(m_client.plugInStartLabelImage(wkSize, m_client.clientInfo)));
 }
 
 } // namespace WebKit

@@ -33,6 +33,7 @@
 #include <wtf/HashMap.h>
 #include <wtf/StdLibExtras.h>
 #include <wtf/Vector.h>
+#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
@@ -43,7 +44,7 @@ void CSSSelector::createRareData()
     if (m_hasRareData)
         return;
     // Move the value to the rare data stucture.
-    m_data.m_rareData = new RareData(adoptRef(m_data.m_value));
+    m_data.m_rareData = RareData::create(adoptRef(m_data.m_value)).leakRef();
     m_hasRareData = true;
 }
 
@@ -51,11 +52,24 @@ unsigned CSSSelector::specificity() const
 {
     // make sure the result doesn't overflow
     static const unsigned maxValueMask = 0xffffff;
+    static const unsigned idMask = 0xff0000;
+    static const unsigned classMask = 0xff00;
+    static const unsigned elementMask = 0xff;
     unsigned total = 0;
+    unsigned temp = 0;
     for (const CSSSelector* selector = this; selector; selector = selector->tagHistory()) {
         if (selector->m_isForPage)
             return (total + selector->specificityForPage()) & maxValueMask;
-        total = (total + selector->specificityForOneSelector()) & maxValueMask;
+        temp = total + selector->specificityForOneSelector();
+        // Clamp each component to its max in the case of overflow.
+        if ((temp & idMask) < (total & idMask))
+            total |= idMask;
+        else if ((temp & classMask) < (total & classMask))
+            total |= classMask;
+        else if ((temp & elementMask) < (total & elementMask))
+            total |= elementMask;
+        else
+            total = temp;
     }
     return total;
 }
@@ -81,10 +95,9 @@ inline unsigned CSSSelector::specificityForOneSelector() const
     case End:
         // FIXME: PsuedoAny should base the specificity on the sub-selectors.
         // See http://lists.w3.org/Archives/Public/www-style/2010Sep/0530.html
-        if (pseudoType() == PseudoNot) {
-            ASSERT(selectorList());
+        if (pseudoType() == PseudoNot && selectorList())
             s += selectorList()->first()->specificityForOneSelector();
-        } else
+        else
             s += 0x100;
     case None:
         break;
@@ -150,11 +163,6 @@ PseudoId CSSSelector::pseudoId(PseudoType type)
     case PseudoAnimatingFullScreenTransition:
         return ANIMATING_FULL_SCREEN_TRANSITION;
 #endif
-
-    case PseudoInputListButton:
-#if ENABLE(DATALIST)
-        return INPUT_LIST_BUTTON;
-#endif
     case PseudoUnknown:
     case PseudoEmpty:
     case PseudoFirstChild:
@@ -210,6 +218,8 @@ PseudoId CSSSelector::pseudoId(PseudoType type)
     case PseudoRightPage:
     case PseudoInRange:
     case PseudoOutOfRange:
+    case PseudoUserAgentCustomElement:
+    case PseudoWebKitCustomElement:
         return NOPSEUDO;
     case PseudoNotParsed:
         ASSERT_NOT_REACHED();
@@ -222,81 +232,78 @@ PseudoId CSSSelector::pseudoId(PseudoType type)
 
 static HashMap<AtomicStringImpl*, CSSSelector::PseudoType>* nameToPseudoTypeMap()
 {
-    DEFINE_STATIC_LOCAL(AtomicString, active, ("active"));
-    DEFINE_STATIC_LOCAL(AtomicString, after, ("after"));
-    DEFINE_STATIC_LOCAL(AtomicString, any, ("-webkit-any("));
-    DEFINE_STATIC_LOCAL(AtomicString, anyLink, ("-webkit-any-link"));
-    DEFINE_STATIC_LOCAL(AtomicString, autofill, ("-webkit-autofill"));
-    DEFINE_STATIC_LOCAL(AtomicString, before, ("before"));
-    DEFINE_STATIC_LOCAL(AtomicString, checked, ("checked"));
-    DEFINE_STATIC_LOCAL(AtomicString, defaultString, ("default"));
-    DEFINE_STATIC_LOCAL(AtomicString, disabled, ("disabled"));
-    DEFINE_STATIC_LOCAL(AtomicString, readOnly, ("read-only"));
-    DEFINE_STATIC_LOCAL(AtomicString, readWrite, ("read-write"));
-    DEFINE_STATIC_LOCAL(AtomicString, valid, ("valid"));
-    DEFINE_STATIC_LOCAL(AtomicString, invalid, ("invalid"));
-    DEFINE_STATIC_LOCAL(AtomicString, drag, ("-webkit-drag"));
-    DEFINE_STATIC_LOCAL(AtomicString, dragAlias, ("-khtml-drag")); // was documented with this name in Apple documentation, so keep an alia
-    DEFINE_STATIC_LOCAL(AtomicString, empty, ("empty"));
-    DEFINE_STATIC_LOCAL(AtomicString, enabled, ("enabled"));
-    DEFINE_STATIC_LOCAL(AtomicString, firstChild, ("first-child"));
-    DEFINE_STATIC_LOCAL(AtomicString, firstLetter, ("first-letter"));
-    DEFINE_STATIC_LOCAL(AtomicString, firstLine, ("first-line"));
-    DEFINE_STATIC_LOCAL(AtomicString, firstOfType, ("first-of-type"));
-    DEFINE_STATIC_LOCAL(AtomicString, fullPageMedia, ("-webkit-full-page-media"));
-    DEFINE_STATIC_LOCAL(AtomicString, nthChild, ("nth-child("));
-    DEFINE_STATIC_LOCAL(AtomicString, nthOfType, ("nth-of-type("));
-    DEFINE_STATIC_LOCAL(AtomicString, nthLastChild, ("nth-last-child("));
-    DEFINE_STATIC_LOCAL(AtomicString, nthLastOfType, ("nth-last-of-type("));
-    DEFINE_STATIC_LOCAL(AtomicString, focus, ("focus"));
-    DEFINE_STATIC_LOCAL(AtomicString, hover, ("hover"));
-    DEFINE_STATIC_LOCAL(AtomicString, indeterminate, ("indeterminate"));
-#if ENABLE(DATALIST)
-    DEFINE_STATIC_LOCAL(AtomicString, inputListButton, ("-webkit-input-list-button"));
-#endif
-    DEFINE_STATIC_LOCAL(AtomicString, lastChild, ("last-child"));
-    DEFINE_STATIC_LOCAL(AtomicString, lastOfType, ("last-of-type"));
-    DEFINE_STATIC_LOCAL(AtomicString, link, ("link"));
-    DEFINE_STATIC_LOCAL(AtomicString, lang, ("lang("));
-    DEFINE_STATIC_LOCAL(AtomicString, notStr, ("not("));
-    DEFINE_STATIC_LOCAL(AtomicString, onlyChild, ("only-child"));
-    DEFINE_STATIC_LOCAL(AtomicString, onlyOfType, ("only-of-type"));
-    DEFINE_STATIC_LOCAL(AtomicString, optional, ("optional"));
-    DEFINE_STATIC_LOCAL(AtomicString, required, ("required"));
-    DEFINE_STATIC_LOCAL(AtomicString, resizer, ("-webkit-resizer"));
-    DEFINE_STATIC_LOCAL(AtomicString, root, ("root"));
-    DEFINE_STATIC_LOCAL(AtomicString, scrollbar, ("-webkit-scrollbar"));
-    DEFINE_STATIC_LOCAL(AtomicString, scrollbarButton, ("-webkit-scrollbar-button"));
-    DEFINE_STATIC_LOCAL(AtomicString, scrollbarCorner, ("-webkit-scrollbar-corner"));
-    DEFINE_STATIC_LOCAL(AtomicString, scrollbarThumb, ("-webkit-scrollbar-thumb"));
-    DEFINE_STATIC_LOCAL(AtomicString, scrollbarTrack, ("-webkit-scrollbar-track"));
-    DEFINE_STATIC_LOCAL(AtomicString, scrollbarTrackPiece, ("-webkit-scrollbar-track-piece"));
-    DEFINE_STATIC_LOCAL(AtomicString, selection, ("selection"));
-    DEFINE_STATIC_LOCAL(AtomicString, target, ("target"));
-    DEFINE_STATIC_LOCAL(AtomicString, visited, ("visited"));
-    DEFINE_STATIC_LOCAL(AtomicString, windowInactive, ("window-inactive"));
-    DEFINE_STATIC_LOCAL(AtomicString, decrement, ("decrement"));
-    DEFINE_STATIC_LOCAL(AtomicString, increment, ("increment"));
-    DEFINE_STATIC_LOCAL(AtomicString, start, ("start"));
-    DEFINE_STATIC_LOCAL(AtomicString, end, ("end"));
-    DEFINE_STATIC_LOCAL(AtomicString, horizontal, ("horizontal"));
-    DEFINE_STATIC_LOCAL(AtomicString, vertical, ("vertical"));
-    DEFINE_STATIC_LOCAL(AtomicString, doubleButton, ("double-button"));
-    DEFINE_STATIC_LOCAL(AtomicString, singleButton, ("single-button"));
-    DEFINE_STATIC_LOCAL(AtomicString, noButton, ("no-button"));
-    DEFINE_STATIC_LOCAL(AtomicString, cornerPresent, ("corner-present"));
+    DEFINE_STATIC_LOCAL(AtomicString, active, ("active", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, after, ("after", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, any, ("-webkit-any(", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, anyLink, ("-webkit-any-link", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, autofill, ("-webkit-autofill", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, before, ("before", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, checked, ("checked", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, defaultString, ("default", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, disabled, ("disabled", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, readOnly, ("read-only", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, readWrite, ("read-write", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, valid, ("valid", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, invalid, ("invalid", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, drag, ("-webkit-drag", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, dragAlias, ("-khtml-drag", AtomicString::ConstructFromLiteral)); // was documented with this name in Apple documentation, so keep an alia
+    DEFINE_STATIC_LOCAL(AtomicString, empty, ("empty", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, enabled, ("enabled", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, firstChild, ("first-child", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, firstLetter, ("first-letter", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, firstLine, ("first-line", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, firstOfType, ("first-of-type", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, fullPageMedia, ("-webkit-full-page-media", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, nthChild, ("nth-child(", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, nthOfType, ("nth-of-type(", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, nthLastChild, ("nth-last-child(", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, nthLastOfType, ("nth-last-of-type(", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, focus, ("focus", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, hover, ("hover", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, indeterminate, ("indeterminate", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, lastChild, ("last-child", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, lastOfType, ("last-of-type", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, link, ("link", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, lang, ("lang(", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, notStr, ("not(", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, onlyChild, ("only-child", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, onlyOfType, ("only-of-type", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, optional, ("optional", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, required, ("required", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, resizer, ("-webkit-resizer", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, root, ("root", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, scrollbar, ("-webkit-scrollbar", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, scrollbarButton, ("-webkit-scrollbar-button", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, scrollbarCorner, ("-webkit-scrollbar-corner", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, scrollbarThumb, ("-webkit-scrollbar-thumb", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, scrollbarTrack, ("-webkit-scrollbar-track", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, scrollbarTrackPiece, ("-webkit-scrollbar-track-piece", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, selection, ("selection", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, target, ("target", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, visited, ("visited", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, windowInactive, ("window-inactive", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, decrement, ("decrement", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, increment, ("increment", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, start, ("start", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, end, ("end", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, horizontal, ("horizontal", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, vertical, ("vertical", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, doubleButton, ("double-button", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, singleButton, ("single-button", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, noButton, ("no-button", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, cornerPresent, ("corner-present", AtomicString::ConstructFromLiteral));
     // Paged Media pseudo-classes
-    DEFINE_STATIC_LOCAL(AtomicString, firstPage, ("first"));
-    DEFINE_STATIC_LOCAL(AtomicString, leftPage, ("left"));
-    DEFINE_STATIC_LOCAL(AtomicString, rightPage, ("right"));
+    DEFINE_STATIC_LOCAL(AtomicString, firstPage, ("first", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, leftPage, ("left", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, rightPage, ("right", AtomicString::ConstructFromLiteral));
 #if ENABLE(FULLSCREEN_API)
-    DEFINE_STATIC_LOCAL(AtomicString, fullScreen, ("-webkit-full-screen"));
-    DEFINE_STATIC_LOCAL(AtomicString, fullScreenDocument, ("-webkit-full-screen-document"));
-    DEFINE_STATIC_LOCAL(AtomicString, fullScreenAncestor, ("-webkit-full-screen-ancestor"));
-    DEFINE_STATIC_LOCAL(AtomicString, animatingFullScreenTransition, ("-webkit-animating-full-screen-transition"));
+    DEFINE_STATIC_LOCAL(AtomicString, fullScreen, ("-webkit-full-screen", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, fullScreenDocument, ("-webkit-full-screen-document", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, fullScreenAncestor, ("-webkit-full-screen-ancestor", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, animatingFullScreenTransition, ("-webkit-animating-full-screen-transition", AtomicString::ConstructFromLiteral));
 #endif
-    DEFINE_STATIC_LOCAL(AtomicString, inRange, ("in-range"));
-    DEFINE_STATIC_LOCAL(AtomicString, outOfRange, ("out-of-range"));
+    DEFINE_STATIC_LOCAL(AtomicString, inRange, ("in-range", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, outOfRange, ("out-of-range", AtomicString::ConstructFromLiteral));
 
     static HashMap<AtomicStringImpl*, CSSSelector::PseudoType>* nameToPseudoType = 0;
     if (!nameToPseudoType) {
@@ -320,9 +327,6 @@ static HashMap<AtomicStringImpl*, CSSSelector::PseudoType>* nameToPseudoTypeMap(
         nameToPseudoType->set(empty.impl(), CSSSelector::PseudoEmpty);
         nameToPseudoType->set(firstChild.impl(), CSSSelector::PseudoFirstChild);
         nameToPseudoType->set(fullPageMedia.impl(), CSSSelector::PseudoFullPageMedia);
-#if ENABLE(DATALIST)
-        nameToPseudoType->set(inputListButton.impl(), CSSSelector::PseudoInputListButton);
-#endif
         nameToPseudoType->set(lastChild.impl(), CSSSelector::PseudoLastChild);
         nameToPseudoType->set(lastOfType.impl(), CSSSelector::PseudoLastOfType);
         nameToPseudoType->set(onlyChild.impl(), CSSSelector::PseudoOnlyChild);
@@ -385,12 +389,22 @@ CSSSelector::PseudoType CSSSelector::parsePseudoType(const AtomicString& name)
         return PseudoUnknown;
     HashMap<AtomicStringImpl*, CSSSelector::PseudoType>* nameToPseudoType = nameToPseudoTypeMap();
     HashMap<AtomicStringImpl*, CSSSelector::PseudoType>::iterator slot = nameToPseudoType->find(name.impl());
-    return slot == nameToPseudoType->end() ? PseudoUnknown : slot->second;
+
+    if (slot != nameToPseudoType->end())
+        return slot->value;
+
+    if (name.startsWith("-webkit-"))
+        return PseudoWebKitCustomElement;
+    if (name.startsWith("x-") || name.startsWith("cue"))
+        return PseudoUserAgentCustomElement;
+
+    return PseudoUnknown;
 }
 
-bool CSSSelector::isUnknownPseudoType(const AtomicString& name)
+bool CSSSelector::isCustomPseudoType(const AtomicString& name)
 {
-    return parsePseudoType(name) == PseudoUnknown;
+    CSSSelector::PseudoType type = parsePseudoType(name);
+    return type == PseudoUserAgentCustomElement || type == PseudoWebKitCustomElement;
 }
 
 void CSSSelector::extractPseudoType() const
@@ -410,7 +424,6 @@ void CSSSelector::extractPseudoType() const
     case PseudoFirstLetter:
     case PseudoFirstLine:
         compat = true;
-    case PseudoInputListButton:
     case PseudoResizer:
     case PseudoScrollbar:
     case PseudoScrollbarCorner:
@@ -419,6 +432,8 @@ void CSSSelector::extractPseudoType() const
     case PseudoScrollbarTrack:
     case PseudoScrollbarTrackPiece:
     case PseudoSelection:
+    case PseudoUserAgentCustomElement:
+    case PseudoWebKitCustomElement:
         element = true;
         break;
     case PseudoUnknown:
@@ -524,16 +539,16 @@ bool CSSSelector::operator==(const CSSSelector& other)
 
 String CSSSelector::selectorText() const
 {
-    String str = "";
+    StringBuilder str;
 
     const AtomicString& prefix = m_tag.prefix();
     const AtomicString& localName = m_tag.localName();
     if (m_match == CSSSelector::None || !prefix.isNull() || localName != starAtom) {
         if (prefix.isNull())
-            str = localName;
+            str.append(localName);
         else {
-            str = prefix.string();
-            str.append("|");
+            str.append(prefix.string());
+            str.append('|');
             str.append(localName);
         }
     }
@@ -541,82 +556,82 @@ String CSSSelector::selectorText() const
     const CSSSelector* cs = this;
     while (true) {
         if (cs->m_match == CSSSelector::Id) {
-            str += "#";
+            str.append('#');
             serializeIdentifier(cs->value(), str);
         } else if (cs->m_match == CSSSelector::Class) {
-            str += ".";
+            str.append('.');
             serializeIdentifier(cs->value(), str);
         } else if (cs->m_match == CSSSelector::PseudoClass || cs->m_match == CSSSelector::PagePseudoClass) {
-            str += ":";
-            str += cs->value();
+            str.append(':');
+            str.append(cs->value());
 
             switch (cs->pseudoType()) {
             case PseudoNot:
-                ASSERT(cs->selectorList());
-                str += cs->selectorList()->first()->selectorText();
-                str += ")";
+                if (CSSSelectorList* selectorList = cs->selectorList())
+                    str.append(selectorList->first()->selectorText());
+                str.append(')');
                 break;
             case PseudoLang:
             case PseudoNthChild:
             case PseudoNthLastChild:
             case PseudoNthOfType:
             case PseudoNthLastOfType:
-                str += cs->argument();
-                str += ")";
+                str.append(cs->argument());
+                str.append(')');
                 break;
             case PseudoAny: {
                 CSSSelector* firstSubSelector = cs->selectorList()->first();
                 for (CSSSelector* subSelector = firstSubSelector; subSelector; subSelector = CSSSelectorList::next(subSelector)) {
                     if (subSelector != firstSubSelector)
-                        str += ",";
-                    str += subSelector->selectorText();
+                        str.append(',');
+                    str.append(subSelector->selectorText());
                 }
-                str += ")";
+                str.append(')');
                 break;
             }
             default:
                 break;
             }
         } else if (cs->m_match == CSSSelector::PseudoElement) {
-            str += "::";
-            str += cs->value();
+            str.appendLiteral("::");
+            str.append(cs->value());
         } else if (cs->isAttributeSelector()) {
-            str += "[";
+            str.append('[');
             const AtomicString& prefix = cs->attribute().prefix();
             if (!prefix.isNull()) {
                 str.append(prefix);
                 str.append("|");
             }
-            str += cs->attribute().localName();
+            str.append(cs->attribute().localName());
             switch (cs->m_match) {
                 case CSSSelector::Exact:
-                    str += "=";
+                    str.append('=');
                     break;
                 case CSSSelector::Set:
                     // set has no operator or value, just the attrName
-                    str += "]";
+                    str.append(']');
                     break;
                 case CSSSelector::List:
-                    str += "~=";
+                    str.appendLiteral("~=");
                     break;
                 case CSSSelector::Hyphen:
-                    str += "|=";
+                    str.appendLiteral("|=");
                     break;
                 case CSSSelector::Begin:
-                    str += "^=";
+                    str.appendLiteral("^=");
                     break;
                 case CSSSelector::End:
-                    str += "$=";
+                    str.appendLiteral("$=");
                     break;
                 case CSSSelector::Contain:
-                    str += "*=";
+                    str.appendLiteral("*=");
                     break;
                 default:
                     break;
             }
             if (cs->m_match != CSSSelector::Set) {
                 serializeString(cs->value(), str);
-                str += "]";
+                str.append(']');
             }
         }
         if (cs->relation() != CSSSelector::SubSelector || !cs->tagHistory())
@@ -626,20 +641,23 @@ String CSSSelector::selectorText() const
 
     if (CSSSelector* tagHistory = cs->tagHistory()) {
         String tagHistoryText = tagHistory->selectorText();
-        if (cs->relation() == CSSSelector::DirectAdjacent)
-            str = tagHistoryText + " + " + str;
-        else if (cs->relation() == CSSSelector::IndirectAdjacent)
-            str = tagHistoryText + " ~ " + str;
-        else if (cs->relation() == CSSSelector::Child)
-            str = tagHistoryText + " > " + str;
-        else if (cs->relation() == CSSSelector::ShadowDescendant)
-            str = tagHistoryText + str;
-        else
-            // Descendant
-            str = tagHistoryText + " " + str;
+        switch (cs->relation()) {
+        case CSSSelector::Descendant:
+            return tagHistoryText + " " + str.toString();
+        case CSSSelector::Child:
+            return tagHistoryText + " > " + str.toString();
+        case CSSSelector::DirectAdjacent:
+            return tagHistoryText + " + " + str.toString();
+        case CSSSelector::IndirectAdjacent:
+            return tagHistoryText + " ~ " + str.toString();
+        case CSSSelector::SubSelector:
+            ASSERT_NOT_REACHED();
+        case CSSSelector::ShadowDescendant:
+            return tagHistoryText + str.toString();
+        }
     }
 
-    return str;
+    return str.toString();
 }
 
 void CSSSelector::setAttribute(const QualifiedName& value)

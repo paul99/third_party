@@ -167,7 +167,7 @@ void PlatformCALayer::animationStarted(CFTimeInterval beginTime)
 
     HashMap<String, RefPtr<PlatformCAAnimation> >::const_iterator end = m_animations.end();
     for (HashMap<String, RefPtr<PlatformCAAnimation> >::const_iterator it = m_animations.begin(); it != end; ++it)
-        it->second->setActualStartTimeIfNeeded(cacfBeginTime);
+        it->value->setActualStartTimeIfNeeded(cacfBeginTime);
 
     if (m_owner)
         m_owner->platformCALayerAnimationStarted(beginTime);
@@ -176,10 +176,8 @@ void PlatformCALayer::animationStarted(CFTimeInterval beginTime)
 static void resubmitAllAnimations(PlatformCALayer* layer)
 {
     HashMap<String, RefPtr<PlatformCAAnimation> >::const_iterator end = layer->animations().end();
-    for (HashMap<String, RefPtr<PlatformCAAnimation> >::const_iterator it = layer->animations().begin(); it != end; ++it) {
-        RetainPtr<CFStringRef> s(AdoptCF, it->first.createCFString());
-        CACFLayerAddAnimation(layer->platformLayer(), s.get(), it->second->platformAnimation());
-    }
+    for (HashMap<String, RefPtr<PlatformCAAnimation> >::const_iterator it = layer->animations().begin(); it != end; ++it)
+        CACFLayerAddAnimation(layer->platformLayer(), it->key.createCFString().get(), it->value->platformAnimation());
 }
 
 void PlatformCALayer::ensureAnimationsSubmitted()
@@ -297,8 +295,7 @@ void PlatformCALayer::addAnimationForKey(const String& key, PlatformCAAnimation*
     // Add it to the animation list
     m_animations.add(key, animation);
 
-    RetainPtr<CFStringRef> s(AdoptCF, key.createCFString());
-    CACFLayerAddAnimation(m_layer.get(), s.get(), animation->platformAnimation());
+    CACFLayerAddAnimation(m_layer.get(), key.createCFString().get(), animation->platformAnimation());
     setNeedsCommit();
 
     // Tell the host about it so we can fire the start animation event
@@ -312,8 +309,7 @@ void PlatformCALayer::removeAnimationForKey(const String& key)
     // Remove it from the animation list
     m_animations.remove(key);
 
-    RetainPtr<CFStringRef> s(AdoptCF, key.createCFString());
-    CACFLayerRemoveAnimation(m_layer.get(), s.get());
+    CACFLayerRemoveAnimation(m_layer.get(), key.createCFString().get());
 
     // We don't "remove" a layer from AbstractCACFLayerTreeHost when it loses an animation.
     // There may be other active animations on the layer and if an animation
@@ -328,7 +324,7 @@ PassRefPtr<PlatformCAAnimation> PlatformCALayer::animationForKey(const String& k
     if (it == m_animations.end())
         return 0;
 
-    return it->second;
+    return it->value;
 }
 
 PlatformCALayer* PlatformCALayer::mask() const
@@ -566,6 +562,23 @@ void PlatformCALayer::setOpacity(float value)
     setNeedsCommit();
 }
 
+#if ENABLE(CSS_FILTERS)
+
+void PlatformCALayer::setFilters(const FilterOperations&)
+{
+}
+
+void PlatformCALayer::copyFiltersFrom(const PlatformCALayer*)
+{
+}
+
+bool PlatformCALayer::filtersCanBeComposited(const FilterOperations&)
+{
+    return false;
+}
+
+#endif // ENABLE(CSS_FILTERS)
+
 String PlatformCALayer::name() const
 {
     return CACFLayerGetName(m_layer.get());
@@ -573,8 +586,7 @@ String PlatformCALayer::name() const
 
 void PlatformCALayer::setName(const String& value)
 {
-    RetainPtr<CFStringRef> s(AdoptCF, value.createCFString());
-    CACFLayerSetName(m_layer.get(), s.get());
+    CACFLayerSetName(m_layer.get(), value.createCFString().get());
     setNeedsCommit();
 }
 
@@ -618,6 +630,11 @@ float PlatformCALayer::contentsScale() const
 
 void PlatformCALayer::setContentsScale(float)
 {
+}
+
+TiledBacking* PlatformCALayer::tiledBacking()
+{
+    return 0;
 }
 
 #ifndef NDEBUG

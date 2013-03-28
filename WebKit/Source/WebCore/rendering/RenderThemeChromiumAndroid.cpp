@@ -28,14 +28,17 @@
 
 #include "CSSValueKeywords.h"
 #include "Color.h"
+#include "LayoutTestSupport.h"
 #include "PaintInfo.h"
-#include "PlatformSupport.h"
 #include "RenderMediaControlsChromium.h"
 #include "RenderObject.h"
 #include "RenderProgress.h"
 #include "RenderSlider.h"
 #include "ScrollbarTheme.h"
 #include "UserAgentStyleSheets.h"
+
+#include <public/Platform.h>
+#include <public/android/WebThemeEngine.h>
 
 namespace WebCore {
 
@@ -56,7 +59,7 @@ RenderThemeChromiumAndroid::~RenderThemeChromiumAndroid()
 
 Color RenderThemeChromiumAndroid::systemColor(int cssValueId) const
 {
-    if (PlatformSupport::layoutTestMode() && cssValueId == CSSValueButtonface) {
+    if (isRunningLayoutTest() && cssValueId == CSSValueButtonface) {
         // Match Chromium Linux' button color in layout tests.
         static const Color linuxButtonGrayColor(0xffdddddd);
         return linuxButtonGrayColor;
@@ -64,18 +67,23 @@ Color RenderThemeChromiumAndroid::systemColor(int cssValueId) const
     return RenderTheme::systemColor(cssValueId);
 }
 
+String RenderThemeChromiumAndroid::extraMediaControlsStyleSheet()
+{
+    return String(mediaControlsChromiumAndroidUserAgentStyleSheet, sizeof(mediaControlsChromiumAndroidUserAgentStyleSheet));
+}
+
 String RenderThemeChromiumAndroid::extraDefaultStyleSheet()
 {
-    return RenderThemeChromiumLinux::extraDefaultStyleSheet() +
+    return RenderThemeChromiumDefault::extraDefaultStyleSheet() +
         String(themeChromiumAndroidUserAgentStyleSheet, sizeof(themeChromiumAndroidUserAgentStyleSheet));
 }
 
-void RenderThemeChromiumAndroid::adjustInnerSpinButtonStyle(CSSStyleSelector*, RenderStyle* style, Element*) const
+void RenderThemeChromiumAndroid::adjustInnerSpinButtonStyle(StyleResolver*, RenderStyle* style, Element*) const
 {
-    if (PlatformSupport::layoutTestMode()) {
+    if (isRunningLayoutTest()) {
         // Match Chromium Linux spin button style in layout tests.
         // FIXME: Consider removing the conditional if a future Android theme matches this.
-        IntSize size = PlatformSupport::getThemePartSize(PlatformSupport::PartInnerSpinButton);
+        IntSize size = WebKit::Platform::current()->themeEngine()->getSize(WebKit::WebThemeEngine::PartInnerSpinButton);
 
         style->setWidth(Length(size.width(), Fixed));
         style->setMinWidth(Length(size.width(), Fixed));
@@ -96,11 +104,9 @@ bool RenderThemeChromiumAndroid::paintMediaOverlayPlayButton(RenderObject* objec
 
 int RenderThemeChromiumAndroid::menuListArrowPadding() const
 {
-    // We can not get call ScrollbarTheme::scrollbarThickness() here, as
-    // scrollbar thickness on android is 0. So get the width of scrollbar
-    // down arrow, which equals the width of vertical scrollbar, directly
-    // from PlatformBridge.
-    IntSize scrollbarSize = PlatformSupport::getThemePartSize(PlatformSupport::PartScrollbarDownArrow);
+    // We cannot use the scrollbar thickness here, as it's width is 0 on Android.
+    // Instead, use the width of the scrollbar down arrow.
+    IntSize scrollbarSize = WebKit::Platform::current()->themeEngine()->getSize(WebKit::WebThemeEngine::PartScrollbarDownArrow);
     return scrollbarSize.width();
 }
 

@@ -38,6 +38,7 @@
 #include <wtf/FastAllocBase.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
+#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
@@ -60,7 +61,7 @@ namespace WebCore {
 
         void notifyError();
 
-        const String& script() const { return m_script; }
+        String script();
         const KURL& url() const { return m_url; }
         const KURL& responseURL() const;
         bool failed() const { return m_failed; }
@@ -72,7 +73,7 @@ namespace WebCore {
         virtual void didFail(const ResourceError&);
         virtual void didFailRedirectCheck();
 
-#if PLATFORM(CHROMIUM)
+#if PLATFORM(CHROMIUM) || PLATFORM(BLACKBERRY)
         void setTargetType(ResourceRequest::TargetType targetType) { m_targetType = targetType; }
 #endif
 
@@ -89,13 +90,13 @@ namespace WebCore {
         RefPtr<ThreadableLoader> m_threadableLoader;
         String m_responseEncoding;        
         RefPtr<TextResourceDecoder> m_decoder;
-        String m_script;
+        StringBuilder m_script;
         KURL m_url;
         KURL m_responseURL;
         bool m_failed;
         unsigned long m_identifier;
         bool m_finishing;
-#if PLATFORM(CHROMIUM)
+#if PLATFORM(CHROMIUM) || PLATFORM(BLACKBERRY)
         ResourceRequest::TargetType m_targetType;
 #endif
     };

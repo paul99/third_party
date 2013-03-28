@@ -47,7 +47,6 @@
 #import <WebCore/Image.h>
 #import <WebCore/KURL.h>
 #import <WebCore/PageCache.h>
-#import <WebCore/PlatformString.h>
 #import <WebCore/RunLoop.h>
 #import <WebCore/ThreadCheck.h>
 #import <WebCore/WebCoreObjCExtras.h>
@@ -55,6 +54,7 @@
 #import <wtf/Assertions.h>
 #import <wtf/MainThread.h>
 #import <wtf/StdLibExtras.h>
+#import <wtf/text/WTFString.h>
 
 // Private keys used in the WebHistoryItem's dictionary representation.
 // see 3245793 for explanation of "lastVisitedDate"
@@ -232,7 +232,7 @@ void WKNotifyHistoryItemChanged(HistoryItem*)
             [result appendString:[child description]];
         }
         // shift all the contents over.  A bit slow, but hey, this is for debugging.
-        NSRange replRange = {currPos, [result length]-currPos};
+        NSRange replRange = { static_cast<NSUInteger>(currPos), [result length] - currPos };
         [result replaceOccurrencesOfString:@"\n" withString:@"\n    " options:0 range:replRange];
     }
     

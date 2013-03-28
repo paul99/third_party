@@ -28,13 +28,13 @@
 #include "TextCodecMac.h"
 
 #include "CharsetData.h"
-#include "PlatformString.h"
 #include "ThreadGlobalData.h"
 #include <wtf/Assertions.h>
 #include <wtf/PassOwnPtr.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/Threading.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/WTFString.h>
 #include <wtf/unicode/CharacterNames.h>
 
 using namespace std;
@@ -284,7 +284,7 @@ CString TextCodecMac::encode(const UChar* characters, size_t length, Unencodable
     // Encoding will change the yen sign back into a backslash.
     String copy(characters, length);
     copy.replace('\\', m_backslashAsCurrencySymbol);
-    RetainPtr<CFStringRef> cfs(AdoptCF, copy.createCFString());
+    RetainPtr<CFStringRef> cfs = copy.createCFString();
 
     CFIndex startPos = 0;
     CFIndex charactersLeft = CFStringGetLength(cfs.get());

@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2006, 2007, 2009, 2011 Apple Inc. All rights reserved.
  * Copyright (C) 2008, 2010 Nokia Corporation and/or its subsidiary(-ies)
+ * Copyright (C) 2012, Samsung Electronics. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,6 +24,7 @@
 
 #include "ChromeClient.h"
 #include "DNS.h"
+#include "DateTimeChooser.h"
 #include "Document.h"
 #include "FileIconLoader.h"
 #include "FileChooser.h"
@@ -39,6 +41,7 @@
 #include "InspectorInstrumentation.h"
 #include "Page.h"
 #include "PageGroupLoadDeferrer.h"
+#include "PopupOpeningObserver.h"
 #include "RenderObject.h"
 #include "ResourceHandle.h"
 #include "SecurityOrigin.h"
@@ -50,7 +53,7 @@
 #include <wtf/Vector.h>
 #include <wtf/text/StringBuilder.h>
 
-#if ENABLE(INPUT_COLOR)
+#if ENABLE(INPUT_TYPE_COLOR)
 #include "ColorChooser.h"
 #endif
 
@@ -94,6 +97,7 @@ void Chrome::invalidateContentsForSlowScroll(const IntRect& updateRect, bool imm
 void Chrome::scroll(const IntSize& scrollDelta, const IntRect& rectToScroll, const IntRect& clipRect)
 {
     m_client->scroll(scrollDelta, rectToScroll, clipRect);
+    InspectorInstrumentation::didScroll(m_page);
 }
 
 #if USE(TILED_BACKING_STORE)
@@ -307,6 +311,7 @@ void Chrome::runJavaScriptAlert(Frame* frame, const String& message)
     PageGroupLoadDeferrer deferrer(m_page, true);
 
     ASSERT(frame);
+    notifyPopupOpeningObservers();
     m_client->runJavaScriptAlert(frame, frame->displayStringModifiedByEncoding(message));
 }
 
@@ -320,6 +325,7 @@ bool Chrome::runJavaScriptConfirm(Frame* frame, const String& message)
     PageGroupLoadDeferrer deferrer(m_page, true);
 
     ASSERT(frame);
+    notifyPopupOpeningObservers();
     return m_client->runJavaScriptConfirm(frame, frame->displayStringModifiedByEncoding(message));
 }
 
@@ -333,6 +339,7 @@ bool Chrome::runJavaScriptPrompt(Frame* frame, const String& prompt, const Strin
     PageGroupLoadDeferrer deferrer(m_page, true);
 
     ASSERT(frame);
+    notifyPopupOpeningObservers();
     bool ok = m_client->runJavaScriptPrompt(frame, frame->displayStringModifiedByEncoding(prompt), frame->displayStringModifiedByEncoding(defaultValue), result);
 
     if (ok)
@@ -356,13 +363,6 @@ bool Chrome::shouldInterruptJavaScript()
     return m_client->shouldInterruptJavaScript();
 }
 
-#if ENABLE(REGISTER_PROTOCOL_HANDLER)
-void Chrome::registerProtocolHandler(const String& scheme, const String& baseURL, const String& url, const String& title) 
-{
-    m_client->registerProtocolHandler(scheme, baseURL, url, title);
-}
-#endif
-
 IntRect Chrome::windowResizerRect() const
 {
     return m_client->windowResizerRect();
@@ -373,7 +373,7 @@ void Chrome::mouseDidMoveOverElement(const HitTestResult& result, unsigned modif
     if (result.innerNode()) {
         Document* document = result.innerNode()->document();
         if (document && document->isDNSPrefetchEnabled())
-            ResourceHandle::prepareForURL(result.absoluteLinkURL());
+            prefetchDNS(result.absoluteLinkURL().host());
     }
     m_client->mouseDidMoveOverElement(result, modifierFlags);
 
@@ -445,16 +445,6 @@ void Chrome::print(Frame* frame)
     m_client->print(frame);
 }
 
-void Chrome::requestGeolocationPermissionForFrame(Frame* frame, Geolocation* geolocation)
-{
-    m_client->requestGeolocationPermissionForFrame(frame, geolocation);
-}
-
-void Chrome::cancelGeolocationPermissionRequestForFrame(Frame* frame, Geolocation* geolocation)
-{
-    m_client->cancelGeolocationPermissionRequestForFrame(frame, geolocation);
-}
-
 #if ENABLE(DIRECTORY_UPLOAD)
 void Chrome::enumerateChosenDirectory(FileChooser* fileChooser)
 {
@@ -462,15 +452,25 @@ void Chrome::enumerateChosenDirectory(FileChooser* fileChooser)
 }
 #endif
 
-#if ENABLE(INPUT_COLOR)
+#if ENABLE(INPUT_TYPE_COLOR)
 PassOwnPtr<ColorChooser> Chrome::createColorChooser(ColorChooserClient* client, const Color& initialColor)
 {
+    notifyPopupOpeningObservers();
     return m_client->createColorChooser(client, initialColor);
+}
+#endif
+
+#if ENABLE(DATE_AND_TIME_INPUT_TYPES)
+PassRefPtr<DateTimeChooser> Chrome::openDateTimeChooser(DateTimeChooserClient* client, const DateTimeChooserParameters& parameters)
+{
+    notifyPopupOpeningObservers();
+    return m_client->openDateTimeChooser(client, parameters);
 }
 #endif
 
 void Chrome::runOpenPanel(Frame* frame, PassRefPtr<FileChooser> fileChooser)
 {
+    notifyPopupOpeningObservers();
     m_client->runOpenPanel(frame, fileChooser);
 }
 
@@ -505,8 +505,8 @@ void Chrome::scheduleAnimation()
 
 // --------
 
-#if ENABLE(DASHBOARD_SUPPORT)
-void ChromeClient::dashboardRegionsChanged()
+#if ENABLE(DASHBOARD_SUPPORT) || ENABLE(DRAGGABLE_REGION)
+void ChromeClient::annotatedRegionsChanged()
 {
 }
 #endif
@@ -557,24 +557,39 @@ bool Chrome::hasOpenedPopup() const
 
 PassRefPtr<PopupMenu> Chrome::createPopupMenu(PopupMenuClient* client) const
 {
+    notifyPopupOpeningObservers();
     return m_client->createPopupMenu(client);
 }
 
 PassRefPtr<SearchPopupMenu> Chrome::createSearchPopupMenu(PopupMenuClient* client) const
 {
+    notifyPopupOpeningObservers();
     return m_client->createSearchPopupMenu(client);
 }
-
-#if ENABLE(CONTEXT_MENUS)
-void Chrome::showContextMenu()
-{
-    m_client->showContextMenu();
-}
-#endif
 
 bool Chrome::requiresFullscreenForVideoPlayback()
 {
     return m_client->requiresFullscreenForVideoPlayback();
+}
+
+void Chrome::registerPopupOpeningObserver(PopupOpeningObserver* observer)
+{
+    ASSERT(observer);
+    m_popupOpeningObservers.append(observer);
+}
+
+void Chrome::unregisterPopupOpeningObserver(PopupOpeningObserver* observer)
+{
+    size_t index = m_popupOpeningObservers.find(observer);
+    ASSERT(index != notFound);
+    m_popupOpeningObservers.remove(index);
+}
+
+void Chrome::notifyPopupOpeningObservers() const
+{
+    const Vector<PopupOpeningObserver*> observers(m_popupOpeningObservers);
+    for (size_t i = 0; i < observers.size(); ++i)
+        observers[i]->willOpenPopup();
 }
 
 } // namespace WebCore

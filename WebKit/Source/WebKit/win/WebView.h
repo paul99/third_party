@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc.  All rights reserved.
+ * Copyright (C) 2006, 2007, 2008, 2009, 2010, 2011, 2012 Apple Inc.  All rights reserved.
  * Copyright (C) 2009, 2010, 2011 Appcelerator, Inc. All rights reserved.
  * Copyright (C) 2011 Brent Fulgham. All rights reserved.
  *
@@ -55,6 +55,9 @@ namespace WebCore {
     class CACFLayerTreeHost;
 #endif
     class FullScreenController;
+#if PLATFORM(WIN) && USE(AVFOUNDATION)
+    struct GraphicsDeviceAdapter;
+#endif
 }
 
 namespace WebCore {
@@ -704,7 +707,7 @@ public:
 
     virtual HRESULT STDMETHODCALLTYPE loadBackForwardListFromOtherView( 
         /* [in] */ IWebView *otherView);
-
+        
     virtual HRESULT STDMETHODCALLTYPE inspector(
         /* [retval][out] */ IWebInspector**);
 
@@ -947,6 +950,10 @@ public:
     void setRootChildLayer(WebCore::GraphicsLayer*);
 #endif
 
+#if PLATFORM(WIN) && USE(AVFOUNDATION)
+    WebCore::GraphicsDeviceAdapter* graphicsDeviceAdapter() const;
+#endif
+
     void enterFullscreenForNode(WebCore::Node*);
     void exitFullscreen();
 
@@ -962,6 +969,25 @@ public:
     WebCore::Element* fullScreenElement() const { return m_fullScreenElement.get(); }
 #endif
 
+    // Used by TextInputController in DumpRenderTree
+
+    HRESULT STDMETHODCALLTYPE setCompositionForTesting(
+        /* [in] */ BSTR composition, 
+        /* [in] */ UINT from, 
+        /* [in] */ UINT length);
+
+    HRESULT STDMETHODCALLTYPE hasCompositionForTesting(/* [out, retval] */ BOOL* result);
+
+    HRESULT STDMETHODCALLTYPE confirmCompositionForTesting(/* [in] */ BSTR composition);
+
+    HRESULT STDMETHODCALLTYPE compositionRangeForTesting(/* [out] */ UINT* startPosition, /* [out] */ UINT* length);
+
+    HRESULT STDMETHODCALLTYPE firstRectForCharacterRangeForTesting(
+    /* [in] */ UINT location, 
+    /* [in] */ UINT length, 
+    /* [out, retval] */ RECT* resultRect);
+
+    HRESULT STDMETHODCALLTYPE selectedRangeForTesting(/* [out] */ UINT* location, /* [out] */ UINT* length);
 private:
     void setZoomMultiplier(float multiplier, bool isTextOnly);
     float zoomMultiplier(bool isTextOnly);
@@ -992,16 +1018,15 @@ private:
 #if USE(ACCELERATED_COMPOSITING)
     // GraphicsLayerClient
     virtual void notifyAnimationStarted(const WebCore::GraphicsLayer*, double time);
-    virtual void notifySyncRequired(const WebCore::GraphicsLayer*);
+    virtual void notifyFlushRequired(const WebCore::GraphicsLayer*);
     virtual void paintContents(const WebCore::GraphicsLayer*, WebCore::GraphicsContext&, WebCore::GraphicsLayerPaintingPhase, const WebCore::IntRect& inClip);
-    virtual bool showDebugBorders(const WebCore::GraphicsLayer*) const;
-    virtual bool showRepaintCounter(const WebCore::GraphicsLayer*) const;
 
     // CACFLayerTreeHostClient
     virtual void flushPendingGraphicsLayerChanges();
 #endif
 
     bool m_shouldInvertColors;
+    void setShouldInvertColors(bool);
 
 protected:
     static bool registerWebViewWindowClass();
@@ -1046,7 +1071,9 @@ protected:
     HWND m_viewWindow;
     WebFrame* m_mainFrame;
     WebCore::Page* m_page;
+#if ENABLE(INSPECTOR)
     WebInspectorClient* m_inspectorClient;
+#endif // ENABLE(INSPECTOR)
     
     RefPtr<RefCountedHBITMAP> m_backingStoreBitmap;
     SIZE m_backingStoreSize;
@@ -1063,7 +1090,9 @@ protected:
     COMPtr<IWebDownloadDelegate> m_downloadDelegate;
     COMPtr<IWebHistoryDelegate> m_historyDelegate;
     COMPtr<WebPreferences> m_preferences;
+#if ENABLE(INSPECTOR)
     COMPtr<WebInspector> m_webInspector;
+#endif // ENABLE(INSPECTOR)
     COMPtr<IWebGeolocationProvider> m_geolocationProvider;
 
     bool m_userAgentOverridden;

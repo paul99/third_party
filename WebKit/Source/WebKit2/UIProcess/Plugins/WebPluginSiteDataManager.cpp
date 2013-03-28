@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,8 @@
 
 #include "config.h"
 #include "WebPluginSiteDataManager.h"
+
+#if ENABLE(NETSCAPE_PLUGIN_API)
 
 #include "ImmutableArray.h"
 #include "PluginProcessManager.h"
@@ -163,15 +165,12 @@ void WebPluginSiteDataManager::getSitesWithData(PassRefPtr<ArrayCallback> prpCal
     m_pendingGetSitesWithData.set(callbackID, state);
     state->getSitesWithDataForNextPlugin();
 #else
-    m_webContext->relaunchProcessIfNecessary();
-
     Vector<PluginModuleInfo> plugins = m_webContext->pluginInfoStore().plugins();
     Vector<String> pluginPaths;
     for (size_t i = 0; i < plugins.size(); ++i)
         pluginPaths.append(plugins[i].path);
 
-    // FIXME (Multi-WebProcess): When multi-process is enabled, we must always use a plug-in process for this,
-    // so this code should just be removed.
+    ASSERT(m_webContext->processModel() == ProcessModelSharedSecondaryProcess); // Plugin process is required for multiple WebProcess mode.
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebProcess::GetSitesWithPluginData(pluginPaths, callbackID));
 #endif
 }
@@ -226,15 +225,12 @@ void WebPluginSiteDataManager::clearSiteData(ImmutableArray* sites, uint64_t fla
     m_pendingClearSiteData.set(callbackID, state);
     state->clearSiteDataForNextPlugin();
 #else
-    m_webContext->relaunchProcessIfNecessary();
-
     Vector<PluginModuleInfo> plugins = m_webContext->pluginInfoStore().plugins();
     Vector<String> pluginPaths;
     for (size_t i = 0; i < plugins.size(); ++i)
         pluginPaths.append(plugins[i].path);
 
-    // FIXME (Multi-WebProcess): When multi-process is enabled, we must always use a plug-in process for this,
-    // so this code should just be removed.
+    ASSERT(m_webContext->processModel() == ProcessModelSharedSecondaryProcess); // Plugin process is required for multiple WebProcess mode.
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebProcess::ClearPluginSiteData(pluginPaths, sitesVector, flags, maxAgeInSeconds, callbackID));
 #endif
 }
@@ -297,3 +293,4 @@ void WebPluginSiteDataManager::didClearSiteDataForAllPlugins(uint64_t callbackID
 
 } // namespace WebKit
 
+#endif // ENABLE(NETSCAPE_PLUGIN_API)

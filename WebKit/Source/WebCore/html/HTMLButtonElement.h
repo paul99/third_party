@@ -32,7 +32,11 @@ class HTMLButtonElement : public HTMLFormControlElement {
 public:
     static PassRefPtr<HTMLButtonElement> create(const QualifiedName&, Document*, HTMLFormElement*);
 
+    void setType(const AtomicString&);
+    
     String value() const;
+
+    virtual bool willRespondToMouseClickEvents() OVERRIDE;
 
 private:
     HTMLButtonElement(const QualifiedName& tagName, Document*, HTMLFormElement*);
@@ -43,18 +47,23 @@ private:
         
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
 
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void willAddAuthorShadowRoot() OVERRIDE;
+
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
     virtual void defaultEventHandler(Event*);
+
     virtual bool appendFormData(FormDataList&, bool);
 
     virtual bool isEnumeratable() const { return true; } 
+    virtual bool supportLabels() const OVERRIDE { return true; }
 
     virtual bool isSuccessfulSubmitButton() const;
     virtual bool isActivatedSubmit() const;
     virtual void setActivatedSubmit(bool flag);
 
     virtual void accessKeyAction(bool sendMouseEvents);
-    virtual bool isURLAttribute(Attribute*) const;
+    virtual bool isURLAttribute(const Attribute&) const OVERRIDE;
 
     virtual bool canStartSelection() const { return false; }
 

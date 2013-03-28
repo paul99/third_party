@@ -28,11 +28,10 @@
 
 class QQuickWebPagePrivate;
 class QQuickWebView;
-class QtWebPageEventHandler;
 class QWebPreferences;
 
 namespace WebKit {
-class QtSGUpdateQueue;
+class QtWebPageEventHandler;
 }
 
 class QWEBKIT_EXPORT QQuickWebPage : public QQuickItem {
@@ -41,24 +40,17 @@ public:
     QQuickWebPage(QQuickWebView* view = 0);
     virtual ~QQuickWebPage();
 
-    void setContentSize(const QSizeF& size);
-    const QSizeF& contentSize() const;
-    void setContentScale(qreal);
-    qreal contentScale() const;
+    void setContentsSize(const QSizeF& size);
+    const QSizeF& contentsSize() const;
+    void setContentsScale(qreal);
+    qreal contentsScale() const;
 
     QTransform transformFromItem() const;
     QTransform transformToItem() const;
 
-    bool usesTraditionalDesktopBehaviour() const;
-    void setUsesTraditionalDesktopBehaviour(bool enable);
-
-    QtWebPageEventHandler* eventHandler() const;
-
-    // Internal. To be removed soon.
-    WebKit::QtSGUpdateQueue* sceneGraphUpdateQueue() const;
+    WebKit::QtWebPageEventHandler* eventHandler() const;
 
 protected:
-    virtual void geometryChanged(const QRectF&, const QRectF&);
     virtual QSGNode* updatePaintNode(QSGNode*, UpdatePaintNodeData*);
 
 private:

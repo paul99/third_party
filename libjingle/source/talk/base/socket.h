@@ -175,14 +175,16 @@ class Socket {
   virtual ConnState GetState() const = 0;
 
   // Fills in the given uint16 with the current estimate of the MTU along the
-  // path to the address to which this socket is connected.
+  // path to the address to which this socket is connected. NOTE: This method
+  // can block for up to 10 seconds on Windows.
   virtual int EstimateMTU(uint16* mtu) = 0;
 
   enum Option {
     OPT_DONTFRAGMENT,
-    OPT_RCVBUF,  // receive buffer size
-    OPT_SNDBUF,  // send buffer size
-    OPT_NODELAY  // whether Nagle algorithm is enabled
+    OPT_RCVBUF,      // receive buffer size
+    OPT_SNDBUF,      // send buffer size
+    OPT_NODELAY,     // whether Nagle algorithm is enabled
+    OPT_IPV6_V6ONLY  // Whether the socket is IPv6 only.
   };
   virtual int GetOption(Option opt, int* value) = 0;
   virtual int SetOption(Option opt, int value) = 0;

@@ -29,10 +29,16 @@
 #ifndef MainResourceLoader_h
 #define MainResourceLoader_h
 
+#include "CachedRawResource.h"
+#include "CachedResourceHandle.h"
 #include "FrameLoaderTypes.h"
 #include "ResourceLoader.h"
 #include "SubstituteData.h"
 #include <wtf/Forward.h>
+
+#if PLATFORM(MAC) && !PLATFORM(IOS) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
+OBJC_CLASS WebFilterEvaluator;
+#endif
 
 #if HAVE(RUNLOOP_TIMER)
 #include "RunLoopTimer.h"
@@ -42,74 +48,91 @@
 
 namespace WebCore {
 
-    class FormState;
-    class ResourceRequest;
+class FormState;
+class ResourceRequest;
 
-    class MainResourceLoader : public ResourceLoader {
-    public:
-        static PassRefPtr<MainResourceLoader> create(Frame*);
-        virtual ~MainResourceLoader();
+class MainResourceLoader : public RefCounted<MainResourceLoader>, public CachedRawResourceClient {
+    WTF_MAKE_FAST_ALLOCATED;
+public:
+    static PassRefPtr<MainResourceLoader> create(DocumentLoader*);
+    virtual ~MainResourceLoader();
 
-        virtual bool load(const ResourceRequest&, const SubstituteData&);
-        virtual void addData(const char*, int, bool allAtOnce);
+    void load(const ResourceRequest&, const SubstituteData&);
+    void cancel();
+    void cancel(const ResourceError&);
+    ResourceLoader* loader() const;
+    PassRefPtr<ResourceBuffer> resourceData();
 
-        virtual void setDefersLoading(bool);
-
-        virtual void willSendRequest(ResourceRequest&, const ResourceResponse& redirectResponse);
-        virtual void didReceiveResponse(const ResourceResponse&);
-        virtual void didReceiveData(const char*, int, long long encodedDataLength, bool allAtOnce);
-        virtual void didFinishLoading(double finishTime);
-        virtual void didFail(const ResourceError&);
+    void setDefersLoading(bool);
+    void setShouldBufferData(DataBufferingPolicy);
 
 #if HAVE(RUNLOOP_TIMER)
-        typedef RunLoopTimer<MainResourceLoader> MainResourceLoaderTimer;
+    typedef RunLoopTimer<MainResourceLoader> MainResourceLoaderTimer;
 #else
-        typedef Timer<MainResourceLoader> MainResourceLoaderTimer;
+    typedef Timer<MainResourceLoader> MainResourceLoaderTimer;
 #endif
 
-        void handleDataLoadNow(MainResourceLoaderTimer*);
+    unsigned long identifier() const;
+    bool isLoadingMultipartContent() const { return m_loadingMultipartContent; }
 
-        bool isLoadingMultipartContent() const { return m_loadingMultipartContent; }
+    void reportMemoryUsage(MemoryObjectInfo*) const;
 
-    private:
-        MainResourceLoader(Frame*);
+private:
+    explicit MainResourceLoader(DocumentLoader*);
 
-        virtual void willCancel(const ResourceError&);
-        virtual void didCancel(const ResourceError&);
+    virtual void redirectReceived(CachedResource*, ResourceRequest&, const ResourceResponse&) OVERRIDE;
+    virtual void responseReceived(CachedResource*, const ResourceResponse&) OVERRIDE;
+    virtual void dataReceived(CachedResource*, const char* data, int dataLength) OVERRIDE;
+    virtual void notifyFinished(CachedResource*) OVERRIDE;
 
-        bool loadNow(ResourceRequest&);
+    void willSendRequest(ResourceRequest&, const ResourceResponse& redirectResponse);
+    void didFinishLoading(double finishTime);
+    void handleSubstituteDataLoadSoon(const ResourceRequest&);
+    void handleSubstituteDataLoadNow(MainResourceLoaderTimer*);
 
-        void handleEmptyLoad(const KURL&, bool forURLScheme);
-        void handleDataLoadSoon(const ResourceRequest& r);
+    void startDataLoadTimer();
 
-        void startDataLoadTimer();
-        void handleDataLoad(ResourceRequest&);
+    void receivedError(const ResourceError&);
+    ResourceError interruptedForPolicyChangeError() const;
+    void stopLoadingForPolicyChange();
+    bool isPostOrRedirectAfterPost(const ResourceRequest& newRequest, const ResourceResponse& redirectResponse);
 
-        void receivedError(const ResourceError&);
-        ResourceError interruptedForPolicyChangeError() const;
-        void stopLoadingForPolicyChange();
-        bool isPostOrRedirectAfterPost(const ResourceRequest& newRequest, const ResourceResponse& redirectResponse);
+    static void callContinueAfterNavigationPolicy(void*, const ResourceRequest&, PassRefPtr<FormState>, bool shouldContinue);
+    void continueAfterNavigationPolicy(const ResourceRequest&, bool shouldContinue);
 
-        static void callContinueAfterNavigationPolicy(void*, const ResourceRequest&, PassRefPtr<FormState>, bool shouldContinue);
-        void continueAfterNavigationPolicy(const ResourceRequest&, bool shouldContinue);
-
-        static void callContinueAfterContentPolicy(void*, PolicyAction);
-        void continueAfterContentPolicy(PolicyAction);
-        void continueAfterContentPolicy(PolicyAction, const ResourceResponse&);
-        
+    static void callContinueAfterContentPolicy(void*, PolicyAction);
+    void continueAfterContentPolicy(PolicyAction);
+    void continueAfterContentPolicy(PolicyAction, const ResourceResponse&);
+    
 #if PLATFORM(QT)
-        void substituteMIMETypeFromPluginDatabase(const ResourceResponse&);
+    void substituteMIMETypeFromPluginDatabase(const ResourceResponse&);
 #endif
 
-        ResourceRequest m_initialRequest;
-        SubstituteData m_substituteData;
+    FrameLoader* frameLoader() const;
+    DocumentLoader* documentLoader() const { return m_documentLoader.get(); }
 
-        MainResourceLoaderTimer m_dataLoadTimer;
+    const ResourceRequest& request() const;
+    void clearResource();
 
-        bool m_loadingMultipartContent;
-        bool m_waitingForContentPolicy;
-        double m_timeOfLastDataReceived;
-    };
+    bool defersLoading() const;
+
+    CachedResourceHandle<CachedRawResource> m_resource;
+
+    ResourceRequest m_initialRequest;
+    SubstituteData m_substituteData;
+    ResourceResponse m_response;
+
+    MainResourceLoaderTimer m_dataLoadTimer;
+    RefPtr<DocumentLoader> m_documentLoader;
+
+    bool m_loadingMultipartContent;
+    bool m_waitingForContentPolicy;
+    double m_timeOfLastDataReceived;
+
+#if PLATFORM(MAC) && !PLATFORM(IOS) && __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
+    WebFilterEvaluator *m_filter;
+#endif
+};
 
 }
 

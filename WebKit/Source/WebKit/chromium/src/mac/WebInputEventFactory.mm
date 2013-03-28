@@ -34,7 +34,7 @@
 #include "WebInputEvent.h"
 #include <wtf/ASCIICType.h>
 
-#if BUILDING_ON_LEOPARD || BUILDING_ON_SNOW_LEOPARD
+#if __MAC_OS_X_VERSION_MAX_ALLOWED < 1070
 
 // Additional Lion APIs.
 enum {
@@ -43,8 +43,7 @@ enum {
     NSEventPhaseStationary  = 0x1 << 1,
     NSEventPhaseChanged     = 0x1 << 2,
     NSEventPhaseEnded       = 0x1 << 3,
-    NSEventPhaseCancelled   = 0x1 << 4,
-    NSEventPhaseMayBegin    = 0x1 << 5
+    NSEventPhaseCancelled   = 0x1 << 4
 };
 typedef NSUInteger NSEventPhase;
 
@@ -53,9 +52,20 @@ typedef NSUInteger NSEventPhase;
 - (NSEventPhase)momentumPhase;
 @end
 
-#endif  // BUILDING_ON_LEOPARD || BUILDING_ON_SNOW_LEOPARD
+#endif  // __MAC_OS_X_VERSION_MAX_ALLOWED < 1070
 
-#if BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MAX_ALLOWED < 1080
+
+// Additional Mountain Lion APIs.
+enum {
+    NSEventPhaseMayBegin    = 0x1 << 5
+};
+
+#endif  // __MAC_OS_X_VERSION_MAX_ALLOWED < 1080
+
+// Do not __MAC_OS_X_VERSION_MAX_ALLOWED here because of a bug in the 10.5 SDK,
+// see <http://lists.webkit.org/pipermail/webkit-dev/2012-July/021442.html>.
+#if MAC_OS_X_VERSION_MAX_ALLOWED <= 1050
 
 // These are not defined in the 10.5 SDK but are defined in later SDKs inside
 // a MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_5 #ifdef.
@@ -64,7 +74,7 @@ enum {
     NSEventTypeEndGesture       = 20
 };
 
-#endif  // BUILDING_ON_LEOPARD
+#endif  // MAC_OS_X_VERSION_MAX_ALLOWED <= 1050
 
 namespace WebKit {
 
@@ -125,9 +135,6 @@ static bool isKeypadEvent(NSEvent* event)
         return false;
     }
 
-    if ([event modifierFlags] & NSNumericPadKeyMask)
-        return true;
-
     switch ([event keyCode]) {
     case 71: // Clear
     case 81: // =
@@ -162,7 +169,7 @@ static int windowsKeyCodeForKeyEvent(NSEvent* event)
     // 2. Keys for which there is no known Mac virtual key codes, like PrintScreen.
     // 3. Certain punctuation keys. On Windows, these are also remapped depending on current keyboard layout,
     //    but see comment in windowsKeyCodeForCharCode().
-    if ([event type] == NSKeyDown || [event type] == NSKeyUp) {
+    if (!isKeypadEvent(event) && ([event type] == NSKeyDown || [event type] == NSKeyUp)) {
         // Cmd switches Roman letters for Dvorak-QWERTY layout, so try modified characters first.
         NSString* s = [event characters];
         code = [s length] > 0 ? WebCore::windowsKeyCodeForCharCode([s characterAtIndex:0]) : 0;
@@ -596,7 +603,9 @@ WebKeyboardEvent WebInputEventFactory::keyboardEvent(NSEvent* event)
     if (([event type] != NSFlagsChanged) && [event isARepeat])
         result.modifiers |= WebInputEvent::IsAutoRepeat;
 
-    result.windowsKeyCode = windowsKeyCodeForKeyEvent(event);
+    int windowsKeyCode = windowsKeyCodeForKeyEvent(event);
+    result.windowsKeyCode = WebKeyboardEvent::windowsKeyCodeWithoutLocation(windowsKeyCode);
+    result.modifiers |= WebKeyboardEvent::locationModifiersFromWindowsKeyCode(windowsKeyCode);
     result.nativeKeyCode = [event keyCode];
 
     NSString* textStr = textFromEvent(event);
@@ -757,7 +766,7 @@ WebMouseEvent WebInputEventFactory::mouseEvent(NSEvent* event, NSView* view)
 
 static WebMouseWheelEvent::Phase phaseForNSEventPhase(NSEventPhase eventPhase)
 {
-    uint32_t phase = WebMouseWheelEvent::PhaseNone; 
+    uint32_t phase = WebMouseWheelEvent::PhaseNone;
     if (eventPhase & NSEventPhaseBegan)
         phase |= WebMouseWheelEvent::PhaseBegan;
     if (eventPhase & NSEventPhaseStationary)
@@ -768,6 +777,8 @@ static WebMouseWheelEvent::Phase phaseForNSEventPhase(NSEventPhase eventPhase)
         phase |= WebMouseWheelEvent::PhaseEnded;
     if (eventPhase & NSEventPhaseCancelled)
         phase |= WebMouseWheelEvent::PhaseCancelled;
+    if (eventPhase & NSEventPhaseMayBegin)
+        phase |= WebMouseWheelEvent::PhaseMayBegin;
     return static_cast<WebMouseWheelEvent::Phase>(phase);
 }
 

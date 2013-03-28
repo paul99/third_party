@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2002-2011 The ANGLE Project Authors. All rights reserved.
+// Copyright (c) 2002-2012 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -16,6 +16,7 @@
 
 #include "common/debug.h"
 #include "libGLESv2/mathutil.h"
+#include "libGLESv2/utilities.h"
 
 #include "libEGL/main.h"
 
@@ -287,6 +288,12 @@ bool Display::initialize()
 
     mDeviceWindow = CreateWindowEx(WS_EX_NOACTIVATE, className, windowName, WS_DISABLED | WS_POPUP, 0, 0, 1, 1, HWND_MESSAGE, NULL, GetModuleHandle(NULL), NULL);
 
+    if (!createDevice())
+    {
+        terminate();
+        return false;
+    }
+
     return true;
 }
 
@@ -300,6 +307,12 @@ void Display::terminate()
     while (!mContextSet.empty())
     {
         destroyContext(*mContextSet.begin());
+    }
+
+    while (!mEventQueryPool.empty())
+    {
+        mEventQueryPool.back()->Release();
+        mEventQueryPool.pop_back();
     }
 
     if (mDevice)
@@ -723,6 +736,12 @@ bool Display::restoreLostDevice()
         (*surface)->release();
     }
 
+    while (!mEventQueryPool.empty())
+    {
+        mEventQueryPool.back()->Release();
+        mEventQueryPool.pop_back();
+    }
+
     if (!resetDevice())
     {
         return false;
@@ -868,6 +887,76 @@ bool Display::testDeviceResettable()
     }
 }
 
+void Display::sync(bool block)
+{
+    HRESULT result;
+
+    IDirect3DQuery9* query = allocateEventQuery();
+    if (!query)
+    {
+        return;
+    }
+
+    result = query->Issue(D3DISSUE_END);
+    ASSERT(SUCCEEDED(result));
+
+    do
+    {
+        result = query->GetData(NULL, 0, D3DGETDATA_FLUSH);
+
+        if(block && result == S_FALSE)
+        {
+            // Keep polling, but allow other threads to do something useful first
+            Sleep(0);
+            // explicitly check for device loss
+            // some drivers seem to return S_FALSE even if the device is lost
+            // instead of D3DERR_DEVICELOST like they should
+            if (testDeviceLost())
+            {
+                result = D3DERR_DEVICELOST;
+            }
+        }
+    }
+    while(block && result == S_FALSE);
+
+    freeEventQuery(query);
+
+    if (isDeviceLostError(result))
+    {
+        notifyDeviceLost();
+    }
+}
+
+IDirect3DQuery9* Display::allocateEventQuery()
+{
+    IDirect3DQuery9 *query = NULL;
+
+    if (mEventQueryPool.empty())
+    {
+        HRESULT result = mDevice->CreateQuery(D3DQUERYTYPE_EVENT, &query);
+        ASSERT(SUCCEEDED(result));
+    }
+    else
+    {
+        query = mEventQueryPool.back();
+        mEventQueryPool.pop_back();
+    }
+
+    return query;
+}
+
+void Display::freeEventQuery(IDirect3DQuery9* query)
+{
+    if (mEventQueryPool.size() > 1000)
+    {
+        query->Release();
+    }
+    else
+    {
+        mEventQueryPool.push_back(query);
+    }
+}
+
 void Display::getMultiSampleSupport(D3DFORMAT format, bool *multiSampleArray)
 {
     for (int multiSampleIndex = 0; multiSampleIndex <= D3DMULTISAMPLE_16_SAMPLES; multiSampleIndex++)
@@ -903,6 +992,22 @@ bool Display::getDXT5TextureSupport()
     return SUCCEEDED(mD3d9->CheckDeviceFormat(mAdapter, mDeviceType, currentDisplayMode.Format, 0, D3DRTYPE_TEXTURE, D3DFMT_DXT5));
 }
 
+// we use INTZ for depth textures in Direct3D9
+// we also want NULL texture support to ensure the we can make depth-only FBOs
+// see http://aras-p.info/texts/D3D9GPUHacks.html
+bool Display::getDepthTextureSupport() const
+{
+    D3DDISPLAYMODE currentDisplayMode;
+    mD3d9->GetAdapterDisplayMode(mAdapter, &currentDisplayMode);
+
+    bool intz = SUCCEEDED(mD3d9->CheckDeviceFormat(mAdapter, mDeviceType, currentDisplayMode.Format,
+                                                   D3DUSAGE_DEPTHSTENCIL, D3DRTYPE_TEXTURE, D3DFMT_INTZ));
+    bool null = SUCCEEDED(mD3d9->CheckDeviceFormat(mAdapter, mDeviceType, currentDisplayMode.Format,
+                                                   D3DUSAGE_RENDERTARGET, D3DRTYPE_SURFACE, D3DFMT_NULL));
+
+    return intz && null;
+}
+
 bool Display::getFloat32TextureSupport(bool *filtering, bool *renderable)
 {
     D3DDISPLAYMODE currentDisplayMode;
@@ -918,7 +1023,7 @@ bool Display::getFloat32TextureSupport(bool *filtering, bool *renderable)
                   SUCCEEDED(mD3d9->CheckDeviceFormat(mAdapter, mDeviceType, currentDisplayMode.Format, D3DUSAGE_RENDERTARGET,
                                                      D3DRTYPE_CUBETEXTURE, D3DFMT_A32B32G32R32F));
 
-    if (!filtering && !renderable)
+    if (!*filtering && !*renderable)
     {
         return SUCCEEDED(mD3d9->CheckDeviceFormat(mAdapter, mDeviceType, currentDisplayMode.Format, 0, 
                                                   D3DRTYPE_TEXTURE, D3DFMT_A32B32G32R32F)) &&
@@ -946,7 +1051,7 @@ bool Display::getFloat16TextureSupport(bool *filtering, bool *renderable)
                  SUCCEEDED(mD3d9->CheckDeviceFormat(mAdapter, mDeviceType, currentDisplayMode.Format, D3DUSAGE_RENDERTARGET,
                                                     D3DRTYPE_CUBETEXTURE, D3DFMT_A16B16G16R16F));
 
-    if (!filtering && !renderable)
+    if (!*filtering && !*renderable)
     {
         return SUCCEEDED(mD3d9->CheckDeviceFormat(mAdapter, mDeviceType, currentDisplayMode.Format, 0, 
                                                   D3DRTYPE_TEXTURE, D3DFMT_A16B16G16R16F)) &&
@@ -992,7 +1097,7 @@ D3DPOOL Display::getBufferPool(DWORD usage) const
     return D3DPOOL_DEFAULT;
 }
 
-D3DPOOL Display::getTexturePool(bool renderable) const
+D3DPOOL Display::getTexturePool(DWORD usage) const
 {
     if (mD3d9Ex != NULL)
     {
@@ -1000,7 +1105,7 @@ D3DPOOL Display::getTexturePool(bool renderable) const
     }
     else
     {
-        if (!renderable)
+        if (!(usage & (D3DUSAGE_DEPTHSTENCIL | D3DUSAGE_RENDERTARGET)))
         {
             return D3DPOOL_MANAGED;
         }
@@ -1011,14 +1116,16 @@ D3DPOOL Display::getTexturePool(bool renderable) const
 
 bool Display::getEventQuerySupport()
 {
-    IDirect3DQuery9 *query;
-    HRESULT result = mDevice->CreateQuery(D3DQUERYTYPE_EVENT, &query);
-    if (SUCCEEDED(result))
+    IDirect3DQuery9 *query = allocateEventQuery();
+    if (query)
     {
-        query->Release();
+        freeEventQuery(query);
+        return true;
     }
-
-    return result != D3DERR_NOTAVAILABLE;
+    else
+    {
+        return false;
+    }
 }
 
 D3DPRESENT_PARAMETERS Display::getDefaultPresentParameters()
@@ -1046,7 +1153,6 @@ D3DPRESENT_PARAMETERS Display::getDefaultPresentParameters()
 void Display::initExtensionString()
 {
     HMODULE swiftShader = GetModuleHandle(TEXT("swiftshader_d3d9.dll"));
-    bool isd3d9ex = isD3d9ExDevice();
 
     mExtensionString = "";
 
@@ -1054,7 +1160,7 @@ void Display::initExtensionString()
     mExtensionString += "EGL_EXT_create_context_robustness ";
 
     // ANGLE-specific extensions
-    if (isd3d9ex)
+    if (shareHandleSupported())
     {
         mExtensionString += "EGL_ANGLE_d3d_share_handle_client_buffer ";
     }
@@ -1066,7 +1172,7 @@ void Display::initExtensionString()
         mExtensionString += "EGL_ANGLE_software_display ";
     }
 
-    if (isd3d9ex)
+    if (shareHandleSupported())
     {
         mExtensionString += "EGL_ANGLE_surface_d3d_texture_2d_share_handle ";
     }
@@ -1083,6 +1189,12 @@ void Display::initExtensionString()
 const char *Display::getExtensionString() const
 {
     return mExtensionString.c_str();
+}
+
+bool Display::shareHandleSupported() const 
+{
+    // PIX doesn't seem to support using share handles, so disable them.
+    return isD3d9ExDevice() && !gl::perfActive();
 }
 
 // Only Direct3D 10 ready devices support all the necessary vertex texture formats.
@@ -1107,6 +1219,32 @@ bool Display::getNonPower2TextureSupport() const
     return !(mDeviceCaps.TextureCaps & D3DPTEXTURECAPS_POW2) &&
            !(mDeviceCaps.TextureCaps & D3DPTEXTURECAPS_CUBEMAP_POW2) &&
            !(mDeviceCaps.TextureCaps & D3DPTEXTURECAPS_NONPOW2CONDITIONAL);
+}
+
+bool Display::getOcclusionQuerySupport() const
+{
+    if (!isInitialized())
+    {
+        return false;
+    }
+
+    IDirect3DQuery9 *query = NULL;
+    HRESULT result = mDevice->CreateQuery(D3DQUERYTYPE_OCCLUSION, &query);
+    
+    if (SUCCEEDED(result) && query)
+    {
+        query->Release();
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+bool Display::getInstancingSupport() const
+{
+    return mDeviceCaps.PixelShaderVersion >= D3DPS_VERSION(3, 0); 
 }
 
 }

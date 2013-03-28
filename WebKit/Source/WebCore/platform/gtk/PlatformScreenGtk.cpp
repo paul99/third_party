@@ -31,7 +31,6 @@
 #include "config.h"
 #include "PlatformScreen.h"
 
-#include "FrameView.h"
 #include "GtkVersioning.h"
 #include "HostWindow.h"
 #include "NotImplemented.h"
@@ -59,18 +58,6 @@ static GdkVisual* getVisual(Widget* widget)
     if (!gtk_widget_get_realized(container))
         container = getToplevel(container);
     return container ? gdk_window_get_visual(gtk_widget_get_window(container)) : 0;
-}
-
-int screenHorizontalDPI(Widget* widget)
-{
-    notImplemented();
-    return 0;
-}
-
-int screenVerticalDPI(Widget* widget)
-{
-    notImplemented();
-    return 0;
 }
 
 int screenDepth(Widget* widget)
@@ -101,9 +88,9 @@ static GdkScreen* getScreen(GtkWidget* widget)
     return gtk_widget_has_screen(widget) ? gtk_widget_get_screen(widget) : gdk_screen_get_default();
 }
 
-FloatRect screenRect(FrameView* frameView)
+FloatRect screenRect(Widget* widget)
 {
-    GtkWidget* container = frameView ? GTK_WIDGET(frameView->root()->hostWindow()->platformPageClient()) : 0;
+    GtkWidget* container = widget ? GTK_WIDGET(widget->root()->hostWindow()->platformPageClient()) : 0;
     if (container)
         container = getToplevel(container);
 
@@ -119,11 +106,11 @@ FloatRect screenRect(FrameView* frameView)
     return FloatRect(geometry.x, geometry.y, geometry.width, geometry.height);
 }
 
-FloatRect screenAvailableRect(FrameView* frameView)
+FloatRect screenAvailableRect(Widget* widget)
 {
-    GtkWidget* container = frameView ? GTK_WIDGET(frameView->root()->hostWindow()->platformPageClient()) : 0;
+    GtkWidget* container = widget ? GTK_WIDGET(widget->root()->hostWindow()->platformPageClient()) : 0;
     if (container && !gtk_widget_get_realized(container))
-        return screenRect(frameView);
+        return screenRect(widget);
 
     GdkScreen* screen = container ? getScreen(container) : gdk_screen_get_default();
     if (!screen)
@@ -136,6 +123,11 @@ FloatRect screenAvailableRect(FrameView* frameView)
 
     return FloatRect(workArea.x, workArea.y, workArea.width, workArea.height);
 
+}
+
+void screenColorProfile(ColorProfile&)
+{
+    notImplemented();
 }
 
 } // namespace WebCore

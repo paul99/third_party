@@ -46,6 +46,7 @@
 #include "Page.h"
 #include "PageCache.h"
 #include "PageGroup.h"
+#include "ScrollingCoordinator.h"
 #include "Settings.h"
 #include <wtf/text/CString.h>
 
@@ -54,17 +55,12 @@
 #include "VisitedLinkStrategy.h"
 #endif
 
-#if OS(ANDROID)
-#include "Chrome.h"
-#include "ChromeClient.h"
-#endif
-
 namespace WebCore {
 
 static inline void addVisitedLink(Page* page, const KURL& url)
 {
 #if USE(PLATFORM_STRATEGIES)
-    platformStrategies()->visitedLinkStrategy()->addVisitedLink(page, visitedLinkHash(url.string().characters(), url.string().length()));
+    platformStrategies()->visitedLinkStrategy()->addVisitedLink(page, visitedLinkHash(url.string()));
 #else
     page->group().addVisitedLink(url);
 #endif
@@ -91,15 +87,19 @@ void HistoryController::saveScrollPositionAndViewStateToItem(HistoryItem* item)
     else
         item->setScrollPoint(m_frame->view()->scrollPosition());
 
-#if OS(ANDROID)
-    // FIXME: Would be better to use DOMContentLoaded for this.
-    if (m_frameLoadComplete)
-        item->setLoadComplete(true);
-#endif
     item->setPageScaleFactor(m_frame->frameScaleFactor());
     
     // FIXME: It would be great to work out a way to put this code in WebCore instead of calling through to the client.
     m_frame->loader()->client()->saveViewStateToItem(item);
+}
+
+void HistoryController::clearScrollPositionAndViewState()
+{
+    if (!m_currentItem)
+        return;
+
+    m_currentItem->clearScrollPoint();
+    m_currentItem->setPageScaleFactor(0);
 }
 
 /*
@@ -131,18 +131,24 @@ void HistoryController::restoreScrollPositionAndViewState()
     // FIXME: It would be great to work out a way to put this code in WebCore instead of calling
     // through to the client. It's currently used only for the PDF view on Mac.
     m_frame->loader()->client()->restoreViewState();
-    
+
+    // FIXME: There is some scrolling related work that needs to happen whenever a page goes into the
+    // page cache and similar work that needs to occur when it comes out. This is where we do the work
+    // that needs to happen when we exit, and the work that needs to happen when we enter is in
+    // Document::setIsInPageCache(bool). It would be nice if there was more symmetry in these spots.
+    // https://bugs.webkit.org/show_bug.cgi?id=98698
     if (FrameView* view = m_frame->view()) {
+        Page* page = m_frame->page();
+        if (page && page->mainFrame() == m_frame) {
+            if (ScrollingCoordinator* scrollingCoordinator = page->scrollingCoordinator())
+                scrollingCoordinator->frameViewRootLayerDidChange(view);
+        }
+
         if (!view->wasScrolledByUser()) {
-            // FIXME: It seems wrong to be setting the scroll position here, since
-            // a) It will be overwritten by scalePage, hence is redundant.
-            // b) m_currentItem->scrollPoint() has been scaled by
-            //    m_currentItem->pageScaleFactor(), so if that differs from
-            //    m_frame->pageScaleFactor() this'll temporarily scroll to the wrong place!
-            view->setScrollPosition(m_currentItem->scrollPoint());
-            Page* page = m_frame->page();
             if (page && page->mainFrame() == m_frame && m_currentItem->pageScaleFactor())
                 page->setPageScaleFactor(m_currentItem->pageScaleFactor(), m_currentItem->scrollPoint());
+            else
+                view->setScrollPosition(m_currentItem->scrollPoint());
         }
     }
 }
@@ -177,7 +183,7 @@ void HistoryController::saveDocumentState()
     Document* document = m_frame->document();
     ASSERT(document);
     
-    if (item->isCurrentDocument(document)) {
+    if (item->isCurrentDocument(document) && document->attached()) {
         LOG(Loading, "WebCoreLoading %s: saving form state to %p", m_frame->tree()->uniqueName().string().utf8().data(), item);
         item->setDocumentState(document->formElementsState());
     }
@@ -191,6 +197,22 @@ void HistoryController::saveDocumentAndScrollState()
         frame->loader()->history()->saveDocumentState();
         frame->loader()->history()->saveScrollPositionAndViewStateToItem(frame->loader()->history()->currentItem());
     }
+}
+
+static inline bool isAssociatedToRequestedHistoryItem(const HistoryItem* current, Frame* frame, const HistoryItem* requested)
+{
+    if (requested == current)
+        return true;
+    if (requested)
+        return false;
+    while ((frame = frame->tree()->parent())) {
+        requested = frame->loader()->requestedHistoryItem();
+        if (!requested)
+            continue;
+        if (requested->isAncestorOf(current))
+            return true;
+    }
+    return false;
 }
 
 void HistoryController::restoreDocumentState()
@@ -215,7 +237,7 @@ void HistoryController::restoreDocumentState()
     
     if (!itemToRestore)
         return;
-    if (m_frame->loader()->requestedHistoryItem() == m_currentItem.get() && !m_frame->loader()->documentLoader()->isClientRedirect()) {
+    if (isAssociatedToRequestedHistoryItem(itemToRestore, m_frame, m_frame->loader()->requestedHistoryItem()) && !m_frame->loader()->documentLoader()->isClientRedirect()) {
         LOG(Loading, "WebCoreLoading %s: restoring form state from %p", m_frame->tree()->uniqueName().string().utf8().data(), itemToRestore);
         doc->setStateForNewFormElements(itemToRestore->documentState());
     }
@@ -452,7 +474,7 @@ void HistoryController::updateForCommit()
     FrameLoadType type = frameLoader->loadType();
     if (isBackForwardLoadType(type)
         || isReplaceLoadTypeWithProvisionalItem(type)
-        || ((type == FrameLoadTypeReload || type == FrameLoadTypeReloadFromOrigin) && !frameLoader->provisionalDocumentLoader()->unreachableURL().isEmpty())) {
+        || (isReloadTypeWithProvisionalItem(type) && !frameLoader->provisionalDocumentLoader()->unreachableURL().isEmpty())) {
         // Once committed, we want to use current item for saving DocState, and
         // the provisional item for restoring state.
         // Note previousItem must be set before we close the URL, which will
@@ -477,6 +499,11 @@ bool HistoryController::isReplaceLoadTypeWithProvisionalItem(FrameLoadType type)
     // Going back to an error page in a subframe can trigger a FrameLoadTypeReplace
     // while m_provisionalItem is set, so we need to commit it.
     return type == FrameLoadTypeReplace && m_provisionalItem;
+}
+
+bool HistoryController::isReloadTypeWithProvisionalItem(FrameLoadType type)
+{
+    return (type == FrameLoadTypeReload || type == FrameLoadTypeReloadFromOrigin) && m_provisionalItem;
 }
 
 void HistoryController::recursiveUpdateForCommit()
@@ -700,7 +727,6 @@ PassRefPtr<HistoryItem> HistoryController::createItemTree(Frame* targetFrame, bo
 void HistoryController::recursiveSetProvisionalItem(HistoryItem* item, HistoryItem* fromItem, FrameLoadType type)
 {
     ASSERT(item);
-    ASSERT(fromItem);
 
     if (itemsAreClones(item, fromItem)) {
         // Set provisional item, which will be committed in recursiveUpdateForCommit.
@@ -726,7 +752,6 @@ void HistoryController::recursiveSetProvisionalItem(HistoryItem* item, HistoryIt
 void HistoryController::recursiveGoToItem(HistoryItem* item, HistoryItem* fromItem, FrameLoadType type)
 {
     ASSERT(item);
-    ASSERT(fromItem);
 
     if (itemsAreClones(item, fromItem)) {
         // Just iterate over the rest, looking for frames to navigate.
@@ -755,7 +780,9 @@ bool HistoryController::itemsAreClones(HistoryItem* item1, HistoryItem* item2) c
     // a reload.  Thus, if item1 and item2 are the same, we need to create a
     // new document and should not consider them clones.
     // (See http://webkit.org/b/35532 for details.)
-    return item1 != item2
+    return item1
+        && item2
+        && item1 != item2
         && item1->itemSequenceNumber() == item2->itemSequenceNumber()
         && currentFramesMatchItem(item1)
         && item2->hasSameFrames(item1);

@@ -61,6 +61,8 @@ public:
   bool CheckResponse(StunMessage* msg);
   bool CheckResponse(const char* data, size_t size);
 
+  bool empty() { return requests_.empty(); }
+
   // Raised when there are bytes to be sent.
   sigslot::signal3<const void*, size_t, StunRequest*> SignalSendPacket;
 
@@ -88,10 +90,10 @@ public:
   StunRequestManager* manager() { return manager_; }
 
   // Returns the transaction ID of this request.
-  const std::string& id() { return id_; }
+  const std::string& id() { return msg_->transaction_id(); }
 
   // Returns the STUN type of the request message.
-  StunMessageType type();
+  int type();
 
   // Handles messages for sending and timeout.
   void OnMessage(talk_base::Message* pmsg);
@@ -115,7 +117,6 @@ protected:
 
 private:
   StunRequestManager* manager_;
-  std::string id_;
   StunMessage* msg_;
   uint32 tstamp_;
 

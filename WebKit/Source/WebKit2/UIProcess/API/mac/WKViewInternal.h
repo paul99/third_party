@@ -35,12 +35,15 @@ namespace CoreIPC {
 
 namespace WebCore {
     struct KeypressCommand;
+    class Image;
+    class SharedBuffer;
 }
 
 namespace WebKit {
     class DrawingAreaProxy;
     class FindIndicator;
     class LayerTreeContext;
+    struct ColorSpaceData;
     struct EditorState;
 }
 
@@ -58,12 +61,12 @@ namespace WebKit {
 - (BOOL)_interpretKeyEvent:(NSEvent *)theEvent savingCommandsTo:(Vector<WebCore::KeypressCommand>&)commands;
 - (void)_doneWithKeyEvent:(NSEvent *)event eventWasHandled:(BOOL)eventWasHandled;
 - (bool)_executeSavedCommandBySelector:(SEL)selector;
+- (void)_setIntrinsicContentSize:(NSSize)intrinsicContentSize;
 - (NSRect)_convertToDeviceSpace:(NSRect)rect;
 - (NSRect)_convertToUserSpace:(NSRect)rect;
 - (void)_setFindIndicator:(PassRefPtr<WebKit::FindIndicator>)findIndicator fadeOut:(BOOL)fadeOut animate:(BOOL)animate;
 
-- (void)_enterAcceleratedCompositingMode:(const WebKit::LayerTreeContext&)layerTreeContext;
-- (void)_exitAcceleratedCompositingMode;
+- (void)_setAcceleratedCompositingModeRootLayer:(CALayer *)rootLayer;
 
 - (void)_setAccessibilityWebProcessToken:(NSData *)data;
 
@@ -77,13 +80,15 @@ namespace WebKit {
 - (void)_findStringInCustomRepresentation:(NSString *)string withFindOptions:(WebKit::FindOptions)options maxMatchCount:(NSUInteger)count;
 - (void)_countStringMatchesInCustomRepresentation:(NSString *)string withFindOptions:(WebKit::FindOptions)options maxMatchCount:(NSUInteger)count;
 - (void)_setDragImage:(NSImage *)image at:(NSPoint)clientPoint linkDrag:(BOOL)linkDrag;
+- (void)_setPromisedData:(WebCore::Image *)image withFileName:(NSString *)filename withExtension:(NSString *)extension withTitle:(NSString *)title withURL:(NSString *)url withVisibleURL:(NSString *)visibleUrl withArchive:(WebCore::SharedBuffer*) archiveBuffer forPasteboard:(NSString *)pasteboardName;
 - (void)_updateSecureInputState;
 - (void)_updateTextInputStateIncludingSecureInputState:(BOOL)updateSecureInputState;
 - (void)_resetTextInputState;
 
-- (void)_didChangeScrollbarsForMainFrame;
+- (WebKit::ColorSpaceData)_colorSpace;
 
 #if ENABLE(FULLSCREEN_API)
+- (BOOL)hasFullScreenWindowController;
 - (WKFullScreenWindowController*)fullScreenWindowController;
 - (void)closeFullScreenWindowController;
 #endif
@@ -91,6 +96,9 @@ namespace WebKit {
 - (void)_cacheWindowBottomCornerRect;
 
 - (NSInteger)spellCheckerDocumentTag;
-- (void)handleCorrectionPanelResult:(NSString*)result;
+- (void)handleAcceptedAlternativeText:(NSString*)text;
+
+- (void)_setSuppressVisibilityUpdates:(BOOL)suppressVisibilityUpdates;
+- (BOOL)_suppressVisibilityUpdates;
 
 @end

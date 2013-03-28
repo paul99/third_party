@@ -37,8 +37,12 @@
 #include "HTMLPlugInElement.h"
 #include <wtf/Forward.h>
 
-class wxWebFrame;
-class wxWebView;
+namespace WebKit {
+
+class WebFrame;
+class WebView;
+
+}
 
 namespace WebCore {
 
@@ -56,10 +60,10 @@ namespace WebCore {
         FrameLoaderClientWx();
         ~FrameLoaderClientWx();
         
-        wxWebFrame* webFrame() { return m_webFrame; }
-        void setFrame(wxWebFrame *frame);
-        wxWebView* webView() { return m_webView; }
-        void setWebView(wxWebView *webview);
+        WebKit::WebFrame* webFrame() { return m_webFrame; }
+        void setFrame(WebKit::WebFrame *frame);
+        WebKit::WebView* webView() { return m_webView; }
+        void setWebView(WebKit::WebView *webview);
 
         virtual bool hasWebView() const; // mainly for assertions
 
@@ -110,17 +114,15 @@ namespace WebCore {
         virtual void dispatchDidCommitLoad();
         virtual void dispatchDidFinishDocumentLoad();
         virtual void dispatchDidFinishLoad();
-        virtual void dispatchDidFirstLayout();
-        virtual void dispatchDidFirstVisuallyNonEmptyLayout();
+        virtual void dispatchDidLayout(WebCore::LayoutMilestones);
         virtual void dispatchDidChangeIcons(WebCore::IconType);
 
         virtual void dispatchShow();
         virtual void cancelPolicyCheck();
 
-        virtual void dispatchWillSendSubmitEvent(HTMLFormElement*) { }
+        virtual void dispatchWillSendSubmitEvent(PassRefPtr<FormState>) { }
         virtual void dispatchWillSubmitForm(FramePolicyFunction, PassRefPtr<FormState>);
 
-        virtual void dispatchDidLoadMainResource(DocumentLoader*);
         virtual void revertToProvisionalState(DocumentLoader*);
 
         virtual void postProgressStartedNotification();
@@ -182,7 +184,7 @@ namespace WebCore {
         virtual ResourceError fileDoesNotExistError(const ResourceResponse&);
         virtual bool shouldFallBack(const ResourceError&);
         virtual WTF::PassRefPtr<DocumentLoader> createDocumentLoader(const ResourceRequest&, const SubstituteData&);
-        virtual void download(ResourceHandle*, const ResourceRequest&, const ResourceResponse&);
+        virtual void convertMainResourceLoadToDownload(MainResourceLoader*, const ResourceRequest&, const ResourceResponse&);
 
         virtual void assignIdentifierToInitialRequest(unsigned long identifier, DocumentLoader*, const ResourceRequest&);
         
@@ -211,8 +213,6 @@ namespace WebCore {
 
         virtual PassRefPtr<Frame> createFrame(const KURL& url, const String& name, HTMLFrameOwnerElement* ownerElement,
                                    const String& referrer, bool allowsScrolling, int marginWidth, int marginHeight);
-        virtual void didTransferChildFrameToNewDocument(Page*);
-        virtual void transferLoadingResourceFromPage(ResourceLoader*, const ResourceRequest&, Page*);
         virtual PassRefPtr<Widget> createPlugin(const IntSize&, HTMLPlugInElement*, const KURL&, const Vector<String>&, const Vector<String>&, const String&, bool loadManually) ;
         virtual void redirectDataToPlugin(Widget* pluginWidget);
         virtual ResourceError pluginWillHandleLoadError(const ResourceResponse&);
@@ -234,13 +234,12 @@ namespace WebCore {
         virtual PassRefPtr<FrameNetworkingContext> createNetworkingContext();
 
     private:
-        wxWebFrame *m_webFrame;
+        WebKit::WebFrame *m_webFrame;
         Frame* m_frame;
-        wxWebView *m_webView;
+        WebKit::WebView *m_webView;
         PluginView* m_pluginView;
         bool m_hasSentResponseToPlugin;
         ResourceResponse m_response;
-        bool m_firstData;
     };
 
 }

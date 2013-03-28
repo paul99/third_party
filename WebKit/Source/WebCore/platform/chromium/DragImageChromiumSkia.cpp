@@ -31,13 +31,19 @@
 #include "config.h"
 #include "DragImage.h"
 
+#include "AffineTransform.h"
+#include "BitmapImage.h"
+#include "FloatRect.h"
 #include "Image.h"
 #include "NativeImageSkia.h"
 #include "NotImplemented.h"
-#include "RefPtr.h"
 #include "SkBitmap.h"
+#include "SkCanvas.h"
+#include "SkMatrix.h"
 
 #include "skia/ext/image_operations.h"
+
+#include <wtf/RefPtr.h>
 
 namespace WebCore {
 
@@ -46,11 +52,13 @@ IntSize dragImageSize(DragImageRef image)
     if (!image)
         return IntSize();
 
-    return IntSize(image->width(), image->height());
+    return IntSize(image->bitmap->width(), image->bitmap->height());
 }
 
 void deleteDragImage(DragImageRef image)
 {
+    if (image)
+        delete image->bitmap;
     delete image;
 }
 
@@ -59,13 +67,14 @@ DragImageRef scaleDragImage(DragImageRef image, FloatSize scale)
     if (!image)
         return 0;
 
-    int imageWidth = scale.width() * image->width();
-    int imageHeight = scale.height() * image->height();
-    DragImageRef scaledImage = new SkBitmap(
-        skia::ImageOperations::Resize(*image, skia::ImageOperations::RESIZE_LANCZOS3,
+    int imageWidth = scale.width() * image->bitmap->width();
+    int imageHeight = scale.height() * image->bitmap->height();
+    SkBitmap* scaledImage = new SkBitmap(
+        skia::ImageOperations::Resize(*image->bitmap, skia::ImageOperations::RESIZE_LANCZOS3,
                                       imageWidth, imageHeight));
-    delete image;
-    return scaledImage;
+    delete image->bitmap;
+    image->bitmap = scaledImage;
+    return image;
 }
 
 DragImageRef dissolveDragImageToFraction(DragImageRef image, float fraction)
@@ -73,12 +82,12 @@ DragImageRef dissolveDragImageToFraction(DragImageRef image, float fraction)
     if (!image)
         return 0;
 
-    image->setIsOpaque(false);
-    image->lockPixels();
+    image->bitmap->setIsOpaque(false);
+    image->bitmap->lockPixels();
 
-    for (int row = 0; row < image->height(); ++row) {
-        for (int column = 0; column < image->width(); ++column) {
-            uint32_t* pixel = image->getAddr32(column, row);
+    for (int row = 0; row < image->bitmap->height(); ++row) {
+        for (int column = 0; column < image->bitmap->width(); ++column) {
+            uint32_t* pixel = image->bitmap->getAddr32(column, row);
             *pixel = SkPreMultiplyARGB(SkColorGetA(*pixel) * fraction,
                                        SkColorGetR(*pixel),
                                        SkColorGetG(*pixel),
@@ -86,12 +95,12 @@ DragImageRef dissolveDragImageToFraction(DragImageRef image, float fraction)
         }
     }
 
-    image->unlockPixels();
+    image->bitmap->unlockPixels();
 
     return image;
 }
 
-DragImageRef createDragImageFromImage(Image* image)
+DragImageRef createDragImageFromImage(Image* image, RespectImageOrientationEnum shouldRespectImageOrientation)
 {
     if (!image)
         return 0;
@@ -100,9 +109,39 @@ DragImageRef createDragImageFromImage(Image* image)
     if (!bitmap)
         return 0;
 
-    SkBitmap* dragImage = new SkBitmap();
-    bitmap->bitmap().copyTo(dragImage, SkBitmap::kARGB_8888_Config);
-    return dragImage;
+    DragImageChromium* dragImageChromium = new DragImageChromium;
+    dragImageChromium->bitmap = new SkBitmap();
+    dragImageChromium->resolutionScale = bitmap->resolutionScale();
+
+    if (image->isBitmapImage()) {
+        ImageOrientation orientation = DefaultImageOrientation;
+        BitmapImage* bitmapImage = static_cast<BitmapImage*>(image);
+        IntSize sizeRespectingOrientation = bitmapImage->sizeRespectingOrientation();
+
+        if (shouldRespectImageOrientation == RespectImageOrientation)
+            orientation = bitmapImage->currentFrameOrientation();
+
+        if (orientation != DefaultImageOrientation) {
+            // Construct a correctly-rotated copy of the image to use as the drag image.
+            dragImageChromium->bitmap->setConfig(
+                SkBitmap::kARGB_8888_Config, sizeRespectingOrientation.width(), sizeRespectingOrientation.height());
+            dragImageChromium->bitmap->allocPixels();
+
+            FloatRect destRect(FloatPoint(), sizeRespectingOrientation);
+            SkCanvas canvas(*dragImageChromium->bitmap);
+
+            canvas.concat(orientation.transformFromDefault(sizeRespectingOrientation));
+
+            if (orientation.usesWidthAsHeight())
+                destRect = FloatRect(destRect.x(), destRect.y(), destRect.height(), destRect.width());
+
+            canvas.drawBitmapRect(bitmap->bitmap(), 0, destRect);
+            return dragImageChromium;
+        }
+    }
+
+    bitmap->bitmap().copyTo(dragImageChromium->bitmap, SkBitmap::kARGB_8888_Config);
+    return dragImageChromium;
 }
 
 DragImageRef createDragImageIconForCachedImage(CachedImage*)

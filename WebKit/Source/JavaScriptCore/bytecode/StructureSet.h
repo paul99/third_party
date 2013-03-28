@@ -26,13 +26,13 @@
 #ifndef StructureSet_h
 #define StructureSet_h
 
-#include "PredictedType.h"
+#include "ArrayProfile.h"
+#include "SpeculatedType.h"
+#include "Structure.h"
 #include <stdio.h>
 #include <wtf/Vector.h>
 
 namespace JSC {
-
-class Structure;
 
 namespace DFG {
 class StructureAbstractValue;
@@ -91,6 +91,13 @@ public:
         return false;
     }
     
+    bool containsOnly(Structure* structure) const
+    {
+        if (size() != 1)
+            return false;
+        return singletonStructure() == structure;
+    }
+    
     bool isSubsetOf(const StructureSet& other) const
     {
         for (size_t i = 0; i < m_structures.size(); ++i) {
@@ -107,18 +114,36 @@ public:
     
     size_t size() const { return m_structures.size(); }
     
+    // Call this if you know that the structure set must consist of exactly
+    // one structure.
+    Structure* singletonStructure() const
+    {
+        ASSERT(m_structures.size() == 1);
+        return m_structures[0];
+    }
+    
     Structure* at(size_t i) const { return m_structures.at(i); }
     
     Structure* operator[](size_t i) const { return at(i); }
     
     Structure* last() const { return m_structures.last(); }
 
-    PredictedType predictionFromStructures() const
+    SpeculatedType speculationFromStructures() const
     {
-        PredictedType result = PredictNone;
+        SpeculatedType result = SpecNone;
         
         for (size_t i = 0; i < m_structures.size(); ++i)
-            mergePrediction(result, predictionFromStructure(m_structures[i]));
+            mergeSpeculation(result, speculationFromStructure(m_structures[i]));
+        
+        return result;
+    }
+    
+    ArrayModes arrayModesFromStructures() const
+    {
+        ArrayModes result = 0;
+        
+        for (size_t i = 0; i < m_structures.size(); ++i)
+            mergeArrayModes(result, asArrayModes(m_structures[i]->indexingType()));
         
         return result;
     }

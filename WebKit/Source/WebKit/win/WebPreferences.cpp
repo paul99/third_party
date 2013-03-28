@@ -196,7 +196,7 @@ void WebPreferences::initializeDefaultSettings()
     CFDictionaryAddValue(defaults, CFSTR(WebKitDefaultFixedFontSizePreferenceKey), CFSTR("13"));
 
     String defaultDefaultEncoding(WEB_UI_STRING("ISO-8859-1", "The default, default character encoding"));
-    CFDictionaryAddValue(defaults, CFSTR(WebKitDefaultTextEncodingNamePreferenceKey), defaultDefaultEncoding.createCFString());
+    CFDictionaryAddValue(defaults, CFSTR(WebKitDefaultTextEncodingNamePreferenceKey), defaultDefaultEncoding.createCFString().get());
 
     CFDictionaryAddValue(defaults, CFSTR(WebKitUserStyleSheetEnabledPreferenceKey), kCFBooleanFalse);
     CFDictionaryAddValue(defaults, CFSTR(WebKitUserStyleSheetLocationPreferenceKey), CFSTR(""));
@@ -212,6 +212,7 @@ void WebPreferences::initializeDefaultSettings()
     CFDictionaryAddValue(defaults, CFSTR(WebKitFrameFlatteningEnabledPreferenceKey), kCFBooleanFalse);
     CFDictionaryAddValue(defaults, CFSTR(WebKitJavaScriptCanOpenWindowsAutomaticallyPreferenceKey), kCFBooleanTrue);
     CFDictionaryAddValue(defaults, CFSTR(WebKitPluginsEnabledPreferenceKey), kCFBooleanTrue);
+    CFDictionaryAddValue(defaults, CFSTR(WebKitCSSRegionsEnabledPreferenceKey), kCFBooleanTrue);
     CFDictionaryAddValue(defaults, CFSTR(WebKitDatabasesEnabledPreferenceKey), kCFBooleanTrue);
     CFDictionaryAddValue(defaults, CFSTR(WebKitLocalStorageEnabledPreferenceKey), kCFBooleanTrue);
     CFDictionaryAddValue(defaults, CFSTR(WebKitExperimentalNotificationsEnabledPreferenceKey), kCFBooleanFalse);
@@ -268,10 +269,11 @@ void WebPreferences::initializeDefaultSettings()
 
     CFDictionaryAddValue(defaults, CFSTR(WebKitMemoryInfoEnabledPreferenceKey), kCFBooleanFalse);
     CFDictionaryAddValue(defaults, CFSTR(WebKitHyperlinkAuditingEnabledPreferenceKey), kCFBooleanTrue);
-    CFDictionaryAddValue(defaults, CFSTR(WebKitHixie76WebSocketProtocolEnabledPreferenceKey), kCFBooleanTrue);
 
     CFDictionaryAddValue(defaults, CFSTR(WebKitMediaPlaybackRequiresUserGesturePreferenceKey), kCFBooleanFalse);
     CFDictionaryAddValue(defaults, CFSTR(WebKitMediaPlaybackAllowsInlinePreferenceKey), kCFBooleanTrue);
+
+    CFDictionaryAddValue(defaults, CFSTR(WebKitRequestAnimationFrameEnabledPreferenceKey), kCFBooleanTrue);
 
     defaultSettings = defaults;
 }
@@ -347,10 +349,10 @@ LONGLONG WebPreferences::longlongValueForKey(CFStringRef key)
 
 void WebPreferences::setStringValue(CFStringRef key, LPCTSTR value)
 {
-    BSTR val = stringValueForKey(key);
+    BString val;
+    val.adoptBSTR(stringValueForKey(key));
     if (val && !wcscmp(val, value))
         return;
-    SysFreeString(val);
     
     RetainPtr<CFStringRef> valueRef(AdoptCF,
         CFStringCreateWithCharactersNoCopy(0, (UniChar*)_wcsdup(value), (CFIndex)wcslen(value), kCFAllocatorMalloc));
@@ -906,6 +908,20 @@ HRESULT STDMETHODCALLTYPE WebPreferences::setPlugInsEnabled(
     return S_OK;
 }
 
+HRESULT STDMETHODCALLTYPE WebPreferences::isCSSRegionsEnabled(
+    /* [retval][out] */ BOOL* enabled)
+{
+    *enabled = boolValueForKey(CFSTR(WebKitCSSRegionsEnabledPreferenceKey));
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WebPreferences::setCSSRegionsEnabled(
+    /* [in] */ BOOL enabled)
+{
+    setBoolValue(CFSTR(WebKitCSSRegionsEnabledPreferenceKey), enabled);
+    return S_OK;
+}
+
 HRESULT STDMETHODCALLTYPE WebPreferences::allowsAnimatedImages( 
     /* [retval][out] */ BOOL* enabled)
 {
@@ -965,14 +981,13 @@ HRESULT STDMETHODCALLTYPE WebPreferences::loadsSiteIconsIgnoringImageLoadingPref
 HRESULT STDMETHODCALLTYPE WebPreferences::setHixie76WebSocketProtocolEnabled(
     /* [in] */ BOOL enabled)
 {
-    setBoolValue(CFSTR(WebKitHixie76WebSocketProtocolEnabledPreferenceKey), enabled);
     return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE WebPreferences::hixie76WebSocketProtocolEnabled(
     /* [retval][out] */ BOOL* enabled)
 {
-    *enabled = boolValueForKey(CFSTR(WebKitHixie76WebSocketProtocolEnabledPreferenceKey));
+    *enabled = false;
     return S_OK;
 }
 
@@ -1212,18 +1227,16 @@ HRESULT STDMETHODCALLTYPE WebPreferences::setEditableLinkBehavior(
     return S_OK;
 }
 
-HRESULT STDMETHODCALLTYPE WebPreferences::editingBehavior(
-    /* [out, retval] */ WebKitEditingBehavior* editingBehavior)
+HRESULT WebPreferences::unused5()
 {
-    *editingBehavior = (WebKitEditingBehavior) integerValueForKey(CFSTR(WebKitEditingBehaviorPreferenceKey));
-    return S_OK;
+    ASSERT_NOT_REACHED();
+    return E_FAIL;
 }
 
-HRESULT STDMETHODCALLTYPE WebPreferences::setEditingBehavior(
-    /* [in] */ WebKitEditingBehavior behavior)
+HRESULT WebPreferences::unused6()
 {
-    setIntegerValue(CFSTR(WebKitEditingBehaviorPreferenceKey), behavior);
-    return S_OK;
+    ASSERT_NOT_REACHED();
+    return E_FAIL;
 }
 
 HRESULT STDMETHODCALLTYPE WebPreferences::hyperlinkAuditingEnabled(
@@ -1639,6 +1652,21 @@ HRESULT WebPreferences::setShowsToolTipOverTruncatedText(BOOL showsToolTip)
     return S_OK;
 }
 
+HRESULT WebPreferences::shouldInvertColors(BOOL* shouldInvertColors)
+{
+    if (!shouldInvertColors)
+        return E_POINTER;
+
+    *shouldInvertColors = boolValueForKey(CFSTR(WebKitShouldInvertColorsPreferenceKey));
+    return S_OK;
+}
+
+HRESULT WebPreferences::setShouldInvertColors(BOOL shouldInvertColors)
+{
+    setBoolValue(CFSTR(WebKitShouldInvertColorsPreferenceKey), shouldInvertColors);
+    return S_OK;
+}
+
 void WebPreferences::willAddToWebView()
 {
     ++m_numWebViews;
@@ -1721,3 +1749,16 @@ HRESULT WebPreferences::setShouldDisplayTextDescriptions(BOOL enabled)
     return E_NOTIMPL;
 #endif
 }
+
+HRESULT WebPreferences::setRequestAnimationFrameEnabled(BOOL enabled)
+{
+    setBoolValue(CFSTR(WebKitRequestAnimationFrameEnabledPreferenceKey), enabled);
+    return S_OK;
+}
+
+HRESULT WebPreferences::requestAnimationFrameEnabled(BOOL* enabled)
+{
+    *enabled = boolValueForKey(CFSTR(WebKitRequestAnimationFrameEnabledPreferenceKey));
+    return S_OK;
+}
+

@@ -26,10 +26,10 @@
 #ifndef QtNetworkReplyData_h
 #define QtNetworkReplyData_h
 
-#include "Noncopyable.h"
-#include "RefCounted.h"
 #include "SharedMemory.h"
 #include <QNetworkAccessManager>
+#include <wtf/Noncopyable.h>
+#include <wtf/RefCounted.h>
 #include <wtf/text/WTFString.h>
 
 namespace CoreIPC {
@@ -42,7 +42,7 @@ namespace WebKit {
 struct QtNetworkReplyData {
     QtNetworkReplyData();
 
-    void encode(CoreIPC::ArgumentEncoder*) const;
+    void encode(CoreIPC::ArgumentEncoder&) const;
     static bool decode(CoreIPC::ArgumentDecoder*, QtNetworkReplyData&);
 
     WTF::String m_urlString;

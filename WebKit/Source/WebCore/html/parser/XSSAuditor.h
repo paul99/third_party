@@ -42,22 +42,24 @@ public:
     void filterToken(HTMLToken&);
 
 private:
+    static const size_t kMaximumFragmentLengthTarget = 100;
+
     enum State {
         Uninitialized,
-        Initial,
-        AfterScriptStartTag,
+        Initialized
     };
 
     enum AttributeKind {
         NormalAttribute,
-        SrcLikeAttribute
+        SrcLikeAttribute,
+        ScriptLikeAttribute
     };
 
     void init();
 
-    bool filterTokenInitial(HTMLToken&);
-    bool filterTokenAfterScriptStartTag(HTMLToken&);
-
+    bool filterStartToken(HTMLToken&);
+    void filterEndToken(HTMLToken&);
+    bool filterCharacterToken(HTMLToken&);
     bool filterScriptToken(HTMLToken&);
     bool filterObjectToken(HTMLToken&);
     bool filterParamToken(HTMLToken&);
@@ -77,19 +79,24 @@ private:
     String decodedSnippetForJavaScript(const HTMLToken&);
 
     bool isContainedInRequest(const String&);
-    bool isSameOriginResource(const String& url);
+    bool isLikelySafeResource(const String& url);
 
     HTMLDocumentParser* m_parser;
     bool m_isEnabled;
     XSSProtectionDisposition m_xssProtection;
 
+    String m_originalURL;
+    String m_originalHTTPBody;
     String m_decodedURL;
     String m_decodedHTTPBody;
     OwnPtr<SuffixTree<ASCIICodebook> > m_decodedHTTPBodySuffixTree;
 
     State m_state;
     String m_cachedDecodedSnippet;
-    bool m_notifiedClient;
+    bool m_shouldAllowCDATA;
+    unsigned m_scriptTagNestingLevel;
+    bool m_notifyClient;
+    KURL m_reportURL;
 };
 
 }

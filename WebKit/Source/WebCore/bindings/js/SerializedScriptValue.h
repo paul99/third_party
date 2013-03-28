@@ -27,11 +27,14 @@
 #ifndef SerializedScriptValue_h
 #define SerializedScriptValue_h
 
+#include "ScriptState.h"
 #include <heap/Strong.h>
 #include <runtime/JSValue.h>
+#include <wtf/ArrayBuffer.h>
 #include <wtf/Forward.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
+#include <wtf/text/WTFString.h>
 
 typedef const struct OpaqueJSContext* JSContextRef;
 typedef const struct OpaqueJSValue* JSValueRef;
@@ -40,6 +43,7 @@ namespace WebCore {
 
 class MessagePort;
 typedef Vector<RefPtr<MessagePort>, 1> MessagePortArray;
+typedef Vector<RefPtr<WTF::ArrayBuffer>, 1> ArrayBufferArray;
  
 enum SerializationReturnCode {
     SuccessfullyCompleted,
@@ -47,17 +51,25 @@ enum SerializationReturnCode {
     InterruptedExecutionError,
     ValidationError,
     ExistingExceptionError,
+    DataCloneError,
     UnspecifiedError
 };
     
 enum SerializationErrorMode { NonThrowing, Throwing };
 
+class ScriptValue;
 class SharedBuffer;
 
-class SerializedScriptValue : public RefCounted<SerializedScriptValue> {
+class SerializedScriptValue :
+#if ENABLE(INDEXED_DATABASE)
+    public ThreadSafeRefCounted<SerializedScriptValue> {
+#else
+    public RefCounted<SerializedScriptValue> {
+#endif
 public:
-    static PassRefPtr<SerializedScriptValue> create(JSC::ExecState*, JSC::JSValue, MessagePortArray*, SerializationErrorMode = Throwing);
-    static PassRefPtr<SerializedScriptValue> create(JSContextRef, JSValueRef, MessagePortArray*,  JSValueRef* exception);
+    static PassRefPtr<SerializedScriptValue> create(JSC::ExecState*, JSC::JSValue, MessagePortArray*, ArrayBufferArray*,
+                                                    SerializationErrorMode = Throwing);
+    static PassRefPtr<SerializedScriptValue> create(JSContextRef, JSValueRef, MessagePortArray*, ArrayBufferArray*, JSValueRef* exception);
     static PassRefPtr<SerializedScriptValue> create(JSContextRef, JSValueRef, JSValueRef* exception);
 
     static PassRefPtr<SerializedScriptValue> create(const String&);
@@ -67,9 +79,11 @@ public:
     }
 
     static PassRefPtr<SerializedScriptValue> create();
-    static SerializedScriptValue* nullValue();
+    static PassRefPtr<SerializedScriptValue> nullValue();
     static PassRefPtr<SerializedScriptValue> undefinedValue();
     static PassRefPtr<SerializedScriptValue> booleanValue(bool value);
+
+    static uint32_t wireFormatVersion();
 
     String toString();
     
@@ -77,16 +91,36 @@ public:
     JSValueRef deserialize(JSContextRef, JSValueRef* exception, MessagePortArray*);
     JSValueRef deserialize(JSContextRef, JSValueRef* exception);
 
+#if ENABLE(INSPECTOR)
+    ScriptValue deserializeForInspector(ScriptState*);
+#endif
+
     const Vector<uint8_t>& data() { return m_data; }
+    const Vector<String>& blobURLs() const { return m_blobURLs; }
+
+#if ENABLE(INDEXED_DATABASE)
+    static PassRefPtr<SerializedScriptValue> create(JSC::ExecState*, JSC::JSValue);
+    static PassRefPtr<SerializedScriptValue> numberValue(double value);
+    JSC::JSValue deserialize(JSC::ExecState*, JSC::JSGlobalObject*);
+#endif
+
+    static PassRefPtr<SerializedScriptValue> createFromWire(const String& data);
+    String toWireString() const;
 
     ~SerializedScriptValue();
 
 private:
+    typedef Vector<WTF::ArrayBufferContents> ArrayBufferContentsArray;
     static void maybeThrowExceptionIfSerializationFailed(JSC::ExecState*, SerializationReturnCode);
     static bool serializationDidCompleteSuccessfully(SerializationReturnCode);
-    
+    static PassOwnPtr<ArrayBufferContentsArray> transferArrayBuffers(ArrayBufferArray&, SerializationReturnCode&);
+
     SerializedScriptValue(Vector<unsigned char>&);
+    SerializedScriptValue(Vector<unsigned char>&, Vector<String>& blobURLs);
+    SerializedScriptValue(Vector<unsigned char>&, Vector<String>& blobURLs, PassOwnPtr<ArrayBufferContentsArray>);
     Vector<unsigned char> m_data;
+    OwnPtr<ArrayBufferContentsArray> m_arrayBufferContentsArray;
+    Vector<String> m_blobURLs;
 };
 
 }

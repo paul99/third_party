@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2002-2010 The ANGLE Project Authors. All rights reserved.
+// Copyright (c) 2002-2012 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -12,6 +12,7 @@
 #include <limits.h>
 #include <algorithm>
 
+#include "compiler/HashNames.h"
 #include "compiler/localintermediate.h"
 #include "compiler/QualifierAlive.h"
 #include "compiler/RemoveTree.h"
@@ -373,7 +374,7 @@ TIntermTyped* TIntermediate::addUnaryMath(TOperator op, TIntermNode* childNode, 
 // their operator to EOpSequence.
 //
 // Returns an aggregate node, which could be the one passed in if
-// it was already an aggregate.
+// it was already an aggregate but no operator was set.
 //
 TIntermAggregate* TIntermediate::setAggregateOperator(TIntermNode* node, TOperator op, TSourceLoc line)
 {
@@ -592,10 +593,10 @@ TIntermNode* TIntermediate::addSelection(TIntermTyped* cond, TIntermNodePair nod
     //
 
     if (cond->getAsTyped() && cond->getAsTyped()->getAsConstantUnion()) {
-        if (cond->getAsTyped()->getAsConstantUnion()->getUnionArrayPointer()->getBConst())
-            return nodePair.node1;
+        if (cond->getAsTyped()->getAsConstantUnion()->getUnionArrayPointer()->getBConst() == true)
+            return nodePair.node1 ? setAggregateOperator(nodePair.node1, EOpSequence, nodePair.node1->getLine()) : NULL;
         else
-            return nodePair.node2;
+            return nodePair.node2 ? setAggregateOperator(nodePair.node2, EOpSequence, nodePair.node2->getLine()) : NULL;
     }
 
     TIntermSelection* node = new TIntermSelection(cond, nodePair.node1, nodePair.node2);
@@ -656,6 +657,7 @@ TIntermTyped* TIntermediate::addSelection(TIntermTyped* cond, TIntermTyped* true
     // Make a selection node.
     //
     TIntermSelection* node = new TIntermSelection(cond, trueBlock, falseBlock, trueBlock->getType());
+    node->getTypePointer()->setQualifier(EvqTemporary);
     node->setLine(line);
 
     return node;
@@ -1444,9 +1446,14 @@ TIntermTyped* TIntermediate::promoteConstantUnion(TBasicType promoteTo, TIntermC
     return addConstantUnion(leftUnionArray, TType(promoteTo, t.getPrecision(), t.getQualifier(), t.getNominalSize(), t.isMatrix(), t.isArray()), node->getLine());
 }
 
-void TIntermAggregate::addToPragmaTable(const TPragmaTable& pTable)
+// static
+TString TIntermTraverser::hash(const TString& name, ShHashFunction64 hashFunction)
 {
-    assert(!pragmaTable);
-    pragmaTable = new TPragmaTable();
-    *pragmaTable = pTable;
+    if (hashFunction == NULL || name.empty())
+        return name;
+    khronos_uint64_t number = (*hashFunction)(name.c_str(), name.length());
+    TStringStream stream;
+    stream << HASHED_NAME_PREFIX << std::hex << number;
+    TString hashedName = stream.str();
+    return hashedName;
 }
