@@ -41,15 +41,15 @@ public:
     bool mapMouseEvent(LayoutPoint location, const LayoutSize&, HitTestResult&);
     
     HTMLImageElement* imageElement();
-    HTMLCollection* areas();
+    PassRefPtr<HTMLCollection> areas();
 
 private:
     HTMLMapElement(const QualifiedName&, Document*);
 
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
 
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
+    virtual void removedFrom(ContainerNode*) OVERRIDE;
 
     AtomicString m_name;
 };

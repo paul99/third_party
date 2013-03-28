@@ -32,6 +32,8 @@ public:
     }
 
     WebCore::Frame* coreFrame() const { return frame(); }
+    virtual SoupSession* soupSession() const;
+    virtual uint64_t initiatingPageID() const;
 
 private:
     FrameNetworkingContextGtk(WebCore::Frame* frame)

@@ -28,17 +28,21 @@
 #define ScriptProfiler_h
 
 #if ENABLE(JAVASCRIPT_DEBUGGER)
-#include "InspectorValues.h"
 #include "ScriptHeapSnapshot.h"
 #include "ScriptProfile.h"
 #include "ScriptState.h"
+#include <wtf/Forward.h>
 #include <wtf/PassRefPtr.h>
-
 
 namespace WebCore {
 
-class DOMWrapperVisitor;
-class InjectedScriptManager;
+class ExternalArrayVisitor;
+class ExternalStringVisitor;
+class WrappedNodeVisitor;
+class Page;
+class ScriptObject;
+class ScriptValue;
+class WorkerContext;
 
 class ScriptProfiler {
     WTF_MAKE_NONCOPYABLE(ScriptProfiler);
@@ -53,16 +57,29 @@ public:
     };
 
     static void collectGarbage();
-    static PassRefPtr<InspectorValue> objectByHeapObjectId(unsigned id, InjectedScriptManager*);
+    static ScriptObject objectByHeapObjectId(unsigned id);
+    static unsigned getHeapObjectId(const ScriptValue&);
     static void start(ScriptState* state, const String& title);
+    static void startForPage(Page*, const String& title);
+#if ENABLE(WORKERS)
+    static void startForWorkerContext(WorkerContext*, const String& title);
+#endif
     static PassRefPtr<ScriptProfile> stop(ScriptState* state, const String& title);
+    static PassRefPtr<ScriptProfile> stopForPage(Page*, const String& title);
+#if ENABLE(WORKERS)
+    static PassRefPtr<ScriptProfile> stopForWorkerContext(WorkerContext*, const String& title);
+#endif
     static PassRefPtr<ScriptHeapSnapshot> takeHeapSnapshot(const String&, HeapSnapshotProgress*) { return 0; }
     static bool causesRecompilation() { return true; }
     static bool isSampling() { return false; }
     static bool hasHeapProfiler() { return false; }
     // FIXME: Implement this counter for JSC. See bug 73936 for more details.
-    static void visitJSDOMWrappers(DOMWrapperVisitor*) { }
-    static void visitExternalJSStrings(DOMWrapperVisitor*) { }
+    static void visitNodeWrappers(WrappedNodeVisitor*) { }
+    // FIXME: Support these methods for JSC. See bug 90358.
+    static void visitExternalStrings(ExternalStringVisitor*) { }
+    static void visitExternalArrays(ExternalArrayVisitor*) { }
+    static void collectBindingMemoryInfo(MemoryInstrumentation*) { }
+    static size_t profilerSnapshotsSize() { return 0; }
 };
 
 } // namespace WebCore

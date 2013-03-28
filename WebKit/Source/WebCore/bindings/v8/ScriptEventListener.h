@@ -37,16 +37,16 @@
 
 namespace WebCore {
 
-    class Attribute;
     class Document;
     class EventListener;
     class Frame;
     class Node;
+    class QualifiedName;
 
-    PassRefPtr<V8LazyEventListener> createAttributeEventListener(Node*, Attribute*);
-    PassRefPtr<V8LazyEventListener> createAttributeEventListener(Frame*, Attribute*);
+    PassRefPtr<V8LazyEventListener> createAttributeEventListener(Node*, const QualifiedName&, const AtomicString& value);
+    PassRefPtr<V8LazyEventListener> createAttributeEventListener(Frame*, const QualifiedName&, const AtomicString& value);
     String eventListenerHandlerBody(Document*, EventListener*);
-    bool eventListenerHandlerLocation(Document*, EventListener*, String& sourceName, int& lineNumber);
+    bool eventListenerHandlerLocation(Document*, EventListener*, String& sourceName, String& scriptId, int& lineNumber);
 
 } // namespace WebCore
 

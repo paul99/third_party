@@ -31,7 +31,11 @@
 #include <list>
 #include <string>
 #include <vector>
+
+#include "talk/base/gunit_prod.h"
 #include "talk/p2p/client/basicportallocator.h"
+
+class HttpPortAllocatorTest_TestSessionRequestUrl_Test;
 
 namespace talk_base {
 class AsyncHttpRequest;
@@ -57,9 +61,11 @@ class HttpPortAllocatorBase : public BasicPortAllocator {
 
   // CreateSession is defined in BasicPortAllocator but is
   // redefined here as pure virtual.
-  virtual PortAllocatorSession* CreateSession(
-      const std::string& name,
-      const std::string& session_type) = 0;
+  virtual PortAllocatorSession* CreateSessionInternal(
+      const std::string& content_name,
+      int component,
+      const std::string& ice_ufrag,
+      const std::string& ice_pwd) = 0;
 
   void SetStunHosts(const std::vector<talk_base::SocketAddress>& hosts) {
     if (!hosts.empty()) {
@@ -102,8 +108,10 @@ class HttpPortAllocatorSessionBase : public BasicPortAllocatorSession {
  public:
   HttpPortAllocatorSessionBase(
       HttpPortAllocatorBase* allocator,
-      const std::string& name,
-      const std::string& session_type,
+      const std::string& content_name,
+      int component,
+      const std::string& ice_ufrag,
+      const std::string& ice_pwd,
       const std::vector<talk_base::SocketAddress>& stun_hosts,
       const std::vector<std::string>& relay_hosts,
       const std::string& relay,
@@ -129,7 +137,11 @@ class HttpPortAllocatorSessionBase : public BasicPortAllocatorSession {
         BasicPortAllocatorSession::allocator());
   }
 
+  std::string GetSessionRequestUrl();
+
  private:
+  FRIEND_TEST(::HttpPortAllocatorTest, TestSessionRequestUrl);
+
   std::vector<std::string> relay_hosts_;
   std::vector<talk_base::SocketAddress> stun_hosts_;
   std::string relay_token_;
@@ -145,16 +157,20 @@ class HttpPortAllocator : public HttpPortAllocatorBase {
                     talk_base::PacketSocketFactory* socket_factory,
                     const std::string& user_agent);
   virtual ~HttpPortAllocator();
-  virtual PortAllocatorSession* CreateSession(const std::string& name,
-                                              const std::string& session_type);
+  virtual PortAllocatorSession* CreateSessionInternal(
+      const std::string& content_name,
+      int component,
+      const std::string& ice_ufrag, const std::string& ice_pwd);
 };
 
 class HttpPortAllocatorSession : public HttpPortAllocatorSessionBase {
  public:
   HttpPortAllocatorSession(
       HttpPortAllocator* allocator,
-      const std::string& name,
-      const std::string& session_type,
+      const std::string& content_name,
+      int component,
+      const std::string& ice_ufrag,
+      const std::string& ice_pwd,
       const std::vector<talk_base::SocketAddress>& stun_hosts,
       const std::vector<std::string>& relay_hosts,
       const std::string& relay,

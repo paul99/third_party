@@ -31,6 +31,7 @@
 #ifndef WebUserMediaRequest_h
 #define WebUserMediaRequest_h
 
+#include "WebSecurityOrigin.h"
 #include "platform/WebCommon.h"
 #include "platform/WebPrivatePtr.h"
 
@@ -39,9 +40,10 @@ class UserMediaRequest;
 }
 
 namespace WebKit {
-
+class WebDocument;
+class WebMediaConstraints;
+class WebMediaStreamDescriptor;
 class WebMediaStreamSource;
-class WebSecurityOrigin;
 class WebString;
 template <typename T> class WebVector;
 
@@ -64,14 +66,14 @@ public:
 
     WEBKIT_EXPORT bool audio() const;
     WEBKIT_EXPORT bool video() const;
-    WEBKIT_EXPORT bool cameraPreferenceUser() const;
-    WEBKIT_EXPORT bool cameraPreferenceEnvironment() const;
+    WEBKIT_EXPORT WebMediaConstraints audioConstraints() const;
+    WEBKIT_EXPORT WebMediaConstraints videoConstraints() const;
+
     WEBKIT_EXPORT WebSecurityOrigin securityOrigin() const;
+    WEBKIT_EXPORT WebDocument ownerDocument() const;
 
-    // DEPRECATED
-    WEBKIT_EXPORT void requestSucceeded(const WebVector<WebMediaStreamSource>&);
+    WEBKIT_EXPORT void requestSucceeded(const WebMediaStreamDescriptor&);
 
-    WEBKIT_EXPORT void requestSucceeded(const WebVector<WebMediaStreamSource>& audioSources, const WebVector<WebMediaStreamSource>& videoSources);
     WEBKIT_EXPORT void requestFailed();
 
 #if WEBKIT_IMPLEMENTATION

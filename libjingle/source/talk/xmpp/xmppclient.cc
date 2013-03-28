@@ -27,6 +27,7 @@
 
 #include "xmppclient.h"
 #include "xmpptask.h"
+#include "talk/base/logging.h"
 #include "talk/base/sigslot.h"
 #include "talk/base/scoped_ptr.h"
 #include "talk/base/stringutils.h"
@@ -43,7 +44,7 @@ class XmppClient::Private :
     public XmppOutputHandler {
 public:
 
-  Private(XmppClient * client) :
+  explicit Private(XmppClient* client) :
     client_(client),
     socket_(NULL),
     engine_(NULL),
@@ -53,15 +54,22 @@ public:
     signal_closed_(false),
     allow_plain_(false) {}
 
+  virtual ~Private() {
+    // We need to disconnect from socket_ before engine_ is destructed (by
+    // the auto-generated destructor code).
+    ResetSocket();
+  }
+
   // the owner
-  XmppClient * const client_;
+  XmppClient* const client_;
 
   // the two main objects
   talk_base::scoped_ptr<AsyncSocket> socket_;
   talk_base::scoped_ptr<XmppEngine> engine_;
   talk_base::scoped_ptr<PreXmppAuth> pre_auth_;
   talk_base::CryptString pass_;
-  std::string auth_cookie_;
+  std::string auth_mechanism_;
+  std::string auth_token_;
   talk_base::SocketAddress server_;
   std::string proxy_host_;
   int proxy_port_;
@@ -71,10 +79,19 @@ public:
   bool signal_closed_;
   bool allow_plain_;
 
+  void ResetSocket() {
+    if (socket_) {
+      socket_->SignalConnected.disconnect(this);
+      socket_->SignalRead.disconnect(this);
+      socket_->SignalClosed.disconnect(this);
+      socket_.reset(NULL);
+    }
+  }
+
   // implementations of interfaces
   void OnStateChange(int state);
-  void WriteOutput(const char * bytes, size_t len);
-  void StartTls(const std::string & domainname);
+  void WriteOutput(const char* bytes, size_t len);
+  void StartTls(const std::string& domainname);
   void CloseConnection();
 
   // slots for socket signals
@@ -90,12 +107,12 @@ bool IsTestServer(const std::string& server_name,
                                test_server_domain.c_str()));
 }
 
-XmppReturnStatus
-XmppClient::Connect(const XmppClientSettings & settings,
-    const std::string & lang, AsyncSocket * socket, PreXmppAuth * pre_auth) {
+XmppReturnStatus XmppClient::Connect(
+    const XmppClientSettings& settings,
+    const std::string& lang, AsyncSocket* socket, PreXmppAuth* pre_auth) {
   if (socket == NULL)
     return XMPP_RETURN_BADARGUMENT;
-  if (d_->socket_.get() != NULL)
+  if (d_->socket_)
     return XMPP_RETURN_BADSTATE;
 
   d_->socket_.reset(socket);
@@ -121,7 +138,7 @@ XmppClient::Connect(const XmppClientSettings & settings,
   // For other servers, we leave the strings empty, which causes the jid's
   // domain to be used.  We do the same for gmail.com and googlemail.com as the
   // returned CN matches the account domain in those cases.
-  std::string server_name = settings.server().IPAsString();
+  std::string server_name = settings.server().HostAsURIString();
   if (server_name == buzz::STR_TALK_GOOGLE_COM ||
       server_name == buzz::STR_TALKX_L_GOOGLE_COM ||
       server_name == buzz::STR_XMPP_GOOGLE_COM ||
@@ -139,7 +156,8 @@ XmppClient::Connect(const XmppClientSettings & settings,
   d_->engine_->SetUser(buzz::Jid(settings.user(), settings.host(), STR_EMPTY));
 
   d_->pass_ = settings.pass();
-  d_->auth_cookie_ = settings.auth_cookie();
+  d_->auth_mechanism_ = settings.auth_mechanism();
+  d_->auth_token_ = settings.auth_token();
   d_->server_ = settings.server();
   d_->proxy_host_ = settings.proxy_host();
   d_->proxy_port_ = settings.proxy_port();
@@ -149,19 +167,17 @@ XmppClient::Connect(const XmppClientSettings & settings,
   return XMPP_RETURN_OK;
 }
 
-XmppEngine::State
-XmppClient::GetState() const {
-  if (d_->engine_.get() == NULL)
+XmppEngine::State XmppClient::GetState() const {
+  if (!d_->engine_)
     return XmppEngine::STATE_NONE;
   return d_->engine_->GetState();
 }
 
-XmppEngine::Error
-XmppClient::GetError(int *subcode) {
+XmppEngine::Error XmppClient::GetError(int* subcode) {
   if (subcode) {
     *subcode = 0;
   }
-  if (d_->engine_.get() == NULL)
+  if (!d_->engine_)
     return XmppEngine::ERROR_NONE;
   if (d_->pre_engine_error_ != XmppEngine::ERROR_NONE) {
     if (subcode) {
@@ -172,33 +188,43 @@ XmppClient::GetError(int *subcode) {
   return d_->engine_->GetError(subcode);
 }
 
-const XmlElement *
-XmppClient::GetStreamError() {
-  if (d_->engine_.get() == NULL) {
+const XmlElement* XmppClient::GetStreamError() {
+  if (!d_->engine_) {
     return NULL;
   }
   return d_->engine_->GetStreamError();
 }
 
 CaptchaChallenge XmppClient::GetCaptchaChallenge() {
-  if (d_->engine_.get() == NULL)
+  if (!d_->engine_)
     return CaptchaChallenge();
   return d_->captcha_challenge_;
 }
 
-std::string
-XmppClient::GetAuthCookie() {
-  if (d_->engine_.get() == NULL)
+std::string XmppClient::GetAuthMechanism() {
+  if (!d_->engine_)
     return "";
-  return d_->auth_cookie_;
+  return d_->auth_mechanism_;
 }
 
-int
-XmppClient::ProcessStart() {
-  if (d_->pre_auth_.get()) {
+std::string XmppClient::GetAuthToken() {
+  if (!d_->engine_)
+    return "";
+  return d_->auth_token_;
+}
+
+int XmppClient::ProcessStart() {
+  // Should not happen, but was observed in crash reports
+  if (!d_->socket_) {
+    LOG(LS_ERROR) << "socket_ already reset";
+    return STATE_DONE;
+  }
+
+  if (d_->pre_auth_) {
     d_->pre_auth_->SignalAuthDone.connect(this, &XmppClient::OnAuthDone);
     d_->pre_auth_->StartPreXmppAuth(
-        d_->engine_->GetUser(), d_->server_, d_->pass_, d_->auth_cookie_);
+        d_->engine_->GetUser(), d_->server_, d_->pass_,
+        d_->auth_mechanism_, d_->auth_token_);
     d_->pass_.Clear(); // done with this;
     return STATE_PRE_XMPP_LOGIN;
   }
@@ -210,15 +236,19 @@ XmppClient::ProcessStart() {
   }
 }
 
-void
-XmppClient::OnAuthDone() {
+void XmppClient::OnAuthDone() {
   Wake();
 }
 
-int
-XmppClient::ProcessCookieLogin() {
+int XmppClient::ProcessTokenLogin() {
+  // Should not happen, but was observed in crash reports
+  if (!d_->socket_) {
+    LOG(LS_ERROR) << "socket_ already reset";
+    return STATE_DONE;
+  }
+
   // Don't know how this could happen, but crash reports show it as NULL
-  if (!d_->pre_auth_.get()) {
+  if (!d_->pre_auth_) {
     d_->pre_engine_error_ = XmppEngine::ERROR_AUTH;
     EnsureClosed();
     return STATE_ERROR;
@@ -244,16 +274,23 @@ XmppClient::ProcessCookieLogin() {
     return STATE_ERROR;
   }
 
-  // Save auth cookie as a result
-  d_->auth_cookie_ = d_->pre_auth_->GetAuthCookie();
+  // Save auth token as a result
+
+  d_->auth_mechanism_ = d_->pre_auth_->GetAuthMechanism();
+  d_->auth_token_ = d_->pre_auth_->GetAuthToken();
 
   // transfer ownership of pre_auth_ to engine
   d_->engine_->SetSaslHandler(d_->pre_auth_.release());
   return STATE_START_XMPP_LOGIN;
 }
 
-int
-XmppClient::ProcessStartXmppLogin() {
+int XmppClient::ProcessStartXmppLogin() {
+  // Should not happen, but was observed in crash reports
+  if (!d_->socket_) {
+    LOG(LS_ERROR) << "socket_ already reset";
+    return STATE_DONE;
+  }
+
   // Done with pre-connect tasks - connect!
   if (!d_->socket_->Connect(d_->server_)) {
     EnsureClosed();
@@ -263,26 +300,24 @@ XmppClient::ProcessStartXmppLogin() {
   return STATE_RESPONSE;
 }
 
-int
-XmppClient::ProcessResponse() {
+int XmppClient::ProcessResponse() {
   // Hang around while we are connected.
-  if (!delivering_signal_ && (d_->engine_.get() == NULL ||
-    d_->engine_->GetState() == XmppEngine::STATE_CLOSED))
+  if (!delivering_signal_ &&
+      (!d_->engine_ || d_->engine_->GetState() == XmppEngine::STATE_CLOSED))
     return STATE_DONE;
   return STATE_BLOCKED;
 }
 
-XmppReturnStatus
-XmppClient::Disconnect() {
-  if (d_->socket_.get() == NULL)
+XmppReturnStatus XmppClient::Disconnect() {
+  if (!d_->socket_)
     return XMPP_RETURN_BADSTATE;
   Abort();
   d_->engine_->Disconnect();
-  d_->socket_.reset(NULL);
+  d_->ResetSocket();
   return XMPP_RETURN_OK;
 }
 
-XmppClient::XmppClient(TaskParent * parent)
+XmppClient::XmppClient(TaskParent* parent)
     : XmppTaskParentInterface(parent),
       delivering_signal_(false),
       valid_(false) {
@@ -294,47 +329,47 @@ XmppClient::~XmppClient() {
   valid_ = false;
 }
 
-const Jid &
-XmppClient::jid() const {
+const Jid& XmppClient::jid() const {
   return d_->engine_->FullJid();
 }
 
 
-std::string
-XmppClient::NextId() {
+std::string XmppClient::NextId() {
   return d_->engine_->NextId();
 }
 
-XmppReturnStatus
-XmppClient::SendStanza(const XmlElement * stanza) {
+XmppReturnStatus XmppClient::SendStanza(const XmlElement* stanza) {
   return d_->engine_->SendStanza(stanza);
 }
 
-XmppReturnStatus
-XmppClient::SendStanzaError(const XmlElement * old_stanza, XmppStanzaError xse, const std::string & message) {
+XmppReturnStatus XmppClient::SendStanzaError(
+    const XmlElement* old_stanza, XmppStanzaError xse,
+    const std::string& message) {
   return d_->engine_->SendStanzaError(old_stanza, xse, message);
 }
 
-XmppReturnStatus
-XmppClient::SendRaw(const std::string & text) {
+XmppReturnStatus XmppClient::SendRaw(const std::string& text) {
   return d_->engine_->SendRaw(text);
 }
 
-XmppEngine*
-XmppClient::engine() {
+XmppEngine* XmppClient::engine() {
   return d_->engine_.get();
 }
 
-void
-XmppClient::Private::OnSocketConnected() {
+void XmppClient::Private::OnSocketConnected() {
   engine_->Connect();
 }
 
-void
-XmppClient::Private::OnSocketRead() {
+void XmppClient::Private::OnSocketRead() {
   char bytes[4096];
   size_t bytes_read;
   for (;;) {
+    // Should not happen, but was observed in crash reports
+    if (!socket_) {
+      LOG(LS_ERROR) << "socket_ already reset";
+      return;
+    }
+
     if (!socket_->Read(bytes, sizeof(bytes), &bytes_read)) {
       // TODO: deal with error information
       return;
@@ -351,14 +386,12 @@ XmppClient::Private::OnSocketRead() {
   }
 }
 
-void
-XmppClient::Private::OnSocketClosed() {
+void XmppClient::Private::OnSocketClosed() {
   int code = socket_->GetError();
   engine_->ConnectionClosed(code);
 }
 
-void
-XmppClient::Private::OnStateChange(int state) {
+void XmppClient::Private::OnStateChange(int state) {
   if (state == XmppEngine::STATE_CLOSED) {
     client_->EnsureClosed();
   }
@@ -368,9 +401,7 @@ XmppClient::Private::OnStateChange(int state) {
   client_->Wake();
 }
 
-void
-XmppClient::Private::WriteOutput(const char * bytes, size_t len) {
-
+void XmppClient::Private::WriteOutput(const char* bytes, size_t len) {
 //#ifdef _DEBUG
   client_->SignalLogOutput(bytes, len);
 //#endif
@@ -379,30 +410,25 @@ XmppClient::Private::WriteOutput(const char * bytes, size_t len) {
   // TODO: deal with error information
 }
 
-void
-XmppClient::Private::StartTls(const std::string & domain) {
+void XmppClient::Private::StartTls(const std::string& domain) {
 #if defined(FEATURE_ENABLE_SSL)
   socket_->StartTls(domain);
 #endif
 }
 
-void
-XmppClient::Private::CloseConnection() {
+void XmppClient::Private::CloseConnection() {
   socket_->Close();
 }
 
-void
-XmppClient::AddXmppTask(XmppTask * task, XmppEngine::HandlerLevel level) {
+void XmppClient::AddXmppTask(XmppTask* task, XmppEngine::HandlerLevel level) {
   d_->engine_->AddStanzaHandler(task, level);
 }
 
-void
-XmppClient::RemoveXmppTask(XmppTask * task) {
+void XmppClient::RemoveXmppTask(XmppTask* task) {
   d_->engine_->RemoveStanzaHandler(task);
 }
 
-void
-XmppClient::EnsureClosed() {
+void XmppClient::EnsureClosed() {
   if (!d_->signal_closed_) {
     d_->signal_closed_ = true;
     delivering_signal_ = true;
@@ -411,5 +437,4 @@ XmppClient::EnsureClosed() {
   }
 }
 
-
-}
+}  // namespace buzz

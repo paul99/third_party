@@ -1,6 +1,8 @@
 //
-// all valid SVG CSS2 properties.
+// SVG CSS property names
 //
+
+#if defined(ENABLE_SVG) && ENABLE_SVG
 
 // SVG style props
 clip-path
@@ -28,6 +30,7 @@ marker
 marker-end
 marker-mid
 marker-start
+mask-type
 shape-rendering
 stroke
 stroke-dasharray
@@ -49,3 +52,6 @@ vector-effect
 writing-mode
 
 -webkit-svg-shadow
+
+#endif
+

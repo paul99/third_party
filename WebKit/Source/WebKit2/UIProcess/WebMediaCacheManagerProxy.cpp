@@ -28,6 +28,7 @@
 
 #include "WebContext.h"
 #include "WebMediaCacheManagerMessages.h"
+#include "WebMediaCacheManagerProxyMessages.h"
 #include "WebSecurityOrigin.h"
 
 namespace WebKit {
@@ -40,6 +41,7 @@ PassRefPtr<WebMediaCacheManagerProxy> WebMediaCacheManagerProxy::create(WebConte
 WebMediaCacheManagerProxy::WebMediaCacheManagerProxy(WebContext* context)
     : m_webContext(context)
 {
+    m_webContext->addMessageReceiver(Messages::WebMediaCacheManagerProxy::messageReceiverName(), this);
 }
 
 WebMediaCacheManagerProxy::~WebMediaCacheManagerProxy()
@@ -56,9 +58,9 @@ bool WebMediaCacheManagerProxy::shouldTerminate(WebProcessProxy*) const
     return m_arrayCallbacks.isEmpty();
 }
 
-void WebMediaCacheManagerProxy::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::ArgumentDecoder* arguments)
+void WebMediaCacheManagerProxy::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
 {
-    didReceiveWebMediaCacheManagerProxyMessage(connection, messageID, arguments);
+    didReceiveWebMediaCacheManagerProxyMessage(connection, messageID, decoder);
 }
 
 void WebMediaCacheManagerProxy::getHostnamesWithMediaCache(PassRefPtr<ArrayCallback> prpCallback)
@@ -67,8 +69,7 @@ void WebMediaCacheManagerProxy::getHostnamesWithMediaCache(PassRefPtr<ArrayCallb
     uint64_t callbackID = callback->callbackID();
     m_arrayCallbacks.set(callbackID, callback.release());
 
-    // FIXME (Multi-WebProcess): When we're sending this to multiple processes, we need to aggregate the
-    // callback data when it comes back.
+    // FIXME (Multi-WebProcess): <rdar://problem/12239765> When we're sending this to multiple processes, we need to aggregate the callback data when it comes back.
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebMediaCacheManager::GetHostnamesWithMediaCache(callbackID));
 }
     

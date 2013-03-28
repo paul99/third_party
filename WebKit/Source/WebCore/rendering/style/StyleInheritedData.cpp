@@ -20,10 +20,9 @@
  */
 
 #include "config.h"
-#include "StyleRareInheritedData.h"
+#include "StyleInheritedData.h"
 
 #include "RenderStyle.h"
-#include "StyleImage.h"
 
 namespace WebCore {
 
@@ -31,10 +30,6 @@ StyleInheritedData::StyleInheritedData()
     : horizontal_border_spacing(RenderStyle::initialHorizontalBorderSpacing())
     , vertical_border_spacing(RenderStyle::initialVerticalBorderSpacing())
     , line_height(RenderStyle::initialLineHeight())
-#if OS(ANDROID) && ENABLE(FONT_BOOSTING)
-    , specified_line_height(RenderStyle::initialLineHeight())
-#endif
-    , list_style_image(RenderStyle::initialListStyleImage())
     , color(RenderStyle::initialColor())
     , visitedLinkColor(RenderStyle::initialColor())
 {
@@ -49,10 +44,6 @@ StyleInheritedData::StyleInheritedData(const StyleInheritedData& o)
     , horizontal_border_spacing(o.horizontal_border_spacing)
     , vertical_border_spacing(o.vertical_border_spacing)
     , line_height(o.line_height)
-#if OS(ANDROID) && ENABLE(FONT_BOOSTING)
-    , specified_line_height(o.specified_line_height)
-#endif
-    , list_style_image(o.list_style_image)
     , font(o.font)
     , color(o.color)
     , visitedLinkColor(o.visitedLinkColor)
@@ -62,10 +53,6 @@ StyleInheritedData::StyleInheritedData(const StyleInheritedData& o)
 bool StyleInheritedData::operator==(const StyleInheritedData& o) const
 {
     return line_height == o.line_height
-#if OS(ANDROID) && ENABLE(FONT_BOOSTING)
-        && specified_line_height == o.specified_line_height
-#endif
-        && StyleImage::imagesEquivalent(list_style_image.get(), o.list_style_image.get())
         && font == o.font
         && color == o.color
         && visitedLinkColor == o.visitedLinkColor

@@ -34,12 +34,12 @@
 #include <limits>
 
 #include "HWndDC.h"
-#include "PlatformString.h"
 #include "UniscribeHelper.h"
 #include <unicode/locid.h>
 #include <unicode/uchar.h>
 #include <wtf/HashMap.h>
 #include <wtf/text/StringHash.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -414,8 +414,8 @@ bool getDerivedFontData(const UChar* family,
         // a font even if there's no font matching the name. Need to
         // check it against what we actually want (as is done in
         // FontCacheWin.cpp)
-        pair<FontDataCache::iterator, bool> entry = fontDataCache.add(fontKey, FontData());
-        derived = &entry.first->second;
+        FontDataCache::AddResult entry = fontDataCache.add(fontKey, FontData());
+        derived = &entry.iterator->value;
         derived->hfont = CreateFontIndirect(logfont);
         // GetAscent may return kUndefinedAscent, but we still want to
         // cache it so that we won't have to call CreateFontIndirect once
@@ -423,7 +423,7 @@ bool getDerivedFontData(const UChar* family,
         derived->ascent = getAscent(derived->hfont);
         derived->spaceGlyph = getSpaceGlyph(derived->hfont);
     } else {
-        derived = &iter->second;
+        derived = &iter->value;
         // Last time, GetAscent failed so that only HFONT was
         // cached. Try once more assuming that TryPreloadFont
         // was called by a caller between calls.

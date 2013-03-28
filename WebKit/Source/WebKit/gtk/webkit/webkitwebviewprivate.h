@@ -25,13 +25,23 @@
 
 #include "AcceleratedCompositingContext.h"
 #include "FullscreenVideoController.h"
+#include "GeolocationClientMock.h"
 #include "GtkClickCounter.h"
 #include "GtkDragAndDropHelper.h"
-#include "GOwnPtr.h"
 #include "Page.h"
 #include "ResourceHandle.h"
+#include "WebViewInputMethodFilter.h"
 #include "WidgetBackingStore.h"
 #include <webkit/webkitwebview.h>
+#include <wtf/gobject/GOwnPtr.h>
+
+#if ENABLE(MEDIA_STREAM)
+#include "UserMediaClientGtk.h"
+#endif
+
+#if ENABLE(NAVIGATOR_CONTENT_UTILS)
+#include "NavigatorContentUtilsClientGtk.h"
+#endif
 
 namespace WebKit {
 WebCore::Page* core(WebKitWebView*);
@@ -44,6 +54,7 @@ extern "C" {
 typedef struct _WebKitWebViewPrivate WebKitWebViewPrivate;
 struct _WebKitWebViewPrivate {
     WebCore::Page* corePage;
+    bool hasNativeWindow;
     OwnPtr<WebCore::WidgetBackingStore> backingStore;
     GRefPtr<WebKitWebSettings> webSettings;
     GRefPtr<WebKitWebInspector> webInspector;
@@ -58,9 +69,10 @@ struct _WebKitWebViewPrivate {
     gint lastPopupYPosition;
 
     HashSet<GtkWidget*> children;
-    GRefPtr<GtkIMContext> imContext;
+    WebKit::WebViewInputMethodFilter imFilter;
 
     gboolean transparent;
+    bool needsResizeOnMap;
 
 #ifndef GTK_API_VERSION_2
     // GtkScrollablePolicy needs to be checked when
@@ -78,7 +90,7 @@ struct _WebKitWebViewPrivate {
 
     gboolean disposing;
 
-#if ENABLE(VIDEO)
+#if ENABLE(VIDEO) && !defined(GST_API_VERSION_1)
     FullscreenVideoController* fullscreenVideoController;
 #endif
 
@@ -96,6 +108,22 @@ struct _WebKitWebViewPrivate {
 
 #if USE(ACCELERATED_COMPOSITING)
     OwnPtr<WebKit::AcceleratedCompositingContext> acceleratedCompositingContext;
+#endif
+
+#if ENABLE(ICONDATABASE)
+    gulong iconLoadedHandler;
+#endif
+
+#if ENABLE(MEDIA_STREAM)
+    OwnPtr<WebKit::UserMediaClientGtk> userMediaClient;
+#endif
+
+#if ENABLE(GEOLOCATION)
+    OwnPtr<WebCore::GeolocationClientMock> geolocationClientMock;
+#endif
+
+#if ENABLE(NAVIGATOR_CONTENT_UTILS)
+    OwnPtr<WebKit::NavigatorContentUtilsClient> navigatorContentUtilsClient;
 #endif
 };
 
@@ -116,6 +144,13 @@ GtkMenu* webkit_web_view_get_context_menu(WebKitWebView*);
 
 void webViewEnterFullscreen(WebKitWebView* webView, WebCore::Node*);
 void webViewExitFullscreen(WebKitWebView* webView);
+
+void webkitWebViewRunFileChooserRequest(WebKitWebView*, WebKitFileChooserRequest*);
+
+#if ENABLE(ICONDATABASE)
+void webkitWebViewRegisterForIconNotification(WebKitWebView*, bool shouldRegister);
+void webkitWebViewIconLoaded(WebKitFaviconDatabase*, const char* frameURI, WebKitWebView*);
+#endif
 }
 
 #endif

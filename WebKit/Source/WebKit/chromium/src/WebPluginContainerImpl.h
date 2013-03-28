@@ -35,6 +35,7 @@
 #include "WebPluginContainer.h"
 #include "Widget.h"
 
+#include <public/WebIOSurfaceLayer.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/Vector.h>
@@ -43,17 +44,14 @@
 struct NPObject;
 
 namespace WebCore {
+class GestureEvent;
 class HTMLPlugInElement;
 class IntRect;
 class KeyboardEvent;
-class LayerChromium;
 class MouseEvent;
-class PluginLayerChromium;
 class ResourceError;
 class ResourceResponse;
-#if ENABLE(TOUCH_EVENTS)
 class TouchEvent;
-#endif // ENABLE(TOUCH_EVENTS)
 class WheelEvent;
 
 #if ENABLE(GESTURE_EVENTS)
@@ -63,9 +61,12 @@ class PlatformGestureEvent;
 
 namespace WebKit {
 
+struct WebPrintParams;
+
 class ScrollbarGroup;
 class WebPlugin;
 class WebPluginLoadObserver;
+class WebExternalTextureLayer;
 
 class WebPluginContainerImpl : public WebCore::PluginViewBase, public WebPluginContainer {
 public:
@@ -76,6 +77,9 @@ public:
 
     // PluginViewBase methods
     virtual bool getFormValue(String&);
+    virtual bool supportsKeyboardFocus() const;
+    virtual bool canProcessDrag() const;
+    virtual bool wantsWheelEvents();
 
     // Widget methods
     virtual void setFrameRect(const WebCore::IntRect&);
@@ -101,23 +105,27 @@ public:
     virtual void setBackingIOSurfaceId(int width,
                                        int height,
                                        uint32_t ioSurfaceId);
-#if OS(ANDROID)
-    virtual void setBackingVideoTextureId(unsigned);
-    virtual void setBackingVideoRect(float x, float y, float width,float height);
-#endif
     virtual void commitBackingTexture();
     virtual void clearScriptObjects();
     virtual NPObject* scriptableObjectForElement();
     virtual WebString executeScriptURL(const WebURL&, bool popupsAllowed);
     virtual void loadFrameRequest(const WebURLRequest&, const WebString& target, bool notifyNeeded, void* notifyData);
-    virtual void zoomLevelChanged(double zoomLevel);
-#if ENABLE(TOUCH_EVENTS)
-    virtual void startAcceptingTouchEvents();
-#endif // ENABLE(TOUCH_EVENTS)
+    virtual void zoomLevelChanged(double zoomLevel);    
+    virtual void setOpaque(bool);
+    virtual bool isRectTopmost(const WebRect&);
+    virtual void requestTouchEventType(TouchEventRequestType);
+    virtual void setWantsWheelEvents(bool);
+    virtual WebPoint windowToLocalPoint(const WebPoint&);
 
     // This cannot be null.
     WebPlugin* plugin() { return m_webPlugin; }
-    void setPlugin(WebPlugin* plugin) { m_webPlugin = plugin; }
+    void setPlugin(WebPlugin*);
+
+    virtual float deviceScaleFactor();
+    virtual float pageScaleFactor();
+    virtual float pageZoomFactor();
+
+    virtual void setWebLayer(WebLayer*);
 
     // Printing interface. The plugin can support custom printing
     // (which means it controls the layout, number of pages etc).
@@ -127,10 +135,8 @@ public:
     // If the plugin content should not be scaled to the printable area of
     // the page, then this method should return true.
     bool isPrintScalingDisabled() const;
-    // Sets up printing at the given print rect and printer DPI. printableArea
-    // is in points (a point is 1/72 of an inch).Returns the number of pages to
-    // be printed at these settings.
-    int printBegin(const WebCore::IntRect& printableArea, int printerDPI) const;
+    // Sets up printing at the specified WebPrintParams. Returns the number of pages to be printed at these settings.
+    int printBegin(const WebPrintParams&) const;
     // Prints the page specified by pageNumber (0-based index) into the supplied canvas.
     bool printPage(int pageNumber, WebCore::GraphicsContext* gc);
     // Ends the print operation.
@@ -145,12 +151,12 @@ public:
     void didFinishLoading();
     void didFailLoading(const WebCore::ResourceError&);
 
-    NPObject* scriptableObject();
+    virtual NPObject* scriptableObject() OVERRIDE;
 
     void willDestroyPluginLoadObserver(WebPluginLoadObserver*);
 
 #if USE(ACCELERATED_COMPOSITING)
-    virtual WebCore::LayerChromium* platformLayer() const;
+    virtual WebLayer* platformLayer() const;
 #endif
 
     ScrollbarGroup* scrollbarGroup();
@@ -160,20 +166,19 @@ public:
 
     bool paintCustomOverhangArea(WebCore::GraphicsContext*, const WebCore::IntRect&, const WebCore::IntRect&, const WebCore::IntRect&);
 
-#if ENABLE(GESTURE_EVENTS)
-    bool handleGestureEvent(const WebCore::PlatformGestureEvent&);
-#endif
-
 private:
     WebPluginContainerImpl(WebCore::HTMLPlugInElement* element, WebPlugin* webPlugin);
     ~WebPluginContainerImpl();
 
     void handleMouseEvent(WebCore::MouseEvent*);
+    void handleDragEvent(WebCore::MouseEvent*);
     void handleWheelEvent(WebCore::WheelEvent*);
     void handleKeyboardEvent(WebCore::KeyboardEvent*);
-#if ENABLE(TOUCH_EVENTS)
     void handleTouchEvent(WebCore::TouchEvent*);
-#endif // ENABLE(TOUCH_EVENTS)
+    void handleGestureEvent(WebCore::GestureEvent*);
+
+    void synthesizeMouseEventIfPossible(WebCore::TouchEvent*);
+
     void calculateGeometry(const WebCore::IntRect& frameRect,
                            WebCore::IntRect& windowRect,
                            WebCore::IntRect& clipRect,
@@ -187,12 +192,23 @@ private:
     Vector<WebPluginLoadObserver*> m_pluginLoadObservers;
 
 #if USE(ACCELERATED_COMPOSITING)
-    RefPtr<WebCore::PluginLayerChromium> m_platformLayer;
+    // A composited plugin will either have no composited layer, a texture layer, or an IOSurface layer.
+    // It will never have both a texture and IOSurface output.
+    unsigned m_textureId;
+    OwnPtr<WebExternalTextureLayer> m_textureLayer;
+
+    unsigned m_ioSurfaceId;
+    OwnPtr<WebIOSurfaceLayer> m_ioSurfaceLayer;
 #endif
+
+    WebLayer* m_webLayer;
 
     // The associated scrollbar group object, created lazily. Used for Pepper
     // scrollbars.
     OwnPtr<ScrollbarGroup> m_scrollbarGroup;
+
+    TouchEventRequestType m_touchEventRequestType;
+    bool m_wantsWheelEvents;
 };
 
 } // namespace WebKit

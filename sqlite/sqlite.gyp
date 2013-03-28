@@ -4,14 +4,7 @@
 
 {
   'variables': {
-    'conditions': [
-      ['OS=="android"', {
-        # Android defines use_system_sqlite in base/common.gypi since this
-        # variable is also used in chrome_browser.gypi.
-      }, {
-        'use_system_sqlite%': 0,
-      }],
-    ],
+    'use_system_sqlite%': 0,
     'required_sqlite_version': '3.6.1',
   },
   'target_defaults': {
@@ -41,77 +34,44 @@
                 ],
           },
         ],
-        ['OS=="linux" and not use_system_sqlite', {
-          'link_settings': {
-            'libraries': [
-              '-ldl',
-            ],
-          },
-        }],
-        ['OS=="android" and use_system_sqlite', {
-          'type': 'none',
-          'all_dependent_settings': {
-            'cflags': [
-              '-I<(android_src)/external/sqlite/dist',
-            ],
-            'defines': [
-              'USE_SYSTEM_SQLITE',
-            ],
-          },
-          'link_settings': {
-            'libraries': [
-              '<(android_lib)/libsqlite.so',
-            ],
-          },
-        }],
-        ['OS=="android" and not use_system_sqlite', {
-            'defines': [
-              'HAVE_USLEEP=1',
-              'SQLITE_DEFAULT_JOURNAL_SIZE_LIMIT=1048576',
-              'SQLITE_THREADSAFE=1',
-              'SQLITE_ENABLE_MEMORY_MANAGEMENT=1',
-              'SQLITE_DEFAULT_AUTOVACUUM=1',
-              'SQLITE_TEMP_STORE=3',
-              'SQLITE_ENABLE_FTS3',
-              'SQLITE_ENABLE_FTS3_BACKWARDS',
-              'DSQLITE_DEFAULT_FILE_FORMAT=4',
-
-              # Speculative performance hacks for http://b/issue?id=6480318
-              # ChromeOS uses this flag to improve performance.
-              # It's a huge performance win on Android too. We rely on the
-              # journaling filesystem to recover from errors, which is risky
-              # because the order of data writes isn't guaranteed. Chrome should
-              # be able to recover at the expense of deleting your database, and
-              # most data should be backed up in the cloud. But do we have any
-              # important data that isn't backed up elsewhere?
-              'SQLITE_NO_SYNC',
-           ],
-        }],
-        ['os_posix == 1 and OS != "mac" and OS != "android" and use_system_sqlite', {
+        ['use_system_sqlite', {
           'type': 'none',
           'direct_dependent_settings': {
-            'cflags': [
-              # This next command produces no output but it it will fail (and
-              # cause GYP to fail) if we don't have a recent enough version of
-              # sqlite.
-              '<!@(pkg-config --atleast-version=<(required_sqlite_version) sqlite3)',
-
-              '<!@(pkg-config --cflags sqlite3)',
-            ],
             'defines': [
               'USE_SYSTEM_SQLITE',
             ],
           },
-          'link_settings': {
-            'ldflags': [
-              '<!@(pkg-config --libs-only-L --libs-only-other sqlite3)',
-            ],
-            'libraries': [
-              '<!@(pkg-config --libs-only-l sqlite3)',
-            ],
-          },
-        }],
-        ['os_posix == 0 or not use_system_sqlite', {
+
+          'conditions': [
+            ['OS == "ios"', {
+              'link_settings': {
+                'libraries': [
+                  '$(SDKROOT)/usr/lib/libsqlite3.dylib',
+                ],
+              },
+            }],
+            ['os_posix == 1 and OS != "mac" and OS != "ios" and OS != "android"', {
+              'direct_dependent_settings': {
+                'cflags': [
+                  # This next command produces no output but it it will fail
+                  # (and cause GYP to fail) if we don't have a recent enough
+                  # version of sqlite.
+                  '<!@(pkg-config --atleast-version=<(required_sqlite_version) sqlite3)',
+
+                  '<!@(pkg-config --cflags sqlite3)',
+                ],
+              },
+              'link_settings': {
+                'ldflags': [
+                  '<!@(pkg-config --libs-only-L --libs-only-other sqlite3)',
+                ],
+                'libraries': [
+                  '<!@(pkg-config --libs-only-l sqlite3)',
+                ],
+              },
+            }],
+          ],
+        }, { # !use_system_sqlite
           'product_name': 'sqlite3',
           'type': 'static_library',
           'sources': [
@@ -156,6 +116,23 @@
             4018, 4244,
           ],
           'conditions': [
+            ['OS=="linux"', {
+              'link_settings': {
+                'libraries': [
+                  '-ldl',
+                ],
+              },
+            }],
+            ['OS == "android"', {
+              'defines': [
+                'HAVE_USLEEP=1',
+                'SQLITE_DEFAULT_JOURNAL_SIZE_LIMIT=1048576',
+                'SQLITE_DEFAULT_AUTOVACUUM=1',
+                'SQLITE_TEMP_STORE=3',
+                'SQLITE_ENABLE_FTS3_BACKWARDS',
+                'DSQLITE_DEFAULT_FILE_FORMAT=4',
+              ],
+            }],
             ['os_posix == 1 and OS != "mac" and OS != "android"', {
               'cflags': [
                 # SQLite doesn't believe in compiler warnings,
@@ -185,7 +162,7 @@
     },
   ],
   'conditions': [
-    ['os_posix == 1 and OS != "mac" and OS != "android" and not use_system_sqlite', {
+    ['os_posix == 1 and OS != "mac" and OS != "ios" and OS != "android" and not use_system_sqlite', {
       'targets': [
         {
           'target_name': 'sqlite_shell',

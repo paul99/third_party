@@ -57,8 +57,7 @@ void PluginPackage::determineQuirks(const String& mimeType)
     }
 
     if (mimeType == "application/x-shockwave-flash") {
-        // The flash plugin only requests windowless plugins if we return a mozilla user agent
-        m_quirks.add(PluginQuirkWantsMozillaUserAgent);
+        m_quirks.add(PluginQuirkWantsChromeUserAgent);
         m_quirks.add(PluginQuirkThrottleInvalidate);
         m_quirks.add(PluginQuirkThrottleWMUserPlusOneMessages);
         m_quirks.add(PluginQuirkFlashURLNotifyBug);
@@ -139,7 +138,7 @@ bool PluginPackage::fetchInfo()
     if (mimeTypesFileName && CFGetTypeID(mimeTypesFileName.get()) == CFStringGetTypeID()) {
 
         WTF::RetainPtr<CFStringRef> fileName = (CFStringRef)mimeTypesFileName.get();
-        WTF::RetainPtr<CFStringRef> homeDir = homeDirectoryPath().createCFString();
+        WTF::RetainPtr<CFStringRef> homeDir = adoptCF(homeDirectoryPath().createCFString());
         WTF::RetainPtr<CFStringRef> path(AdoptCF, CFStringCreateWithFormat(0, 0, CFSTR("%@/Library/Preferences/%@"), homeDir.get(), fileName.get()));
 
         WTF::RetainPtr<CFDictionaryRef> plist = readPListFile(path.get(), /*createFile*/ false, m_module);
@@ -196,6 +195,7 @@ bool PluginPackage::fetchInfo()
 
             String description = (CFStringRef)CFDictionaryGetValue(extensionsDict.get(), CFSTR("WebPluginTypeDescription"));
             m_mimeToDescriptions.set(mimeType, description);
+            determineQuirks(mimeType);
         }
 
         m_name = (CFStringRef)CFBundleGetValueForInfoDictionaryKey(m_module, CFSTR("WebPluginName"));

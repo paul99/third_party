@@ -29,10 +29,13 @@
 #ifndef InspectorDatabaseAgent_h
 #define InspectorDatabaseAgent_h
 
+#if ENABLE(INSPECTOR) && ENABLE(SQL_DATABASE)
+
 #include "InspectorBaseAgent.h"
-#include "PlatformString.h"
+#include "InspectorFrontend.h"
 #include <wtf/HashMap.h>
 #include <wtf/PassOwnPtr.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -45,10 +48,8 @@ class InstrumentingAgents;
 
 typedef String ErrorString;
 
-class InspectorDatabaseAgent : public InspectorBaseAgent<InspectorDatabaseAgent> {
+class InspectorDatabaseAgent : public InspectorBaseAgent<InspectorDatabaseAgent>, public InspectorBackendDispatcher::DatabaseCommandHandler {
 public:
-    class FrontendProvider;
-
     static PassOwnPtr<InspectorDatabaseAgent> create(InstrumentingAgents* instrumentingAgents, InspectorState* state)
     {
         return adoptPtr(new InspectorDatabaseAgent(instrumentingAgents, state));
@@ -62,27 +63,29 @@ public:
     void clearResources();
 
     // Called from the front-end.
-    void enable(ErrorString*);
-    void disable(ErrorString*);
-    void getDatabaseTableNames(ErrorString*, int databaseId, RefPtr<InspectorArray>& names);
-    void executeSQL(ErrorString*, int databaseId, const String& query, bool* success, int* transactionId);
+    virtual void enable(ErrorString*);
+    virtual void disable(ErrorString*);
+    virtual void getDatabaseTableNames(ErrorString*, const String& databaseId, RefPtr<TypeBuilder::Array<String> >& names);
+    virtual void executeSQL(ErrorString*, const String& databaseId, const String& query, PassRefPtr<ExecuteSQLCallback>);
 
     // Called from the injected script.
-    int databaseId(Database*);
+    String databaseId(Database*);
 
     void didOpenDatabase(PassRefPtr<Database>, const String& domain, const String& name, const String& version);
 private:
     explicit InspectorDatabaseAgent(InstrumentingAgents*, InspectorState*);
 
-    Database* databaseForId(int databaseId);
+    Database* databaseForId(const String& databaseId);
     InspectorDatabaseResource* findByFileName(const String& fileName);
 
-    typedef HashMap<int, RefPtr<InspectorDatabaseResource> > DatabaseResourcesMap;
+    InspectorFrontend::Database* m_frontend;
+    typedef HashMap<String, RefPtr<InspectorDatabaseResource> > DatabaseResourcesMap;
     DatabaseResourcesMap m_resources;
-    RefPtr<FrontendProvider> m_frontendProvider;
     bool m_enabled;
 };
 
 } // namespace WebCore
+
+#endif // ENABLE(INSPECTOR) && ENABLE(SQL_DATABASE)
 
 #endif // !defined(InspectorDatabaseAgent_h)

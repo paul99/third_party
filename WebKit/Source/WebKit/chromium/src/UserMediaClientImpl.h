@@ -32,6 +32,7 @@
 #define UserMediaClientImpl_h
 
 #if ENABLE(MEDIA_STREAM)
+
 #include "MediaStreamSource.h"
 #include "UserMediaClient.h"
 #include <wtf/PassRefPtr.h>
@@ -51,7 +52,7 @@ public:
 
     // WebCore::UserMediaClient ----------------------------------------------
     virtual void pageDestroyed();
-    virtual void requestUserMedia(PassRefPtr<WebCore::UserMediaRequest>, const WebCore::MediaStreamSourceVector&, const WebCore::MediaStreamSourceVector&);
+    virtual void requestUserMedia(PassRefPtr<WebCore::UserMediaRequest>, const WebCore::MediaStreamSourceVector& audioSources, const WebCore::MediaStreamSourceVector& videoSources);
     virtual void cancelUserMediaRequest(WebCore::UserMediaRequest*);
 
 private:

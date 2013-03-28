@@ -52,7 +52,7 @@ const size_t kCacheHeader = 0;
 const size_t kCacheBody = 1;
 
 // Convert decimal string to integer
-bool HttpStringToInt(const std::string& str, unsigned long* val) {
+bool HttpStringToUInt(const std::string& str, size_t* val) {
   ASSERT(NULL != val);
   char* eos = NULL;
   *val = strtoul(str.c_str(), &eos, 10);
@@ -105,10 +105,10 @@ enum HttpCacheState {
 HttpCacheState HttpGetCacheState(const HttpTransaction& t) {
   // Temporaries
   std::string s_temp;
-  unsigned long i_temp;
+  time_t u_temp;
 
   // Current time
-  unsigned long now = time(0);
+  size_t now = time(0);
 
   HttpAttributeList cache_control;
   if (t.response.hasHeader(HH_CACHE_CONTROL, &s_temp)) {
@@ -116,42 +116,44 @@ HttpCacheState HttpGetCacheState(const HttpTransaction& t) {
   }
 
   // Compute age of cache document
-  unsigned long date;
+  time_t date;
   if (!t.response.hasHeader(HH_DATE, &s_temp)
       || !HttpDateToSeconds(s_temp, &date))
     return HCS_NONE;
 
   // TODO: Timestamp when cache request sent and response received?
-  unsigned long request_time = date;
-  unsigned long response_time = date;
+  time_t request_time = date;
+  time_t response_time = date;
 
-  unsigned long apparent_age = 0;
+  time_t apparent_age = 0;
   if (response_time > date) {
     apparent_age = response_time - date;
   }
 
-  unsigned long corrected_received_age = apparent_age;
+  size_t corrected_received_age = apparent_age;
+  size_t i_temp;
   if (t.response.hasHeader(HH_AGE, &s_temp)
-      && HttpStringToInt(s_temp, &i_temp)) {
-    corrected_received_age = stdmax(apparent_age, i_temp);
+      && HttpStringToUInt(s_temp, (&i_temp))) {
+    u_temp = static_cast<time_t>(i_temp);
+    corrected_received_age = stdmax(apparent_age, u_temp);
   }
 
-  unsigned long response_delay = response_time - request_time;
-  unsigned long corrected_initial_age = corrected_received_age + response_delay;
-  unsigned long resident_time = now - response_time;
-  unsigned long current_age = corrected_initial_age + resident_time;
+  size_t response_delay = response_time - request_time;
+  size_t corrected_initial_age = corrected_received_age + response_delay;
+  size_t resident_time = now - response_time;
+  size_t current_age = corrected_initial_age + resident_time;
 
   // Compute lifetime of document
-  unsigned long lifetime;
+  size_t lifetime;
   if (HttpHasAttribute(cache_control, "max-age", &s_temp)) {
     lifetime = atoi(s_temp.c_str());
   } else if (t.response.hasHeader(HH_EXPIRES, &s_temp)
-             && HttpDateToSeconds(s_temp, &i_temp)) {
-    lifetime = i_temp - date;
+             && HttpDateToSeconds(s_temp, &u_temp)) {
+    lifetime = u_temp - date;
   } else if (t.response.hasHeader(HH_LAST_MODIFIED, &s_temp)
-             && HttpDateToSeconds(s_temp, &i_temp)) {
+             && HttpDateToSeconds(s_temp, &u_temp)) {
     // TODO: Issue warning 113 if age > 24 hours
-    lifetime = (now - i_temp) / 10;
+    lifetime = static_cast<size_t>(now - u_temp) / 10;
   } else {
     return HCS_STALE;
   }
@@ -180,7 +182,7 @@ HttpResponseValidatorLevel(const HttpResponseData& response) {
     return is_weak ? HVS_WEAK : HVS_STRONG;
   }
   if (response.hasHeader(HH_LAST_MODIFIED, &value)) {
-    unsigned long last_modified, date;
+    time_t last_modified, date;
     if (HttpDateToSeconds(value, &last_modified)
         && response.hasHeader(HH_DATE, &value)
         && HttpDateToSeconds(value, &date)
@@ -285,7 +287,8 @@ HttpClient::HttpClient(const std::string& agent, StreamPool* pool,
       transaction_(transaction), free_transaction_(false),
       retries_(kDefaultRetries), attempt_(0), redirects_(0),
       redirect_action_(REDIRECT_DEFAULT),
-      uri_form_(URI_DEFAULT), cache_(NULL), cache_state_(CS_READY) {
+      uri_form_(URI_DEFAULT), cache_(NULL), cache_state_(CS_READY),
+      resolver_(NULL) {
   base_.notify(this);
   if (NULL == transaction_) {
     free_transaction_ = true;
@@ -296,6 +299,9 @@ HttpClient::HttpClient(const std::string& agent, StreamPool* pool,
 HttpClient::~HttpClient() {
   base_.notify(NULL);
   base_.abort(HE_SHUTDOWN);
+  if (resolver_) {
+    resolver_->Destroy(false);
+  }
   release();
   if (free_transaction_)
     delete transaction_;
@@ -308,6 +314,30 @@ void HttpClient::reset() {
   context_.reset();
   redirects_ = 0;
   base_.abort(HE_OPERATION_CANCELLED);
+}
+
+void HttpClient::OnResolveResult(SignalThread* thread) {
+  if (thread != resolver_) {
+    return;
+  }
+  int error = resolver_->error();
+  server_ = resolver_->address();
+  resolver_->Destroy(false);
+  resolver_ = NULL;
+  if (error != 0) {
+    LOG(LS_ERROR) << "Error " << error << " resolving name: "
+                  << server_;
+    onHttpComplete(HM_CONNECT, HE_CONNECT_FAILED);
+  } else {
+    connect();
+  }
+}
+
+void HttpClient::StartDNSLookup() {
+  resolver_ = new AsyncResolver();
+  resolver_->set_address(server_);
+  resolver_->SignalWorkDone.connect(this, &HttpClient::OnResolveResult);
+  resolver_->Start();
 }
 
 void HttpClient::set_server(const SocketAddress& address) {
@@ -384,6 +414,10 @@ void HttpClient::start() {
 
 void HttpClient::connect() {
   int stream_err;
+  if (server_.IsUnresolvedIP()) {
+    StartDNSLookup();
+    return;
+  }
   StreamInterface* stream = pool_->RequestConnectedStream(server_, &stream_err);
   if (stream == NULL) {
     ASSERT(0 != stream_err);
@@ -451,7 +485,7 @@ bool HttpClient::BeginCacheFile() {
   }
 
   scoped_ptr<StreamInterface> stream(cache_->WriteResource(id, kCacheBody));
-  if (!stream.get()) {
+  if (!stream) {
     LOG_F(LS_ERROR) << "Couldn't open body cache";
     return false;
   }
@@ -470,7 +504,7 @@ bool HttpClient::BeginCacheFile() {
 
 HttpError HttpClient::WriteCacheHeaders(const std::string& id) {
   scoped_ptr<StreamInterface> stream(cache_->WriteResource(id, kCacheHeader));
-  if (!stream.get()) {
+  if (!stream) {
     LOG_F(LS_ERROR) << "Couldn't open header cache";
     return HE_CACHE;
   }
@@ -547,7 +581,7 @@ bool HttpClient::CheckCache() {
 
 HttpError HttpClient::ReadCacheHeaders(const std::string& id, bool override) {
   scoped_ptr<StreamInterface> stream(cache_->ReadResource(id, kCacheHeader));
-  if (!stream.get()) {
+  if (!stream) {
     return HE_CACHE;
   }
 
@@ -570,7 +604,7 @@ HttpError HttpClient::ReadCacheBody(const std::string& id) {
 
   size_t data_size;
   scoped_ptr<StreamInterface> stream(cache_->ReadResource(id, kCacheBody));
-  if (!stream.get() || !stream->GetAvailable(&data_size)) {
+  if (!stream || !stream->GetAvailable(&data_size)) {
     LOG_F(LS_ERROR) << "Unavailable cache body";
     error = HE_CACHE;
   } else {
@@ -579,7 +613,7 @@ HttpError HttpClient::ReadCacheBody(const std::string& id) {
 
   if ((HE_NONE == error)
       && (HV_HEAD != request().verb)
-      && (NULL != response().document.get())) {
+      && response().document) {
     char buffer[1024 * 64];
     StreamResult result = Flow(stream.get(), buffer, ARRAY_SIZE(buffer),
                                response().document.get());
@@ -639,7 +673,7 @@ HttpError HttpClient::OnHeaderAvailable(bool ignore_data, bool chunked,
   // TODO: by default, only write response documents with a success code.
   SignalHeaderAvailable(this, !ignore_data, ignore_data ? 0 : data_size);
   if (!ignore_data && !chunked && (data_size != SIZE_UNKNOWN)
-      && response().document.get()) {
+      && response().document) {
     // Attempt to pre-allocate space for the downloaded data.
     if (!response().document->ReserveSize(data_size)) {
       return HE_OVERFLOW;
@@ -699,7 +733,7 @@ void HttpClient::onHttpComplete(HttpMode mode, HttpError err) {
     // received anything meaningful from the server, so we are eligible for a
     // retry.
     ++attempt_;
-    if (request().document.get() && !request().document->Rewind()) {
+    if (request().document && !request().document->Rewind()) {
       // Unable to replay the request document.
       err = HE_STREAM;
     } else {
@@ -732,7 +766,7 @@ void HttpClient::onHttpComplete(HttpMode mode, HttpError err) {
         request().clearHeader(HH_CONTENT_TYPE);
         request().clearHeader(HH_CONTENT_LENGTH);
         request().document.reset();
-      } else if (request().document.get() && !request().document->Rewind()) {
+      } else if (request().document && !request().document->Rewind()) {
         // Unable to replay the request document.
         ASSERT(REDIRECT_ALWAYS == redirect_action_);
         err = HE_STREAM;
@@ -761,7 +795,7 @@ void HttpClient::onHttpComplete(HttpMode mode, HttpError err) {
         context_.reset(context);
         if (res == HAR_RESPONSE) {
           request().setHeader(HH_PROXY_AUTHORIZATION, authorization);
-          if (request().document.get() && !request().document->Rewind()) {
+          if (request().document && !request().document->Rewind()) {
             err = HE_STREAM;
           } else {
             // Explicitly do not reset the HttpAuthContext

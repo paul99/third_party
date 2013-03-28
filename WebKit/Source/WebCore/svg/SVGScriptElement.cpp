@@ -47,6 +47,7 @@ END_REGISTER_ANIMATED_PROPERTIES
 inline SVGScriptElement::SVGScriptElement(const QualifiedName& tagName, Document* document, bool wasInsertedByParser, bool alreadyStarted)
     : SVGElement(tagName, document)
     , ScriptElement(this, wasInsertedByParser, alreadyStarted)
+    , m_svgLoadEventTimer(this, &SVGElement::svgLoadEventTimerFired)
 {
     ASSERT(hasTagName(SVGNames::scriptTag));
     registerAnimatedPropertiesForSVGScriptElement();
@@ -69,26 +70,26 @@ bool SVGScriptElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<QualifiedName, SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGScriptElement::parseMappedAttribute(Attribute* attr)
+void SVGScriptElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
-    if (!isSupportedAttribute(attr->name())) {
-        SVGElement::parseMappedAttribute(attr);
+    if (!isSupportedAttribute(name)) {
+        SVGElement::parseAttribute(name, value);
         return;
     }
 
-    if (attr->name() == SVGNames::typeAttr) {
-        setType(attr->value());
+    if (name == SVGNames::typeAttr) {
+        setType(value);
         return;
     }
 
-    if (attr->name() == HTMLNames::onerrorAttr) {
-        setAttributeEventListener(eventNames().errorEvent, createAttributeEventListener(this, attr));
+    if (name == HTMLNames::onerrorAttr) {
+        setAttributeEventListener(eventNames().errorEvent, createAttributeEventListener(this, name, value));
         return;
     }
 
-    if (SVGURIReference::parseMappedAttribute(attr))
+    if (SVGURIReference::parseAttribute(name, value))
         return;
-    if (SVGExternalResourcesRequired::parseMappedAttribute(attr))
+    if (SVGExternalResourcesRequired::parseAttribute(name, value))
         return;
 
     ASSERT_NOT_REACHED();
@@ -111,55 +112,36 @@ void SVGScriptElement::svgAttributeChanged(const QualifiedName& attrName)
         return;
     }
 
-    if (SVGExternalResourcesRequired::isKnownAttribute(attrName)) {
-        // Handle dynamic updates of the 'externalResourcesRequired' attribute. Only possible case: changing from 'true' to 'false'
-        // causes an immediate dispatch of the SVGLoad event. If the attribute value was 'false' before inserting the script element
-        // in the document, the SVGLoad event has already been dispatched.
-        if (!externalResourcesRequiredBaseValue() && !haveFiredLoadEvent() && !isParserInserted()) {
-            setHaveFiredLoadEvent(true);
-            ASSERT(haveLoadedRequiredResources());
-
-            sendSVGLoadEventIfPossible();
-        }
+    if (SVGExternalResourcesRequired::handleAttributeChange(this, attrName))
         return;
-    }
 
     ASSERT_NOT_REACHED();
 }
 
-void SVGScriptElement::insertedIntoDocument()
+Node::InsertionNotificationRequest SVGScriptElement::insertedInto(ContainerNode* rootParent)
 {
-    SVGElement::insertedIntoDocument();
-    ScriptElement::insertedIntoDocument();
-
-    if (isParserInserted())
-        return;
-
-    // Eventually send SVGLoad event now for the dynamically inserted script element
-    if (!externalResourcesRequiredBaseValue()) {
-        setHaveFiredLoadEvent(true);
-        sendSVGLoadEventIfPossible();
-    }
+    SVGElement::insertedInto(rootParent);
+    ScriptElement::insertedInto(rootParent);
+    if (rootParent->inDocument())
+        SVGExternalResourcesRequired::insertedIntoDocument(this);
+    return InsertionDone;
 }
 
 void SVGScriptElement::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
 {
-    ScriptElement::childrenChanged();
     SVGElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
+    ScriptElement::childrenChanged();
 }
 
-bool SVGScriptElement::isURLAttribute(Attribute* attr) const
+bool SVGScriptElement::isURLAttribute(const Attribute& attribute) const
 {
-    return attr->name() == sourceAttributeValue();
+    return attribute.name() == sourceAttributeValue();
 }
 
 void SVGScriptElement::finishParsingChildren()
 {
     SVGElement::finishParsingChildren();
-
-    // A SVGLoad event has been fired by SVGElement::finishParsingChildren.
-    if (!externalResourcesRequiredBaseValue())
-        setHaveFiredLoadEvent(true);
+    SVGExternalResourcesRequired::finishParsingChildren();
 }
 
 String SVGScriptElement::type() const
@@ -177,11 +159,6 @@ void SVGScriptElement::addSubresourceAttributeURLs(ListHashSet<KURL>& urls) cons
     SVGElement::addSubresourceAttributeURLs(urls);
 
     addSubresourceURL(urls, document()->completeURL(href()));
-}
-
-bool SVGScriptElement::haveLoadedRequiredResources()
-{
-    return !externalResourcesRequiredBaseValue() || haveFiredLoadEvent();
 }
 
 String SVGScriptElement::sourceAttributeValue() const
@@ -227,34 +204,6 @@ bool SVGScriptElement::deferAttributeValue() const
 bool SVGScriptElement::hasSourceAttribute() const
 {
     return hasAttribute(XLinkNames::hrefAttr);
-}
-
-void SVGScriptElement::dispatchLoadEvent()
-{
-    bool externalResourcesRequired = externalResourcesRequiredBaseValue();
-
-    if (isParserInserted())
-        ASSERT(externalResourcesRequired != haveFiredLoadEvent());
-    else if (haveFiredLoadEvent()) {
-        // If we've already fired an load event and externalResourcesRequired is set to 'true'
-        // externalResourcesRequired has been modified while loading the <script>. Don't dispatch twice.
-        if (externalResourcesRequired)
-            return;
-    }
-
-    // HTML and SVG differ completly in the 'onload' event handling of <script> elements.
-    // HTML fires the 'load' event after it sucessfully loaded a remote resource, otherwhise an error event.
-    // SVG fires the SVGLoad event immediately after parsing the <script> element, if externalResourcesRequired
-    // is set to 'false', otherwhise it dispatches the 'SVGLoad' event just after loading the remote resource.
-    if (externalResourcesRequired) {
-        ASSERT(!haveFiredLoadEvent());
-
-        // Dispatch SVGLoad event
-        setHaveFiredLoadEvent(true);
-        ASSERT(haveLoadedRequiredResources());
-
-        sendSVGLoadEventIfPossible();
-    }
 }
 
 PassRefPtr<Element> SVGScriptElement::cloneElementWithoutAttributesAndChildren()

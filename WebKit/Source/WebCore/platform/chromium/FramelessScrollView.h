@@ -36,7 +36,7 @@
 namespace WebCore {
 
     class FramelessScrollViewClient;
-#if ENABLE(GESTURE_RECOGNIZER)
+#if ENABLE(GESTURE_EVENTS)
     class PlatformGestureEvent;
 #endif
     class PlatformKeyboardEvent;
@@ -69,14 +69,16 @@ namespace WebCore {
 #if ENABLE(TOUCH_EVENTS)
         virtual bool handleTouchEvent(const PlatformTouchEvent&) = 0;
 #endif
-#if ENABLE(GESTURE_RECOGNIZER)
+#if ENABLE(GESTURE_EVENTS)
         virtual bool handleGestureEvent(const PlatformGestureEvent&) = 0;
 #endif
 
         // ScrollableArea public methods:
-        virtual void invalidateScrollbarRect(Scrollbar*, const IntRect&);
-        virtual bool isActive() const;
-        virtual ScrollableArea* enclosingScrollableArea() const;
+        virtual void invalidateScrollbarRect(Scrollbar*, const IntRect&) OVERRIDE;
+        virtual bool isActive() const OVERRIDE;
+        virtual ScrollableArea* enclosingScrollableArea() const OVERRIDE;
+        virtual bool scrollbarsCanBeActive() const OVERRIDE;
+        virtual IntRect scrollableAreaBoundingBox() const OVERRIDE;
 
         // Widget public methods:
         virtual void invalidateRect(const IntRect&);

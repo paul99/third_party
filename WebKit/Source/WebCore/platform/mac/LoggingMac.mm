@@ -24,8 +24,10 @@
  */
 
 #include "config.h"
-
+#include "InitializeLogging.h"
 #include "Logging.h"
+
+#if !LOG_DISABLED
 
 namespace WebCore {
 
@@ -73,6 +75,9 @@ void initializeLoggingChannelsIfNecessary()
     initializeWithUserDefault(LogPlugins);
     initializeWithUserDefault(LogArchives);
     initializeWithUserDefault(LogWebAudio);
+    initializeWithUserDefault(LogCompositing);
 }
 
 }
+
+#endif // !LOG_DISABLED

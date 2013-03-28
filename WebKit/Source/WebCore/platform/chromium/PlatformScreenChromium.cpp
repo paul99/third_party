@@ -31,53 +31,89 @@
 #include "config.h"
 #include "PlatformScreen.h"
 
+#include "FloatRect.h"
+#include "Frame.h"
 #include "FrameView.h"
-#include "IntRect.h"
-#include "PlatformSupport.h"
+#include "HostWindow.h"
+#include "Page.h"
+#include "ScrollView.h"
+#include "Settings.h"
+#include "Widget.h"
+#include <public/Platform.h>
+#include <public/WebScreenInfo.h>
 
 namespace WebCore {
 
-int screenHorizontalDPI(Widget* widget)
+static PlatformPageClient toPlatformPageClient(Widget* widget)
 {
-    return PlatformSupport::screenHorizontalDPI(widget);
-}
-
-int screenVerticalDPI(Widget* widget)
-{
-    return PlatformSupport::screenVerticalDPI(widget);
+    if (!widget)
+        return 0;
+    ScrollView* root = widget->root();
+    if (!root)
+        return 0;
+    HostWindow* hostWindow = root->hostWindow();
+    if (!hostWindow)
+        return 0;
+    return hostWindow->platformPageClient();
 }
 
 int screenDepth(Widget* widget)
 {
-    return PlatformSupport::screenDepth(widget);
+    PlatformPageClient client = toPlatformPageClient(widget);
+    if (!client)
+        return 0;
+    return client->screenInfo().depth;
 }
 
 int screenDepthPerComponent(Widget* widget)
 {
-    return PlatformSupport::screenDepthPerComponent(widget);
+    PlatformPageClient client = toPlatformPageClient(widget);
+    if (!client)
+        return 0;
+    return client->screenInfo().depthPerComponent;
 }
 
 bool screenIsMonochrome(Widget* widget)
 {
-    return PlatformSupport::screenIsMonochrome(widget);
+    PlatformPageClient client = toPlatformPageClient(widget);
+    if (!client)
+        return false;
+    return client->screenInfo().isMonochrome;
 }
 
-FloatRect screenRect(FrameView* frameView)
+// On Chrome for Android, the screenInfo rects are in physical screen pixels
+// instead of density independent (UI) pixels, and must be scaled down.
+static FloatRect toUserSpace(FloatRect rect, Widget* widget)
 {
-    return PlatformSupport::screenRect(frameView);
+    if (widget->isFrameView()) {
+        Page* page = static_cast<FrameView*>(widget)->frame()->page();
+        if (page && !page->settings()->applyDeviceScaleFactorInCompositor())
+            rect.scale(1 / page->deviceScaleFactor());
+    }
+    return rect;
 }
 
-FloatRect screenAvailableRect(FrameView* frameView)
+FloatRect screenRect(Widget* widget)
 {
-    return PlatformSupport::screenAvailableRect(frameView);
+    PlatformPageClient client = toPlatformPageClient(widget);
+    if (!client)
+        return FloatRect();
+    return toUserSpace(IntRect(client->screenInfo().rect), widget);
 }
 
-#if OS(ANDROID)
-float defaultDevicePixelRatio(Widget* widget)
+FloatRect screenAvailableRect(Widget* widget)
 {
-    // devicePixelRatio is de facto relative to 160dpi. See also computeViewportAttributes in ViewportArguments.cpp.
-    return screenHorizontalDPI(widget) / 160.0f;
+    PlatformPageClient client = toPlatformPageClient(widget);
+    if (!client)
+        return FloatRect();
+    return toUserSpace(IntRect(client->screenInfo().availableRect), widget);
 }
-#endif
+
+void screenColorProfile(ColorProfile& toProfile)
+{
+    WebKit::WebVector<char> profile;
+    WebKit::Platform::current()->screenColorProfile(&profile);
+    toProfile.append(profile.data(), profile.size());
+}
 
 } // namespace WebCore

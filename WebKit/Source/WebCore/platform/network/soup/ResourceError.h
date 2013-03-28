@@ -27,20 +27,40 @@
 #define ResourceError_h
 
 #include "ResourceErrorBase.h"
+#include <wtf/gobject/GRefPtr.h>
+
+typedef struct _GTlsCertificate GTlsCertificate;
+typedef struct _SoupRequest SoupRequest;
+typedef struct _SoupMessage SoupMessage;
 
 namespace WebCore {
 
 class ResourceError : public ResourceErrorBase
 {
 public:
-    ResourceError()
+    ResourceError(const String& domain, int errorCode, const String& failingURL, const String& localizedDescription)
+        : ResourceErrorBase(domain, errorCode, failingURL, localizedDescription)
+        , m_tlsErrors(0)
     {
     }
 
-    ResourceError(const String& domain, int errorCode, const String& failingURL, const String& localizedDescription)
-        : ResourceErrorBase(domain, errorCode, failingURL, localizedDescription)
+    ResourceError()
+        : m_tlsErrors(0)
     {
     }
+
+    static ResourceError httpError(SoupMessage*, GError*, SoupRequest*);
+    static ResourceError genericIOError(GError*, SoupRequest*);
+    static ResourceError tlsError(SoupRequest*, unsigned tlsErrors, GTlsCertificate*);
+    static ResourceError timeoutError(const String& failingURL);
+    static ResourceError authenticationError(SoupMessage*);
+
+    unsigned tlsErrors() const { return m_tlsErrors; }
+    GTlsCertificate* certificate() const { return m_certificate.get(); }
+
+private:
+    unsigned m_tlsErrors;
+    GRefPtr<GTlsCertificate> m_certificate;
 };
 
 }

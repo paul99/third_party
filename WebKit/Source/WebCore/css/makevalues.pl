@@ -3,7 +3,7 @@
 #   This file is part of the WebKit project
 #
 #   Copyright (C) 1999 Waldo Bastian (bastian@kde.org)
-#   Copyright (C) 2007 Apple Inc. All rights reserved.
+#   Copyright (C) 2007, 2012 Apple Inc. All rights reserved.
 #   Copyright (C) 2008 Nokia Corporation and/or its subsidiary(-ies)
 #   Copyright (C) 2010 Andras Becsi (abecsi@inf.u-szeged.hu), University of Szeged
 #
@@ -39,6 +39,8 @@ my @duplicates = ();
 my @names = ();
 foreach (@NAMES) {
   next if (m/(^\s*$)/);
+  next if (/^#/);
+
   # Input may use a different EOL sequence than $/, so avoid chomp.
   $_ =~ s/[\r\n]+$//g;
   # CSS values need to be lower case.
@@ -128,7 +130,8 @@ print HEADER << "EOF";
 
 namespace WebCore {
 
-const int CSSValueInvalid = 0;
+enum CSSValueID {
+    CSSValueInvalid = 0,
 EOF
 
 my $i = 1;
@@ -136,12 +139,14 @@ my $maxLen = 0;
 foreach my $name (@names) {
   my $id = $name;
   $id =~ s/(^[^-])|-(.)/uc($1||$2)/ge;
-  print HEADER "const int CSSValue" . $id . " = " . $i . ";\n";
+  print HEADER "    CSSValue" . $id . " = " . $i . ",\n";
   $i = $i + 1;
   if (length($name) > $maxLen) {
     $maxLen = length($name);
   }
 }
+
+print HEADER "};\n\n";
 print HEADER "const int numCSSValueKeywords = " . $i . ";\n";
 print HEADER "const size_t maxCSSValueKeywordLength = " . $maxLen . ";\n";
 print HEADER << "EOF";
@@ -155,4 +160,5 @@ const char* getValueName(unsigned short id);
 EOF
 close HEADER;
 
-system("gperf --key-positions=\"*\" -D -n -s 2 CSSValueKeywords.gperf --output-file=CSSValueKeywords.cpp") == 0 || die "calling gperf failed: $?";
+my $gperf = $ENV{GPERF} ? $ENV{GPERF} : "gperf";
+system("\"$gperf\" --key-positions=\"*\" -D -n -s 2 CSSValueKeywords.gperf --output-file=CSSValueKeywords.cpp") == 0 || die "calling gperf failed: $?";

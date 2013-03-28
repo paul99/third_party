@@ -32,8 +32,12 @@ class QTouchEvent;
 QT_END_NAMESPACE
 #endif
 
-#if PLATFORM(EFL)
-typedef struct _Eina_List Eina_List;
+#if PLATFORM(BLACKBERRY)
+namespace BlackBerry {
+namespace Platform {
+class TouchEvent;
+};
+};
 #endif
 
 namespace WebCore {
@@ -43,19 +47,36 @@ class PlatformTouchEvent : public PlatformEvent {
 public:
     PlatformTouchEvent()
         : PlatformEvent(PlatformEvent::TouchStart)
+#if PLATFORM(BLACKBERRY)
+        , m_rotation(0)
+        , m_scale(1)
+        , m_doubleTap(false)
+        , m_touchHold(false)
+#endif
     {
     }
 
-#if PLATFORM(QT)
-    PlatformTouchEvent(QTouchEvent*);
-#elif PLATFORM(EFL)
-    PlatformTouchEvent(Eina_List*, const IntPoint, PlatformEvent::Type, int metaState);
+#if PLATFORM(BLACKBERRY)
+    explicit PlatformTouchEvent(BlackBerry::Platform::TouchEvent*);
 #endif
 
     const Vector<PlatformTouchPoint>& touchPoints() const { return m_touchPoints; }
 
+#if PLATFORM(BLACKBERRY)
+    float rotation() const { return m_rotation; }
+    float scale() const { return m_scale; }
+    bool doubleTap() const { return m_doubleTap; }
+    bool touchHold() const { return m_touchHold; }
+#endif
+
 protected:
     Vector<PlatformTouchPoint> m_touchPoints;
+#if PLATFORM(BLACKBERRY)
+    float m_rotation;
+    float m_scale;
+    bool m_doubleTap;
+    bool m_touchHold;
+#endif
 };
 
 }

@@ -30,7 +30,7 @@
 
 #include "IDBKeyPath.h"
 #include "platform/WebString.h"
-#include "platform/WebVector.h"
+#include <public/WebVector.h>
 #include <wtf/Vector.h>
 
 using namespace WebCore;
@@ -39,27 +39,26 @@ namespace WebKit {
 
 WebIDBKeyPath WebIDBKeyPath::create(const WebString& keyPath)
 {
-    WTF::Vector<WTF::String> idbElements;
-    IDBKeyPathParseError idbError;
-    IDBParseKeyPath(keyPath, idbElements, idbError);
-    return WebIDBKeyPath(idbElements, static_cast<int>(idbError));
+    return WebIDBKeyPath(IDBKeyPath(keyPath));
 }
 
-WebIDBKeyPath::WebIDBKeyPath(const WTF::Vector<WTF::String>& elements, int parseError)
-    : m_private(new WTF::Vector<WTF::String>(elements))
-    , m_parseError(parseError)
+WebIDBKeyPath WebIDBKeyPath::create(const WebVector<WebString>& keyPath)
 {
+    Vector<String> strings;
+    for (size_t i = 0; i < keyPath.size(); ++i)
+        strings.append(keyPath[i]);
+    return WebIDBKeyPath(IDBKeyPath(strings));
 }
 
-int WebIDBKeyPath::parseError() const
+WebIDBKeyPath WebIDBKeyPath::createNull()
 {
-    return m_parseError;
+    return WebIDBKeyPath(IDBKeyPath());
 }
 
 void WebIDBKeyPath::assign(const WebIDBKeyPath& keyPath)
 {
-    m_parseError = keyPath.m_parseError;
-    m_private.reset(new WTF::Vector<WTF::String>(keyPath));
+    ASSERT(keyPath.m_private.get());
+    m_private.reset(new IDBKeyPath(keyPath));
 }
 
 void WebIDBKeyPath::reset()
@@ -67,9 +66,50 @@ void WebIDBKeyPath::reset()
     m_private.reset(0);
 }
 
-WebIDBKeyPath::operator const WTF::Vector<WTF::String, 0>&() const
+bool WebIDBKeyPath::isValid() const
 {
-    return *m_private.get();
+    ASSERT(m_private.get());
+    return m_private->isValid();
+}
+
+WebIDBKeyPath::Type WebIDBKeyPath::type() const
+{
+    ASSERT(m_private.get());
+    return Type(m_private->type());
+}
+
+
+WebVector<WebString> WebIDBKeyPath::array() const
+{
+    ASSERT(m_private.get());
+    ASSERT(m_private->type() == IDBKeyPath::ArrayType);
+    return m_private->array();
+}
+
+WebString WebIDBKeyPath::string() const
+{
+    ASSERT(m_private.get());
+    ASSERT(m_private->type() == IDBKeyPath::StringType);
+    return m_private->string();
+}
+
+WebIDBKeyPath::WebIDBKeyPath(const WebCore::IDBKeyPath& value)
+    : m_private(new IDBKeyPath(value))
+{
+    ASSERT(m_private.get());
+}
+
+WebIDBKeyPath& WebIDBKeyPath::operator=(const WebCore::IDBKeyPath& value)
+{
+    ASSERT(m_private.get());
+    m_private.reset(new IDBKeyPath(value));
+    return *this;
+}
+
+WebIDBKeyPath::operator const WebCore::IDBKeyPath&() const
+{
+    ASSERT(m_private.get());
+    return *(m_private.get());
 }
 
 } // namespace WebKit

@@ -161,31 +161,27 @@ void MouseRelatedEvent::computeRelativePosition()
     m_offsetLocation = m_pageLocation;
 
     // Must have an updated render tree for this math to work correctly.
-    targetNode->document()->updateStyleIfNeeded();
+    targetNode->document()->updateLayoutIgnorePendingStylesheets();
 
     // Adjust offsetLocation to be relative to the target's position.
-    if (!isSimulated()) {
-        if (RenderObject* r = targetNode->renderer()) {
-            FloatPoint localPos = r->absoluteToLocal(absoluteLocation(), false, true);
-            m_offsetLocation = roundedLayoutPoint(localPos);
-            float scaleFactor = 1 / (pageZoomFactor(this) * frameScaleFactor(this));
-            if (scaleFactor != 1.0f)
-                m_offsetLocation.scale(scaleFactor, scaleFactor);
-        }
+    if (RenderObject* r = targetNode->renderer()) {
+        FloatPoint localPos = r->absoluteToLocal(absoluteLocation(), UseTransforms);
+        m_offsetLocation = roundedLayoutPoint(localPos);
+        float scaleFactor = 1 / (pageZoomFactor(this) * frameScaleFactor(this));
+        if (scaleFactor != 1.0f)
+            m_offsetLocation.scale(scaleFactor, scaleFactor);
     }
 
     // Adjust layerLocation to be relative to the layer.
-    // FIXME: We're pretty sure this is the wrong definition of "layer."
-    // Our RenderLayer is a more modern concept, and layerX/Y is some
-    // other notion about groups of elements (left over from the Netscape 4 days?);
-    // we should test and fix this.
+    // FIXME: event.layerX and event.layerY are poorly defined,
+    // and probably don't always correspond to RenderLayer offsets.
+    // https://bugs.webkit.org/show_bug.cgi?id=21868
     Node* n = targetNode;
     while (n && !n->renderer())
         n = n->parentNode();
 
     RenderLayer* layer;
     if (n && (layer = n->renderer()->enclosingLayer())) {
-        layer->updateLayerPosition();
         for (; layer; layer = layer->parent()) {
             m_layerLocation -= toLayoutSize(layer->location());
         }
@@ -196,7 +192,6 @@ void MouseRelatedEvent::computeRelativePosition()
 
 int MouseRelatedEvent::layerX()
 {
-    warnDeprecatedLayerXYUsage();
     if (!m_hasCachedRelativePosition)
         computeRelativePosition();
     return m_layerLocation.x();
@@ -204,7 +199,6 @@ int MouseRelatedEvent::layerX()
 
 int MouseRelatedEvent::layerY()
 {
-    warnDeprecatedLayerXYUsage();
     if (!m_hasCachedRelativePosition)
         computeRelativePosition();
     return m_layerLocation.y();
@@ -214,14 +208,14 @@ int MouseRelatedEvent::offsetX()
 {
     if (!m_hasCachedRelativePosition)
         computeRelativePosition();
-    return m_offsetLocation.x();
+    return roundToInt(m_offsetLocation.x());
 }
 
 int MouseRelatedEvent::offsetY()
 {
     if (!m_hasCachedRelativePosition)
         computeRelativePosition();
-    return m_offsetLocation.y();
+    return roundToInt(m_offsetLocation.y());
 }
 
 int MouseRelatedEvent::pageX() const

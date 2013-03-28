@@ -28,8 +28,12 @@
 #include "KURL.h"
 #include "PopupMenu.h"
 
-#if ENABLE(NOTIFICATIONS)
-#include "NotificationPresenter.h"
+#if ENABLE(INPUT_TYPE_COLOR)
+#include "ColorChooser.h"
+#endif
+
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
+#include "NotificationClient.h"
 #endif
 
 typedef struct _Evas_Object Evas_Object;
@@ -81,7 +85,7 @@ public:
 
     virtual void setResizable(bool);
 
-    virtual void addMessageToConsole(MessageSource, MessageType, MessageLevel, const String& message,
+    virtual void addMessageToConsole(MessageSource, MessageLevel, const String& message,
                                      unsigned int lineNumber, const String& sourceID);
 
     virtual bool canRunBeforeUnloadConfirmPanel();
@@ -114,16 +118,14 @@ public:
     virtual void exceededDatabaseQuota(Frame*, const String&);
 #endif
 
-#if ENABLE(NOTIFICATIONS)
-    virtual WebCore::NotificationPresenter* notificationPresenter() const;
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
+    virtual WebCore::NotificationClient* notificationPresenter() const;
 #endif
 
     virtual void reachedMaxAppCacheSize(int64_t spaceNeeded);
     virtual void reachedApplicationCacheOriginQuota(SecurityOrigin*, int64_t totalSpaceNeeded);
 
-#if ENABLE(CONTEXT_MENUS)
-    virtual void showContextMenu() { }
-#endif
+    virtual void populateVisitedLinks();
 
 #if ENABLE(TOUCH_EVENTS)
     virtual void needTouchEvents(bool);
@@ -132,7 +134,7 @@ public:
 #if USE(ACCELERATED_COMPOSITING)
     virtual void attachRootGraphicsLayer(Frame*, GraphicsLayer*);
     virtual void setNeedsOneShotDrawingSynchronization();
-    virtual void scheduleCompositingLayerSync();
+    virtual void scheduleCompositingLayerFlush();
     virtual CompositingTriggerFlags allowedCompositingTriggers() const;
 #endif
 
@@ -140,6 +142,12 @@ public:
     virtual bool supportsFullScreenForElement(const WebCore::Element*, bool withKeyboard);
     virtual void enterFullScreenForElement(WebCore::Element*);
     virtual void exitFullScreenForElement(WebCore::Element*);
+#endif
+
+#if ENABLE(INPUT_TYPE_COLOR)
+    virtual PassOwnPtr<ColorChooser> createColorChooser(ColorChooserClient*, const Color&);
+    virtual void removeColorChooser();
+    virtual void updateColorChooser(const Color&);
 #endif
 
     virtual void runOpenPanel(Frame*, PassRefPtr<FileChooser>);
@@ -151,8 +159,6 @@ public:
 
     virtual void scrollRectIntoView(const IntRect&) const { }
 
-    virtual void requestGeolocationPermissionForFrame(Frame*, Geolocation*);
-    virtual void cancelGeolocationPermissionRequestForFrame(Frame*, Geolocation*);
     virtual void cancelGeolocationPermissionForFrame(Frame*, Geolocation*);
 
     virtual void invalidateContents(const IntRect&, bool);
@@ -174,8 +180,16 @@ public:
     virtual bool shouldRubberBandInDirection(WebCore::ScrollDirection) const { return true; }
     virtual void numWheelEventHandlersChanged(unsigned) { }
 
+#if USE(TILED_BACKING_STORE)
+    virtual void delegatedScrollRequested(const IntPoint& scrollPoint);
+    virtual IntRect visibleRectForTiledBackingStore() const;
+#endif
+
     Evas_Object* m_view;
     KURL m_hoveredLinkURL;
+#if ENABLE(FULLSCREEN_API)
+    RefPtr<Element> m_fullScreenElement;
+#endif
 };
 }
 

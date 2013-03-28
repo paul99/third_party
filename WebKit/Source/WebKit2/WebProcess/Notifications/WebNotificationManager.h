@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,18 +26,13 @@
 #ifndef WebNotificationManager_h
 #define WebNotificationManager_h
 
-#include "MessageID.h"
-#include <WebCore/NotificationPresenter.h>
+#include "MessageReceiver.h"
+#include <WebCore/NotificationClient.h>
 #include <wtf/HashMap.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/RefPtr.h>
 #include <wtf/Vector.h>
 #include <wtf/text/StringHash.h>
-
-namespace CoreIPC {
-class ArgumentDecoder;
-class Connection;
-}
 
 namespace WebCore {
 class Notification;
@@ -49,7 +44,7 @@ namespace WebKit {
 class WebPage;
 class WebProcess;
 
-class WebNotificationManager {
+class WebNotificationManager : private CoreIPC::MessageReceiver {
     WTF_MAKE_NONCOPYABLE(WebNotificationManager);
 public:
     explicit WebNotificationManager(WebProcess*);
@@ -59,32 +54,45 @@ public:
     
     bool show(WebCore::Notification*, WebPage*);
     void cancel(WebCore::Notification*, WebPage*);
+    void clearNotifications(WebCore::ScriptExecutionContext*, WebPage*);
     // This callback comes from WebCore, not messaged from the UI process.
     void didDestroyNotification(WebCore::Notification*, WebPage*);
 
-    void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
-    
+    void didUpdateNotificationDecision(const String& originString, bool allowed);
+
     // Looks in local cache for permission. If not found, returns DefaultDenied.
-    WebCore::NotificationPresenter::Permission policyForOrigin(WebCore::SecurityOrigin*) const;
+    WebCore::NotificationClient::Permission policyForOrigin(WebCore::SecurityOrigin*) const;
+
+    void removeAllPermissionsForTesting();
+    uint64_t notificationIDForTesting(WebCore::Notification*);
 
 private:
+    // CoreIPC::MessageReceiver
+    void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&) OVERRIDE;
+
     // Implemented in generated WebNotificationManagerMessageReceiver.cpp
-    void didReceiveWebNotificationManagerMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+    void didReceiveWebNotificationManagerMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
     
     void didShowNotification(uint64_t notificationID);
     void didClickNotification(uint64_t notificationID);
     void didCloseNotifications(const Vector<uint64_t>& notificationIDs);
-    void didUpdateNotificationDecision(const String& originString, bool allowed);
     void didRemoveNotificationDecisions(const Vector<String>& originStrings);
+    
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
+    void removeNotificationFromContextMap(uint64_t notificationID, WebCore::Notification*);
+#endif
 
     WebProcess* m_process;
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     typedef HashMap<RefPtr<WebCore::Notification>, uint64_t> NotificationMap;
     NotificationMap m_notificationMap;
     
     typedef HashMap<uint64_t, RefPtr<WebCore::Notification> > NotificationIDMap;
     NotificationIDMap m_notificationIDMap;
+    
+    typedef HashMap<RefPtr<WebCore::ScriptExecutionContext>, Vector<uint64_t> > NotificationContextMap;
+    NotificationContextMap m_notificationContextMap;
     
     HashMap<String, bool> m_permissionsMap;
 #endif

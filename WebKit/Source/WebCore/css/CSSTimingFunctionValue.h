@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2008, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,20 +31,7 @@
 
 namespace WebCore {
 
-class CSSTimingFunctionValue : public CSSValue {
-public:
-    bool isLinearTimingFunctionValue() const { return classType() == LinearTimingFunctionClass; }
-    bool isCubicBezierTimingFunctionValue() const { return classType() == CubicBezierTimingFunctionClass; }
-    bool isStepsTimingFunctionValue() const { return classType() == StepsTimingFunctionClass; }
-
-protected:
-    CSSTimingFunctionValue(ClassType classType)
-        : CSSValue(classType)
-    {
-    }
-};
-
-class CSSLinearTimingFunctionValue : public CSSTimingFunctionValue {
+class CSSLinearTimingFunctionValue : public CSSValue {
 public:
     static PassRefPtr<CSSLinearTimingFunctionValue> create()
     {
@@ -53,14 +40,16 @@ public:
 
     String customCssText() const;
 
+    void reportDescendantMemoryUsage(MemoryObjectInfo*) const;
+
 private:
     CSSLinearTimingFunctionValue()
-        : CSSTimingFunctionValue(LinearTimingFunctionClass)
+        : CSSValue(LinearTimingFunctionClass)
     {
     }
 };
 
-class CSSCubicBezierTimingFunctionValue : public CSSTimingFunctionValue {
+class CSSCubicBezierTimingFunctionValue : public CSSValue {
 public:
     static PassRefPtr<CSSCubicBezierTimingFunctionValue> create(double x1, double y1, double x2, double y2)
     {
@@ -74,9 +63,11 @@ public:
     double x2() const { return m_x2; }
     double y2() const { return m_y2; }
 
+    void reportDescendantMemoryUsage(MemoryObjectInfo*) const;
+
 private:
     CSSCubicBezierTimingFunctionValue(double x1, double y1, double x2, double y2)
-        : CSSTimingFunctionValue(CubicBezierTimingFunctionClass)
+        : CSSValue(CubicBezierTimingFunctionClass)
         , m_x1(x1)
         , m_y1(y1)
         , m_x2(x2)
@@ -90,7 +81,7 @@ private:
     double m_y2;
 };
 
-class CSSStepsTimingFunctionValue : public CSSTimingFunctionValue {
+class CSSStepsTimingFunctionValue : public CSSValue {
 public:
     static PassRefPtr<CSSStepsTimingFunctionValue> create(int steps, bool stepAtStart)
     {
@@ -102,9 +93,11 @@ public:
 
     String customCssText() const;
 
+    void reportDescendantMemoryUsage(MemoryObjectInfo*) const;
+
 private:
     CSSStepsTimingFunctionValue(int steps, bool stepAtStart)
-        : CSSTimingFunctionValue(StepsTimingFunctionClass)
+        : CSSValue(StepsTimingFunctionClass)
         , m_steps(steps)
         , m_stepAtStart(stepAtStart)
     {

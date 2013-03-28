@@ -348,6 +348,74 @@
 			Name="DerivedSources"
 			>
 			<File
+				RelativePath="$(ConfigurationBuildDir)\obj\WebCore\DerivedSources\JSMallocStatistics.cpp"
+				>
+				<FileConfiguration
+					Name="Debug|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+						DisableSpecificWarnings="4065;4273;4565;4701;4702"
+						ForcedIncludeFiles="$(NOINHERIT)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+						DisableSpecificWarnings="4065;4273;4565;4701;4702"
+						ForcedIncludeFiles="$(NOINHERIT)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug_Cairo_CFLite|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+						DisableSpecificWarnings="4065;4273;4565;4701;4702"
+						ForcedIncludeFiles="$(NOINHERIT)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release_Cairo_CFLite|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+						DisableSpecificWarnings="4065;4273;4565;4701;4702"
+						ForcedIncludeFiles="$(NOINHERIT)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug_All|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+						DisableSpecificWarnings="4065;4273;4565;4701;4702"
+						ForcedIncludeFiles="$(NOINHERIT)"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Production|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+						DisableSpecificWarnings="4065;4273;4565;4701;4702"
+						ForcedIncludeFiles="$(NOINHERIT)"
+					/>
+				</FileConfiguration>
+			</File>
+			<File
+				RelativePath="$(ConfigurationBuildDir)\obj\WebCore\DerivedSources\JSMallocStatistics.h"
+				>
+			</File>
+			<File
 				RelativePath="$(ConfigurationBuildDir)\obj\WebCore\DerivedSources\JSInternals.cpp"
 				>
 				<FileConfiguration
@@ -487,6 +555,10 @@
 		<Filter
 			Name="testing"
 			>
+			<File
+				RelativePath="..\testing\MallocStatistics.h"
+				>
+			</File>
 			<File
 				RelativePath="..\testing\Internals.cpp"
 				>
@@ -689,74 +761,6 @@
 			</File>
 			<File
 				RelativePath="..\testing\js\WebCoreTestSupport.h"
-				>
-			</File>
-			<File
-				RelativePath="..\testing\js\JSInternalsCustom.cpp"
-				>
-				<FileConfiguration
-					Name="Debug|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="0"
-						DisableSpecificWarnings="4065;4273;4565;4701;4702"
-						ForcedIncludeFiles="$(NOINHERIT)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="0"
-						DisableSpecificWarnings="4065;4273;4565;4701;4702"
-						ForcedIncludeFiles="$(NOINHERIT)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Debug_Cairo_CFLite|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="0"
-						DisableSpecificWarnings="4065;4273;4565;4701;4702"
-						ForcedIncludeFiles="$(NOINHERIT)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Release_Cairo_CFLite|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="0"
-						DisableSpecificWarnings="4065;4273;4565;4701;4702"
-						ForcedIncludeFiles="$(NOINHERIT)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Debug_All|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="0"
-						DisableSpecificWarnings="4065;4273;4565;4701;4702"
-						ForcedIncludeFiles="$(NOINHERIT)"
-					/>
-				</FileConfiguration>
-				<FileConfiguration
-					Name="Production|Win32"
-					>
-					<Tool
-						Name="VCCLCompilerTool"
-						UsePrecompiledHeader="0"
-						DisableSpecificWarnings="4065;4273;4565;4701;4702"
-						ForcedIncludeFiles="$(NOINHERIT)"
-					/>
-				</FileConfiguration>
-			</File>
-			<File
-				RelativePath="..\testing\js\JSInternalsCustom.h"
 				>
 			</File>
 		</Filter>

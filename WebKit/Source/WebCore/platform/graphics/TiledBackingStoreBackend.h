@@ -22,8 +22,8 @@
 
 #if USE(TILED_BACKING_STORE)
 
-#include "PassOwnPtr.h"
 #include "Tile.h"
+#include <wtf/PassOwnPtr.h>
 
 namespace WebCore {
 
@@ -31,6 +31,7 @@ class TiledBackingStore;
 class TiledBackingStoreBackend;
 
 class TiledBackingStoreBackend {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     static PassOwnPtr<TiledBackingStoreBackend> create() { return adoptPtr(new TiledBackingStoreBackend); }
     virtual ~TiledBackingStoreBackend() { }

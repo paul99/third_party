@@ -43,6 +43,7 @@
 #include <vector>
 
 #include "talk/base/basictypes.h"
+#include "talk/base/byteorder.h"
 #ifdef WIN32
 #include "talk/base/win32.h"
 #endif
@@ -67,7 +68,7 @@ class IPAddress {
 
   explicit IPAddress(uint32 ip_in_host_byte_order) : family_(AF_INET) {
     memset(&u_, 0, sizeof(u_));
-    u_.ip4.s_addr = htonl(ip_in_host_byte_order);
+    u_.ip4.s_addr = HostToNetwork32(ip_in_host_byte_order);
   }
 
   IPAddress(const IPAddress &other) : family_(other.family_) {
@@ -117,13 +118,25 @@ class IPAddress {
   } u_;
 };
 
-bool IPFromHostEnt(hostent* hostEnt, IPAddress* out);
-bool IPFromHostEnt(hostent* hostEnt, int idx, IPAddress* out);
+bool IPFromAddrInfo(struct addrinfo* info, IPAddress* out);
 bool IPFromString(const std::string& str, IPAddress* out);
 bool IPIsAny(const IPAddress& ip);
 bool IPIsLoopback(const IPAddress& ip);
 bool IPIsPrivate(const IPAddress& ip);
+bool IPIsUnspec(const IPAddress& ip);
 size_t HashIP(const IPAddress& ip);
+
+// These are only really applicable for IPv6 addresses.
+bool IPIs6Bone(const IPAddress& ip);
+bool IPIs6To4(const IPAddress& ip);
+bool IPIsSiteLocal(const IPAddress& ip);
+bool IPIsTeredo(const IPAddress& ip);
+bool IPIsULA(const IPAddress& ip);
+bool IPIsV4Compatibility(const IPAddress& ip);
+bool IPIsV4Mapped(const IPAddress& ip);
+
+// Returns the precedence value for this IP as given in RFC3484.
+int IPAddressPrecedence(const IPAddress& ip);
 
 // Returns 'ip' truncated to be 'length' bits long.
 IPAddress TruncateIP(const IPAddress& ip, int length);

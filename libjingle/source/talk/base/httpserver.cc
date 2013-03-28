@@ -2,26 +2,26 @@
  * libjingle
  * Copyright 2004--2005, Google Inc.
  *
- * Redistribution and use in source and binary forms, with or without 
+ * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- *  1. Redistributions of source code must retain the above copyright notice, 
+ *  1. Redistributions of source code must retain the above copyright notice,
  *     this list of conditions and the following disclaimer.
  *  2. Redistributions in binary form must reproduce the above copyright notice,
  *     this list of conditions and the following disclaimer in the documentation
  *     and/or other materials provided with the distribution.
- *  3. The name of the author may not be used to endorse or promote products 
+ *  3. The name of the author may not be used to endorse or promote products
  *     derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF 
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
- * EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
+ * EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
  * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR 
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF 
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
@@ -134,9 +134,9 @@ HttpServer::Remove(int connection_id) {
 // HttpServer::Connection
 ///////////////////////////////////////////////////////////////////////////////
 
-HttpServer::Connection::Connection(int connection_id, HttpServer* server) 
+HttpServer::Connection::Connection(int connection_id, HttpServer* server)
   : connection_id_(connection_id), server_(server),
-    current_(NULL), signalling_(false), close_(false) { 
+    current_(NULL), signalling_(false), close_(false) {
 }
 
 HttpServer::Connection::~Connection() {
@@ -147,7 +147,7 @@ HttpServer::Connection::~Connection() {
 
 void
 HttpServer::Connection::BeginProcess(StreamInterface* stream) {
-  base_.notify(this); 
+  base_.notify(this);
   base_.attach(stream);
   current_ = new HttpServerTransaction(connection_id_);
   if (base_.mode() != HM_CONNECT)
@@ -189,7 +189,7 @@ HttpServer::Connection::InitiateClose(bool force) {
 //
 // IHttpNotify Implementation
 //
-  
+
 HttpError
 HttpServer::Connection::onHttpHeaderComplete(bool chunked, size_t& data_size) {
   if (data_size == SIZE_UNKNOWN) {
@@ -247,9 +247,7 @@ HttpServer::Connection::onHttpClosed(HttpError err) {
 // HttpListenServer
 ///////////////////////////////////////////////////////////////////////////////
 
-HttpListenServer::HttpListenServer()
-: listener_(Thread::Current()->socketserver()->CreateAsyncSocket(SOCK_STREAM)) {
-  listener_->SignalReadEvent.connect(this, &HttpListenServer::OnReadEvent);
+HttpListenServer::HttpListenServer() {
   SignalConnectionClosed.connect(this, &HttpListenServer::OnConnectionClosed);
 }
 
@@ -257,6 +255,14 @@ HttpListenServer::~HttpListenServer() {
 }
 
 int HttpListenServer::Listen(const SocketAddress& address) {
+  AsyncSocket* sock =
+      Thread::Current()->socketserver()->CreateAsyncSocket(address.family(),
+                                                           SOCK_STREAM);
+  if (!sock) {
+    return SOCKET_ERROR;
+  }
+  listener_.reset(sock);
+  listener_->SignalReadEvent.connect(this, &HttpListenServer::OnReadEvent);
   if ((listener_->Bind(address) != SOCKET_ERROR) &&
       (listener_->Listen(5) != SOCKET_ERROR))
     return 0;
@@ -264,16 +270,22 @@ int HttpListenServer::Listen(const SocketAddress& address) {
 }
 
 bool HttpListenServer::GetAddress(SocketAddress* address) const {
+  if (!listener_) {
+    return false;
+  }
   *address = listener_->GetLocalAddress();
   return !address->IsNil();
 }
 
 void HttpListenServer::StopListening() {
-  listener_->Close();
+  if (listener_) {
+    listener_->Close();
+  }
 }
 
 void HttpListenServer::OnReadEvent(AsyncSocket* socket) {
   ASSERT(socket == listener_.get());
+  ASSERT(listener_);
   AsyncSocket* incoming = listener_->Accept(NULL);
   if (incoming) {
     StreamInterface* stream = new SocketStream(incoming);

@@ -25,30 +25,30 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "talk/base/systeminfo.h"
+
 #ifdef WIN32
-#include "talk/base/scoped_ptr.h"
-#include "talk/base/win32.h"  // first because it brings in win32 stuff
+#include "talk/base/win32.h"  // NOLINT first because it brings in win32 stuff
 #ifndef EXCLUDE_D3D9
 #include <d3d9.h>
 #endif
-
+#include <intrin.h>  // for __cpuid()
+#include "talk/base/scoped_ptr.h"
 #elif defined(OSX)
 #include <ApplicationServices/ApplicationServices.h>
 #include <CoreServices/CoreServices.h>
 #include <sys/sysctl.h>
 #include "talk/base/macconversion.h"
 #elif defined(IOS)
-#include <sys/sysctl.h>
+#include <sys/sysctl.h>  // NOLINT - lint thinks this is duplicate include
 #elif defined(LINUX) || defined(ANDROID)
 #include <unistd.h>
 #include "talk/base/linux.h"
 #endif
 
 #include "talk/base/common.h"
-#include "talk/base/cpuid.h"
 #include "talk/base/logging.h"
 #include "talk/base/stringutils.h"
-#include "talk/base/systeminfo.h"
 
 namespace talk_base {
 
@@ -58,13 +58,13 @@ typedef BOOL (WINAPI *LPFN_GLPI)(
     PSYSTEM_LOGICAL_PROCESSOR_INFORMATION,
     PDWORD);
 
-static int NumCores() {
+static void GetProcessorInformation(int &physical_cpus, int &cache_size) {
   // GetLogicalProcessorInformation() is available on Windows XP SP3 and beyond.
   LPFN_GLPI glpi = reinterpret_cast<LPFN_GLPI>(GetProcAddress(
       GetModuleHandle(L"kernel32"),
       "GetLogicalProcessorInformation"));
   if (NULL == glpi) {
-    return -1;
+    return;
   }
   // Determine buffer size, allocate and get processor information.
   // Size can change between calls (unlikely), so a loop is done.
@@ -75,41 +75,70 @@ static int NumCores() {
       infos.reset(new SYSTEM_LOGICAL_PROCESSOR_INFORMATION[
           return_length / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION)]);
     } else {
-      return -1;
+      return;
     }
   }
-  int processor_core_count = 0;
+  physical_cpus = 0;
+  cache_size = 0;
   for (size_t i = 0;
       i < return_length / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION); ++i) {
     if (infos[i].Relationship == RelationProcessorCore) {
-      ++processor_core_count;
+      ++physical_cpus;
+    } else if (infos[i].Relationship == RelationCache) {
+      int next_cache_size = static_cast<int>(infos[i].Cache.Size);
+      if (next_cache_size >= cache_size) {
+        cache_size = next_cache_size;
+      }
     }
   }
-  return processor_core_count;
+  return;
+}
+#else
+// TODO(fbarchard): Use gcc 4.4 provided cpuid intrinsic
+// 32 bit fpic requires ebx be preserved
+#if (defined(__pic__) || defined(__APPLE__)) && defined(__i386__)
+static inline void __cpuid(int cpu_info[4], int info_type) {
+  __asm__ volatile (  // NOLINT
+    "mov %%ebx, %%edi\n"
+    "cpuid\n"
+    "xchg %%edi, %%ebx\n"
+    : "=a"(cpu_info[0]), "=D"(cpu_info[1]), "=c"(cpu_info[2]), "=d"(cpu_info[3])
+    : "a"(info_type)
+  );  // NOLINT
+}
+#elif defined(__i386__) || defined(__x86_64__)
+static inline void __cpuid(int cpu_info[4], int info_type) {
+  __asm__ volatile (  // NOLINT
+    "cpuid\n"
+    : "=a"(cpu_info[0]), "=b"(cpu_info[1]), "=c"(cpu_info[2]), "=d"(cpu_info[3])
+    : "a"(info_type)
+  );  // NOLINT
 }
 #endif
+#endif  // WIN32
 
 // Note(fbarchard):
 // Family and model are extended family and extended model.  8 bits each.
 SystemInfo::SystemInfo()
-    : physical_cpus_(1), logical_cpus_(1),
+    : physical_cpus_(1), logical_cpus_(1), cache_size_(0),
       cpu_family_(0), cpu_model_(0), cpu_stepping_(0),
       cpu_speed_(0), memory_(0) {
   // Initialize the basic information.
-
-#if defined(__arm__)
-  cpu_arch_ = ARCH_ARM;
-#elif defined(CPU_X86)
-  cpu_arch_ = ARCH_X86;
+#if defined(CPU_ARM)
+  cpu_arch_ = SI_ARCH_ARM;
+#elif defined(__x86_64__) || defined(_M_X64)
+  cpu_arch_ = SI_ARCH_X64;
+#elif defined(__i386__) || defined(_M_IX86)
+  cpu_arch_ = SI_ARCH_X86;
 #else
 #error "Unknown architecture."
 #endif
 
-#ifdef WIN32
+#if defined(WIN32)
   SYSTEM_INFO si;
   GetSystemInfo(&si);
   logical_cpus_ = si.dwNumberOfProcessors;
-  physical_cpus_ = NumCores();
+  GetProcessorInformation(physical_cpus_, cache_size_);
   if (physical_cpus_ <= 0) {
     physical_cpus_ = logical_cpus_;
   }
@@ -125,6 +154,19 @@ SystemInfo::SystemInfo()
   length = sizeof(sysctl_value);
   if (!sysctlbyname("hw.logicalcpu_max", &sysctl_value, &length, NULL, 0)) {
     logical_cpus_ = static_cast<int>(sysctl_value);
+  }
+  uint64_t sysctl_value64;
+  length = sizeof(sysctl_value64);
+  if (!sysctlbyname("hw.l3cachesize", &sysctl_value64, &length, NULL, 0)) {
+    cache_size_ = static_cast<int>(sysctl_value64);
+    LOG(LS_INFO) << "l3cachesize " << cache_size_;
+  }
+  if (!cache_size_) {
+    length = sizeof(sysctl_value64);
+    if (!sysctlbyname("hw.l2cachesize", &sysctl_value64, &length, NULL, 0)) {
+      cache_size_ = static_cast<int>(sysctl_value64);
+      LOG(LS_INFO) << "l2cachesize " << cache_size_;
+    }
   }
   length = sizeof(sysctl_value);
   if (!sysctlbyname("machdep.cpu.family", &sysctl_value, &length, NULL, 0)) {
@@ -144,23 +186,37 @@ SystemInfo::SystemInfo()
     proc_info.GetNumCpus(&logical_cpus_);
     proc_info.GetNumPhysicalCpus(&physical_cpus_);
     proc_info.GetCpuFamily(&cpu_family_);
-#if !defined(__arm__)
+#if !defined(CPU_ARM)
     // These values aren't found on ARM systems.
     proc_info.GetSectionIntValue(0, "model", &cpu_model_);
     proc_info.GetSectionIntValue(0, "stepping", &cpu_stepping_);
     proc_info.GetSectionIntValue(0, "cpu MHz", &cpu_speed_);
+    proc_info.GetSectionIntValue(0, "cache size", &cache_size_);
+    cache_size_ *= 1024;
 #endif
   }
-
   // ProcCpuInfo reads cpu speed from "cpu MHz" under /proc/cpuinfo.
   // But that number is a moving target which can change on-the-fly according to
   // many factors including system workload.
   // See /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors.
   // The one in /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq is more
   // accurate. We use it as our cpu speed when it is available.
+  // cpuinfo_max_freq is measured in KHz and requires conversion to MHz.
   int max_freq = talk_base::ReadCpuMaxFreq();
   if (max_freq > 0) {
-    cpu_speed_ = max_freq;
+    cpu_speed_ = max_freq / 1000;
+  }
+#endif
+// For L2 CacheSize see also
+// http://www.flounder.com/cpuid_explorer2.htm#CPUID(0x800000006)
+#ifdef CPU_X86
+  if (cache_size_ == 0) {
+    int cpu_info[4];
+    __cpuid(cpu_info, 0x80000000);  // query maximum extended cpuid function.
+    if (static_cast<uint32>(cpu_info[0]) >= 0x80000006) {
+      __cpuid(cpu_info, 0x80000006);
+      cache_size_ = (cpu_info[2] >> 16) * 1024;
+    }
   }
 #endif
 }
@@ -181,17 +237,14 @@ int SystemInfo::GetMaxPhysicalCpus() {
 int SystemInfo::GetCurCpus() {
   int cur_cpus;
 #ifdef WIN32
-  DWORD process_mask, system_mask;
+  DWORD_PTR process_mask, system_mask;
   ::GetProcessAffinityMask(::GetCurrentProcess(), &process_mask, &system_mask);
   for (cur_cpus = 0; process_mask; ++cur_cpus) {
     // Sparse-ones algorithm. There are slightly faster methods out there but
     // they are unintuitive and won't make a difference on a single dword.
     process_mask &= (process_mask - 1);
   }
-#elif defined(OSX)
-  // Find number of _available_ cores
-  cur_cpus = MPProcessorsScheduled();
-#elif defined(IOS)
+#elif defined(OSX) || defined(IOS)
   uint32_t sysctl_value;
   size_t length = sizeof(sysctl_value);
   int error = sysctlbyname("hw.ncpu", &sysctl_value, &length, NULL, 0);
@@ -213,9 +266,25 @@ SystemInfo::Architecture SystemInfo::GetCpuArchitecture() {
 // (Intel document number: 241618)
 std::string SystemInfo::GetCpuVendor() {
   if (cpu_vendor_.empty()) {
-    cpu_vendor_ = talk_base::CpuInfo::GetCpuVendor();
+#if defined(CPU_X86)
+    int cpu_info[4];
+    __cpuid(cpu_info, 0);
+    cpu_info[0] = cpu_info[1];  // Reorder output
+    cpu_info[1] = cpu_info[3];
+    cpu_info[2] = cpu_info[2];
+    cpu_info[3] = 0;
+    cpu_vendor_ = std::string(reinterpret_cast<char*>(&cpu_info[0]));
+#elif defined(CPU_ARM)
+    cpu_vendor_ = std::string("ARM");
+#else
+    cpu_vendor_ = std::string("Undefined");
+#endif
   }
   return cpu_vendor_;
+}
+
+int SystemInfo::GetCpuCacheSize() {
+  return cache_size_;
 }
 
 // Return the "family" of this CPU.
@@ -239,8 +308,7 @@ int SystemInfo::GetMaxCpuSpeed() {
   if (cpu_speed_) {
     return cpu_speed_;
   }
-
-#ifdef WIN32
+#if defined(WIN32)
   HKEY key;
   static const WCHAR keyName[] =
       L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0";
@@ -267,10 +335,11 @@ int SystemInfo::GetMaxCpuSpeed() {
 #elif defined(IOS) || defined(OSX)
   uint64_t sysctl_value;
   size_t length = sizeof(sysctl_value);
-  int error = sysctlbyname("hw.cpufrequency_max", &sysctl_value, &length, NULL, 0);
+  int error = sysctlbyname("hw.cpufrequency_max", &sysctl_value, &length,
+                           NULL, 0);
   cpu_speed_ = !error ? static_cast<int>(sysctl_value/1000000) : -1;
 #else
-  // TODO: Implement using proc/cpuinfo
+  // TODO(fbarchard): Implement using proc/cpuinfo
   cpu_speed_ = 0;
 #endif
   return cpu_speed_;
@@ -281,7 +350,7 @@ int SystemInfo::GetMaxCpuSpeed() {
 // root\WMI::ProcessorPerformance.InstanceName="Processor_Number_0".frequency
 int SystemInfo::GetCurCpuSpeed() {
 #ifdef WIN32
-  // TODO: Add WMI check, requires COM initialization
+  // TODO(fbarchard): Add WMI check, requires COM initialization
   // NOTE(fbarchard): Testable on Sandy Bridge.
   return GetMaxCpuSpeed();
 #elif defined(IOS) || defined(OSX)
@@ -290,7 +359,7 @@ int SystemInfo::GetCurCpuSpeed() {
   int error = sysctlbyname("hw.cpufrequency", &sysctl_value, &length, NULL, 0);
   return !error ? static_cast<int>(sysctl_value/1000000) : GetMaxCpuSpeed();
 #else // LINUX || ANDROID
-  // TODO: Use proc/cpuinfo for Cur speed on Linux.
+  // TODO(fbarchard): Use proc/cpuinfo for Cur speed on Linux.
   return GetMaxCpuSpeed();
 #endif
 }
@@ -454,7 +523,7 @@ bool SystemInfo::GetGpuInfo(GpuInfo *info) {
   GetProperty(display_service_port, CFSTR("model"), &info->description);
   return true;
 #else // LINUX || ANDROID
-  // TODO: Implement this on Linux
+  // TODO(fbarchard): Implement this on Linux
   return false;
 #endif
 }

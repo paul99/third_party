@@ -35,15 +35,40 @@
 #include "talk/base/network.h"
 #include "talk/base/scoped_ptr.h"
 #include "talk/base/thread.h"
+#include "talk/p2p/base/port.h"
 #include "talk/p2p/base/portallocator.h"
 
 namespace cricket {
+
+struct RelayCredentials {
+  RelayCredentials() {}
+  RelayCredentials(const std::string& username,
+                   const std::string& password)
+      : username(username),
+        password(password) {
+  }
+
+  std::string username;
+  std::string password;
+};
+
+typedef std::vector<ProtocolAddress> PortList;
+struct RelayServerConfig {
+  RelayServerConfig(RelayType type) : type(type) {}
+
+  RelayType type;
+  PortList ports;
+  RelayCredentials credentials;
+};
 
 class BasicPortAllocator : public PortAllocator {
  public:
   BasicPortAllocator(talk_base::NetworkManager* network_manager,
                      talk_base::PacketSocketFactory* socket_factory);
   explicit BasicPortAllocator(talk_base::NetworkManager* network_manager);
+  BasicPortAllocator(talk_base::NetworkManager* network_manager,
+                     talk_base::PacketSocketFactory* socket_factory,
+                     const talk_base::SocketAddress& stun_server);
   BasicPortAllocator(talk_base::NetworkManager* network_manager,
                      const talk_base::SocketAddress& stun_server,
                      const talk_base::SocketAddress& relay_server_udp,
@@ -60,23 +85,24 @@ class BasicPortAllocator : public PortAllocator {
   const talk_base::SocketAddress& stun_address() const {
     return stun_address_;
   }
-  const talk_base::SocketAddress& relay_address_udp() const {
-    return relay_address_udp_;
+
+  const std::vector<RelayServerConfig>& relays() const {
+    return relays_;
   }
-  const talk_base::SocketAddress& relay_address_tcp() const {
-    return relay_address_tcp_;
-  }
-  const talk_base::SocketAddress& relay_address_ssl() const {
-    return relay_address_ssl_;
+  virtual void AddRelay(const RelayServerConfig& relay) {
+    relays_.push_back(relay);
   }
 
-  // Returns the best (highest preference) phase that has produced a port that
+  // Returns the best (highest priority) phase that has produced a port that
   // produced a writable connection.  If no writable connections have been
   // produced, this returns -1.
   int best_writable_phase() const;
 
-  virtual PortAllocatorSession* CreateSession(const std::string& name,
-                                              const std::string& session_type);
+  virtual PortAllocatorSession* CreateSessionInternal(
+      const std::string& content_name,
+      int component,
+      const std::string& ice_ufrag,
+      const std::string& ice_pwd);
 
   // Called whenever a connection becomes writable with the argument being the
   // phase that the corresponding port was created in.
@@ -95,9 +121,7 @@ class BasicPortAllocator : public PortAllocator {
   talk_base::NetworkManager* network_manager_;
   talk_base::PacketSocketFactory* socket_factory_;
   const talk_base::SocketAddress stun_address_;
-  const talk_base::SocketAddress relay_address_udp_;
-  const talk_base::SocketAddress relay_address_tcp_;
-  const talk_base::SocketAddress relay_address_ssl_;
+  std::vector<RelayServerConfig> relays_;
   int best_writable_phase_;
   bool allow_tcp_listen_;
 };
@@ -106,11 +130,13 @@ struct PortConfiguration;
 class AllocationSequence;
 
 class BasicPortAllocatorSession : public PortAllocatorSession,
-    public talk_base::MessageHandler {
+                                  public talk_base::MessageHandler {
  public:
   BasicPortAllocatorSession(BasicPortAllocator* allocator,
-                            const std::string& name,
-                            const std::string& session_type);
+                            const std::string& content_name,
+                            int component,
+                            const std::string& ice_ufrag,
+                            const std::string& ice_pwd);
   ~BasicPortAllocatorSession();
 
   virtual BasicPortAllocator* allocator() { return allocator_; }
@@ -135,21 +161,26 @@ class BasicPortAllocatorSession : public PortAllocatorSession,
 
  private:
   void OnConfigReady(PortConfiguration* config);
-  void OnConfigTimeout();
+  void OnConfigStop();
   void AllocatePorts();
   void OnAllocate();
   void DoAllocate();
   void OnNetworksChanged();
+  void OnAllocationSequenceObjectsCreated();
   void DisableEquivalentPhases(talk_base::Network* network,
-      PortConfiguration* config, uint32* flags);
-  void AddAllocatedPort(Port* port, AllocationSequence* seq, float pref,
-      bool prepare_address = true);
-  void OnAddressReady(Port* port);
+                               PortConfiguration* config, uint32* flags);
+  void AddAllocatedPort(Port* port, AllocationSequence* seq,
+                        bool prepare_address = true);
+  void OnCandidateReady(Port* port, const Candidate& c);
+  void OnPortReady(Port* port);
   void OnProtocolEnabled(AllocationSequence* seq, ProtocolType proto);
-  void OnPortDestroyed(Port* port);
+  void OnPortDestroyed(PortInterface* port);
+  void OnAddressError(Port* port);
   void OnConnectionCreated(Port* port, Connection* conn);
   void OnConnectionStateChange(Connection* conn);
   void OnShake();
+  void MaybeSignalCandidatesAllocationDone();
+  void OnPortAllocationComplete(AllocationSequence* seq);
 
   BasicPortAllocator* allocator_;
   talk_base::Thread* network_thread_;
@@ -159,15 +190,32 @@ class BasicPortAllocatorSession : public PortAllocatorSession,
   bool allocation_started_;
   bool network_manager_started_;
   bool running_;  // set when StartGetAllPorts is called
+  bool allocation_sequences_created_;
   std::vector<PortConfiguration*> configs_;
   std::vector<AllocationSequence*> sequences_;
 
+  enum PortState {
+    STATE_INIT,   // No candidates allocated yet.
+    STATE_READY,  // All candidates allocated and ready for process.
+    STATE_ERROR   // Error in gathering candidates.
+  };
+
   struct PortData {
+    PortData() : port(NULL), sequence(NULL), state(STATE_INIT) {}
+    PortData(Port* port, AllocationSequence* seq)
+        : port(port), sequence(seq), state(STATE_INIT) {
+    }
+
     Port* port;
     AllocationSequence* sequence;
-    bool ready;
+    PortState state;
 
     bool operator==(Port* rhs) const { return (port == rhs); }
+    bool ready() const { return state == STATE_READY; }
+    bool allocation_complete() const {
+      // Returns true if candidates allocation is success or failure.
+      return ((state == STATE_READY) || (state == STATE_ERROR));
+    }
   };
   std::vector<PortData> ports_;
 
@@ -179,30 +227,19 @@ struct PortConfiguration : public talk_base::MessageData {
   talk_base::SocketAddress stun_address;
   std::string username;
   std::string password;
-  std::string magic_cookie;
 
-  typedef std::vector<ProtocolAddress> PortList;
-  struct RelayServer {
-    PortList ports;
-    float pref_modifier;  // added to the protocol modifier to get the
-                          // preference for this particular server
-  };
-
-  typedef std::vector<RelayServer> RelayList;
+  typedef std::vector<RelayServerConfig> RelayList;
   RelayList relays;
 
   PortConfiguration(const talk_base::SocketAddress& stun_address,
                     const std::string& username,
-                    const std::string& password,
-                    const std::string& magic_cookie);
+                    const std::string& password);
 
   // Adds another relay server, with the given ports and modifier, to the list.
-  void AddRelay(const PortList& ports, float pref_modifier);
-
-  bool ResolveStunAddress();
+  void AddRelay(const RelayServerConfig& config);
 
   // Determines whether the given relay server supports the given protocol.
-  static bool SupportsProtocol(const PortConfiguration::RelayServer& relay,
+  static bool SupportsProtocol(const RelayServerConfig& relay,
                                ProtocolType type);
 };
 

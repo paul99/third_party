@@ -33,6 +33,7 @@
 #include "DocumentFragment.h"
 #include "DocumentLoader.h"
 #include "DocumentLoaderGtk.h"
+#include "FrameLoadRequest.h"
 #include "FrameLoader.h"
 #include "FrameLoaderClientGtk.h"
 #include "FrameSelection.h"
@@ -40,6 +41,7 @@
 #include "FrameView.h"
 #include "GCController.h"
 #include "GraphicsContext.h"
+#include "GtkUtilities.h"
 #include "GtkVersioning.h"
 #include "HTMLFrameOwnerElement.h"
 #include "JSDOMBinding.h"
@@ -50,20 +52,22 @@
 #include "RenderListItem.h"
 #include "RenderTreeAsText.h"
 #include "RenderView.h"
-#include "ReplaceSelectionCommand.h"
 #include "ScriptController.h"
 #include "SubstituteData.h"
 #include "TextIterator.h"
 #include "WebKitAccessibleWrapperAtk.h"
+#include "WebKitDOMDocumentPrivate.h"
+#include "WebKitDOMRangePrivate.h"
 #include "markup.h"
-#include "webkit/WebKitDOMRangePrivate.h"
 #include "webkitenumtypes.h"
 #include "webkitglobalsprivate.h"
 #include "webkitmarshal.h"
+#include "webkitnetworkresponse.h"
 #include "webkitnetworkrequestprivate.h"
 #include "webkitnetworkresponseprivate.h"
 #include "webkitsecurityoriginprivate.h"
 #include "webkitwebframeprivate.h"
+#include "webkitwebresource.h"
 #include "webkitwebview.h"
 #include "webkitwebviewprivate.h"
 #include <JavaScriptCore/APICast.h>
@@ -104,6 +108,14 @@ enum {
     TITLE_CHANGED,
     HOVERING_OVER_LINK,
     SCROLLBARS_POLICY_CHANGED,
+    // Resource loading signals
+    RESOURCE_REQUEST_STARTING,
+    RESOURCE_RESPONSE_RECEIVED,
+    RESOURCE_LOAD_FINISHED,
+    RESOURCE_CONTENT_LENGTH_RECEIVED,
+    RESOURCE_LOAD_FAILED,
+    INSECURE_CONTENT_RUN,
+
     LAST_SIGNAL
 };
 
@@ -220,25 +232,6 @@ static void webkit_web_frame_class_init(WebKitWebFrameClass* frameClass)
             G_TYPE_NONE, 0);
 
     /**
-     * WebKitWebFrame::load-done
-     * @web_frame: the object on which the signal is emitted
-     *
-     * Emitted when frame loading is done.
-     *
-     * Deprecated: Use the "load-status" property instead, and/or
-     * WebKitWebView::load-error to be notified of load errors
-     */
-    webkit_web_frame_signals[LOAD_DONE] = g_signal_new("load-done",
-            G_TYPE_FROM_CLASS(frameClass),
-            (GSignalFlags)G_SIGNAL_RUN_LAST,
-            0,
-            0,
-            0,
-            g_cclosure_marshal_VOID__BOOLEAN,
-            G_TYPE_NONE, 1,
-            G_TYPE_BOOLEAN);
-
-    /**
      * WebKitWebFrame::title-changed:
      * @frame: the object on which the signal is emitted
      * @title: the new title
@@ -300,6 +293,149 @@ static void webkit_web_frame_class_init(WebKitWebFrameClass* frameClass)
             0,
             webkit_marshal_BOOLEAN__VOID,
             G_TYPE_BOOLEAN, 0);
+
+
+    /**
+     * WebKitWebFrame::resource-request-starting:
+     * @web_frame: the #WebKitWebFrame whose load dispatched this request
+     * @web_resource: an empty #WebKitWebResource object
+     * @request: the #WebKitNetworkRequest that will be dispatched
+     * @response: the #WebKitNetworkResponse representing the redirect
+     * response, if any
+     *
+     * Emitted when a request is about to be sent. You can modify the
+     * request while handling this signal. You can set the URI in the
+     * #WebKitNetworkRequest object itself, and add/remove/replace
+     * headers using the #SoupMessage object it carries, if it is
+     * present. See webkit_network_request_get_message(). Setting the
+     * request URI to "about:blank" will effectively cause the request
+     * to load nothing, and can be used to disable the loading of
+     * specific resources.
+     *
+     * Notice that information about an eventual redirect is available
+     * in @response's #SoupMessage, not in the #SoupMessage carried by
+     * the @request. If @response is %NULL, then this is not a
+     * redirected request.
+     *
+     * The #WebKitWebResource object will be the same throughout all
+     * the lifetime of the resource, but the contents may change
+     * between signal emissions.
+     *
+     * Since: 1.7.5
+     */
+    webkit_web_frame_signals[RESOURCE_REQUEST_STARTING] = g_signal_new("resource-request-starting",
+            G_TYPE_FROM_CLASS(frameClass),
+            G_SIGNAL_RUN_LAST,
+            0,
+            0, 0,
+            webkit_marshal_VOID__OBJECT_OBJECT_OBJECT,
+            G_TYPE_NONE, 3,
+            WEBKIT_TYPE_WEB_RESOURCE,
+            WEBKIT_TYPE_NETWORK_REQUEST,
+            WEBKIT_TYPE_NETWORK_RESPONSE);
+
+    /**
+     * WebKitWebFrame::resource-response-received:
+     * @web_frame: the #WebKitWebFrame the response was received for
+     * @web_resource: the #WebKitWebResource being loaded
+     * @response: the #WebKitNetworkResponse that was received.
+     *
+     * Emitted when the response is received from the server.
+     *
+     * Since: 1.7.5
+     */
+    webkit_web_frame_signals[RESOURCE_RESPONSE_RECEIVED] = g_signal_new("resource-response-received",
+            G_TYPE_FROM_CLASS(frameClass),
+            G_SIGNAL_RUN_LAST,
+            0,
+            0, 0,
+            webkit_marshal_VOID__OBJECT_OBJECT,
+            G_TYPE_NONE, 2,
+            WEBKIT_TYPE_WEB_RESOURCE,
+            WEBKIT_TYPE_NETWORK_RESPONSE);
+
+    /**
+     * WebKitWebFrame::resource-load-finished:
+     * @web_frame: the #WebKitWebFrame the response was received for
+     * @web_resource: the #WebKitWebResource being loaded
+     *
+     * Emitted when all the data for the resource was loaded.
+     *
+     * Since: 1.7.5
+     */
+    webkit_web_frame_signals[RESOURCE_LOAD_FINISHED] = g_signal_new("resource-load-finished",
+            G_TYPE_FROM_CLASS(frameClass),
+            G_SIGNAL_RUN_LAST,
+            0,
+            0, 0,
+            g_cclosure_marshal_VOID__OBJECT,
+            G_TYPE_NONE, 1,
+            WEBKIT_TYPE_WEB_RESOURCE);
+
+    /**
+     * WebKitWebFrame::resource-content-length-received:
+     * @web_frame: the #WebKitWebFrame the response was received for
+     * @web_resource: the #WebKitWebResource that was loaded
+     * @length_received: the amount of data received since the last signal emission
+     *
+     * Emitted when new resource data has been received. The
+     * @length_received variable stores the amount of bytes received
+     * since the last time this signal was emitted. This is useful to
+     * provide progress information about the resource load operation.
+     *
+     * Since: 1.7.5
+     */
+    webkit_web_frame_signals[RESOURCE_CONTENT_LENGTH_RECEIVED] = g_signal_new("resource-content-length-received",
+            G_TYPE_FROM_CLASS(frameClass),
+            G_SIGNAL_RUN_LAST,
+            0,
+            0, 0,
+            webkit_marshal_VOID__OBJECT_INT,
+            G_TYPE_NONE, 2,
+            WEBKIT_TYPE_WEB_RESOURCE,
+            G_TYPE_INT);
+
+    /**
+     * WebKitWebFrame::resource-load-failed:
+     * @web_frame: the #WebKitWebFrame the response was received for
+     * @web_resource: the #WebKitWebResource that was loaded
+     * @error: the #GError that was triggered
+     *
+     * Invoked when a resource failed to load.
+     *
+     * Since: 1.7.5
+     */
+    webkit_web_frame_signals[RESOURCE_LOAD_FAILED] = g_signal_new("resource-load-failed",
+            G_TYPE_FROM_CLASS(frameClass),
+            G_SIGNAL_RUN_LAST,
+            0,
+            0, 0,
+            webkit_marshal_VOID__OBJECT_POINTER,
+            G_TYPE_NONE, 2,
+            WEBKIT_TYPE_WEB_RESOURCE,
+            G_TYPE_POINTER);
+
+    /**
+     * WebKitWebFrame::insecure-content-run:
+     * @web_frame: the #WebKitWebFrame the response was received for.
+     * @security_origin: the #WebKitSecurityOrigin.
+     * @url: the url of the insecure content.
+     *
+     * Invoked when insecure content is run from a secure page. This happens
+     * when a page loaded via HTTPS loads a stylesheet, script, image or
+     * iframe from an unencrypted HTTP URL.
+     *
+     * Since: 1.10.0
+     */
+    webkit_web_frame_signals[INSECURE_CONTENT_RUN] = g_signal_new("insecure-content-run",
+            G_TYPE_FROM_CLASS(frameClass),
+            G_SIGNAL_RUN_LAST,
+            0,
+            0, 0,
+            webkit_marshal_VOID__OBJECT_STRING,
+            G_TYPE_NONE, 2,
+            WEBKIT_TYPE_SECURITY_ORIGIN,
+            G_TYPE_STRING);
 
     /*
      * implementations of virtual methods
@@ -539,7 +675,7 @@ void webkit_web_frame_load_uri(WebKitWebFrame* frame, const gchar* uri)
     if (!coreFrame)
         return;
 
-    coreFrame->loader()->load(ResourceRequest(KURL(KURL(), String::fromUTF8(uri))), false);
+    coreFrame->loader()->load(FrameLoadRequest(coreFrame, ResourceRequest(KURL(KURL(), String::fromUTF8(uri)))));
 }
 
 static void webkit_web_frame_load_data(WebKitWebFrame* frame, const gchar* content, const gchar* mimeType, const gchar* encoding, const gchar* baseURL, const gchar* unreachableURL)
@@ -558,7 +694,7 @@ static void webkit_web_frame_load_data(WebKitWebFrame* frame, const gchar* conte
                                   KURL(KURL(), String::fromUTF8(unreachableURL)),
                                   KURL(KURL(), String::fromUTF8(unreachableURL)));
 
-    coreFrame->loader()->load(request, substituteData, false);
+    coreFrame->loader()->load(FrameLoadRequest(coreFrame, request, substituteData));
 }
 
 /**
@@ -627,7 +763,7 @@ void webkit_web_frame_load_request(WebKitWebFrame* frame, WebKitNetworkRequest* 
     if (!coreFrame)
         return;
 
-    coreFrame->loader()->load(core(request), false);
+    coreFrame->loader()->load(FrameLoadRequest(coreFrame->document()->securityOrigin(), core(request)));
 }
 
 /**
@@ -813,8 +949,7 @@ GtkPrintOperationResult webkit_web_frame_print_full(WebKitWebFrame* frame, GtkPr
     g_return_val_if_fail(GTK_IS_PRINT_OPERATION(operation), GTK_PRINT_OPERATION_RESULT_ERROR);
 
     GtkWidget* topLevel = gtk_widget_get_toplevel(GTK_WIDGET(webkit_web_frame_get_web_view(frame)));
-
-    if (!gtk_widget_is_toplevel(topLevel))
+    if (!widgetIsOnscreenToplevelWindow(topLevel))
         topLevel = 0;
 
     Frame* coreFrame = core(frame);
@@ -853,7 +988,7 @@ void webkit_web_frame_print(WebKitWebFrame* frame)
 
     if (error) {
         GtkWidget* window = gtk_widget_get_toplevel(GTK_WIDGET(priv->webView));
-        GtkWidget* dialog = gtk_message_dialog_new(gtk_widget_is_toplevel(window) ? GTK_WINDOW(window) : 0,
+        GtkWidget* dialog = gtk_message_dialog_new(widgetIsOnscreenToplevelWindow(window) ? GTK_WINDOW(window) : 0,
                                                    GTK_DIALOG_DESTROY_WITH_PARENT,
                                                    GTK_MESSAGE_ERROR,
                                                    GTK_BUTTONS_CLOSE,
@@ -1026,6 +1161,30 @@ WebKitDOMRange* webkit_web_frame_get_range_for_word_around_caret(WebKitWebFrame*
     visibleSelection.expandUsingGranularity(WordGranularity);
 
     return kit(visibleSelection.firstRange().get());
+}
+
+/**
+ * webkit_web_frame_get_dom_document:
+ * @frame: a #WebKitWebFrame
+ * 
+ * Returns: (transfer none): the #WebKitDOMDocument currently loaded
+ * in the @frame or %NULL if no document is loaded
+ *
+ * Since: 1.10
+ **/
+WebKitDOMDocument* webkit_web_frame_get_dom_document(WebKitWebFrame* frame)
+{
+    g_return_val_if_fail(WEBKIT_IS_WEB_FRAME(frame), 0);
+
+    Frame* coreFrame = core(frame);
+    if (!coreFrame)
+        return 0;
+
+    Document* doc = coreFrame->document();
+    if (!doc)
+        return 0;
+
+    return kit(doc);
 }
 
 namespace WebKit {

@@ -1,4 +1,4 @@
-# Copyright (C) 2010 Apple Inc. All rights reserved.
+# Copyright (C) 2010, 2011, 2012 Apple Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -22,8 +22,13 @@
 
 VPATH = \
     $(WebKit2) \
+    $(WebKit2)/NetworkProcess \
     $(WebKit2)/PluginProcess \
+    $(WebKit2)/PluginProcess/mac \
     $(WebKit2)/Shared/Plugins \
+    $(WebKit2)/Shared \
+    $(WebKit2)/Shared/Network/CustomProtocols \
+    $(WebKit2)/SharedWorkerProcess \
     $(WebKit2)/WebProcess/ApplicationCache \
     $(WebKit2)/WebProcess/Authentication \
     $(WebKit2)/WebProcess/Cookies \
@@ -32,6 +37,7 @@ VPATH = \
     $(WebKit2)/WebProcess/IconDatabase \
     $(WebKit2)/WebProcess/KeyValueStorage \
     $(WebKit2)/WebProcess/MediaCache \
+    $(WebKit2)/WebProcess/Network \
     $(WebKit2)/WebProcess/Notifications \
     $(WebKit2)/WebProcess/Plugins \
     $(WebKit2)/WebProcess/ResourceCache \
@@ -40,26 +46,41 @@ VPATH = \
     $(WebKit2)/WebProcess \
     $(WebKit2)/UIProcess \
     $(WebKit2)/UIProcess/Downloads \
+    $(WebKit2)/UIProcess/Network \
+    $(WebKit2)/UIProcess/Network/CustomProtocols \
     $(WebKit2)/UIProcess/Notifications \
     $(WebKit2)/UIProcess/Plugins \
+    $(WebKit2)/UIProcess/SharedWorkers \
+    $(WebKit2)/UIProcess/mac \
 #
 
 MESSAGE_RECEIVERS = \
     AuthenticationManager \
+    CustomProtocolManager \
+    CustomProtocolManagerProxy \
     DrawingArea \
     DrawingAreaProxy \
     DownloadProxy \
     EventDispatcher \
+    NetworkProcess \
+    NetworkProcessConnection \
+    NetworkProcessProxy \
     NPObjectMessageReceiver \
     PluginControllerProxy \
     PluginProcess \
     PluginProcessConnection \
     PluginProcessProxy \
     PluginProxy \
+    SharedWorkerProcess \
+    SharedWorkerProcessProxy \
     WebApplicationCacheManager \
     WebApplicationCacheManagerProxy \
     WebCookieManager \
     WebCookieManagerProxy \
+    WebConnection \
+    NetworkConnectionToWebProcess \
+    NetworkResourceLoader \
+    RemoteLayerTreeHost \
     WebContext \
     WebDatabaseManager \
     WebDatabaseManagerProxy \
@@ -78,12 +99,14 @@ MESSAGE_RECEIVERS = \
     WebNotificationManagerProxy \
     WebNotificationManager \
     WebPage \
+    WebPageGroupProxy \
     WebPageProxy \
     WebProcess \
     WebProcessConnection \
     WebProcessProxy \
     WebResourceCacheManager \
     WebResourceCacheManagerProxy \
+    WebResourceLoader \
 #
 
 SCRIPTS = \
@@ -110,6 +133,30 @@ all : \
 	@echo Generating message receiver for $*...
 	@python $(WebKit2)/Scripts/generate-messages-header.py $< > $@
 
+# Mac-specific rules
+
+ifeq ($(OS),MACOS)
+
+FRAMEWORK_FLAGS = $(shell echo $(BUILT_PRODUCTS_DIR) $(FRAMEWORK_SEARCH_PATHS) | perl -e 'print "-F " . join(" -F ", split(" ", <>));')
+HEADER_FLAGS = $(shell echo $(BUILT_PRODUCTS_DIR) $(HEADER_SEARCH_PATHS) | perl -e 'print "-I" . join(" -I", split(" ", <>));')
+TEXT_PREPROCESSOR_FLAGS=-E -P -x c -traditional -w
+
+ifneq ($(SDKROOT),)
+	SDK_FLAGS=-isysroot $(SDKROOT)
+endif
+
+SANDBOX_PROFILES = \
+	com.apple.WebProcess.sb \
+	com.apple.WebKit.PluginProcess.sb
+
+all: $(SANDBOX_PROFILES)
+
+%.sb : %.sb.in
+	@echo Pre-processing $* sandbox profile...
+	$(CC) $(SDK_FLAGS) $(TEXT_PREPROCESSOR_FLAGS) $(FRAMEWORK_FLAGS) $(HEADER_FLAGS) -include "wtf/Platform.h" $< > $@
+
+endif # MACOS
+
 # ------------------------
 
 # Windows-specific rules
@@ -120,5 +167,6 @@ all : HeaderDetection.h
 
 HeaderDetection.h : DerivedSources.make
 	if [ -f "$(WEBKITLIBRARIESDIR)/include/WebKitQuartzCoreAdditions/WebKitQuartzCoreAdditionsBase.h" ] && [ ! -f "$(WEBKITLIBRARIESDIR)/include/cairo/cairo.h" ]; then echo "#define HAVE_WKQCA 1" > $@; else echo > $@; fi
+	if [ -f "$(WEBKITLIBRARIESDIR)/include/AVFoundationCF/AVCFBase.h" ]; then echo "#define HAVE_AVCF 1" >> $@; else echo >> $@; fi
 
 endif # Windows_NT

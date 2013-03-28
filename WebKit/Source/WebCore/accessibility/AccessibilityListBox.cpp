@@ -54,7 +54,9 @@ AccessibilityListBox::~AccessibilityListBox()
     
 PassRefPtr<AccessibilityListBox> AccessibilityListBox::create(RenderObject* renderer)
 {
-    return adoptRef(new AccessibilityListBox(renderer));
+    AccessibilityListBox* obj = new AccessibilityListBox(renderer);
+    obj->init();
+    return adoptRef(obj);
 }
     
 bool AccessibilityListBox::canSetSelectedChildrenAttribute() const
@@ -163,7 +165,7 @@ bool AccessibilityListBox::accessibilityIsIgnored() const
     return false;
 }
 
-AccessibilityObject* AccessibilityListBox::elementAccessibilityHitTest(const LayoutPoint& point) const
+AccessibilityObject* AccessibilityListBox::elementAccessibilityHitTest(const IntPoint& point) const
 {
     // the internal HTMLSelectElement methods for returning a listbox option at a point
     // ignore optgroup elements.

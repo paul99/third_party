@@ -30,11 +30,14 @@
 #include "ContentSecurityPolicy.h"
 #include "HTMLParserIdioms.h"
 #include "SecurityOrigin.h"
+#include "WebCoreMemoryInstrumentation.h"
+#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
 SecurityContext::SecurityContext()
-    : m_haveInitializedSecurityOrigin(false)
+    : m_mayDisplaySeamlessWithParent(false)
+    , m_haveInitializedSecurityOrigin(false)
     , m_sandboxFlags(SandboxNone)
 {
 }
@@ -49,7 +52,7 @@ void SecurityContext::setSecurityOrigin(PassRefPtr<SecurityOrigin> securityOrigi
     m_haveInitializedSecurityOrigin = true;
 }
 
-void SecurityContext::setContentSecurityPolicy(PassRefPtr<ContentSecurityPolicy> contentSecurityPolicy)
+void SecurityContext::setContentSecurityPolicy(PassOwnPtr<ContentSecurityPolicy> contentSecurityPolicy)
 {
     m_contentSecurityPolicy = contentSecurityPolicy;
 }
@@ -66,7 +69,23 @@ bool SecurityContext::isSecureTransitionTo(const KURL& url) const
     return securityOrigin()->canAccess(other.get());
 }
 
-SandboxFlags SecurityContext::parseSandboxPolicy(const String& policy)
+void SecurityContext::enforceSandboxFlags(SandboxFlags mask)
+{
+    m_sandboxFlags |= mask;
+
+    // The SandboxOrigin is stored redundantly in the security origin.
+    if (isSandboxed(SandboxOrigin) && securityOrigin() && !securityOrigin()->isUnique()) {
+        setSecurityOrigin(SecurityOrigin::createUnique());
+        didUpdateSecurityOrigin();
+    }
+}
+
+void SecurityContext::didUpdateSecurityOrigin()
+{
+    // Subclasses can override this function if the need to do extra work when the security origin changes.
+}
+
+SandboxFlags SecurityContext::parseSandboxPolicy(const String& policy, String& invalidTokensErrorMessage)
 {
     // http://www.w3.org/TR/html5/the-iframe-element.html#attr-iframe-sandbox
     // Parse the unordered set of unique space-separated tokens.
@@ -74,6 +93,8 @@ SandboxFlags SecurityContext::parseSandboxPolicy(const String& policy)
     const UChar* characters = policy.characters();
     unsigned length = policy.length();
     unsigned start = 0;
+    unsigned numberOfTokenErrors = 0;
+    StringBuilder tokenErrors;
     while (true) {
         while (start < length && isHTMLSpace(characters[start]))
             ++start;
@@ -89,17 +110,44 @@ SandboxFlags SecurityContext::parseSandboxPolicy(const String& policy)
             flags &= ~SandboxOrigin;
         else if (equalIgnoringCase(sandboxToken, "allow-forms"))
             flags &= ~SandboxForms;
-        else if (equalIgnoringCase(sandboxToken, "allow-scripts"))
+        else if (equalIgnoringCase(sandboxToken, "allow-scripts")) {
             flags &= ~SandboxScripts;
-        else if (equalIgnoringCase(sandboxToken, "allow-top-navigation"))
+            flags &= ~SandboxAutomaticFeatures;
+        } else if (equalIgnoringCase(sandboxToken, "allow-top-navigation"))
             flags &= ~SandboxTopNavigation;
         else if (equalIgnoringCase(sandboxToken, "allow-popups"))
             flags &= ~SandboxPopups;
+        else if (equalIgnoringCase(sandboxToken, "allow-pointer-lock"))
+            flags &= ~SandboxPointerLock;
+        else {
+            if (numberOfTokenErrors)
+                tokenErrors.appendLiteral(", '");
+            else
+                tokenErrors.append('\'');
+            tokenErrors.append(sandboxToken);
+            tokenErrors.append('\'');
+            numberOfTokenErrors++;
+        }
 
         start = end + 1;
     }
 
+    if (numberOfTokenErrors) {
+        if (numberOfTokenErrors > 1)
+            tokenErrors.appendLiteral(" are invalid sandbox flags.");
+        else
+            tokenErrors.appendLiteral(" is an invalid sandbox flag.");
+        invalidTokensErrorMessage = tokenErrors.toString();
+    }
+
     return flags;
+}
+
+void SecurityContext::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::DOM);
+    info.addMember(m_securityOrigin);
+    info.addMember(m_contentSecurityPolicy);
 }
 
 }

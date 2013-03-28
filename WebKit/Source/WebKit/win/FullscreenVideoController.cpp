@@ -189,12 +189,14 @@ private:
     virtual GraphicsLayer::CompositingCoordinatesOrientation platformCALayerContentsOrientation() const { return GraphicsLayer::CompositingCoordinatesBottomUp; }
     virtual void platformCALayerPaintContents(GraphicsContext&, const IntRect& inClip) { }
     virtual bool platformCALayerShowDebugBorders() const { return false; }
-    virtual bool platformCALayerShowRepaintCounter() const { return false; }
+    virtual bool platformCALayerShowRepaintCounter(PlatformCALayer*) const { return false; }
     virtual int platformCALayerIncrementRepaintCount() { return 0; }
 
     virtual bool platformCALayerContentsOpaque() const { return false; }
     virtual bool platformCALayerDrawsContent() const { return false; }
     virtual void platformCALayerLayerDidDisplay(PlatformLayer*) { }
+    virtual void platformCALayerDidCreateTiles(const Vector<FloatRect>&) { }
+    virtual float platformCALayerDeviceScaleFactor() { return 1; }
 
     FullscreenVideoController* m_parent;
 };
@@ -420,7 +422,7 @@ void FullscreenVideoController::registerHUDWindowClass()
     wcex.style = CS_HREDRAW | CS_VREDRAW;
     wcex.lpfnWndProc = hudWndProc;
     wcex.cbClsExtra = 0;
-    wcex.cbWndExtra = 4;
+    wcex.cbWndExtra = sizeof(FullscreenVideoController*);
     wcex.hInstance = gInstance;
     wcex.hIcon = 0;
     wcex.hCursor = LoadCursor(0, IDC_ARROW);

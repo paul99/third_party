@@ -27,7 +27,6 @@
 #ifndef XMLToken_h
 #define XMLToken_h
 
-#include "Element.h"
 #include "MarkupTokenBase.h"
 
 namespace WebCore {
@@ -58,7 +57,7 @@ public:
 class XMLToken : public MarkupTokenBase<XMLTokenTypes, DoctypeDataBase, PrefixedAttribute> {
 public:
     class XMLDeclarationData {
-        WTF_MAKE_NONCOPYABLE(XMLDeclarationData);
+        WTF_MAKE_NONCOPYABLE(XMLDeclarationData); WTF_MAKE_FAST_ALLOCATED;
     public:
         XMLDeclarationData()
             : m_hasStandalone(false)
@@ -431,7 +430,7 @@ public:
         }
     }
 
-    AtomicXMLToken(XMLTokenTypes::Type type, AtomicString name, PassOwnPtr<NamedNodeMap> attributes = nullptr)
+    AtomicXMLToken(XMLTokenTypes::Type type, const AtomicString& name, const Vector<Attribute>& attributes = Vector<Attribute>())
         : AtomicMarkupTokenBase<XMLToken>(type, name, attributes)
     {
     }

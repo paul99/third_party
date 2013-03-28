@@ -30,10 +30,13 @@
 
 #import "EnvironmentVariables.h"
 #import "PluginProcessCreationParameters.h"
+#import "PluginProcessMessages.h"
 #import "WebKitSystemInterface.h"
 #import <WebCore/FileSystem.h>
 #import <spawn.h>
 #import <wtf/text/CString.h>
+
+#import <QuartzCore/CARemoteLayerServer.h>
 
 @interface WKPlaceholderModalWindow : NSWindow 
 @end
@@ -48,6 +51,8 @@
 }
 
 @end
+
+NSString * const WebKit2PlugInSandboxProfileDirectoryPathKey = @"WebKit2PlugInSandboxProfileDirectoryPath";
 
 using namespace WebCore;
 
@@ -112,20 +117,46 @@ bool PluginProcessProxy::createPropertyListFile(const PluginModuleInfo& plugin)
     return true;
 }
 
+void PluginProcessProxy::platformInitializeLaunchOptions(ProcessLauncher::LaunchOptions& launchOptions, const PluginModuleInfo& pluginInfo)
+{
+    launchOptions.architecture = pluginInfo.pluginArchitecture;
+    launchOptions.executableHeap = PluginProcessProxy::pluginNeedsExecutableHeap(pluginInfo);
+#if HAVE(XPC)
+    launchOptions.useXPC = false;
+#endif
+}
+
 void PluginProcessProxy::platformInitializePluginProcess(PluginProcessCreationParameters& parameters)
 {
+    // For know only Flash is known to behave with asynchronous plug-in initialization.
+    parameters.supportsAsynchronousPluginInitialization = m_pluginInfo.bundleIdentifier == "com.macromedia.Flash Player.plugin";
+
 #if USE(ACCELERATED_COMPOSITING) && HAVE(HOSTED_CORE_ANIMATION)
     parameters.parentProcessName = [[NSProcessInfo processInfo] processName];
-    mach_port_t renderServerPort = WKInitializeRenderServer();
+    mach_port_t renderServerPort = [[CARemoteLayerServer sharedServer] serverPort];
+
     if (renderServerPort != MACH_PORT_NULL)
         parameters.acceleratedCompositingPort = CoreIPC::MachPort(renderServerPort, MACH_MSG_TYPE_COPY_SEND);
 #endif
+
+    // FIXME: We should rip this out once we have a good place to install plug-in
+    // sandbox profiles.
+    NSString* sandboxProfileDirectoryPath = [[NSUserDefaults standardUserDefaults] stringForKey:WebKit2PlugInSandboxProfileDirectoryPathKey];
+    if (sandboxProfileDirectoryPath)
+        parameters.sandboxProfileDirectoryPath = String(sandboxProfileDirectoryPath);
 }
 
 bool PluginProcessProxy::getPluginProcessSerialNumber(ProcessSerialNumber& pluginProcessSerialNumber)
 {
     pid_t pluginProcessPID = m_processLauncher->processIdentifier();
+#if COMPILER(CLANG)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     return GetProcessForPID(pluginProcessPID, &pluginProcessSerialNumber) == noErr;
+#if COMPILER(CLANG)
+#pragma clang diagnostic pop
+#endif
 }
 
 void PluginProcessProxy::makePluginProcessTheFrontProcess()
@@ -134,14 +165,28 @@ void PluginProcessProxy::makePluginProcessTheFrontProcess()
     if (!getPluginProcessSerialNumber(pluginProcessSerialNumber))
         return;
 
+#if COMPILER(CLANG)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     SetFrontProcess(&pluginProcessSerialNumber);
+#if COMPILER(CLANG)
+#pragma clang diagnostic pop
+#endif
 }
 
 void PluginProcessProxy::makeUIProcessTheFrontProcess()
 {
     ProcessSerialNumber processSerialNumber;
+#if COMPILER(CLANG)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     GetCurrentProcess(&processSerialNumber);
     SetFrontProcess(&processSerialNumber);            
+#if COMPILER(CLANG)
+#pragma clang diagnostic pop
+#endif
 }
 
 void PluginProcessProxy::setFullscreenWindowIsShowing(bool fullscreenWindowIsShowing)
@@ -173,7 +218,14 @@ void PluginProcessProxy::exitFullscreen()
 {
     // If the plug-in host is the current application then we should bring ourselves to the front when it exits full-screen mode.
     ProcessSerialNumber frontProcessSerialNumber;
+#if COMPILER(CLANG)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     GetFrontProcess(&frontProcessSerialNumber);
+#if COMPILER(CLANG)
+#pragma clang diagnostic pop
+#endif
 
     // The UI process must be the front process in order to change the presentation mode.
     makeUIProcessTheFrontProcess();
@@ -186,14 +238,29 @@ void PluginProcessProxy::exitFullscreen()
     // If the plug-in process was not the front process, switch back to the previous front process.
     // (Otherwise we'll keep the UI process as the front process).
     Boolean isPluginProcessFrontProcess;
+#if COMPILER(CLANG)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     SameProcess(&frontProcessSerialNumber, &pluginProcessSerialNumber, &isPluginProcessFrontProcess);
-    if (!isPluginProcessFrontProcess)
+#if COMPILER(CLANG)
+#pragma clang diagnostic pop
+#endif
+    if (!isPluginProcessFrontProcess) {
+#if COMPILER(CLANG)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
         SetFrontProcess(&frontProcessSerialNumber);
+#if COMPILER(CLANG)
+#pragma clang diagnostic pop
+#endif
+    }
 }
 
 void PluginProcessProxy::setModalWindowIsShowing(bool modalWindowIsShowing)
 {
-    if (modalWindowIsShowing == m_modalWindowIsShowing) 
+    if (modalWindowIsShowing == m_modalWindowIsShowing)
         return;
     
     m_modalWindowIsShowing = modalWindowIsShowing;
@@ -214,7 +281,11 @@ void PluginProcessProxy::beginModal()
     
     m_activationObserver = [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationWillBecomeActiveNotification object:NSApp queue:nil
                                                                          usingBlock:^(NSNotification *){ applicationDidBecomeActive(); }];
-    
+
+    // The call to -[NSApp runModalForWindow:] below will run a nested run loop, and if the plug-in process
+    // crashes the PluginProcessProxy object can be destroyed. Protect against this here.
+    RefPtr<PluginProcessProxy> protect(this);
+
     [NSApp runModalForWindow:m_placeholderWindow.get()];
     
     [m_placeholderWindow.get() orderOut:nil];
@@ -239,6 +310,13 @@ void PluginProcessProxy::applicationDidBecomeActive()
     makePluginProcessTheFrontProcess();
 }
 
+void PluginProcessProxy::setApplicationIsOccluded(bool applicationIsOccluded)
+{
+    if (!isValid())
+        return;
+
+    m_connection->send(Messages::PluginProcess::SetApplicationIsOccluded(applicationIsOccluded), 0);
+}
 
 } // namespace WebKit
 

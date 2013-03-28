@@ -50,9 +50,11 @@
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
 				UsePrecompiledHeader="0"
-				WarningLevel="3"
+				WarningLevel="4"
+				DisableSpecificWarnings="4100;4127;4189;4239;4244;4245;4512;4702"
 				Detect64BitPortabilityProblems="false"
 				DebugInformationFormat="4"
+				WarnAsError="true"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -65,6 +67,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				AdditionalOptions="/SAFESEH"
 				AdditionalDependencies="d3d9.lib D3dx9.lib d3dcompiler.lib"
 				LinkIncremental="2"
 				ModuleDefinitionFile="libGLESv2.def"
@@ -128,9 +131,11 @@
 				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_USRDLL;LIBGLESV2_EXPORTS;_CRT_SECURE_NO_DEPRECATE;NOMINMAX;_SECURE_SCL=0"
 				RuntimeLibrary="0"
 				UsePrecompiledHeader="0"
-				WarningLevel="3"
+				WarningLevel="4"
+				DisableSpecificWarnings="4100;4127;4189;4239;4244;4245;4512;4702;4718"
 				Detect64BitPortabilityProblems="false"
 				DebugInformationFormat="3"
+				WarnAsError="true"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -143,6 +148,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				AdditionalOptions="/SAFESEH"
 				AdditionalDependencies="d3d9.lib D3dx9.lib d3dcompiler.lib"
 				LinkIncremental="1"
 				IgnoreAllDefaultLibraries="false"
@@ -210,9 +216,11 @@
 				BasicRuntimeChecks="3"
 				RuntimeLibrary="1"
 				UsePrecompiledHeader="0"
-				WarningLevel="3"
+				WarningLevel="4"
+				DisableSpecificWarnings="4100;4127;4189;4239;4244;4245;4512;4702;4718"
 				Detect64BitPortabilityProblems="false"
 				DebugInformationFormat="3"
+				WarnAsError="true"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -225,6 +233,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				AdditionalOptions="/SAFESEH"
 				AdditionalDependencies="d3d9.lib D3dx9.lib d3dcompiler.lib"
 				LinkIncremental="2"
 				ModuleDefinitionFile="libGLESv2.def"
@@ -289,9 +298,11 @@
 				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_USRDLL;LIBGLESV2_EXPORTS;_CRT_SECURE_NO_DEPRECATE;NOMINMAX;_SECURE_SCL=0"
 				RuntimeLibrary="0"
 				UsePrecompiledHeader="0"
-				WarningLevel="3"
+				WarningLevel="4"
+				DisableSpecificWarnings="4100;4127;4189;4239;4244;4245;4512;4702;4718"
 				Detect64BitPortabilityProblems="false"
 				DebugInformationFormat="3"
+				WarnAsError="true"
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -304,6 +315,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				AdditionalOptions="/SAFESEH"
 				AdditionalDependencies="d3d9.lib D3dx9.lib d3dcompiler.lib"
 				LinkIncremental="1"
 				IgnoreAllDefaultLibraries="false"
@@ -393,7 +405,15 @@
 				>
 			</File>
 			<File
-				RelativePath=".\RefCountObject.cpp"
+				RelativePath=".\ProgramBinary.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\Query.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\common\RefCountObject.cpp"
 				>
 			</File>
 			<File
@@ -479,7 +499,15 @@
 				>
 			</File>
 			<File
-				RelativePath=".\RefCountObject.h"
+				RelativePath=".\ProgramBinary.h"
+				>
+			</File>
+			<File
+				RelativePath=".\Query.h"
+				>
+			</File>
+			<File
+				RelativePath="..\common\RefCountObject.h"
 				>
 			</File>
 			<File

@@ -29,11 +29,10 @@
 #include "config.h"
 
 #if ENABLE(WEB_AUDIO)
-
 #include "AudioDestinationChromium.h"
-
-#include "WebKit.h"
-#include "platform/WebKitPlatformSupport.h"
+#include "AudioFIFO.h"
+#include "AudioPullFIFO.h"
+#include <public/Platform.h>
 
 using namespace WebKit;
 
@@ -49,26 +48,27 @@ const size_t fifoSize = 8192;
 const unsigned numberOfChannels = 2;
 
 // Factory method: Chromium-implementation
-PassOwnPtr<AudioDestination> AudioDestination::create(AudioSourceProvider& provider, float sampleRate)
+PassOwnPtr<AudioDestination> AudioDestination::create(AudioIOCallback& callback, float sampleRate)
 {
-    return adoptPtr(new AudioDestinationChromium(provider, sampleRate));
+    return adoptPtr(new AudioDestinationChromium(callback, sampleRate));
 }
 
-AudioDestinationChromium::AudioDestinationChromium(AudioSourceProvider& provider, float sampleRate)
-    : m_provider(provider)
+AudioDestinationChromium::AudioDestinationChromium(AudioIOCallback& callback, float sampleRate)
+    : m_callback(callback)
+    , m_inputBus(numberOfChannels, renderBufferSize)
     , m_renderBus(numberOfChannels, renderBufferSize, false)
     , m_sampleRate(sampleRate)
     , m_isPlaying(false)
 {
     // Use the optimal buffer size recommended by the audio backend.
-    m_callbackBufferSize = webKitPlatformSupport()->audioHardwareBufferSize();
+    m_callbackBufferSize = WebKit::Platform::current()->audioHardwareBufferSize();
 
     // Quick exit if the requested size is too large.
     ASSERT(m_callbackBufferSize + renderBufferSize <= fifoSize);
     if (m_callbackBufferSize + renderBufferSize > fifoSize)
         return;
-    
-    m_audioDevice = adoptPtr(webKitPlatformSupport()->createAudioDevice(m_callbackBufferSize, numberOfChannels, sampleRate, this));
+
+    m_audioDevice = adoptPtr(WebKit::Platform::current()->createAudioDevice(m_callbackBufferSize, numberOfChannels, sampleRate, this));
     ASSERT(m_audioDevice);
 
     // Create a FIFO to handle the possibility of the callback size
@@ -76,7 +76,18 @@ AudioDestinationChromium::AudioDestinationChromium(AudioSourceProvider& provider
     // contains enough data, the data will be provided directly.
     // Otherwise, the FIFO will call the provider enough times to
     // satisfy the request for data.
-    m_fifo = adoptPtr(new FIFO(provider, numberOfChannels, fifoSize, renderBufferSize));
+    m_fifo = adoptPtr(new AudioPullFIFO(*this, numberOfChannels, fifoSize, renderBufferSize));
+
+    // Input buffering.
+    m_inputFifo = adoptPtr(new AudioFIFO(numberOfChannels, fifoSize));
+
+    // If the callback size does not match the render size, then we need to buffer some
+    // extra silence for the input. Otherwise, we can over-consume the input FIFO.
+    if (m_callbackBufferSize != renderBufferSize) {
+        // FIXME: handle multi-channel input and don't hard-code to stereo.
+        AudioBus silence(2, renderBufferSize);
+        m_inputFifo->push(&silence);
+    }
 }
 
 AudioDestinationChromium::~AudioDestinationChromium()
@@ -102,10 +113,40 @@ void AudioDestinationChromium::stop()
 
 float AudioDestination::hardwareSampleRate()
 {
-    return static_cast<float>(webKitPlatformSupport()->audioHardwareSampleRate());
+    return static_cast<float>(WebKit::Platform::current()->audioHardwareSampleRate());
+}
+
+void AudioDestinationChromium::render(const WebVector<float*>& sourceData, const WebVector<float*>& audioData, size_t numberOfFrames)
+{
+    bool isNumberOfChannelsGood = audioData.size() == numberOfChannels;
+    if (!isNumberOfChannelsGood) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    bool isBufferSizeGood = numberOfFrames == m_callbackBufferSize;
+    if (!isBufferSizeGood) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    // Buffer optional live input.
+    if (sourceData.size() >= 2) {
+        // FIXME: handle multi-channel input and don't hard-code to stereo.
+        AudioBus wrapperBus(2, numberOfFrames, false);
+        wrapperBus.setChannelMemory(0, sourceData[0], numberOfFrames);
+        wrapperBus.setChannelMemory(1, sourceData[1], numberOfFrames);
+        m_inputFifo->push(&wrapperBus);
+    }
+
+    m_renderBus.setChannelMemory(0, audioData[0], numberOfFrames);
+    m_renderBus.setChannelMemory(1, audioData[1], numberOfFrames);
+
+    m_fifo->consume(&m_renderBus, numberOfFrames);
 }
 
 // Pulls on our provider to get the rendered audio stream.
+// FIXME: remove this method when the chromium-side switches over to the synchronized I/O render() method (above).
 void AudioDestinationChromium::render(const WebVector<float*>& audioData, size_t numberOfFrames)
 {
     bool isNumberOfChannelsGood = audioData.size() == numberOfChannels;
@@ -113,7 +154,7 @@ void AudioDestinationChromium::render(const WebVector<float*>& audioData, size_t
         ASSERT_NOT_REACHED();
         return;
     }
-        
+
     bool isBufferSizeGood = numberOfFrames == m_callbackBufferSize;
     if (!isBufferSizeGood) {
         ASSERT_NOT_REACHED();
@@ -125,123 +166,15 @@ void AudioDestinationChromium::render(const WebVector<float*>& audioData, size_t
     m_fifo->consume(&m_renderBus, numberOfFrames);
 }
 
-AudioDestinationChromium::FIFO::FIFO(AudioSourceProvider& provider, unsigned numberOfChannels, size_t fifoLength, size_t providerSize)
-    : m_provider(provider)
-    , m_fifoAudioBus(numberOfChannels, fifoLength)
-    , m_fifoLength(fifoLength)
-    , m_framesInFifo(0)
-    , m_readIndex(0)
-    , m_writeIndex(0)
-    , m_providerSize(providerSize)
-    , m_tempBus(numberOfChannels, providerSize)
+void AudioDestinationChromium::provideInput(AudioBus* bus, size_t framesToProcess)
 {
-}
-
-void AudioDestinationChromium::FIFO::consume(AudioBus* destination, size_t framesToConsume)
-{
-    bool isGood = destination && (framesToConsume <= m_fifoLength);
-    ASSERT(isGood);
-    if (!isGood)
-        return;
-
-    if (framesToConsume > m_framesInFifo) {
-        // We don't have enough data in the FIFO to fulfill the
-        // request. Ask for more data.
-        fillBuffer(framesToConsume - m_framesInFifo);
+    AudioBus* sourceBus = 0;
+    if (m_inputFifo->framesInFifo() >= framesToProcess) {
+        m_inputFifo->consume(&m_inputBus, framesToProcess);
+        sourceBus = &m_inputBus;
     }
 
-    // We have enough data now. Copy the requested number of samples
-    // to the destination.
-
-    size_t part1Length;
-    size_t part2Length;
-    findWrapLengths(m_readIndex, framesToConsume, part1Length, part2Length);
-
-    size_t numberOfChannels = m_fifoAudioBus.numberOfChannels();
-
-    for (size_t channelIndex = 0; channelIndex < numberOfChannels; ++channelIndex) {
-        float* destinationData = destination->channel(channelIndex)->mutableData();
-        const float* sourceData = m_fifoAudioBus.channel(channelIndex)->data();
-
-        bool isCopyGood = ((m_readIndex < m_fifoLength)
-                           && (m_readIndex + part1Length) <= m_fifoLength
-                           && (part1Length <= destination->length())
-                           && (part1Length + part2Length) <= destination->length());
-        ASSERT(isCopyGood);
-        if (!isCopyGood)
-            return;
-
-        memcpy(destinationData, sourceData + m_readIndex, part1Length * sizeof(*sourceData));
-        // Handle wrap around of the FIFO, if needed.
-        if (part2Length > 0)
-            memcpy(destinationData + part1Length, sourceData, part2Length * sizeof(*sourceData));
-    }
-    m_readIndex = updateIndex(m_readIndex, framesToConsume);
-    m_framesInFifo -= framesToConsume;
-    ASSERT(m_framesInFifo >= 0);
-}
-
-void AudioDestinationChromium::FIFO::findWrapLengths(size_t index, size_t size, size_t& part1Length, size_t& part2Length)
-{
-    ASSERT(index < m_fifoLength && size <= m_fifoLength);
-    if (index < m_fifoLength && size <= m_fifoLength) {
-        if (index + size > m_fifoLength) {
-            // Need to wrap. Figure out the length of each piece.
-            part1Length = m_fifoLength - index;
-            part2Length = size - part1Length;
-        } else {
-            // No wrap needed.
-            part1Length = size;
-            part2Length = 0;
-        }
-    } else {
-        // Invalid values for index or size. Set the part lengths to
-        // zero so nothing is copied.
-        part1Length = 0;
-        part2Length = 0;
-    }
-}
-
-void AudioDestinationChromium::FIFO::fillBuffer(size_t numberOfFrames)
-{
-    // Keep asking the provider to give us data until we have received
-    // at least |numberOfFrames| of data. Stuff the data into the
-    // FIFO.
-    size_t framesProvided = 0;
-
-    while (framesProvided < numberOfFrames) {
-        m_provider.provideInput(&m_tempBus, m_providerSize);
-
-        size_t part1Length;
-        size_t part2Length;
-        findWrapLengths(m_writeIndex, m_providerSize, part1Length, part2Length);
-
-        size_t numberOfChannels = m_fifoAudioBus.numberOfChannels();
-        
-        for (size_t channelIndex = 0; channelIndex < numberOfChannels; ++channelIndex) {
-            float* destination = m_fifoAudioBus.channel(channelIndex)->mutableData();
-            const float* source = m_tempBus.channel(channelIndex)->data();
-
-            bool isCopyGood = (part1Length <= m_providerSize
-                               && (part1Length + part2Length) <= m_providerSize
-                               && (m_writeIndex < m_fifoLength)
-                               && (m_writeIndex + part1Length) <= m_fifoLength
-                               && part2Length < m_fifoLength);
-            ASSERT(isCopyGood);
-            if (!isCopyGood)
-                return;
-
-            memcpy(destination + m_writeIndex, source, part1Length * sizeof(*destination));
-            // Handle wrap around of the FIFO, if needed.
-            if (part2Length > 0)
-                memcpy(destination, source + part1Length, part2Length * sizeof(*destination));
-        }
-
-        m_framesInFifo += m_providerSize;
-        ASSERT(m_framesInFifo <= m_fifoLength);
-        m_writeIndex = updateIndex(m_writeIndex, m_providerSize);
-        framesProvided += m_providerSize;
-    }
+    m_callback.render(sourceBus, bus, framesToProcess);
 }
 
 } // namespace WebCore

@@ -33,13 +33,16 @@
 
 #if ENABLE(INSPECTOR)
 
+#include "InspectorFrontend.h"
 #include "InspectorRuntimeAgent.h"
+#include "ScriptState.h"
 #include <wtf/PassOwnPtr.h>
 
 namespace WebCore {
 
 class InspectorPageAgent;
 class Page;
+class SecurityOrigin;
 
 class PageRuntimeAgent : public InspectorRuntimeAgent {
 public:
@@ -48,14 +51,28 @@ public:
         return adoptPtr(new PageRuntimeAgent(instrumentingAgents, state, injectedScriptManager, page, pageAgent));
     }
     virtual ~PageRuntimeAgent();
+    virtual void setFrontend(InspectorFrontend*);
+    virtual void clearFrontend();
+    virtual void restore();
+    virtual void enable(ErrorString*);
+    virtual void disable(ErrorString*);
+
+    void didCreateMainWorldContext(Frame*);
+    void didCreateIsolatedContext(Frame*, ScriptState*, SecurityOrigin*);
 
 private:
     PageRuntimeAgent(InstrumentingAgents*, InspectorState*, InjectedScriptManager*, Page*, InspectorPageAgent*);
 
-    virtual ScriptState* scriptStateForFrameId(const String& frameId);
-    virtual ScriptState* getDefaultInspectedState();
+    virtual InjectedScript injectedScriptForEval(ErrorString*, const int* executionContextId);
+    virtual void muteConsole();
+    virtual void unmuteConsole();
+    void reportExecutionContextCreation();
+    void notifyContextCreated(const String& frameId, ScriptState*, SecurityOrigin*, bool isPageContext);
+
     Page* m_inspectedPage;
     InspectorPageAgent* m_pageAgent;
+    InspectorFrontend::Runtime* m_frontend;
+    bool m_mainWorldContextCreated;
 };
 
 } // namespace WebCore

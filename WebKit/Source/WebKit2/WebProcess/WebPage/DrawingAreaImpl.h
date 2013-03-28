@@ -55,23 +55,35 @@ private:
     virtual void scroll(const WebCore::IntRect& scrollRect, const WebCore::IntSize& scrollOffset);
     virtual void setLayerTreeStateIsFrozen(bool);
     virtual bool layerTreeStateIsFrozen() const { return m_layerTreeStateIsFrozen; }
+    virtual LayerTreeHost* layerTreeHost() const { return m_layerTreeHost.get(); }
     virtual void forceRepaint();
+    virtual bool forceRepaintAsync(uint64_t callbackID);
 
     virtual void didInstallPageOverlay();
     virtual void didUninstallPageOverlay();
     virtual void setPageOverlayNeedsDisplay(const WebCore::IntRect&);
+    virtual void setPageOverlayOpacity(float);
+    virtual bool pageOverlayShouldApplyFadeWhenPainting() const;
 
     virtual void setPaintingEnabled(bool);
+    virtual void updatePreferences(const WebPreferencesStore&) OVERRIDE;
 
-    virtual void setRootCompositingLayer(WebCore::GraphicsLayer*);
-    virtual void scheduleCompositingLayerSync();
+#if USE(ACCELERATED_COMPOSITING)
+    virtual WebCore::GraphicsLayerFactory* graphicsLayerFactory() OVERRIDE;
+    virtual void setRootCompositingLayer(WebCore::GraphicsLayer*) OVERRIDE;
+    virtual void scheduleCompositingLayerFlush() OVERRIDE;
+#endif
 
 #if PLATFORM(WIN)
     virtual void scheduleChildWindowGeometryUpdate(const WindowGeometry&);
 #endif
 
-#if USE(ACCELERATED_COMPOSITING) && USE(TEXTURE_MAPPER)
-    virtual void didReceiveLayerTreeHostMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+#if PLATFORM(MAC)
+    virtual void setLayerHostingMode(uint32_t) OVERRIDE;
+#endif
+
+#if USE(COORDINATED_GRAPHICS)
+    virtual void didReceiveCoordinatedLayerTreeHostMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
 #endif
 
     // CoreIPC message handlers.

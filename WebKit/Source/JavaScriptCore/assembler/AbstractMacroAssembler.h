@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2008, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,17 +26,30 @@
 #ifndef AbstractMacroAssembler_h
 #define AbstractMacroAssembler_h
 
+#include "AssemblerBuffer.h"
 #include "CodeLocation.h"
 #include "MacroAssemblerCodeRef.h"
+#include <wtf/CryptographicallyRandomNumber.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/UnusedParam.h>
 
 #if ENABLE(ASSEMBLER)
 
+
+#if PLATFORM(QT)
+#define ENABLE_JIT_CONSTANT_BLINDING 0
+#endif
+
+#ifndef ENABLE_JIT_CONSTANT_BLINDING
+#define ENABLE_JIT_CONSTANT_BLINDING 1
+#endif
+
 namespace JSC {
 
+class JumpReplacementWatchpoint;
 class LinkBuffer;
 class RepatchBuffer;
+class Watchpoint;
 namespace DFG {
 class CorrectableJumpPoint;
 }
@@ -58,7 +71,6 @@ public:
     //
     // The following types are used as operands to MacroAssembler operations,
     // describing immediate  and memory operands to the instructions to be planted.
-
 
     enum Scale {
         TimesOne,
@@ -160,6 +172,8 @@ public:
     // in a class requiring explicit construction in order to differentiate
     // from pointers used as absolute addresses to memory operations
     struct TrustedImmPtr {
+        TrustedImmPtr() { }
+        
         explicit TrustedImmPtr(const void* value)
             : m_value(value)
         {
@@ -186,11 +200,19 @@ public:
         const void* m_value;
     };
 
-    struct ImmPtr : public TrustedImmPtr {
+    struct ImmPtr : 
+#if ENABLE(JIT_CONSTANT_BLINDING)
+        private TrustedImmPtr 
+#else
+        public TrustedImmPtr
+#endif
+    {
         explicit ImmPtr(const void* value)
             : TrustedImmPtr(value)
         {
         }
+
+        TrustedImmPtr asTrustedImmPtr() { return *this; }
     };
 
     // TrustedImm32:
@@ -200,39 +222,31 @@ public:
     // (which are implemented as an enum) from accidentally being passed as
     // immediate values.
     struct TrustedImm32 {
+        TrustedImm32() { }
+        
         explicit TrustedImm32(int32_t value)
             : m_value(value)
-#if CPU(ARM) || CPU(MIPS)
-            , m_isPointer(false)
-#endif
         {
         }
 
 #if !CPU(X86_64)
         explicit TrustedImm32(TrustedImmPtr ptr)
             : m_value(ptr.asIntptr())
-#if CPU(ARM) || CPU(MIPS)
-            , m_isPointer(true)
-#endif
         {
         }
 #endif
 
         int32_t m_value;
-#if CPU(ARM) || CPU(MIPS)
-        // We rely on being able to regenerate code to recover exception handling
-        // information.  Since ARMv7 supports 16-bit immediates there is a danger
-        // that if pointer values change the layout of the generated code will change.
-        // To avoid this problem, always generate pointers (and thus Imm32s constructed
-        // from ImmPtrs) with a code sequence that is able  to represent  any pointer
-        // value - don't use a more compact form in these cases.
-        // Same for MIPS.
-        bool m_isPointer;
-#endif
     };
 
 
-    struct Imm32 : public TrustedImm32 {
+    struct Imm32 : 
+#if ENABLE(JIT_CONSTANT_BLINDING)
+        private TrustedImm32 
+#else
+        public TrustedImm32
+#endif
+    {
         explicit Imm32(int32_t value)
             : TrustedImm32(value)
         {
@@ -243,6 +257,52 @@ public:
         {
         }
 #endif
+        const TrustedImm32& asTrustedImm32() const { return *this; }
+
+    };
+    
+    // TrustedImm64:
+    //
+    // A 64bit immediate operand to an instruction - this is wrapped in a
+    // class requiring explicit construction in order to prevent RegisterIDs
+    // (which are implemented as an enum) from accidentally being passed as
+    // immediate values.
+    struct TrustedImm64 {
+        TrustedImm64() { }
+        
+        explicit TrustedImm64(int64_t value)
+            : m_value(value)
+        {
+        }
+
+#if CPU(X86_64)
+        explicit TrustedImm64(TrustedImmPtr ptr)
+            : m_value(ptr.asIntptr())
+        {
+        }
+#endif
+
+        int64_t m_value;
+    };
+
+    struct Imm64 : 
+#if ENABLE(JIT_CONSTANT_BLINDING)
+        private TrustedImm64 
+#else
+        public TrustedImm64
+#endif
+    {
+        explicit Imm64(int64_t value)
+            : TrustedImm64(value)
+        {
+        }
+#if CPU(X86_64)
+        explicit Imm64(TrustedImmPtr ptr)
+            : TrustedImm64(ptr)
+        {
+        }
+#endif
+        const TrustedImm64& asTrustedImm64() const { return *this; }
     };
     
     // Section 2: MacroAssembler code buffer handles
@@ -262,8 +322,10 @@ public:
         friend class AbstractMacroAssembler;
         friend class DFG::CorrectableJumpPoint;
         friend class Jump;
+        friend class JumpReplacementWatchpoint;
         friend class MacroAssemblerCodeRef;
         friend class LinkBuffer;
+        friend class Watchpoint;
 
     public:
         Label()
@@ -272,6 +334,36 @@ public:
 
         Label(AbstractMacroAssembler<AssemblerType>* masm)
             : m_label(masm->m_assembler.label())
+        {
+        }
+        
+        bool isSet() const { return m_label.isSet(); }
+    private:
+        AssemblerLabel m_label;
+    };
+    
+    // ConvertibleLoadLabel:
+    //
+    // A ConvertibleLoadLabel records a loadPtr instruction that can be patched to an addPtr
+    // so that:
+    //
+    // loadPtr(Address(a, i), b)
+    //
+    // becomes:
+    //
+    // addPtr(TrustedImmPtr(i), a, b)
+    class ConvertibleLoadLabel {
+        template<class TemplateAssemblerType>
+        friend class AbstractMacroAssembler;
+        friend class LinkBuffer;
+        
+    public:
+        ConvertibleLoadLabel()
+        {
+        }
+        
+        ConvertibleLoadLabel(AbstractMacroAssembler<AssemblerType>* masm)
+            : m_label(masm->m_assembler.labelIgnoringWatchpoints())
         {
         }
         
@@ -424,17 +516,32 @@ public:
             , m_condition(condition)
         {
         }
+#elif CPU(SH4)
+        Jump(AssemblerLabel jmp, SH4Assembler::JumpType type = SH4Assembler::JumpFar)
+            : m_label(jmp)
+            , m_type(type)
+        {
+        }
 #else
         Jump(AssemblerLabel jmp)    
             : m_label(jmp)
         {
         }
 #endif
+        
+        Label label() const
+        {
+            Label result;
+            result.m_label = m_label;
+            return result;
+        }
 
         void link(AbstractMacroAssembler<AssemblerType>* masm) const
         {
 #if CPU(ARM_THUMB2)
             masm->m_assembler.linkJump(m_label, masm->m_assembler.label(), m_type, m_condition);
+#elif CPU(SH4)
+            masm->m_assembler.linkJump(m_label, masm->m_assembler.label(), m_type);
 #else
             masm->m_assembler.linkJump(m_label, masm->m_assembler.label());
 #endif
@@ -457,6 +564,24 @@ public:
         ARMv7Assembler::JumpType m_type;
         ARMv7Assembler::Condition m_condition;
 #endif
+#if CPU(SH4)
+        SH4Assembler::JumpType m_type;
+#endif
+    };
+
+    struct PatchableJump {
+        PatchableJump()
+        {
+        }
+
+        explicit PatchableJump(Jump jump)
+            : m_jump(jump)
+        {
+        }
+
+        operator Jump&() { return m_jump; }
+
+        Jump m_jump;
     };
 
     // JumpList:
@@ -468,6 +593,13 @@ public:
 
     public:
         typedef Vector<Jump, 16> JumpVector;
+        
+        JumpList() { }
+        
+        JumpList(Jump jump)
+        {
+            append(jump);
+        }
 
         void link(AbstractMacroAssembler<AssemblerType>* masm)
         {
@@ -490,7 +622,7 @@ public:
             m_jumps.append(jump);
         }
         
-        void append(JumpList& other)
+        void append(const JumpList& other)
         {
             m_jumps.append(other.m_jumps.begin(), other.m_jumps.size());
         }
@@ -505,7 +637,7 @@ public:
             m_jumps.clear();
         }
         
-        const JumpVector& jumps() { return m_jumps; }
+        const JumpVector& jumps() const { return m_jumps; }
 
     private:
         JumpVector m_jumps;
@@ -513,9 +645,36 @@ public:
 
 
     // Section 3: Misc admin methods
+#if ENABLE(DFG_JIT)
+    Label labelIgnoringWatchpoints()
+    {
+        Label result;
+        result.m_label = m_assembler.labelIgnoringWatchpoints();
+        return result;
+    }
+#else
+    Label labelIgnoringWatchpoints()
+    {
+        return label();
+    }
+#endif
+    
     Label label()
     {
         return Label(this);
+    }
+    
+    void padBeforePatch()
+    {
+        // Rely on the fact that asking for a label already does the padding.
+        (void)label();
+    }
+    
+    Label watchpointLabel()
+    {
+        Label result;
+        result.m_label = m_assembler.labelForWatchpoint();
+        return result;
     }
     
     Label align()
@@ -525,7 +684,7 @@ public:
     }
 
     template<typename T, typename U>
-    ptrdiff_t differenceBetween(T from, U to)
+    static ptrdiff_t differenceBetween(T from, U to)
     {
         return AssemblerType::getDifferenceBetweenLabels(from.m_label, to.m_label);
     }
@@ -535,15 +694,32 @@ public:
         return reinterpret_cast<ptrdiff_t>(b.executableAddress()) - reinterpret_cast<ptrdiff_t>(a.executableAddress());
     }
 
-    void beginUninterruptedSequence() { }
-    void endUninterruptedSequence() { }
-
-#ifndef NDEBUG
     unsigned debugOffset() { return m_assembler.debugOffset(); }
-#endif
 
+    ALWAYS_INLINE static void cacheFlush(void* code, size_t size)
+    {
+        AssemblerType::cacheFlush(code, size);
+    }
 protected:
+    AbstractMacroAssembler()
+        : m_randomSource(cryptographicallyRandomNumber())
+    {
+    }
+
     AssemblerType m_assembler;
+    
+    uint32_t random()
+    {
+        return m_randomSource.getUint32();
+    }
+
+    WeakRandom m_randomSource;
+
+#if ENABLE(JIT_CONSTANT_BLINDING)
+    static bool scratchRegisterForBlinding() { return false; }
+    static bool shouldBlindForSpecificArch(uint32_t) { return true; }
+    static bool shouldBlindForSpecificArch(uint64_t) { return true; }
+#endif
 
     friend class LinkBuffer;
     friend class RepatchBuffer;
@@ -598,16 +774,14 @@ protected:
         return AssemblerType::readPointer(dataLabelPtr.dataLocation());
     }
     
-    static void unreachableForPlatform()
+    static void replaceWithLoad(CodeLocationConvertibleLoad label)
     {
-#if COMPILER(CLANG)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wmissing-noreturn"
-        ASSERT_NOT_REACHED();
-#pragma clang diagnostic pop
-#else
-        ASSERT_NOT_REACHED();
-#endif
+        AssemblerType::replaceWithLoad(label.dataLocation());
+    }
+    
+    static void replaceWithAddressComputation(CodeLocationConvertibleLoad label)
+    {
+        AssemblerType::replaceWithAddressComputation(label.dataLocation());
     }
 };
 

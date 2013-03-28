@@ -57,7 +57,7 @@ void JSWeakObjectMapSet(JSContextRef ctx, JSWeakObjectMapRef map, void* key, JSO
     JSObject* obj = toJS(object);
     if (!obj)
         return;
-    ASSERT(obj->inherits(&JSCallbackObject<JSGlobalObject>::s_info) || obj->inherits(&JSCallbackObject<JSNonFinalObject>::s_info));
+    ASSERT(obj->inherits(&JSCallbackObject<JSGlobalObject>::s_info) || obj->inherits(&JSCallbackObject<JSDestructibleObject>::s_info));
     map->map().set(exec->globalData(), key, obj);
 }
 
@@ -65,14 +65,14 @@ JSObjectRef JSWeakObjectMapGet(JSContextRef ctx, JSWeakObjectMapRef map, void* k
 {
     ExecState* exec = toJS(ctx);
     APIEntryShim entryShim(exec);
-    return toRef(static_cast<JSObject*>(map->map().get(key)));
+    return toRef(jsCast<JSObject*>(map->map().get(key)));
 }
 
 void JSWeakObjectMapRemove(JSContextRef ctx, JSWeakObjectMapRef map, void* key)
 {
     ExecState* exec = toJS(ctx);
     APIEntryShim entryShim(exec);
-    map->map().take(key);
+    map->map().remove(key);
 }
 
 // We need to keep this function in the build to keep the nightlies running.

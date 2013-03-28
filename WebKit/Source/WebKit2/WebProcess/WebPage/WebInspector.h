@@ -30,8 +30,12 @@
 
 #include "APIObject.h"
 #include "Connection.h"
-#include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/text/WTFString.h>
+
+namespace WebCore {
+class InspectorFrontendChannel;
+}
 
 namespace WebKit {
 
@@ -43,17 +47,19 @@ class WebInspector : public APIObject {
 public:
     static const Type APIType = TypeBundleInspector;
 
-    static PassRefPtr<WebInspector> create(WebPage*);
+    static PassRefPtr<WebInspector> create(WebPage*, WebCore::InspectorFrontendChannel*);
 
     WebPage* page() const { return m_page; }
     WebPage* inspectorPage() const { return m_inspectorPage; }
 
     // Implemented in generated WebInspectorMessageReceiver.cpp
-    void didReceiveWebInspectorMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+    void didReceiveWebInspectorMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
 
     // Called by WebInspector messages
     void show();
     void close();
+
+    void setAttachedWindow(bool);
 
     void evaluateScriptForTest(long callID, const String& script);
 
@@ -61,20 +67,29 @@ public:
     void startPageProfiling();
     void stopPageProfiling();
 
+#if ENABLE(INSPECTOR_SERVER)
+    bool hasRemoteFrontendConnected() const { return m_remoteFrontendConnected; }
+    void sendMessageToRemoteFrontend(const String& message);
+    void dispatchMessageFromRemoteFrontend(const String& message);
+    void remoteFrontendConnected();
+    void remoteFrontendDisconnected();
+#endif
+
 #if PLATFORM(MAC)
-    static void setLocalizedStringsPath(const String&);
+    void setInspectorUsesWebKitUserInterface(bool);
 #endif
 
 private:
     friend class WebInspectorClient;
     friend class WebInspectorFrontendClient;
 
-    explicit WebInspector(WebPage*);
+    explicit WebInspector(WebPage*, WebCore::InspectorFrontendChannel*);
 
     virtual Type type() const { return APIType; }
 
     // Called from WebInspectorClient
     WebPage* createInspectorPage();
+    void destroyInspectorPage();
 
     // Called from WebInspectorFrontendClient
     void didLoadInspectorPage();
@@ -92,15 +107,28 @@ private:
 
     void showConsole();
 
+    void showResources();
+
+    void showMainResourceForFrame(uint64_t frameID);
+
     void startJavaScriptDebugging();
     void stopJavaScriptDebugging();
 
     void startJavaScriptProfiling();
     void stopJavaScriptProfiling();
 
+    void updateDockingAvailability();
+
     WebPage* m_page;
     WebPage* m_inspectorPage;
     WebInspectorFrontendClient* m_frontendClient;
+    WebCore::InspectorFrontendChannel* m_frontendChannel;
+#if PLATFORM(MAC)
+    String m_localizedStringsURL;
+#endif
+#if ENABLE(INSPECTOR_SERVER)
+    bool m_remoteFrontendConnected;
+#endif
 };
 
 } // namespace WebKit

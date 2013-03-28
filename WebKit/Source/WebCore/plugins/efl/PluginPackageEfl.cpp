@@ -43,8 +43,6 @@
 
 namespace WebCore {
 
-typedef char* (*NPP_GetMIMEDescriptionProcPtr)();
-
 bool PluginPackage::fetchInfo()
 {
     const char *errmsg;
@@ -53,15 +51,15 @@ bool PluginPackage::fetchInfo()
         return false;
 
     NPP_GetValueProcPtr getValue = 0;
-    NPP_GetMIMEDescriptionProcPtr getMIMEDescription = 0;
+    NP_GetMIMEDescriptionFuncPtr getMIMEDescription = 0;
 
-    getValue = reinterpret_cast<NPP_GetValueProcPtr>(dlsym(m_module, "NP_GetValue"));
+    getValue = reinterpret_cast<NPP_GetValueProcPtr>(eina_module_symbol_get(m_module, "NP_GetValue"));
     if ((errmsg = dlerror())) {
         EINA_LOG_ERR("Could not get symbol NP_GetValue: %s", errmsg);
         return false;
     }
 
-    getMIMEDescription = reinterpret_cast<NPP_GetMIMEDescriptionProcPtr>(dlsym(m_module, "NP_GetMIMEDescription"));
+    getMIMEDescription = reinterpret_cast<NP_GetMIMEDescriptionFuncPtr>(eina_module_symbol_get(m_module, "NP_GetMIMEDescription"));
     if ((errmsg = dlerror())) {
         EINA_LOG_ERR("Could not get symbol NP_GetMIMEDescription: %s", errmsg);
         return false;
@@ -71,16 +69,16 @@ bool PluginPackage::fetchInfo()
     NPError err = getValue(0, NPPVpluginNameString, static_cast<void*>(&buffer));
     if (err != NPERR_NO_ERROR)
         return false;
-    m_name = buffer;
+    m_name = String::fromUTF8(buffer);
 
     buffer = 0;
     err = getValue(0, NPPVpluginDescriptionString, static_cast<void*>(&buffer));
     if (err != NPERR_NO_ERROR)
         return false;
-    m_description = buffer;
+    m_description = String::fromUTF8(buffer);
     determineModuleVersionFromDescription();
 
-    String description = getMIMEDescription();
+    String description = String::fromUTF8(getMIMEDescription());
 
     Vector<String> types;
     description.split(UChar(';'), false, types);
@@ -113,33 +111,35 @@ uint16_t PluginPackage::NPVersion() const
 
 bool PluginPackage::load()
 {
-    char* errmsg;
-
     if (m_isLoaded) {
-        m_loadCount++;
+        ++m_loadCount;
         return true;
     }
 
-    m_module = dlopen(m_path.utf8().data(), RTLD_LAZY | RTLD_LOCAL);
-    if ((errmsg = dlerror())) {
-        EINA_LOG_WARN("%s not loaded: %s", m_path.utf8().data(), errmsg);
+    m_module = eina_module_new(m_path.utf8().data());
+    if (!m_module) {
+        EINA_LOG_WARN("%s not loaded: eina_module_new() failed", m_path.utf8().data());
+        return false;
+    }
+    if (!eina_module_load(m_module)) {
+        const char* errorMessage = eina_error_msg_get(eina_error_get());
+        EINA_LOG_WARN("%s not loaded: %s", m_path.utf8().data(), errorMessage ? errorMessage : "None");
         return false;
     }
 
     m_isLoaded = true;
 
-    NP_InitializeFuncPtr initialize;
     NPError err;
 
-    initialize = reinterpret_cast<NP_InitializeFuncPtr>(dlsym(m_module, "NP_Initialize"));
-    if ((errmsg = dlerror())) {
-        EINA_LOG_ERR("Could not get symbol NP_Initialize: %s", errmsg);
+    NP_InitializeFuncPtr initialize = reinterpret_cast<NP_InitializeFuncPtr>(eina_module_symbol_get(m_module, "NP_Initialize"));
+    if (!initialize) {
+        EINA_LOG_ERR("Could not get symbol NP_Initialize");
         goto abort;
     }
 
-    m_NPP_Shutdown = reinterpret_cast<NPP_ShutdownProcPtr>(dlsym(m_module, "NP_Shutdown"));
-    if ((errmsg = dlerror())) {
-        EINA_LOG_ERR("Could not get symbol NP_Shutdown: %s", errmsg);
+    m_NPP_Shutdown = reinterpret_cast<NPP_ShutdownProcPtr>(eina_module_symbol_get(m_module, "NP_Shutdown"));
+    if (!m_NPP_Shutdown) {
+        EINA_LOG_ERR("Could not get symbol NP_Shutdown");
         goto abort;
     }
 
@@ -156,7 +156,7 @@ bool PluginPackage::load()
     if (err != NPERR_NO_ERROR)
         goto abort;
 
-    m_loadCount++;
+    ++m_loadCount;
     return true;
 
 abort:

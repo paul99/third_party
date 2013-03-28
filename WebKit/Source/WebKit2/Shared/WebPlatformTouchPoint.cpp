@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2012 Nokia Corporation and/or its subsidiary(-ies)
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,17 +41,51 @@ WebPlatformTouchPoint::WebPlatformTouchPoint(unsigned id, TouchPointState state,
     , m_state(state)
     , m_screenPosition(screenPosition)
     , m_position(position)
+    , m_rotationAngle(0.0)
+    , m_force(0.0)
 {
 }
 
-void WebPlatformTouchPoint::encode(CoreIPC::ArgumentEncoder* encoder) const
+WebPlatformTouchPoint::WebPlatformTouchPoint(unsigned id, TouchPointState state, const IntPoint& screenPosition, const IntPoint& position, const WebCore::IntSize& radius, float rotationAngle, float force)
+    : m_id(id)
+    , m_state(state)
+    , m_screenPosition(screenPosition)
+    , m_position(position)
+    , m_radius(radius)
+    , m_rotationAngle(rotationAngle)
+    , m_force(force)
 {
-    encoder->encode(CoreIPC::In(m_id, m_state, m_screenPosition, m_position));
 }
 
-bool WebPlatformTouchPoint::decode(CoreIPC::ArgumentDecoder* decoder, WebPlatformTouchPoint& t)
+void WebPlatformTouchPoint::encode(CoreIPC::ArgumentEncoder& encoder) const
 {
-    return decoder->decode(CoreIPC::Out(t.m_id, t.m_state, t.m_screenPosition, t.m_position));
+    encoder << m_id;
+    encoder << m_state;
+    encoder << m_screenPosition;
+    encoder << m_position;
+    encoder << m_radius;
+    encoder << m_rotationAngle;
+    encoder << m_force;
+}
+
+bool WebPlatformTouchPoint::decode(CoreIPC::ArgumentDecoder* decoder, WebPlatformTouchPoint& result)
+{
+    if (!decoder->decode(result.m_id))
+        return false;
+    if (!decoder->decode(result.m_state))
+        return false;
+    if (!decoder->decode(result.m_screenPosition))
+        return false;
+    if (!decoder->decode(result.m_position))
+        return false;
+    if (!decoder->decode(result.m_radius))
+        return false;
+    if (!decoder->decode(result.m_rotationAngle))
+        return false;
+    if (!decoder->decode(result.m_force))
+        return false;
+
+    return true;
 }
 
 } // namespace WebKit

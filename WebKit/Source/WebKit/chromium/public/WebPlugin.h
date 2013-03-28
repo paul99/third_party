@@ -31,6 +31,8 @@
 #ifndef WebPlugin_h
 #define WebPlugin_h
 
+#include "WebDragOperation.h"
+#include "WebDragStatus.h"
 #include "platform/WebCanvas.h"
 #include "platform/WebString.h"
 #include "platform/WebURL.h"
@@ -40,12 +42,14 @@ struct NPObject;
 namespace WebKit {
 
 class WebDataSource;
+class WebDragData;
 class WebFrame;
 class WebInputEvent;
 class WebPluginContainer;
 class WebURLResponse;
 struct WebCursorInfo;
 struct WebPluginParams;
+struct WebPrintParams;
 struct WebPoint;
 struct WebRect;
 struct WebURLError;
@@ -56,12 +60,17 @@ public:
     virtual bool initialize(WebPluginContainer*) = 0;
     virtual void destroy() = 0;
 
+    virtual WebPluginContainer* container() const { return 0; }
+
     virtual NPObject* scriptableObject() = 0;
 
     // Returns true if the form submission value is successfully obtained
     // from the plugin. The value would be associated with the name attribute
     // of the corresponding object element.
     virtual bool getFormValue(WebString&) { return false; }
+    virtual bool supportsKeyboardFocus() const { return false; }
+
+    virtual bool canProcessDrag() const { return false; }
 
     virtual void paint(WebCanvas*, const WebRect&) = 0;
 
@@ -75,6 +84,8 @@ public:
 
     virtual bool acceptsInputEvents() = 0;
     virtual bool handleInputEvent(const WebInputEvent&, WebCursorInfo&) = 0;
+
+    virtual bool handleDragStatusUpdate(WebDragStatus, const WebDragData&, WebDragOperationsMask, const WebPoint& position, const WebPoint& screenPosition) { return false; }
 
     virtual void didReceiveResponse(const WebURLResponse&) = 0;
     virtual void didReceiveData(const char* data, int dataLength) = 0;
@@ -94,10 +105,11 @@ public:
     // Returns true if the printed content should not be scaled to
     // the printer's printable area.
     virtual bool isPrintScalingDisabled() { return false; }
-    // Sets up printing at the given print rect and printer DPI. printableArea
-    // is in points (a point is 1/72 of an inch).Returns the number of pages to
-    // be printed at these settings.
-    virtual int printBegin(const WebRect& printableArea, int printerDPI) { return 0; }
+
+    // Sets up printing with the specified printParams. Returns the number of
+    // pages to be printed at these settings.
+    virtual int printBegin(const WebPrintParams& printParams) { return 0; }
+
     // Prints the page specified by pageNumber (0-based index) into the supplied canvas.
     virtual bool printPage(int pageNumber, WebCanvas* canvas) { return false; }
     // Ends the print operation.
@@ -134,6 +146,8 @@ public:
     virtual bool canRotateView() { return false; }
     // Rotates the plugin's view of its content.
     virtual void rotateView(RotationType type) { }
+
+    virtual bool isPlaceholder() { return true; }
 
 protected:
     ~WebPlugin() { }

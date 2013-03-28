@@ -44,121 +44,162 @@ public:
     explicit WebSettingsImpl(WebCore::Settings*);
     virtual ~WebSettingsImpl() { }
 
-    virtual void setStandardFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON);
-    virtual void setFixedFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON);
-    virtual void setSerifFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON);
-    virtual void setSansSerifFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON);
+    virtual bool deviceSupportsTouch();
+    virtual bool scrollAnimatorEnabled() const;
+    virtual bool viewportEnabled() const { return m_viewportEnabled; }
+    virtual void setAccelerated2dCanvasEnabled(bool);
+    virtual void setAcceleratedAnimationEnabled(bool);
+    virtual void setAcceleratedCompositingEnabled(bool);
+    virtual void setAcceleratedCompositingFor3DTransformsEnabled(bool);
+    virtual void setAcceleratedCompositingForAnimationEnabled(bool);
+    virtual void setAcceleratedCompositingForCanvasEnabled(bool);
+    virtual void setAcceleratedCompositingForFixedPositionEnabled(bool);
+    virtual void setAcceleratedCompositingForOverflowScrollEnabled(bool);
+    virtual void setAcceleratedCompositingForPluginsEnabled(bool);
+    virtual void setAcceleratedCompositingForScrollableFramesEnabled(bool);
+    virtual void setAcceleratedCompositingForVideoEnabled(bool);
+    virtual void setAcceleratedFiltersEnabled(bool);
+    virtual void setAcceleratedPaintingEnabled(bool);
+    virtual void setAllowDisplayOfInsecureContent(bool);
+    virtual void setAllowFileAccessFromFileURLs(bool);
+    virtual void setAllowCustomScrollbarInMainFrame(bool);
+    virtual void setAllowRunningOfInsecureContent(bool);
+    virtual void setAllowScriptsToCloseWindows(bool);
+    virtual void setAllowUniversalAccessFromFileURLs(bool);
+    virtual void setAntialiased2dCanvasEnabled(bool);
+    virtual void setApplyDeviceScaleFactorInCompositor(bool);
+    virtual void setApplyPageScaleFactorInCompositor(bool);
+    virtual void setAsynchronousSpellCheckingEnabled(bool);
+    virtual void setAuthorAndUserStylesEnabled(bool);
+    virtual void setAutoZoomFocusedNodeToLegibleScale(bool);
+    virtual void setCaretBrowsingEnabled(bool);
+    virtual void setCompositedScrollingForFramesEnabled(bool);
+    virtual void setCookieEnabled(bool);
     virtual void setCursiveFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON);
-    virtual void setFantasyFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON);
-    virtual void setDefaultFontSize(int);
+    virtual void setDNSPrefetchingEnabled(bool);
+    virtual void setDOMPasteAllowed(bool);
     virtual void setDefaultFixedFontSize(int);
+    virtual void setDefaultFontSize(int);
+    virtual void setDefaultTextEncodingName(const WebString&);
+    virtual void setDefaultTileSize(WebSize);
+    virtual void setDeferred2dCanvasEnabled(bool);
+    virtual void setDeferredImageDecodingEnabled(bool);
+    virtual void setDeveloperExtrasEnabled(bool);
+    virtual void setDeviceSupportsMouse(bool);
+    virtual void setDeviceSupportsTouch(bool);
+    virtual void setDoubleTapToZoomEnabled(bool);
+    virtual void setDownloadableBinaryFontsEnabled(bool);
+    virtual void setEditableLinkBehaviorNeverLive();
+    virtual void setEditingBehavior(EditingBehavior);
+    virtual void setEnableScrollAnimator(bool);
+    virtual void setEnableTouchAdjustment(bool);
+    virtual void setExperimentalCSSCustomFilterEnabled(bool);
+    virtual void setExperimentalCSSGridLayoutEnabled(bool);
+    virtual void setCSSStickyPositionEnabled(bool);
+    virtual void setExperimentalCSSVariablesEnabled(bool);
+    virtual void setExperimentalWebGLEnabled(bool);
+    virtual void setFantasyFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON);
+    virtual void setFixedElementsLayoutRelativeToFrame(bool);
+    virtual void setFixedFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON);
+    virtual void setFixedPositionCreatesStackingContext(bool);
+    virtual void setFontRenderingModeNormal();
+    virtual void setForceCompositingMode(bool);
+    virtual void setFrameFlatteningEnabled(bool);
+    virtual void setFullScreenEnabled(bool);
+    virtual void setGestureTapHighlightEnabled(bool);
+    virtual void setHyperlinkAuditingEnabled(bool);
+    virtual void setImagesEnabled(bool);
+    virtual void setInteractiveFormValidationEnabled(bool);
+    virtual void setJavaEnabled(bool);
+    virtual void setJavaScriptCanAccessClipboard(bool);
+    virtual void setJavaScriptCanOpenWindowsAutomatically(bool);
+    virtual void setJavaScriptEnabled(bool);
+    virtual void setLayoutFallbackWidth(int);
+    virtual void setLoadsImagesAutomatically(bool);
+    virtual void setLocalStorageEnabled(bool);
+    virtual void setLowLatencyRenderingEnabled(bool);
+    virtual void setMaxUntiledLayerSize(WebSize);
+    virtual void setMediaPlaybackRequiresUserGesture(bool);
+    virtual void setMemoryInfoEnabled(bool);
+    virtual void setMinimumAccelerated2dCanvasSize(int);
     virtual void setMinimumFontSize(int);
     virtual void setMinimumLogicalFontSize(int);
-    virtual void setDefaultTextEncodingName(const WebString&);
-    virtual void setJavaScriptEnabled(bool);
-    virtual void setWebSecurityEnabled(bool);
-    virtual void setJavaScriptCanOpenWindowsAutomatically(bool);
-    virtual void setLoadsImagesAutomatically(bool);
-    virtual void setImagesEnabled(bool);
-    virtual void setPluginsEnabled(bool);
-    virtual void setDOMPasteAllowed(bool);
-    virtual void setDeveloperExtrasEnabled(bool);
+    virtual void setMinimumTimerInterval(double);
+    virtual void setMockScrollbarsEnabled(bool);
     virtual void setNeedsSiteSpecificQuirks(bool);
-    virtual void setShrinksStandaloneImagesToFit(bool);
-    virtual void setUsesEncodingDetector(bool);
-    virtual void setTextAreasAreResizable(bool);
-    virtual void setJavaEnabled(bool);
-    virtual void setAllowScriptsToCloseWindows(bool);
-    virtual void setUserStyleSheetLocation(const WebURL&);
-    virtual void setAuthorAndUserStylesEnabled(bool);
-    virtual void setUsesPageCache(bool);
-    virtual void setPageCacheSupportsPlugins(bool);
-    virtual void setDownloadableBinaryFontsEnabled(bool);
-    virtual void setJavaScriptCanAccessClipboard(bool);
-    virtual void setXSSAuditorEnabled(bool);
-    virtual void setDNSPrefetchingEnabled(bool);
-    virtual void setFixedElementsLayoutRelativeToFrame(bool);
-    virtual void setLocalStorageEnabled(bool);
-    virtual void setEditableLinkBehaviorNeverLive();
-    virtual void setFrameFlatteningEnabled(bool);
-    virtual void setFontRenderingModeNormal();
-    virtual void setAllowUniversalAccessFromFileURLs(bool);
-    virtual void setAllowFileAccessFromFileURLs(bool);
-#if OS(ANDROID)
-    virtual void setAllowContentURLAccess(bool);
-    virtual bool allowContentURLAccess() const;
-    virtual void setOnlyAllowFileAccessToAndroidResources(bool);
-    virtual bool onlyAllowFileAccessToAndroidResources() const;
-#endif
-    virtual void setTextDirectionSubmenuInclusionBehaviorNeverIncluded();
     virtual void setOfflineWebApplicationCacheEnabled(bool);
-    virtual void setWebAudioEnabled(bool);
-    virtual void setExperimentalWebGLEnabled(bool);
     virtual void setOpenGLMultisamplingEnabled(bool);
+    virtual void setPageCacheSupportsPlugins(bool);
+    virtual void setPasswordEchoDurationInSeconds(double);
+    virtual void setPasswordEchoEnabled(bool);
+    virtual void setPerTilePaintingEnabled(bool);
+    virtual void setPictographFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON);
+    virtual void setPluginsEnabled(bool);
     virtual void setPrivilegedWebGLExtensionsEnabled(bool);
+    virtual void setRenderVSyncEnabled(bool);
+    virtual void setSansSerifFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON);
+    virtual void setSerifFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON);
+    virtual void setShouldDisplayCaptions(bool);
+    virtual void setShouldDisplaySubtitles(bool);
+    virtual void setShouldDisplayTextDescriptions(bool);
+    virtual void setShouldPrintBackgrounds(bool);
+    virtual void setShouldRespectImageOrientation(bool);
     virtual void setShowDebugBorders(bool);
     virtual void setShowFPSCounter(bool);
-    virtual bool showFPSCounter() const { return m_showFPSCounter; }
+    virtual void setShowPaintRects(bool);
     virtual void setShowPlatformLayerTree(bool);
-    virtual bool showPlatformLayerTree() const { return m_showPlatformLayerTree; }
-    virtual void setEditingBehavior(EditingBehavior);
-    virtual void setAcceleratedCompositingEnabled(bool);
-    virtual void setForceCompositingMode(bool);
-    virtual void setMockScrollbarsEnabled(bool);
-    virtual void setCompositeToTextureEnabled(bool);
-    virtual bool compositeToTextureEnabled() const { return m_compositeToTextureEnabled; }
-    virtual void setAcceleratedCompositingFor3DTransformsEnabled(bool);
-    virtual void setAcceleratedCompositingForVideoEnabled(bool);
-    virtual void setAcceleratedCompositingForPluginsEnabled(bool);
-    virtual void setAcceleratedCompositingForCanvasEnabled(bool);
-    virtual void setAcceleratedCompositingForAnimationEnabled(bool);
-    virtual void setAccelerated2dCanvasEnabled(bool);
-    virtual void setAcceleratedCompositingForFixedPositionEnabled(bool);
-    virtual void setMinimumAccelerated2dCanvasSize(int);
-    virtual void setAcceleratedFiltersEnabled(bool);
-    virtual void setMemoryInfoEnabled(bool);
-    virtual void setHyperlinkAuditingEnabled(bool);
-    virtual void setLayoutFallbackWidth(int);
-    virtual void setAsynchronousSpellCheckingEnabled(bool);
+    virtual void setShrinksStandaloneImagesToFit(bool);
+    virtual void setStandardFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON);
+    virtual void setSupportsMultipleWindows(bool);
+    virtual void setSyncXHRInDocumentsEnabled(bool);
+    virtual void setTextAreasAreResizable(bool);
+    virtual void setTextAutosizingEnabled(bool);
+    virtual void setTextAutosizingFontScaleFactor(float);
+    virtual void setTextDirectionSubmenuInclusionBehaviorNeverIncluded();
+    virtual void setTouchDragDropEnabled(bool);
     virtual void setUnifiedTextCheckerEnabled(bool);
-    virtual void setCaretBrowsingEnabled(bool);
-    virtual void setInteractiveFormValidationEnabled(bool);
+    virtual void setUserStyleSheetLocation(const WebURL&);
+    virtual void setUsesEncodingDetector(bool);
+    virtual void setUsesPageCache(bool);
     virtual void setValidationMessageTimerMagnification(int);
-    virtual void setMinimumTimerInterval(double);
-    virtual void setFullScreenEnabled(bool);
-    virtual void setAllowDisplayOfInsecureContent(bool);
-    virtual void setAllowRunningOfInsecureContent(bool);
-    virtual void setFontBoostingVersion(int);
-#if defined(ANDROID) && ENABLE(FONT_BOOSTING)
-    virtual void setFontScaleFactor(float);
-#endif
-#if defined(ANDROID) && ENABLE(VIEWPORT)
-    virtual void setForceEnableZoom(bool);
-#endif
-    virtual void setPasswordEchoEnabled(bool);
-    virtual void setPasswordEchoDurationInSeconds(double);
-    virtual void setShouldPrintBackgrounds(bool);
-    virtual void setEnableScrollAnimator(bool);
-    virtual void setHixie76WebSocketProtocolEnabled(bool);
+    virtual void setViewportEnabled(bool);
     virtual void setVisualWordMovementEnabled(bool);
-    virtual void setShouldDisplaySubtitles(bool);
-    virtual void setShouldDisplayCaptions(bool);
-    virtual void setShouldDisplayTextDescriptions(bool);
-    virtual void setAcceleratedPaintingEnabled(bool);
-    virtual void setPerTilePaintingEnabled(bool);
-    virtual void setPartialSwapEnabled(bool);
-    virtual void setThreadedAnimationEnabled(bool);
-    virtual void setMediaPlaybackRequiresUserGesture(bool);
+    virtual void setWebAudioEnabled(bool);
+    virtual void setWebGLErrorsToConsoleEnabled(bool);
+    virtual void setWebSecurityEnabled(bool);
+    virtual void setXSSAuditorEnabled(bool);
+
+    bool showFPSCounter() const { return m_showFPSCounter; }
+    bool showPlatformLayerTree() const { return m_showPlatformLayerTree; }
+    bool showPaintRects() const { return m_showPaintRects; }
+    bool renderVSyncEnabled() const { return m_renderVSyncEnabled; }
+    bool lowLatencyRenderingEnabled() const { return m_lowLatencyRenderingEnabled; }
+    bool applyDeviceScaleFactorInCompositor() const;
+    bool applyPageScaleFactorInCompositor() const;
+    bool autoZoomFocusedNodeToLegibleScale() const { return m_autoZoomFocusedNodeToLegibleScale; }
+    bool gestureTapHighlightEnabled() const { return m_gestureTapHighlightEnabled; }
+    bool doubleTapToZoomEnabled() const { return m_doubleTapToZoomEnabled; }
+    bool perTilePaintingEnabled() const { return m_perTilePaintingEnabled; }
+    bool acceleratedAnimationEnabled() const { return m_acceleratedAnimationEnabled; }
+    WebSize defaultTileSize() const { return m_defaultTileSize; }
+    WebSize maxUntiledLayerSize() const { return m_maxUntiledLayerSize; }
 
 private:
     WebCore::Settings* m_settings;
-    bool m_compositeToTextureEnabled;
     bool m_showFPSCounter;
     bool m_showPlatformLayerTree;
-#if OS(ANDROID)
-    bool m_allowContentURLAccess;
-    bool m_onlyAllowFileAccessToAndroidResources;
-#endif
+    bool m_showPaintRects;
+    bool m_renderVSyncEnabled;
+    bool m_lowLatencyRenderingEnabled;
+    bool m_viewportEnabled;
+    bool m_gestureTapHighlightEnabled;
+    bool m_autoZoomFocusedNodeToLegibleScale;
+    bool m_deferredImageDecodingEnabled;
+    bool m_doubleTapToZoomEnabled;
+    bool m_perTilePaintingEnabled;
+    bool m_acceleratedAnimationEnabled;
+    WebSize m_defaultTileSize;
+    WebSize m_maxUntiledLayerSize;
 };
 
 } // namespace WebKit

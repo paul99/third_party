@@ -33,9 +33,33 @@
 
 #include "BlobURL.h"
 #include "File.h"
+#include "HistogramSupport.h"
+#include "ScriptCallStack.h"
+#include "ScriptExecutionContext.h"
 #include "ThreadableBlobRegistry.h"
 
 namespace WebCore {
+
+namespace {
+
+// Used in histograms to see when we can actually deprecate the prefixed slice.
+enum SliceHistogramEnum {
+    SliceWithoutPrefix,
+    SliceWithPrefix,
+    SliceHistogramEnumMax,
+};
+
+} // namespace
+
+Blob::Blob()
+    : m_size(0)
+{
+    OwnPtr<BlobData> blobData = BlobData::create();
+
+    // Create a new internal URL and register it with the provided blob data.
+    m_internalURL = BlobURL::createInternalURL();
+    ThreadableBlobRegistry::registerBlobURL(m_internalURL, blobData.release());
+}
 
 Blob::Blob(PassOwnPtr<BlobData> blobData, long long size)
     : m_type(blobData->contentType())
@@ -54,7 +78,7 @@ Blob::Blob(const KURL& srcURL, const String& type, long long size)
 {
     // Create a new internal URL and register it with the same blob data as the source URL.
     m_internalURL = BlobURL::createInternalURL();
-    ThreadableBlobRegistry::registerBlobURL(m_internalURL, srcURL);
+    ThreadableBlobRegistry::registerBlobURL(0, m_internalURL, srcURL);
 }
 
 Blob::~Blob()
@@ -63,16 +87,16 @@ Blob::~Blob()
 }
 
 #if ENABLE(BLOB)
-PassRefPtr<Blob> Blob::webkitSlice(long long start, long long end, const String& contentType) const
+PassRefPtr<Blob> Blob::slice(long long start, long long end, const String& contentType) const
 {
     // When we slice a file for the first time, we obtain a snapshot of the file by capturing its current size and modification time.
     // The modification time will be used to verify if the file has been changed or not, when the underlying data are accessed.
     long long size;
     double modificationTime;
-    if (isFile())
+    if (isFile()) {
         // FIXME: This involves synchronous file operation. We need to figure out how to make it asynchronous.
-        static_cast<const File*>(this)->captureSnapshot(size, modificationTime);
-    else {
+        toFile(this)->captureSnapshot(size, modificationTime);
+    } else {
         ASSERT(m_size != -1);
         size = m_size;
     }
@@ -99,9 +123,14 @@ PassRefPtr<Blob> Blob::webkitSlice(long long start, long long end, const String&
     long long length = end - start;
     OwnPtr<BlobData> blobData = BlobData::create();
     blobData->setContentType(contentType);
-    if (isFile())
-        blobData->appendFile(static_cast<const File*>(this)->path(), start, length, modificationTime);
-    else
+    if (isFile()) {
+#if ENABLE(FILE_SYSTEM)
+        if (!toFile(this)->fileSystemURL().isEmpty())
+            blobData->appendURL(toFile(this)->fileSystemURL(), start, length, modificationTime);
+        else
+#endif
+        blobData->appendFile(toFile(this)->path(), start, length, modificationTime);
+    } else
         blobData->appendBlob(m_internalURL, start, length);
 
     return Blob::create(blobData.release(), length);

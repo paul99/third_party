@@ -32,7 +32,7 @@
 #include "KURL.h"
 #include "markup.h"
 #include "NotImplemented.h"
-#include "PlatformString.h"
+#include <wtf/text/WTFString.h>
 
 #include <wx/defs.h>
 #include <wx/dataobj.h>
@@ -53,12 +53,15 @@ Pasteboard* Pasteboard::generalPasteboard()
 void Pasteboard::writeSelection(Range* selectedRange, bool canSmartCopyOrDelete, Frame* frame)
 {
     if (wxTheClipboard->Open()) {
-        wxTheClipboard->SetData( new wxTextDataObject(frame->editor()->selectedText()) );
+#if wxCHECK_VERSION(2, 9, 4)
+        wxTheClipboard->SetData(new wxHTMLDataObject(createMarkup(selectedRange, 0, AnnotateForInterchange)));
+#endif
+        wxTheClipboard->SetData(new wxTextDataObject(frame->editor()->selectedText()));
         wxTheClipboard->Close();
     }
 }
 
-void Pasteboard::writePlainText(const String& text)
+void Pasteboard::writePlainText(const String& text, SmartReplaceOption)
 {
     if (wxTheClipboard->Open()) {
         wxTheClipboard->SetData( new wxTextDataObject(text) );
@@ -74,7 +77,15 @@ bool Pasteboard::canSmartReplace()
 
 String Pasteboard::plainText(Frame* frame)
 {
-    notImplemented();
+    if (wxTheClipboard->Open()) {
+        if (wxTheClipboard->IsSupported(wxDF_TEXT)) {
+            wxTextDataObject data;
+            wxTheClipboard->GetData(data);
+            wxTheClipboard->Close();
+            return data.GetText();
+        }
+    }
+    
     return String();
 }
 
@@ -83,11 +94,21 @@ PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefP
 {
     RefPtr<DocumentFragment> fragment = 0;
     if (wxTheClipboard->Open()) {
-        if (allowPlainText && wxTheClipboard->IsSupported( wxDF_TEXT )) {
-            wxTextDataObject data;
-            wxTheClipboard->GetData( data );
-            chosePlainText = true;
-            fragment = createFragmentFromText(context.get(), data.GetText());
+#if wxCHECK_VERSION(2, 9, 4)
+        if (wxTheClipboard->IsSupported(wxDF_HTML)) {
+            wxHTMLDataObject data;
+            wxTheClipboard->GetData(data);
+            chosePlainText = false;
+            fragment = createFragmentFromMarkup(frame->document(), data.GetHTML(), "", DisallowScriptingContent);
+        } else
+#endif
+        {
+            if (allowPlainText && wxTheClipboard->IsSupported( wxDF_TEXT )) {
+                wxTextDataObject data;
+                wxTheClipboard->GetData( data );
+                chosePlainText = true;
+                fragment = createFragmentFromText(context.get(), data.GetText());
+            }
         }
         wxTheClipboard->Close();
     }

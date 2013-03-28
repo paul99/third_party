@@ -30,7 +30,7 @@
 
 #include "config.h"
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 #include "V8NotificationCenter.h"
 
 #include "ExceptionCode.h"
@@ -38,66 +38,34 @@
 #include "Notification.h"
 #include "NotificationCenter.h"
 #include "V8Binding.h"
-#include "V8CustomVoidCallback.h"
 #include "V8EventListener.h"
 #include "V8Notification.h"
-#include "V8Proxy.h"
 #include "V8Utilities.h"
+#include "V8VoidCallback.h"
 #include "WorkerContext.h"
 
 namespace WebCore {
 
-v8::Handle<v8::Value> V8NotificationCenter::createHTMLNotificationCallback(const v8::Arguments& args)
-{
-    INC_STATS(L"DOM.NotificationCenter.CreateHTMLNotification()");
-    NotificationCenter* notificationCenter = V8NotificationCenter::toNative(args.Holder());
-
-    ExceptionCode ec = 0;
-    String url = toWebCoreString(args[0]);
-    RefPtr<Notification> notification = notificationCenter->createHTMLNotification(url, ec);
-
-    if (ec)
-        return throwError(ec);
-
-    notification->ref();
-    return toV8(notification.get());
-}
-
-v8::Handle<v8::Value> V8NotificationCenter::createNotificationCallback(const v8::Arguments& args)
-{
-    INC_STATS(L"DOM.NotificationCenter.CreateNotification()");
-    NotificationCenter* notificationCenter = V8NotificationCenter::toNative(args.Holder());
-
-    ExceptionCode ec = 0;
-    RefPtr<Notification> notification = notificationCenter->createNotification(toWebCoreString(args[0]), toWebCoreString(args[1]), toWebCoreString(args[2]), ec);
-
-    if (ec)
-        return throwError(ec);
-
-    notification->ref();
-    return toV8(notification.get());
-}
-
 v8::Handle<v8::Value> V8NotificationCenter::requestPermissionCallback(const v8::Arguments& args)
 {
-    INC_STATS(L"DOM.NotificationCenter.RequestPermission()");
+    INC_STATS("DOM.NotificationCenter.RequestPermission()");
     NotificationCenter* notificationCenter = V8NotificationCenter::toNative(args.Holder());
     ScriptExecutionContext* context = notificationCenter->scriptExecutionContext();
 
     // Make sure that script execution context is valid.
     if (!context)
-        return throwError(INVALID_STATE_ERR);
+        return setDOMException(INVALID_STATE_ERR, args.GetIsolate());
 
     // Requesting permission is only valid from a page context.
     if (context->isWorkerContext())
-        return throwError(NOT_SUPPORTED_ERR);
+        return setDOMException(NOT_SUPPORTED_ERR, args.GetIsolate());
 
-    RefPtr<V8CustomVoidCallback> callback;
+    RefPtr<V8VoidCallback> callback;
     if (args.Length() > 0) {
         if (!args[0]->IsObject())
-            return throwError("Callback must be of valid type.", V8Proxy::TypeError);
+            return throwTypeError("Callback must be of valid type.", args.GetIsolate());
  
-        callback = V8CustomVoidCallback::create(args[0], context);
+        callback = V8VoidCallback::create(args[0], context);
     }
 
     notificationCenter->requestPermission(callback.release());
@@ -107,4 +75,4 @@ v8::Handle<v8::Value> V8NotificationCenter::requestPermissionCallback(const v8::
 
 }  // namespace WebCore
 
-#endif  // ENABLE(NOTIFICATIONS)
+#endif // ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)

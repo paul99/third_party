@@ -3,6 +3,7 @@
 #   This file is part of the WebKit project
 #
 #   Copyright (C) 2010 Andras Becsi (abecsi@inf.u-szeged.hu), University of Szeged
+#   Copyright (C) 2012 Apple Inc. All rights reserved.
 #
 #   This library is free software; you can redistribute it and/or
 #   modify it under the terms of the GNU Library General Public
@@ -26,28 +27,17 @@ my $outdir = $ARGV[0];
 shift;
 my $option = basename($ARGV[0],".gperf");
 
-
 if ($option eq "ColorData") {
-
     my $colorDataGenerated         = "$outdir/ColorData.cpp";
-    my $colorDataGperf             = $ARGV[0];
-    shift;
+    my $colorDataGperf             = shift;
+    my $customGperf                = shift;
 
-    # Clank Hack
-
-    # Do not upstream like this; make conditional on an environment variable or other param.
-
-    # Clank change: don't inline the findBLAH routine.
-    open C, ">$colorDataGenerated" || die "Could not open $colorDataGenerated for writing";
-    print C << "EOF";
-/* Clank Linux build *must* have __inline defined in string.h, so include that first. */
-#include <string.h>
-EOF
-    close C;
-
-    # end of Clank Hack
-
-    system("gperf --key-positions=\"*\" -D -s 2 $colorDataGperf --output-file=$colorDataGenerated") == 0 || die "calling gperf failed: $?";
+    # gperf emits this filename literally in #line directives, but VS errors
+    # out because the filenames then contain unescaped \s, so replace the \
+    # with /.
+    $colorDataGperf =~ s/\\/\//g;
+    my $gperf = $ENV{GPERF} ? $ENV{GPERF} : ($customGperf ? $customGperf : "gperf");
+    system("\"$gperf\" --key-positions=\"*\" -D -s 2 $colorDataGperf --output-file=$colorDataGenerated") == 0 || die "calling gperf failed: $?";
 
 } else {
     die "Unknown option.";

@@ -35,11 +35,11 @@
 #include "ClipboardChromium.h"
 #include "Frame.h"
 #include "NativeImageSkia.h"
-#include "platform/WebCommon.h"
-#include "platform/WebDragData.h"
-#include "platform/WebImage.h"
 #include "WebViewClient.h"
 #include "WebViewImpl.h"
+#include <public/WebCommon.h>
+#include <public/WebDragData.h>
+#include <public/WebImage.h>
 
 using namespace WebCore;
 
@@ -86,14 +86,13 @@ void DragClientImpl::startDrag(DragImageRef dragImage,
 
     IntSize offsetSize(eventPos - dragImageOrigin);
     WebPoint offsetPoint(offsetSize.width(), offsetSize.height());
-    m_webView->startDragging(
-        dragData, static_cast<WebDragOperationsMask>(dragOperationMask),
-#if WEBKIT_USING_SKIA
-        dragImage ? WebImage(*dragImage) : WebImage(),
-#else
-        dragImage ? WebImage(dragImage) : WebImage(),
-#endif
-        offsetPoint);
+
+    if (dragImage && dragImage->bitmap && m_webView->deviceScaleFactor() != dragImage->resolutionScale) {
+        ASSERT(dragImage->resolutionScale > 0);
+        float scale = m_webView->deviceScaleFactor() / dragImage->resolutionScale;
+        dragImage = scaleDragImage(dragImage, WebCore::FloatSize(scale, scale));
+    }
+    m_webView->startDragging(frame, dragData, static_cast<WebDragOperationsMask>(dragOperationMask), (dragImage && dragImage->bitmap) ? WebImage(*dragImage->bitmap) : WebImage(), offsetPoint);
 }
 
 void DragClientImpl::dragControllerDestroyed()

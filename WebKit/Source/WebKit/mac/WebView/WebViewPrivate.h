@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2005-2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,8 +39,10 @@
 @class WebDeviceOrientation;
 @class WebGeolocationPosition;
 @class WebInspector;
+@class WebNotification;
 @class WebPreferences;
 @class WebScriptWorld;
+@class WebSecurityOrigin;
 @class WebTextIterator;
 
 @protocol WebDeviceOrientationProvider;
@@ -100,9 +102,25 @@ typedef NSUInteger WebFindOptions;
 
 typedef enum {
     WebPaginationModeUnpaginated,
-    WebPaginationModeHorizontal,
-    WebPaginationModeVertical,
+    WebPaginationModeLeftToRight,
+    WebPaginationModeRightToLeft,
+    WebPaginationModeTopToBottom,
+    WebPaginationModeBottomToTop,
 } WebPaginationMode;
+
+enum {
+    WebDidFirstLayout = 1 << 0,
+    WebDidFirstVisuallyNonEmptyLayout = 1 << 1,
+    WebDidHitRelevantRepaintedObjectsAreaThreshold = 1 << 2
+};
+typedef NSUInteger WebLayoutMilestones;
+
+// This needs to be in sync with WebCore::NotificationClient::Permission
+typedef enum {
+    WebNotificationPermissionAllowed,
+    WebNotificationPermissionNotAllowed,
+    WebNotificationPermissionDenied
+} WebNotificationPermission;
 
 @interface WebController : NSTreeController {
     IBOutlet WebView *webView;
@@ -350,9 +368,6 @@ Could be worth adding to the API.
 + (void)_setShouldUseFontSmoothing:(BOOL)f;
 + (BOOL)_shouldUseFontSmoothing;
 
-- (void)_setCatchesDelegateExceptions:(BOOL)f;
-- (BOOL)_catchesDelegateExceptions;
-
 // These two methods are useful for a test harness that needs a consistent appearance for the focus rings
 // regardless of OS X version.
 + (void)_setUsesTestModeFocusRingColor:(BOOL)f;
@@ -471,8 +486,6 @@ Could be worth adding to the API.
 - (void)setMemoryCacheDelegateCallsEnabled:(BOOL)suspend;
 - (BOOL)areMemoryCacheDelegateCallsEnabled;
 
-- (void)_setJavaScriptURLsAreAllowed:(BOOL)setJavaScriptURLsAreAllowed;
-
 + (NSCursor *)_pointingHandCursor;
 
 // SPI for DumpRenderTree
@@ -557,6 +570,15 @@ Could be worth adding to the API.
 
 - (void)_setPaginationMode:(WebPaginationMode)paginationMode;
 - (WebPaginationMode)_paginationMode;
+
+- (void)_listenForLayoutMilestones:(WebLayoutMilestones)layoutMilestones;
+- (WebLayoutMilestones)_layoutMilestones;
+
+// Whether the column-break-{before,after} properties are respected instead of the
+// page-break-{before,after} properties.
+- (void)_setPaginationBehavesLikeColumns:(BOOL)behavesLikeColumns;
+- (BOOL)_paginationBehavesLikeColumns;
+
 // Set to 0 to have the page length equal the view length.
 - (void)_setPageLength:(CGFloat)pageLength;
 - (CGFloat)_pageLength;
@@ -618,6 +640,9 @@ Could be worth adding to the API.
  */
 + (void)_setHTTPPipeliningEnabled:(BOOL)enabled;
 
+// SPI for DumpRenderTree
+- (void)_setVisibilityState:(int)visibilityState isInitialState:(BOOL)isInitialState;
+
 @end
 
 @interface WebView (WebViewPrintingPrivate)
@@ -660,7 +685,7 @@ Could be worth adding to the API.
 - (BOOL)isAutomaticDashSubstitutionEnabled;
 - (BOOL)isAutomaticTextReplacementEnabled;
 - (BOOL)isAutomaticSpellingCorrectionEnabled;
-#ifndef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
 - (void)setAutomaticQuoteSubstitutionEnabled:(BOOL)flag;
 - (void)toggleAutomaticQuoteSubstitution:(id)sender;
 - (void)setAutomaticLinkDetectionEnabled:(BOOL)flag;
@@ -672,9 +697,6 @@ Could be worth adding to the API.
 - (void)setAutomaticSpellingCorrectionEnabled:(BOOL)flag;
 - (void)toggleAutomaticSpellingCorrection:(id)sender;
 #endif
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
-- (void)handleCorrectionPanelResult:(NSString*)result;
-#endif
 @end
 
 @interface WebView (WebViewEditingInMail)
@@ -682,6 +704,8 @@ Could be worth adding to the API.
 - (void)_replaceSelectionWithNode:(DOMNode *)node matchStyle:(BOOL)matchStyle;
 - (BOOL)_selectionIsCaret;
 - (BOOL)_selectionIsAll;
+- (void)_simplifyMarkup:(DOMNode *)startNode endNode:(DOMNode *)endNode;
+
 @end
 
 @interface WebView (WebViewDeviceOrientation)
@@ -695,20 +719,42 @@ Could be worth adding to the API.
 - (WebGeolocationPosition *)lastPosition;
 @end
 
+@protocol WebNotificationProvider
+- (void)registerWebView:(WebView *)webView;
+- (void)unregisterWebView:(WebView *)webView;
+
+- (void)showNotification:(WebNotification *)notification fromWebView:(WebView *)webView;
+- (void)cancelNotification:(WebNotification *)notification;
+- (void)notificationDestroyed:(WebNotification *)notification;
+- (void)clearNotifications:(NSArray *)notificationIDs;
+- (WebNotificationPermission)policyForOrigin:(WebSecurityOrigin *)origin;
+
+- (void)webView:(WebView *)webView didShowNotification:(uint64_t)notificationID;
+- (void)webView:(WebView *)webView didClickNotification:(uint64_t)notificationID;
+- (void)webView:(WebView *)webView didCloseNotifications:(NSArray *)notificationIDs;
+@end
+
 @interface WebView (WebViewGeolocation)
 - (void)_setGeolocationProvider:(id<WebGeolocationProvider>)locationProvider;
 - (id<WebGeolocationProvider>)_geolocationProvider;
 
 - (void)_geolocationDidChangePosition:(WebGeolocationPosition *)position;
-- (void)_geolocationDidFailWithError:(NSError *)error;
+- (void)_geolocationDidFailWithMessage:(NSString *)errorMessage;
+@end
+
+@interface WebView (WebViewNotification)
+- (void)_setNotificationProvider:(id<WebNotificationProvider>)notificationProvider;
+- (id<WebNotificationProvider>)_notificationProvider;
+
+- (void)_notificationDidShow:(uint64_t)notificationID;
+- (void)_notificationDidClick:(uint64_t)notificationID;
+- (void)_notificationsDidClose:(NSArray *)notificationIDs;
+
+- (uint64_t)_notificationIDForTesting:(JSValueRef)jsNotification;
 @end
 
 @interface WebView (WebViewPrivateStyleInfo)
 - (JSValueRef)_computedStyleIncludingVisitedInfo:(JSContextRef)context forElement:(JSValueRef)value;
-@end
-
-@interface WebView (WebViewPrivateNodesFromRect)
-- (JSValueRef)_nodesFromRect:(JSContextRef)context forDocument:(JSValueRef)value x:(int)x  y:(int)y top:(unsigned)top right:(unsigned)right bottom:(unsigned)bottom left:(unsigned)left ignoreClipping:(BOOL)ignoreClipping;
 @end
 
 @interface NSObject (WebViewFrameLoadDelegatePrivate)
@@ -723,6 +769,8 @@ Could be worth adding to the API.
 - (void)webView:(WebView *)sender didHandleOnloadEventsForFrame:(WebFrame *)frame;
 
 - (void)webView:(WebView *)sender didFirstVisuallyNonEmptyLayoutInFrame:(WebFrame *)frame;
+
+- (void)webView:(WebView *)sender didLayout:(WebLayoutMilestones)milestones;
 
 // For implementing the WebInspector's test harness
 - (void)webView:(WebView *)webView didClearInspectorWindowObject:(WebScriptObject *)windowObject forFrame:(WebFrame *)frame;

@@ -90,7 +90,6 @@ using JSC::ExecState;
 using JSC::Interpreter;
 using JSC::JSLock;
 using JSC::JSObject;
-using JSC::UString;
 
 using namespace std;
 using namespace WTF;
@@ -113,7 +112,6 @@ void PluginView::updatePluginWidget()
     m_windowRect.move(root()->scrollOffset());
 
     m_clipRect = calculateClipRect();
-    IntRect f = frameRect();
 
     // Notify the plugin if it may or may not be on/offscreen.
     handleScrollEvent();
@@ -196,11 +194,11 @@ void PluginView::updateBuffer(const IntRect& bufferRect)
         std::vector<BlackBerry::Platform::IntRect> exposedRects = exposedRegion.rects();
         for (unsigned i = 0; i < exposedRects.size(); ++i) {
             NPDrawEvent draw;
+            NPRect tempRect = toNPRect(exposedRects.at(i));
             draw.pluginRect = toNPRect(m_windowRect);
             draw.clipRect = toNPRect(m_clipRect);
-            draw.drawRect = (NPRect*)alloca(sizeof(NPRect));
+            draw.drawRect = &tempRect;
             draw.drawRectCount = 1;
-            *draw.drawRect = toNPRect(exposedRects.at(i));
             draw.zoomFactor = ((NPSetWindowCallbackStruct*)m_npWindow.ws_info)->zoomFactor;
 
             NPEvent npEvent;
@@ -404,7 +402,7 @@ bool PluginView::dispatchNPEvent(NPEvent& event)
         return false;
 
     PluginView::setCurrentPluginView(this);
-    JSC::JSLock::DropAllLocks dropAllLocks(JSC::SilenceAssertionsOnly);
+    JSC::JSLock::DropAllLocks dropAllLocks(JSDOMWindowBase::commonJSGlobalData());
     setCallingPlugin(true);
 
     bool accepted = m_plugin->pluginFuncs()->event(m_instance, &event);
@@ -474,10 +472,8 @@ void PluginView::handleWheelEvent(WheelEvent* event)
     npEvent.type = NP_WheelEvent;
     npEvent.data = &wheelEvent;
 
-    if (dispatchNPEvent(npEvent)) {
+    if (dispatchNPEvent(npEvent))
         event->setDefaultHandled();
-        event->setPluginHandled();
-    }
 }
 
 void PluginView::handleTouchEvent(TouchEvent* event)
@@ -494,22 +490,15 @@ void PluginView::handleTouchEvent(TouchEvent* event)
         npTouchEvent.type = TOUCH_EVENT_DOUBLETAP;
     else if (event->isTouchHold())
         npTouchEvent.type = TOUCH_EVENT_TOUCHHOLD;
-    else if (event->type() == eventNames().touchstartEvent)
-        npTouchEvent.type = TOUCH_EVENT_START;
-    else if (event->type() == eventNames().touchendEvent)
-        npTouchEvent.type = TOUCH_EVENT_END;
-    else if (event->type() == eventNames().touchmoveEvent)
-        npTouchEvent.type = TOUCH_EVENT_MOVE;
     else if (event->type() == eventNames().touchcancelEvent)
         npTouchEvent.type = TOUCH_EVENT_CANCEL;
-    else {
-        ASSERT_NOT_REACHED();
+    else
         return;
-    }
 
     TouchList* touchList;
-    // The touches list is empty if in a touch end event. Use changedTouches instead.
-    if (npTouchEvent.type == TOUCH_EVENT_DOUBLETAP || npTouchEvent.type == TOUCH_EVENT_END)
+    // The touches list is empty if in a touch end event.
+    // Since DoubleTap is ususally a TouchEnd Use changedTouches instead.
+    if (npTouchEvent.type == TOUCH_EVENT_DOUBLETAP)
         touchList = event->changedTouches();
     else
         touchList = event->touches();
@@ -538,18 +527,8 @@ void PluginView::handleTouchEvent(TouchEvent* event)
     npEvent.type = NP_TouchEvent;
     npEvent.data = &npTouchEvent;
 
-    if (dispatchNPEvent(npEvent)) {
+    if (dispatchNPEvent(npEvent))
         event->setDefaultHandled();
-        event->setPluginHandled();
-    } else if (npTouchEvent.type == TOUCH_EVENT_DOUBLETAP) {
-        // Send Touch Up if double tap not consumed
-        npTouchEvent.type = TOUCH_EVENT_END;
-        npEvent.data = &npTouchEvent;
-        if (dispatchNPEvent(npEvent)) {
-            event->setDefaultHandled();
-            event->setPluginHandled();
-        }
-    }
 }
 
 void PluginView::handleMouseEvent(MouseEvent* event)
@@ -566,19 +545,17 @@ void PluginView::handleMouseEvent(MouseEvent* event)
     mouseEvent.x = event->offsetX();
     mouseEvent.y = event->offsetY();
 
-    if (event->type() == eventNames().mousedownEvent) {
+    if (event->type() == eventNames().mousedownEvent)
         mouseEvent.type = MOUSE_BUTTON_DOWN;
-        parentFrame()->eventHandler()->setCapturingMouseEventsNode(node());
-    } else if (event->type() == eventNames().mousemoveEvent)
+    else if (event->type() == eventNames().mousemoveEvent)
         mouseEvent.type = MOUSE_MOTION;
     else if (event->type() == eventNames().mouseoutEvent)
         mouseEvent.type = MOUSE_OUTBOUND;
     else if (event->type() == eventNames().mouseoverEvent)
         mouseEvent.type = MOUSE_OVER;
-    else if (event->type() == eventNames().mouseupEvent) {
+    else if (event->type() == eventNames().mouseupEvent)
         mouseEvent.type = MOUSE_BUTTON_UP;
-        parentFrame()->eventHandler()->setCapturingMouseEventsNode(0);
-    } else
+    else
         return;
 
     mouseEvent.button = event->button();
@@ -587,10 +564,8 @@ void PluginView::handleMouseEvent(MouseEvent* event)
     npEvent.type = NP_MouseEvent;
     npEvent.data = &mouseEvent;
 
-    if (dispatchNPEvent(npEvent)) {
+    if (dispatchNPEvent(npEvent))
         event->setDefaultHandled();
-        event->setPluginHandled();
-    }
 }
 
 void PluginView::handleFocusInEvent()
@@ -978,7 +953,7 @@ void PluginView::setNPWindowIfNeeded()
         ((NPSetWindowCallbackStruct*)m_npWindow.ws_info)->windowGroup = window->windowGroup();
 
     PluginView::setCurrentPluginView(this);
-    JSC::JSLock::DropAllLocks dropAllLocks(JSC::SilenceAssertionsOnly);
+    JSC::JSLock::DropAllLocks dropAllLocks(JSDOMWindowBase::commonJSGlobalData());
     setCallingPlugin(true);
 
     // FIXME: Passing zoomFactor to setwindow make windowed plugin scale incorrectly.
@@ -1228,7 +1203,7 @@ bool PluginView::platformStart()
 
     if (m_plugin->pluginFuncs()->getvalue) {
         PluginView::setCurrentPluginView(this);
-        JSC::JSLock::DropAllLocks dropAllLocks(JSC::SilenceAssertionsOnly);
+        JSC::JSLock::DropAllLocks dropAllLocks(JSDOMWindowBase::commonJSGlobalData());
         setCallingPlugin(true);
         m_plugin->pluginFuncs()->getvalue(m_instance, NPPVpluginNeedsXEmbed, &m_needsXEmbed);
         setCallingPlugin(false);
@@ -1301,14 +1276,6 @@ void PluginView::platformDestroy()
     m_private = 0;
 }
 
-void PluginView::halt()
-{
-}
-
-void PluginView::restart()
-{
-}
-
 void PluginView::getWindowInfo(Vector<PluginWindowInfo>& windowList)
 {
     if (!m_plugin->pluginFuncs()->getvalue)
@@ -1317,7 +1284,7 @@ void PluginView::getWindowInfo(Vector<PluginWindowInfo>& windowList)
     void* valPtr = 0;
 
     PluginView::setCurrentPluginView(this);
-    JSC::JSLock::DropAllLocks dropAllLocks(JSC::SilenceAssertionsOnly);
+    JSC::JSLock::DropAllLocks dropAllLocks(JSDOMWindowBase::commonJSGlobalData());
     setCallingPlugin(true);
     m_plugin->pluginFuncs()->getvalue(m_instance, NPPVpluginScreenWindow, &valPtr);
     setCallingPlugin(false);

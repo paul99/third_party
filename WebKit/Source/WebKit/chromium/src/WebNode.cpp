@@ -37,18 +37,21 @@
 #include "FrameLoaderClientImpl.h"
 #include "Node.h"
 #include "NodeList.h"
-
 #include "EventListenerWrapper.h"
+#include "RenderObject.h"
+#include "RenderWidget.h"
 #include "WebDOMEvent.h"
 #include "WebDOMEventListener.h"
 #include "WebDocument.h"
 #include "WebElement.h"
 #include "WebFrameImpl.h"
 #include "WebNodeList.h"
-#include "platform/WebString.h"
-#include "platform/WebVector.h"
-
+#include "WebPluginContainer.h"
+#include "WebPluginContainerImpl.h"
+#include "Widget.h"
 #include "markup.h"
+#include <public/WebString.h>
+#include <public/WebVector.h>
 
 using namespace WebCore;
 
@@ -136,6 +139,13 @@ WebNodeList WebNode::childNodes()
     return WebNodeList(m_private->childNodes());
 }
 
+bool WebNode::appendChild(const WebNode& child) 
+{
+    ExceptionCode exceptionCode = 0;
+    m_private->appendChild(child, exceptionCode);
+    return !exceptionCode;
+}
+
 WebString WebNode::createMarkup() const
 {
     return WebCore::createMarkup(m_private.get());
@@ -153,7 +163,7 @@ bool WebNode::isTextNode() const
 
 bool WebNode::isFocusable() const
 {
-    m_private->document()->updateLayout();
+    m_private->document()->updateLayoutIgnorePendingStylesheets();
     return m_private->isFocusable();
 }
 
@@ -199,8 +209,7 @@ bool WebNode::dispatchEvent(const WebDOMEvent& event)
 
 void WebNode::simulateClick()
 {
-    RefPtr<Event> noEvent;
-    m_private->dispatchSimulatedClick(noEvent);
+    m_private->dispatchSimulatedClick(0);
 }
 
 WebNodeList WebNode::getElementsByTagName(const WebString& tag) const
@@ -218,9 +227,33 @@ bool WebNode::focused() const
     return m_private->focused();
 }
 
+bool WebNode::remove()
+{
+    ExceptionCode exceptionCode = 0;
+    m_private->remove(exceptionCode);
+    return !exceptionCode;
+}
+
 bool WebNode::hasNonEmptyBoundingBox() const
 {
+    m_private->document()->updateLayoutIgnorePendingStylesheets();
     return m_private->hasNonEmptyBoundingBox();
+}
+
+WebPluginContainer* WebNode::pluginContainer() const
+{
+    if (isNull())
+        return 0;
+    const Node* coreNode = constUnwrap<Node>();
+    if (coreNode->hasTagName(HTMLNames::objectTag) || coreNode->hasTagName(HTMLNames::embedTag)) {
+        RenderObject* object = coreNode->renderer();
+        if (object && object->isWidget()) {
+            Widget* widget = WebCore::toRenderWidget(object)->widget();
+            if (widget && widget->isPluginContainer())
+                return static_cast<WebPluginContainerImpl*>(widget);
+        }
+    }
+    return 0;
 }
 
 WebNode::WebNode(const PassRefPtr<Node>& node)

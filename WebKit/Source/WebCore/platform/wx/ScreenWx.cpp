@@ -28,7 +28,6 @@
 #include "Screen.h"
 #include "IntRect.h"
 #include "FloatRect.h"
-#include "FrameView.h"
 #include "NotImplemented.h"
 #include "Widget.h"
 
@@ -38,18 +37,7 @@
 
 namespace WebCore {
     
-int screenHorizontalDPI(Widget*)
-{
-    notImplemented();
-    return 0;
-}
-int screenVerticalDPI(Widget*)
-{
-    notImplemented();
-    return 0;
-}
-    
-FloatRect screenRect(FrameView* frameView)
+FloatRect screenRect(Widget* widget)
 {
 /*
     int displayNum;
@@ -78,7 +66,7 @@ bool screenIsMonochrome(Widget* widget)
     return wxColourDisplay();
 }
 
-FloatRect screenAvailableRect(FrameView* frameView)
+FloatRect screenAvailableRect(Widget* widget)
 {
 /*
     Widget* widget = widget->widget();

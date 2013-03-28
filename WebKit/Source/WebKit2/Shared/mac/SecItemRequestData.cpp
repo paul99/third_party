@@ -49,13 +49,13 @@ SecItemRequestData::SecItemRequestData(Type type, CFDictionaryRef query, CFDicti
 {
 }
 
-void SecItemRequestData::encode(CoreIPC::ArgumentEncoder* encoder) const
+void SecItemRequestData::encode(CoreIPC::ArgumentEncoder& encoder) const
 {
-    encoder->encodeEnum(m_type);
+    encoder.encodeEnum(m_type);
 
     CoreIPC::encode(encoder, m_queryDictionary.get());
 
-    encoder->encodeBool(m_attributesToMatch.get());
+    encoder << static_cast<bool>(m_attributesToMatch);
     if (m_attributesToMatch)
         CoreIPC::encode(encoder, m_attributesToMatch.get());
 }

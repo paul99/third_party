@@ -26,15 +26,16 @@
 #ifndef ContextMenu_h
 #define ContextMenu_h
 
+#if ENABLE(CONTEXT_MENUS)
+
 #include <wtf/Noncopyable.h>
 
 #include "ContextMenuItem.h"
 #include "PlatformMenuDescription.h"
-#include "PlatformString.h"
+#include <wtf/text/WTFString.h>
+
 #if PLATFORM(MAC)
 #include <wtf/RetainPtr.h>
-#elif PLATFORM(QT)
-#include <QMenu>
 #elif PLATFORM(WIN)
 #include <windows.h>
 #endif
@@ -71,7 +72,7 @@ namespace WebCore {
 
         void appendItem(const ContextMenuItem& item) { m_items.append(item); } 
 #else
-        ContextMenu(const PlatformMenuDescription);
+        explicit ContextMenu(const PlatformMenuDescription);
         ~ContextMenu();
 
         void insertItem(unsigned position, ContextMenuItem&);
@@ -120,4 +121,5 @@ PlatformMenuDescription platformMenuDescription(Vector<ContextMenuItem>&);
 
 }
 
+#endif // ENABLE(CONTEXT_MENUS)
 #endif // ContextMenu_h

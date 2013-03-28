@@ -54,7 +54,14 @@ public:
         GestureScrollUpdate,
         GestureTap,
         GestureTapDown,
+        GestureTapDownCancel,
         GestureDoubleTap,
+        GestureTwoFingerTap,
+        GestureLongPress,
+        GestureLongTap,
+        GesturePinchBegin,
+        GesturePinchEnd,
+        GesturePinchUpdate,
 
 #if ENABLE(TOUCH_EVENTS)
         // PlatformTouchEvent
@@ -91,7 +98,7 @@ protected:
     {
     }
 
-    PlatformEvent(Type type)
+    explicit PlatformEvent(Type type)
         : m_type(type)
         , m_modifiers(0)
         , m_timestamp(0)

@@ -204,7 +204,7 @@ void BinaryPropertyListPlan::writeInteger(int integer)
             return;
         m_integerZeroObjectReference = m_currentObjectReference;
     } else {
-        if (!m_integers.add(integer, m_currentObjectReference).second)
+        if (!m_integers.add(integer, m_currentObjectReference).isNewEntry)
             return;
     }
     ++m_currentObjectReference;
@@ -214,7 +214,7 @@ void BinaryPropertyListPlan::writeInteger(int integer)
 void BinaryPropertyListPlan::writeString(const String& string)
 {
     ++m_currentAggregateSize;
-    if (!m_strings.add(string, m_currentObjectReference).second)
+    if (!m_strings.add(string, m_currentObjectReference).isNewEntry)
         return;
     ++m_currentObjectReference;
     writeStringObject(string);
@@ -224,12 +224,12 @@ void BinaryPropertyListPlan::writeIntegerArray(const int* integers, size_t size)
 {
     size_t savedAggregateSize = ++m_currentAggregateSize;
     ASSERT(size);
-    pair<IntegerArrayMap::iterator, bool> addResult = m_integerArrays.add(IntegerArray(integers, size), 0);
-    if (!addResult.second)
+    IntegerArrayMap::AddResult addResult = m_integerArrays.add(IntegerArray(integers, size), 0);
+    if (!addResult.isNewEntry)
         return;
     for (size_t i = 0; i < size; ++i)
         writeInteger(integers[i]);
-    addResult.first->second = m_currentObjectReference++;
+    addResult.iterator->value = m_currentObjectReference++;
     writeArrayObject(size);
     m_currentAggregateSize = savedAggregateSize;
 }
@@ -697,7 +697,7 @@ void BinaryPropertyListSerializer::appendStringObject(const String& string)
     unsigned length = string.length();
     if (charactersAreAllASCII(characters, length)) {
         if (length <= maxLengthInMarkerByte)
-            appendByte(asciiStringMarkerByte | length);
+            appendByte(static_cast<unsigned char>(asciiStringMarkerByte | length));
         else {
             appendByte(asciiStringWithSeparateLengthMarkerByte);
             appendInteger(length);
@@ -706,7 +706,7 @@ void BinaryPropertyListSerializer::appendStringObject(const String& string)
             appendByte(characters[i]);
     } else {
         if (length <= maxLengthInMarkerByte)
-            appendByte(unicodeStringMarkerByte | length);
+            appendByte(static_cast<unsigned char>(unicodeStringMarkerByte | length));
         else {
             appendByte(unicodeStringWithSeparateLengthMarkerByte);
             appendInteger(length);
@@ -723,7 +723,7 @@ void BinaryPropertyListSerializer::appendStringObject(const char* string)
     startObject();
     unsigned length = strlen(string);
     if (length <= maxLengthInMarkerByte)
-        appendByte(asciiStringMarkerByte | length);
+        appendByte(static_cast<unsigned char>(asciiStringMarkerByte | length));
     else {
         appendByte(asciiStringWithSeparateLengthMarkerByte);
         appendInteger(length);
@@ -825,7 +825,7 @@ void BinaryPropertyListSerializer::addAggregateObjectReference(ObjectReference r
 
 void BinaryPropertyListWriter::writePropertyList()
 {
-    BinaryPropertyListSerializer(*this);
+    BinaryPropertyListSerializer serializer(*this);
 }
 
 }

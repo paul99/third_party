@@ -34,9 +34,13 @@
 #include "CrossThreadTask.h"
 #include "DatabaseTask.h"
 #include "Document.h"
+#include "FrameLoadRequest.h"
+#include "GroupSettings.h"
 #include "KURL.h"
 #include "MessageEvent.h"
 #include "MessagePortChannel.h"
+#include "Page.h"
+#include "PageGroup.h"
 #include "PlatformMessagePortChannel.h"
 #include "SecurityOrigin.h"
 #include "ScriptExecutionContext.h"
@@ -46,7 +50,6 @@
 #include "WebFileError.h"
 #include "WebFrameClient.h"
 #include "WebFrameImpl.h"
-#include "WebMessagePortChannel.h"
 #include "WebRuntimeFeatures.h"
 #include "WebSettings.h"
 #include "WebSharedWorkerClient.h"
@@ -56,8 +59,9 @@
 #include "WorkerInspectorController.h"
 #include "WorkerLoaderProxy.h"
 #include "WorkerThread.h"
-#include "platform/WebString.h"
-#include "platform/WebURL.h"
+#include <public/WebMessagePortChannel.h>
+#include <public/WebString.h>
+#include <public/WebURL.h>
 #include <wtf/MainThread.h>
 
 using namespace WebCore;
@@ -120,7 +124,6 @@ void WebSharedWorkerImpl::initializeLoader(const WebURL& url)
     m_webView->settings()->setOfflineWebApplicationCacheEnabled(WebRuntimeFeatures::isApplicationCacheEnabled());
     // FIXME: Settings information should be passed to the Worker process from Browser process when the worker
     // is created (similar to RenderThread::OnCreateNewView).
-    m_webView->settings()->setHixie76WebSocketProtocolEnabled(false);
     m_webView->initializeMainFrame(this);
 
     WebFrameImpl* webFrame = static_cast<WebFrameImpl*>(m_webView->mainFrame());
@@ -128,10 +131,9 @@ void WebSharedWorkerImpl::initializeLoader(const WebURL& url)
     // Construct substitute data source for the 'shadow page'. We only need it
     // to have same origin as the worker so the loading checks work correctly.
     CString content("");
-    int len = static_cast<int>(content.length());
-    RefPtr<SharedBuffer> buf(SharedBuffer::create(content.data(), len));
-    SubstituteData substData(buf, String("text/html"), String("UTF-8"), KURL());
-    webFrame->frame()->loader()->load(ResourceRequest(url), substData, false);
+    int length = static_cast<int>(content.length());
+    RefPtr<SharedBuffer> buffer(SharedBuffer::create(content.data(), length));
+    webFrame->frame()->loader()->load(FrameLoadRequest(webFrame->frame(), ResourceRequest(url), SubstituteData(buffer, "text/html", "UTF-8", KURL())));
 
     // This document will be used as 'loading context' for the worker.
     m_loadingDocument = webFrame->frame()->document();
@@ -201,30 +203,25 @@ void WebSharedWorkerImpl::postExceptionTask(ScriptExecutionContext* context,
 }
 
 void WebSharedWorkerImpl::postConsoleMessageToWorkerObject(MessageSource source,
-                                                           MessageType type,
                                                            MessageLevel level,
                                                            const String& message,
                                                            int lineNumber,
                                                            const String& sourceURL)
 {
-    WebWorkerBase::dispatchTaskToMainThread(createCallbackTask(&postConsoleMessageTask, AllowCrossThreadAccess(this),
-                                            source, type, level,
-                                            message, lineNumber, sourceURL));
+    WebWorkerBase::dispatchTaskToMainThread(createCallbackTask(&postConsoleMessageTask, AllowCrossThreadAccess(this), source, level, message, lineNumber, sourceURL));
 }
 
 void WebSharedWorkerImpl::postConsoleMessageTask(ScriptExecutionContext* context,
                                                  WebSharedWorkerImpl* thisPtr,
                                                  int source,
-                                                 int type, int level,
+                                                 int level,
                                                  const String& message,
                                                  int lineNumber,
                                                  const String& sourceURL)
 {
     if (!thisPtr->client())
         return;
-    thisPtr->client()->postConsoleMessageToWorkerObject(source,
-                                                              type, level, message,
-                                                              lineNumber, sourceURL);
+    thisPtr->client()->postConsoleMessageToWorkerObject(source, level, message, lineNumber, sourceURL);
 }
 
 void WebSharedWorkerImpl::postMessageToPageInspector(const String& message)
@@ -320,10 +317,11 @@ void WebSharedWorkerImpl::postTaskToLoader(PassOwnPtr<ScriptExecutionContext::Ta
     m_loadingDocument->postTask(task);
 }
 
-void WebSharedWorkerImpl::postTaskForModeToWorkerContext(
+bool WebSharedWorkerImpl::postTaskForModeToWorkerContext(
     PassOwnPtr<ScriptExecutionContext::Task> task, const String& mode)
 {
     m_workerThread->runLoop().postTaskForMode(task, mode);
+    return true;
 }
 
 
@@ -365,7 +363,13 @@ void WebSharedWorkerImpl::startWorkerContext(const WebURL& url, const WebString&
 {
     initializeLoader(url);
     WorkerThreadStartMode startMode = m_pauseWorkerContextOnStart ? PauseWorkerContextOnStart : DontPauseWorkerContextOnStart;
-    setWorkerThread(SharedWorkerThread::create(name, url, userAgent, sourceCode, *this, *this, startMode, contentSecurityPolicy,
+    ASSERT(m_loadingDocument->isDocument());
+    Document* document = static_cast<Document*>(m_loadingDocument.get());
+    GroupSettings* settings = 0;
+    if (document->page())
+        settings = document->page()->group().groupSettings();
+    setWorkerThread(SharedWorkerThread::create(name, url, userAgent, settings,
+                                               sourceCode, *this, *this, startMode, contentSecurityPolicy,
                                                static_cast<WebCore::ContentSecurityPolicy::HeaderType>(policyType)));
 
     workerThread()->start();
@@ -443,6 +447,7 @@ static void dispatchOnInspectorBackendTask(ScriptExecutionContext* context, cons
 void WebSharedWorkerImpl::dispatchDevToolsMessage(const WebString& message)
 {
     workerThread()->runLoop().postTaskForMode(createCallbackTask(dispatchOnInspectorBackendTask, String(message)), WorkerDebuggerAgent::debuggerTaskMode);
+    WorkerDebuggerAgent::interruptAndDispatchInspectorCommands(workerThread());
 }
 
 WebSharedWorker* WebSharedWorker::create(WebSharedWorkerClient* client)

@@ -37,20 +37,25 @@
 #include "FloatRect.h"
 #include "GraphicsContext.h"
 #include "ImageObserver.h"
-#include "PlatformString.h"
 #include "ShadowBlur.h"
 #include "StillImageQt.h"
+#include <wtf/text/WTFString.h>
 
-#include <QApplication>
+#include <QCoreApplication>
 #include <QDebug>
 #include <QImage>
 #include <QImageReader>
 #include <QPainter>
 #include <QPixmap>
-#include <QStyle>
 #include <QTransform>
 
 #include <math.h>
+
+#if OS(WINDOWS)
+QT_BEGIN_NAMESPACE
+Q_GUI_EXPORT QPixmap qt_pixmapFromWinHBITMAP(HBITMAP, int hbitmapFormat = 0);
+QT_END_NAMESPACE
+#endif
 
 typedef QHash<QByteArray, QPixmap> WebGraphicHash;
 Q_GLOBAL_STATIC(WebGraphicHash, _graphics)
@@ -81,10 +86,6 @@ static WebGraphicHash* graphics()
         hash->insert("deleteButton", QPixmap(QLatin1String(":webkit/resources/deleteButton.png")));
         // QWebSettings::InputSpeechButtonGraphic
         hash->insert("inputSpeech", QPixmap(QLatin1String(":webkit/resources/inputSpeech.png")));
-        // QWebSettings::SearchCancelButtonGraphic
-        hash->insert("searchCancelButton", QApplication::style()->standardPixmap(QStyle::SP_DialogCloseButton));
-        // QWebSettings::SearchCancelButtonPressedGraphic
-        hash->insert("searchCancelButtonPressed", QApplication::style()->standardPixmap(QStyle::SP_DialogCloseButton));
     }
 
     return hash;
@@ -137,9 +138,15 @@ void Image::drawPattern(GraphicsContext* ctxt, const FloatRect& tileRect, const 
     if (!framePixmap) // If it's too early we won't have an image yet.
         return;
 
+#if ENABLE(IMAGE_DECODER_DOWN_SAMPLING)
+    FloatRect tileRectAdjusted = adjustSourceRectForDownSampling(tileRect, framePixmap->size());
+#else
+    FloatRect tileRectAdjusted = tileRect;
+#endif
+
     // Qt interprets 0 width/height as full width/height so just short circuit.
     QRectF dr = QRectF(destRect).normalized();
-    QRect tr = QRectF(tileRect).toRect().normalized();
+    QRect tr = QRectF(tileRectAdjusted).toRect().normalized();
     if (!dr.width() || !dr.height() || !tr.width() || !tr.height())
         return;
 
@@ -207,8 +214,6 @@ BitmapImage::BitmapImage(QPixmap* pixmap, ImageObserver* observer)
     , m_sizeAvailable(true)
     , m_haveFrameCount(true)
 {
-    initPlatformData();
-
     int width = pixmap->width();
     int height = pixmap->height();
     m_decodedSize = width * height * 4;
@@ -221,17 +226,13 @@ BitmapImage::BitmapImage(QPixmap* pixmap, ImageObserver* observer)
     checkForSolidColor();
 }
 
-void BitmapImage::initPlatformData()
-{
-}
-
 void BitmapImage::invalidatePlatformData()
 {
 }
 
 // Drawing Routines
 void BitmapImage::draw(GraphicsContext* ctxt, const FloatRect& dst,
-                       const FloatRect& src, ColorSpace styleColorSpace, CompositeOperator op)
+    const FloatRect& src, ColorSpace styleColorSpace, CompositeOperator op, BlendMode)
 {
     QRectF normalizedDst = dst.normalized();
     QRectF normalizedSrc = src.normalized();
@@ -249,6 +250,10 @@ void BitmapImage::draw(GraphicsContext* ctxt, const FloatRect& dst,
         fillWithSolidColor(ctxt, normalizedDst, solidColor(), styleColorSpace, op);
         return;
     }
+
+#if ENABLE(IMAGE_DECODER_DOWN_SAMPLING)
+    normalizedSrc = adjustSourceRectForDownSampling(normalizedSrc, image->size());
+#endif
 
     CompositeOperator previousOperator = ctxt->compositeOperation();
     ctxt->setCompositeOperation(!image->hasAlpha() && op == CompositeSourceOver ? CompositeCopy : op);
@@ -290,7 +295,9 @@ void BitmapImage::checkForSolidColor()
 #if OS(WINDOWS)
 PassRefPtr<BitmapImage> BitmapImage::create(HBITMAP hBitmap)
 {
-    return BitmapImage::create(new QPixmap(QPixmap::fromWinHBITMAP(hBitmap)));
+    QPixmap* qPixmap = new QPixmap(qt_pixmapFromWinHBITMAP(hBitmap));
+
+    return BitmapImage::create(qPixmap);
 }
 #endif
 

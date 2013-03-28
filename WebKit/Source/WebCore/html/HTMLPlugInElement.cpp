@@ -33,10 +33,13 @@
 #include "FrameTree.h"
 #include "HTMLNames.h"
 #include "Page.h"
+#include "PluginViewBase.h"
 #include "RenderEmbeddedObject.h"
+#include "RenderSnapshottedPlugIn.h"
 #include "RenderWidget.h"
 #include "Settings.h"
 #include "Widget.h"
+#include <wtf/UnusedParam.h>
 
 #if ENABLE(NETSCAPE_PLUGIN_API)
 #include "npruntime_impl.h"
@@ -53,10 +56,7 @@ HTMLPlugInElement::HTMLPlugInElement(const QualifiedName& tagName, Document* doc
     , m_NPObject(0)
 #endif
     , m_isCapturingMouseEvents(false)
-#if ENABLE(PLUGIN_SET_FOCUSABLE)
-    , m_supportsFocus(false)
-    , m_didOverrideFocus(false)
-#endif
+    , m_displayState(Playing)
 {
 }
 
@@ -72,6 +72,24 @@ HTMLPlugInElement::~HTMLPlugInElement()
 #endif
 }
 
+bool HTMLPlugInElement::canProcessDrag() const
+{
+    const PluginViewBase* plugin = pluginWidget() && pluginWidget()->isPluginViewBase() ? static_cast<const PluginViewBase*>(pluginWidget()) : 0;
+    return plugin ? plugin->canProcessDrag() : false;
+}
+
+bool HTMLPlugInElement::willRespondToMouseClickEvents()
+{
+    if (disabled())
+        return false;
+    RenderObject* r = renderer();
+    if (!r)
+        return false;
+    if (!r->isEmbeddedObject() && !r->isWidget())
+        return false;
+    return true;
+}
+
 void HTMLPlugInElement::detach()
 {
     m_instance.clear();
@@ -82,11 +100,6 @@ void HTMLPlugInElement::detach()
         m_isCapturingMouseEvents = false;
     }
 
-    HTMLFrameOwnerElement::detach();
-}
-
-void HTMLPlugInElement::removedFromDocument()
-{
 #if ENABLE(NETSCAPE_PLUGIN_API)
     if (m_NPObject) {
         _NPN_ReleaseObject(m_NPObject);
@@ -94,7 +107,12 @@ void HTMLPlugInElement::removedFromDocument()
     }
 #endif
 
-    HTMLFrameOwnerElement::removedFromDocument();
+    HTMLFrameOwnerElement::detach();
+}
+
+void HTMLPlugInElement::resetInstance()
+{
+    m_instance.clear();
 }
 
 PassScriptInstance HTMLPlugInElement::getInstance()
@@ -116,7 +134,11 @@ PassScriptInstance HTMLPlugInElement::getInstance()
 
 bool HTMLPlugInElement::guardedDispatchBeforeLoadEvent(const String& sourceURL)
 {
-    ASSERT(!m_inBeforeLoadEventHandler);
+    // FIXME: Our current plug-in loading design can't guarantee the following
+    // assertion is true, since plug-in loading can be initiated during layout,
+    // and synchronous layout can be initiated in a beforeload event handler!
+    // See <http://webkit.org/b/71264>.
+    // ASSERT(!m_inBeforeLoadEventHandler);
     m_inBeforeLoadEventHandler = true;
     // static_cast is used to avoid a compile error since dispatchBeforeLoadEvent
     // is intentionally undefined on this class.
@@ -125,7 +147,7 @@ bool HTMLPlugInElement::guardedDispatchBeforeLoadEvent(const String& sourceURL)
     return beforeLoadAllowedLoad;
 }
 
-Widget* HTMLPlugInElement::pluginWidget()
+Widget* HTMLPlugInElement::pluginWidget() const
 {
     if (m_inBeforeLoadEventHandler) {
         // The plug-in hasn't loaded yet, and it makes no sense to try to load if beforeload handler happened to touch the plug-in element.
@@ -140,40 +162,29 @@ Widget* HTMLPlugInElement::pluginWidget()
     return renderWidget->widget();
 }
 
-bool HTMLPlugInElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+bool HTMLPlugInElement::isPresentationAttribute(const QualifiedName& name) const
 {
-    if (attrName == widthAttr ||
-        attrName == heightAttr ||
-        attrName == vspaceAttr ||
-        attrName == hspaceAttr) {
-            result = eUniversal;
-            return false;
-    }
-    
-    if (attrName == alignAttr) {
-        result = eReplaced; // Share with <img> since the alignment behavior is the same.
-        return false;
-    }
-    
-    return HTMLFrameOwnerElement::mapToEntry(attrName, result);
+    if (name == widthAttr || name == heightAttr || name == vspaceAttr || name == hspaceAttr || name == alignAttr)
+        return true;
+    return HTMLFrameOwnerElement::isPresentationAttribute(name);
 }
 
-void HTMLPlugInElement::parseMappedAttribute(Attribute* attr)
+void HTMLPlugInElement::collectStyleForPresentationAttribute(const Attribute& attribute, StylePropertySet* style)
 {
-    if (attr->name() == widthAttr)
-        addCSSLength(attr, CSSPropertyWidth, attr->value());
-    else if (attr->name() == heightAttr)
-        addCSSLength(attr, CSSPropertyHeight, attr->value());
-    else if (attr->name() == vspaceAttr) {
-        addCSSLength(attr, CSSPropertyMarginTop, attr->value());
-        addCSSLength(attr, CSSPropertyMarginBottom, attr->value());
-    } else if (attr->name() == hspaceAttr) {
-        addCSSLength(attr, CSSPropertyMarginLeft, attr->value());
-        addCSSLength(attr, CSSPropertyMarginRight, attr->value());
-    } else if (attr->name() == alignAttr)
-        addHTMLAlignment(attr);
+    if (attribute.name() == widthAttr)
+        addHTMLLengthToStyle(style, CSSPropertyWidth, attribute.value());
+    else if (attribute.name() == heightAttr)
+        addHTMLLengthToStyle(style, CSSPropertyHeight, attribute.value());
+    else if (attribute.name() == vspaceAttr) {
+        addHTMLLengthToStyle(style, CSSPropertyMarginTop, attribute.value());
+        addHTMLLengthToStyle(style, CSSPropertyMarginBottom, attribute.value());
+    } else if (attribute.name() == hspaceAttr) {
+        addHTMLLengthToStyle(style, CSSPropertyMarginLeft, attribute.value());
+        addHTMLLengthToStyle(style, CSSPropertyMarginRight, attribute.value());
+    } else if (attribute.name() == alignAttr)
+        applyAlignmentAttributeToStyle(attribute, style);
     else
-        HTMLFrameOwnerElement::parseMappedAttribute(attr);
+        HTMLFrameOwnerElement::collectStyleForPresentationAttribute(attribute, style);
 }
 
 void HTMLPlugInElement::defaultEventHandler(Event* event)
@@ -185,9 +196,15 @@ void HTMLPlugInElement::defaultEventHandler(Event* event)
     // FIXME: Mouse down and scroll events are passed down to plug-in via custom code in EventHandler; these code paths should be united.
 
     RenderObject* r = renderer();
-    if (r && r->isEmbeddedObject() && toRenderEmbeddedObject(r)->showsMissingPluginIndicator()) {
-        toRenderEmbeddedObject(r)->handleMissingPluginIndicatorEvent(event);
-        return;
+    if (r && r->isEmbeddedObject()) {
+        if (toRenderEmbeddedObject(r)->showsUnavailablePluginIndicator()) {
+            toRenderEmbeddedObject(r)->handleUnavailablePluginIndicatorEvent(event);
+            return;
+        }
+        if (r->isSnapshottedPlugIn() && displayState() < PlayingWithPendingMouseClick) {
+            toRenderSnapshottedPlugIn(r)->handleEvent(event);
+            return;
+        }
     }
 
     if (!r || !r->isWidget())
@@ -201,6 +218,24 @@ void HTMLPlugInElement::defaultEventHandler(Event* event)
     HTMLFrameOwnerElement::defaultEventHandler(event);
 }
 
+bool HTMLPlugInElement::isKeyboardFocusable(KeyboardEvent* event) const
+{
+    UNUSED_PARAM(event);
+    if (!document()->page())
+        return false;
+
+    const PluginViewBase* plugin = pluginWidget() && pluginWidget()->isPluginViewBase() ? static_cast<const PluginViewBase*>(pluginWidget()) : 0;
+    if (plugin)
+        return plugin->supportsKeyboardFocus();
+
+    return false;
+}
+
+bool HTMLPlugInElement::isPluginElement() const
+{
+    return true;
+}
+
 #if ENABLE(NETSCAPE_PLUGIN_API)
 
 NPObject* HTMLPlugInElement::getNPObject()
@@ -212,22 +247,5 @@ NPObject* HTMLPlugInElement::getNPObject()
 }
 
 #endif /* ENABLE(NETSCAPE_PLUGIN_API) */
-
-#if ENABLE(PLUGIN_SET_FOCUSABLE)
-
-bool HTMLPlugInElement::supportsFocus() const
-{
-    if (m_didOverrideFocus)
-        return m_supportsFocus;
-    else
-        return HTMLFrameOwnerElement::supportsFocus();
-}
-
-void HTMLPlugInElement::setSupportsFocus(bool supportsFocus)
-{
-    m_supportsFocus = supportsFocus;
-    m_didOverrideFocus = true;
-}
-#endif
 
 }

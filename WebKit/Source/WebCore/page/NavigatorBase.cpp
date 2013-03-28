@@ -28,7 +28,8 @@
 #include "NavigatorBase.h"
 
 #include "NetworkStateNotifier.h"
-#include "PlatformString.h"
+#include <wtf/text/WTFString.h>
+
 #if OS(LINUX)
 #include "sys/utsname.h"
 #include <wtf/StdLibExtras.h>
@@ -41,6 +42,8 @@
 #define WEBCORE_NAVIGATOR_PLATFORM "MacIntel"
 #elif OS(WINDOWS)
 #define WEBCORE_NAVIGATOR_PLATFORM "Win32"
+#elif PLATFORM(BLACKBERRY)
+#define WEBCORE_NAVIGATOR_PLATFORM "BlackBerry"
 #else
 #define WEBCORE_NAVIGATOR_PLATFORM ""
 #endif

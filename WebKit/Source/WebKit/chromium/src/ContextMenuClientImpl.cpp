@@ -37,6 +37,7 @@
 #include "ContextMenuController.h"
 #include "Document.h"
 #include "DocumentLoader.h"
+#include "DocumentMarkerController.h"
 #include "Editor.h"
 #include "EventHandler.h"
 #include "FrameLoader.h"
@@ -46,17 +47,15 @@
 #include "HTMLMediaElement.h"
 #include "HTMLNames.h"
 #include "HTMLPlugInImageElement.h"
-
 #include "HistoryItem.h"
 #include "HitTestResult.h"
 #include "KURL.h"
 #include "MediaError.h"
 #include "Page.h"
-#include "PlatformString.h"
 #include "RenderWidget.h"
+#include "Settings.h"
 #include "TextBreakIterator.h"
 #include "Widget.h"
-
 #include "WebContextMenuData.h"
 #include "WebDataSourceImpl.h"
 #include "WebFormElement.h"
@@ -64,15 +63,16 @@
 #include "WebMenuItemInfo.h"
 #include "WebPlugin.h"
 #include "WebPluginContainerImpl.h"
-#include "platform/WebPoint.h"
 #include "WebSearchableFormData.h"
 #include "WebSpellCheckClient.h"
-#include "platform/WebString.h"
-#include "platform/WebURL.h"
-#include "platform/WebURLResponse.h"
-#include "platform/WebVector.h"
 #include "WebViewClient.h"
 #include "WebViewImpl.h"
+#include <public/WebPoint.h>
+#include <public/WebString.h>
+#include <public/WebURL.h>
+#include <public/WebURLResponse.h>
+#include <public/WebVector.h>
+#include <wtf/text/WTFString.h>
 
 using namespace WebCore;
 
@@ -120,7 +120,7 @@ static String selectMisspelledWord(const ContextMenu* defaultMenu, Frame* select
 
     // Selection is empty, so change the selection to the word under the cursor.
     HitTestResult hitTestResult = selectedFrame->eventHandler()->
-        hitTestResultAtPoint(selectedFrame->page()->contextMenuController()->hitTestResult().point(), true);
+        hitTestResultAtPoint(selectedFrame->page()->contextMenuController()->hitTestResult().pointInInnerNodeFrame(), true);
     Node* innerNode = hitTestResult.innerNode();
     VisiblePosition pos(innerNode->renderer()->positionForPoint(
         hitTestResult.localPoint()));
@@ -155,10 +155,10 @@ PlatformMenuDescription ContextMenuClientImpl::getCustomMenuFromDefaultItems(
         return 0;
 
     HitTestResult r = m_webView->page()->contextMenuController()->hitTestResult();
-    Frame* selectedFrame = r.innerNonSharedNode()->document()->frame();
+    Frame* selectedFrame = r.innerNodeFrame();
 
     WebContextMenuData data;
-    data.mousePosition = selectedFrame->view()->contentsToWindow(r.point());
+    data.mousePosition = selectedFrame->view()->contentsToWindow(r.roundedPointInInnerNodeFrame());
 
     // Compute edit flags.
     data.editFlags = WebContextMenuData::CanDoNone;
@@ -212,7 +212,7 @@ PlatformMenuDescription ContextMenuClientImpl::getCustomMenuFromDefaultItems(
         if (mediaElement->hasVideo())
             data.mediaFlags |= WebContextMenuData::MediaHasVideo;
         if (mediaElement->controls())
-            data.mediaFlags |= WebContextMenuData::MediaControlRootElement;
+            data.mediaFlags |= WebContextMenuData::MediaControls;
     } else if (r.innerNonSharedNode()->hasTagName(HTMLNames::objectTag)
                || r.innerNonSharedNode()->hasTagName(HTMLNames::embedTag)) {
         RenderObject* object = r.innerNonSharedNode()->renderer();
@@ -259,8 +259,10 @@ PlatformMenuDescription ContextMenuClientImpl::getCustomMenuFromDefaultItems(
             data.frameHistoryItem = WebHistoryItem(historyItem);
     }
 
-    if (r.isSelected())
-        data.selectedText = selectedFrame->editor()->selectedText().stripWhiteSpace();
+    if (r.isSelected()) {
+        if (!r.innerNonSharedNode()->hasTagName(HTMLNames::inputTag) || !static_cast<HTMLInputElement*>(r.innerNonSharedNode())->isPasswordField())
+            data.selectedText = selectedFrame->editor()->selectedText().stripWhiteSpace();
+    }
 
     if (r.isContentEditable()) {
         data.isEditable = true;
@@ -270,8 +272,35 @@ PlatformMenuDescription ContextMenuClientImpl::getCustomMenuFromDefaultItems(
                 static_cast<HTMLInputElement*>(r.innerNonSharedNode())->isSpeechEnabled();
         }  
 #endif
-        if (m_webView->focusedWebCoreFrame()->editor()->isContinuousSpellCheckingEnabled()) {
-            data.isSpellCheckingEnabled = true;
+        // When Chrome enables asynchronous spellchecking, its spellchecker adds spelling markers to misspelled
+        // words and attaches suggestions to these markers in the background. Therefore, when a user right-clicks
+        // a mouse on a word, Chrome just needs to find a spelling marker on the word instread of spellchecking it.
+        if (selectedFrame->settings() && selectedFrame->settings()->asynchronousSpellCheckingEnabled()) {
+            VisibleSelection selection = selectedFrame->selection()->selection();
+            if (selection.isCaret()) {
+                selection.expandUsingGranularity(WordGranularity);
+                RefPtr<Range> range = selection.toNormalizedRange();
+                Vector<DocumentMarker*> markers = selectedFrame->document()->markers()->markersInRange(range.get(), DocumentMarker::Spelling | DocumentMarker::Grammar);
+                if (markers.size() == 1) {
+                    range->setStart(range->startContainer(), markers[0]->startOffset());
+                    range->setEnd(range->endContainer(), markers[0]->endOffset());
+                    data.misspelledWord = range->text();
+                    if (markers[0]->description().length()) {
+                        Vector<String> suggestions;
+                        markers[0]->description().split('\n', suggestions);
+                        data.dictionarySuggestions = suggestions;
+                    } else if (m_webView->spellCheckClient()) {
+                        int misspelledOffset, misspelledLength;
+                        m_webView->spellCheckClient()->spellCheck(data.misspelledWord, misspelledOffset, misspelledLength, &data.dictionarySuggestions);
+                    }
+                    selection = VisibleSelection(range.get());
+                    if (selectedFrame->selection()->shouldChangeSelection(selection))
+                        selectedFrame->selection()->setSelection(selection, WordGranularity);
+                }
+            }
+        } else {
+            data.isSpellCheckingEnabled = 
+                m_webView->focusedWebCoreFrame()->editor()->isContinuousSpellCheckingEnabled();
             // Spellchecking might be enabled for the field, but could be disabled on the node.
             if (m_webView->focusedWebCoreFrame()->editor()->isSpellCheckingEnabledInFocusedNode()) {
                 data.misspelledWord = selectMisspelledWord(defaultMenu, selectedFrame);
@@ -323,12 +352,12 @@ PlatformMenuDescription ContextMenuClientImpl::getCustomMenuFromDefaultItems(
     return 0;
 }
 
-void ContextMenuClientImpl::populateCustomMenuItems(WebCore::ContextMenu* defaultMenu, WebContextMenuData* data)
+static void populateSubMenuItems(PlatformMenuDescription inputMenu, WebVector<WebMenuItemInfo>& subMenuItems)
 {
-    Vector<WebMenuItemInfo> customItems;
-    for (size_t i = 0; i < defaultMenu->itemCount(); ++i) {
-        ContextMenuItem* inputItem = defaultMenu->itemAtIndex(i, defaultMenu->platformDescription());
-        if (inputItem->action() < ContextMenuItemBaseCustomTag || inputItem->action() >  ContextMenuItemLastCustomTag)
+    Vector<WebMenuItemInfo> subItems;
+    for (size_t i = 0; i < inputMenu->size(); ++i) {
+        const ContextMenuItem* inputItem = &inputMenu->at(i);
+        if (inputItem->action() < ContextMenuItemBaseCustomTag || inputItem->action() > ContextMenuItemLastCustomTag)
             continue;
 
         WebMenuItemInfo outputItem;
@@ -347,16 +376,22 @@ void ContextMenuClientImpl::populateCustomMenuItems(WebCore::ContextMenu* defaul
             outputItem.type = WebMenuItemInfo::Separator;
             break;
         case SubmenuType:
-            outputItem.type = WebMenuItemInfo::Group;
+            outputItem.type = WebMenuItemInfo::SubMenu;
+            populateSubMenuItems(inputItem->platformSubMenu(), outputItem.subMenuItems);
             break;
         }
-        customItems.append(outputItem);
+        subItems.append(outputItem);
     }
 
-    WebVector<WebMenuItemInfo> outputItems(customItems.size());
-    for (size_t i = 0; i < customItems.size(); ++i)
-        outputItems[i] = customItems[i];
-    data->customItems.swap(outputItems);
+    WebVector<WebMenuItemInfo> outputItems(subItems.size());
+    for (size_t i = 0; i < subItems.size(); ++i)
+        outputItems[i] = subItems[i];
+    subMenuItems.swap(outputItems);
+}
+
+void ContextMenuClientImpl::populateCustomMenuItems(WebCore::ContextMenu* defaultMenu, WebContextMenuData* data)
+{
+    populateSubMenuItems(defaultMenu->platformDescription(), data->customItems);
 }
 
 } // namespace WebKit

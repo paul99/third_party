@@ -52,7 +52,6 @@
 
 #define JavaCocoaPluginIdentifier   "com.apple.JavaPluginCocoa"
 #define JavaCarbonPluginIdentifier  "com.apple.JavaAppletPlugin"
-#define JavaCFMPluginFilename       "Java Applet Plugin Enabler"
 
 #define QuickTimeCarbonPluginIdentifier       "com.apple.QuickTime Plugin.plugin"
 #define QuickTimeCocoaPluginIdentifier        "com.apple.quicktime.webplugin"
@@ -137,14 +136,11 @@ static NSString *pathByResolvingSymlinksAndAliases(NSString *thePath)
     path = pathByResolvingSymlinksAndAliases(pluginPath);
     cfBundle.adoptCF(CFBundleCreate(kCFAllocatorDefault, (CFURLRef)[NSURL fileURLWithPath:path]));
 
-#ifndef __ppc__
-    // 32-bit PowerPC is the only platform where non-bundled CFM plugins are supported
     if (!cfBundle) {
         [self release];
         return nil;
     }
-#endif
-    
+
     return self;
 }
 
@@ -355,8 +351,7 @@ static NSString *pathByResolvingSymlinksAndAliases(NSString *thePath)
 - (BOOL)isJavaPlugIn
 {
     const String& bundleIdentifier = [self bundleIdentifier];
-    return bundleIdentifier == JavaCocoaPluginIdentifier || bundleIdentifier == JavaCarbonPluginIdentifier ||
-        equalIgnoringCase(pluginInfo.file, JavaCFMPluginFilename);
+    return bundleIdentifier == JavaCocoaPluginIdentifier || bundleIdentifier == JavaCarbonPluginIdentifier;
 }
 
 static inline void swapIntsInHeader(uint32_t* rawData, size_t length)
@@ -463,9 +458,22 @@ static inline void swapIntsInHeader(uint32_t* rawData, size_t length)
     [pluginDatabases removeObject:database];
 }
 
-- (WTF::String)bundleIdentifier
+- (String)bundleIdentifier
 {
     return CFBundleGetIdentifier(cfBundle.get());
+}
+
+- (String)bundleVersion
+{
+    CFDictionaryRef infoDictionary = CFBundleGetInfoDictionary(cfBundle.get());
+    if (!infoDictionary)
+        return String();
+
+    CFTypeRef bundleVersionString = CFDictionaryGetValue(infoDictionary, kCFBundleVersionKey);
+    if (!bundleVersionString || CFGetTypeID(bundleVersionString) != CFStringGetTypeID())
+        return String();
+
+    return reinterpret_cast<CFStringRef>(bundleVersionString);
 }
 
 @end

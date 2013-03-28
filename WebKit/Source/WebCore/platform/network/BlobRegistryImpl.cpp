@@ -52,6 +52,26 @@ BlobRegistry& blobRegistry()
     DEFINE_STATIC_LOCAL(BlobRegistryImpl, instance, ());
     return instance;
 }
+
+static PassRefPtr<ResourceHandle> createResourceHandle(const ResourceRequest& request, ResourceHandleClient* client)
+{
+    return static_cast<BlobRegistryImpl&>(blobRegistry()).createResourceHandle(request, client);
+}
+
+static void registerBlobResourceHandleConstructor()
+{
+    static bool didRegister = false;
+    if (!didRegister) {
+        ResourceHandle::registerBuiltinConstructor("blob", createResourceHandle);
+        didRegister = true;
+    }
+}
+
+#else
+
+static void registerBlobResourceHandleConstructor()
+{
+}
 #endif
 
 bool BlobRegistryImpl::shouldLoadResource(const ResourceRequest& request) const
@@ -87,6 +107,10 @@ void BlobRegistryImpl::appendStorageItems(BlobStorageData* blobStorageData, cons
     for (BlobDataItemList::const_iterator iter = items.begin(); iter != items.end(); ++iter) {
         if (iter->type == BlobDataItem::Data)
             blobStorageData->m_data.appendData(iter->data, iter->offset, iter->length);
+#if ENABLE(FILE_SYSTEM)
+        else if (iter->type == BlobDataItem::URL)
+            blobStorageData->m_data.appendURL(iter->url, iter->offset, iter->length, iter->expectedModificationTime);
+#endif
         else {
             ASSERT(iter->type == BlobDataItem::File);
             blobStorageData->m_data.appendFile(iter->path, iter->offset, iter->length, iter->expectedModificationTime);
@@ -113,6 +137,10 @@ void BlobRegistryImpl::appendStorageItems(BlobStorageData* blobStorageData, cons
         long long newLength = currentLength > length ? length : currentLength;
         if (iter->type == BlobDataItem::Data)
             blobStorageData->m_data.appendData(iter->data, iter->offset + offset, newLength);
+#if ENABLE(FILE_SYSTEM)
+        else if (iter->type == BlobDataItem::URL)
+            blobStorageData->m_data.appendURL(iter->url, iter->offset + offset, newLength, iter->expectedModificationTime);
+#endif
         else {
             ASSERT(iter->type == BlobDataItem::File);
             blobStorageData->m_data.appendFile(iter->path, iter->offset + offset, newLength, iter->expectedModificationTime);
@@ -125,12 +153,14 @@ void BlobRegistryImpl::appendStorageItems(BlobStorageData* blobStorageData, cons
 void BlobRegistryImpl::registerBlobURL(const KURL& url, PassOwnPtr<BlobData> blobData)
 {
     ASSERT(isMainThread());
+    registerBlobResourceHandleConstructor();
 
     RefPtr<BlobStorageData> blobStorageData = BlobStorageData::create(blobData->contentType(), blobData->contentDisposition());
 
     // The blob data is stored in the "canonical" way. That is, it only contains a list of Data and File items.
     // 1) The Data item is denoted by the raw data and the range.
     // 2) The File item is denoted by the file path, the range and the expected modification time.
+    // 3) The URL item is denoted by the URL, the range and the expected modification time.
     // All the Blob items in the passing blob data are resolved and expanded into a set of Data and File items.
 
     for (BlobDataItemList::const_iterator iter = blobData->items().begin(); iter != blobData->items().end(); ++iter) {
@@ -141,6 +171,11 @@ void BlobRegistryImpl::registerBlobURL(const KURL& url, PassOwnPtr<BlobData> blo
         case BlobDataItem::File:
             blobStorageData->m_data.appendFile(iter->path, iter->offset, iter->length, iter->expectedModificationTime);
             break;
+#if ENABLE(FILE_SYSTEM)
+        case BlobDataItem::URL:
+            blobStorageData->m_data.appendURL(iter->url, iter->offset, iter->length, iter->expectedModificationTime);
+            break;
+#endif
         case BlobDataItem::Blob:
             if (m_blobs.contains(iter->url.string()))
                 appendStorageItems(blobStorageData.get(), m_blobs.get(iter->url.string())->items(), iter->offset, iter->length);
@@ -154,6 +189,7 @@ void BlobRegistryImpl::registerBlobURL(const KURL& url, PassOwnPtr<BlobData> blo
 void BlobRegistryImpl::registerBlobURL(const KURL& url, const KURL& srcURL)
 {
     ASSERT(isMainThread());
+    registerBlobResourceHandleConstructor();
 
     RefPtr<BlobStorageData> src = m_blobs.get(srcURL.string());
     ASSERT(src);

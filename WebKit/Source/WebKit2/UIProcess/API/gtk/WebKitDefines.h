@@ -32,6 +32,12 @@
 
 #include <glib.h>
 
+typedef struct _WebKitPrintOperation  WebKitPrintOperation;
+typedef struct _WebKitFindController  WebKitFindController;
+typedef struct _WebKitWebView         WebKitWebView;
+typedef struct _WebKitContextMenu     WebKitContextMenu;
+typedef struct _WebKitContextMenuItem WebKitContextMenuItem;
+
 #ifdef G_OS_WIN32
 #    ifdef BUILDING_WEBKIT
 #        define WEBKIT_API __declspec(dllexport)

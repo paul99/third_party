@@ -37,7 +37,6 @@
 #include "SVGLengthContext.h"
 #include "SVGPropertyTearOff.h"
 #include "V8Binding.h"
-#include "V8BindingMacros.h"
 
 namespace WebCore {
 
@@ -49,10 +48,8 @@ v8::Handle<v8::Value> V8SVGLength::valueAccessorGetter(v8::Local<v8::String> nam
     ExceptionCode ec = 0;
     SVGLengthContext lengthContext(wrapper->contextElement());
     float value = imp.value(lengthContext, ec);
-    if (UNLIKELY(ec)) {
-        V8Proxy::setDOMException(ec);
-        return v8::Handle<v8::Value>();
-    }
+    if (UNLIKELY(ec))
+        return setDOMException(ec, info.GetIsolate());
     return v8::Number::New(value);
 }
 
@@ -60,13 +57,13 @@ void V8SVGLength::valueAccessorSetter(v8::Local<v8::String> name, v8::Local<v8::
 {
     INC_STATS("DOM.SVGLength.value._set");
     SVGPropertyTearOff<SVGLength>* wrapper = V8SVGLength::toNative(info.Holder());
-    if (wrapper->role() == AnimValRole) {
-        V8Proxy::setDOMException(NO_MODIFICATION_ALLOWED_ERR);
+    if (wrapper->isReadOnly()) {
+        setDOMException(NO_MODIFICATION_ALLOWED_ERR, info.GetIsolate());
         return;
     }
 
     if (!isUndefinedOrNull(value) && !value->IsNumber() && !value->IsBoolean()) {
-        V8Proxy::throwTypeError();
+        throwTypeError(0, info.GetIsolate());
         return;
     }
 
@@ -75,7 +72,7 @@ void V8SVGLength::valueAccessorSetter(v8::Local<v8::String> name, v8::Local<v8::
     SVGLengthContext lengthContext(wrapper->contextElement());
     imp.setValue(static_cast<float>(value->NumberValue()), lengthContext, ec);
     if (UNLIKELY(ec))
-        V8Proxy::setDOMException(ec);
+        setDOMException(ec, info.GetIsolate());
     else
         wrapper->commitChange();
 }
@@ -84,24 +81,22 @@ v8::Handle<v8::Value> V8SVGLength::convertToSpecifiedUnitsCallback(const v8::Arg
 {
     INC_STATS("DOM.SVGLength.convertToSpecifiedUnits");
     SVGPropertyTearOff<SVGLength>* wrapper = V8SVGLength::toNative(args.Holder());
-    if (wrapper->role() == AnimValRole) {
-        V8Proxy::setDOMException(NO_MODIFICATION_ALLOWED_ERR);
-        return v8::Handle<v8::Value>();
-    }
+    if (wrapper->isReadOnly())
+        return setDOMException(NO_MODIFICATION_ALLOWED_ERR, args.GetIsolate());
 
     if (args.Length() < 1)
-        return throwError("Not enough arguments", V8Proxy::SyntaxError);
+        return throwNotEnoughArgumentsError(args.GetIsolate());
 
     SVGLength& imp = wrapper->propertyReference();
     ExceptionCode ec = 0;
-    EXCEPTION_BLOCK(int, unitType, toUInt32(args[0]));
+    V8TRYCATCH(int, unitType, toUInt32(args[0]));
     SVGLengthContext lengthContext(wrapper->contextElement());
     imp.convertToSpecifiedUnits(unitType, lengthContext, ec);
     if (UNLIKELY(ec))
-        V8Proxy::setDOMException(ec);
-    else
-        wrapper->commitChange();
-    return v8::Handle<v8::Value>();
+        return setDOMException(ec, args.GetIsolate());
+
+    wrapper->commitChange();
+    return v8Undefined();
 }
 
 } // namespace WebCore

@@ -5,6 +5,7 @@
  * Copyright (C) 2008 INdT - Instituto Nokia de Tecnologia
  * Copyright (C) 2009-2010 ProFUSION embedded systems
  * Copyright (C) 2009-2010 Samsung Electronics
+ * Copyright (C) 2012 Intel Corporation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,63 +35,82 @@
 #include "config.h"
 #include "PlatformScreen.h"
 
-#include "FrameView.h"
 #include "NotImplemented.h"
-#include "PlatformString.h"
 #include "Widget.h"
 
 #include <Ecore_Evas.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/WTFString.h>
+
+#ifdef HAVE_ECORE_X
+#include <Ecore_X.h>
+#endif
 
 namespace WebCore {
- 
-int screenHorizontalDPI(Widget* widget)
+
+int screenDepth(Widget*)
 {
-    notImplemented();
-    return 0;
+#ifdef HAVE_ECORE_X
+    return ecore_x_default_depth_get(ecore_x_display_get(), ecore_x_default_screen_get());
+#else
+    return 24;
+#endif
 }
 
-int screenVerticalDPI(Widget* widget)
+int screenDepthPerComponent(Widget* widget)
 {
-    notImplemented();
-    return 0;
+    if (!widget)
+        return 8;
+
+    int depth = screenDepth(widget);
+
+    switch (depth) {
+    // Special treat 0 as an error, and return 8 bit per component.
+    case 0:
+    case 24:
+    case 32:
+        return 8;
+    case 8:
+        return 2;
+    default:
+        return depth / 3;
+    }
 }
 
-int screenDepth(Widget* widget)
+bool screenIsMonochrome(Widget* widget)
 {
-    notImplemented();
-    return 8;
+    return screenDepth(widget) < 2;
 }
 
-int screenDepthPerComponent(Widget*)
+FloatRect screenRect(Widget* widget)
 {
-    notImplemented();
-    return 8;
-}
-
-bool screenIsMonochrome(Widget*)
-{
-    notImplemented();
-    return false;
-}
-
-FloatRect screenRect(FrameView* frameView)
-{
-    if (!frameView)
+#ifdef HAVE_ECORE_X
+    UNUSED_PARAM(widget);
+    // Fallback to realistic values if the EcoreX call fails
+    // and we cannot accurately detect the screen size.
+    int width = 800;
+    int height = 600;
+    ecore_x_screen_size_get(ecore_x_default_screen_get(), &width, &height);
+    return FloatRect(0, 0, width, height);
+#else
+    if (!widget || !widget->evas())
         return FloatRect();
 
     int x, y, w, h;
-    Evas* e = frameView->evas();
-
-    ecore_evas_screen_geometry_get(ecore_evas_ecore_evas_get(e), &x, &y, &w, &h);
-
+    ecore_evas_screen_geometry_get(ecore_evas_ecore_evas_get(widget->evas()), &x, &y, &w, &h);
     return FloatRect(x, y, w, h);
+#endif
 }
 
-FloatRect screenAvailableRect(FrameView* frameView)
+FloatRect screenAvailableRect(Widget* widget)
 {
     notImplemented();
-    return screenRect(frameView);
+    return screenRect(widget);
+}
+
+void screenColorProfile(ColorProfile&)
+{
+    notImplemented();
 }
 
 }

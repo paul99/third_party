@@ -31,6 +31,21 @@
 
 namespace cricket {
 
+PortAllocatorSession::PortAllocatorSession(const std::string& content_name,
+                                           int component,
+                                           const std::string& ice_ufrag,
+                                           const std::string& ice_pwd,
+                                           uint32 flags)
+    : content_name_(content_name),
+      component_(component),
+      flags_(flags),
+      // If PORTALLOCATOR_ENABLE_SHARED_UFRAG flag is not enabled, ignore the
+      // incoming ufrag and pwd, which will cause each Port to generate one
+      // by itself.
+      username_(flags_ & PORTALLOCATOR_ENABLE_SHARED_UFRAG ? ice_ufrag : ""),
+      password_(flags_ & PORTALLOCATOR_ENABLE_SHARED_UFRAG ? ice_pwd : "") {
+}
+
 PortAllocator::~PortAllocator() {
   for (SessionMuxerMap::iterator iter = muxers_.begin();
        iter != muxers_.end(); ++iter) {
@@ -40,12 +55,15 @@ PortAllocator::~PortAllocator() {
 
 PortAllocatorSession* PortAllocator::CreateSession(
     const std::string& sid,
-    const std::string& name,
-    const std::string& session_type) {
+    const std::string& content_name,
+    int component,
+    const std::string& ice_ufrag,
+    const std::string& ice_pwd) {
   if (flags_ & PORTALLOCATOR_ENABLE_BUNDLE) {
     PortAllocatorSessionMuxer* muxer = GetSessionMuxer(sid);
     if (!muxer) {
-      PortAllocatorSession* session_impl = CreateSession(name, session_type);
+      PortAllocatorSession* session_impl = CreateSessionInternal(
+          content_name, component, ice_ufrag, ice_pwd);
       // Create PortAllocatorSessionMuxer object for |session_impl|.
       muxer = new PortAllocatorSessionMuxer(session_impl);
       muxer->SignalDestroyed.connect(
@@ -54,11 +72,11 @@ PortAllocatorSession* PortAllocator::CreateSession(
       muxers_[sid] = muxer;
     }
     PortAllocatorSessionProxy* proxy =
-        new PortAllocatorSessionProxy(name, session_type, flags_);
+        new PortAllocatorSessionProxy(content_name, component, flags_);
     muxer->RegisterSessionProxy(proxy);
     return proxy;
   }
-  return CreateSession(name, session_type);
+  return CreateSessionInternal(content_name, component, ice_ufrag, ice_pwd);
 }
 
 PortAllocatorSessionMuxer* PortAllocator::GetSessionMuxer(

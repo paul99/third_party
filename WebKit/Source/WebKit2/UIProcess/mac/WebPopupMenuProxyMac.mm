@@ -26,9 +26,12 @@
 #import "config.h"
 #import "WebPopupMenuProxyMac.h"
 
+#if USE(APPKIT)
+
 #import "NativeWebMouseEvent.h"
 #import "PageClientImpl.h"
 #import "PlatformPopupMenuData.h"
+#import "StringUtilities.h"
 #import "WKView.h"
 #import "WebPopupItem.h"
 #import <WebKitSystemInterface.h>
@@ -84,6 +87,9 @@ void WebPopupMenuProxyMac::populate(const Vector<WebPopupItem>& items, NSFont *f
             RetainPtr<NSAttributedString> string(AdoptNS, [[NSAttributedString alloc] initWithString:nsStringFromWebCoreString(items[i].m_text) attributes:attributes.get()]);
 
             [menuItem setAttributedTitle:string.get()];
+            // We set the title as well as the attributed title here. The attributed title will be displayed in the menu,
+            // but typeahead will use the non-attributed string that doesn't contain any leading or trailing whitespace.
+            [menuItem setTitle:[[string.get() string] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]];
             [menuItem setEnabled:items[i].m_isEnabled];
             [menuItem setToolTip:nsStringFromWebCoreString(items[i].m_toolTip)];
         }
@@ -175,3 +181,5 @@ void WebPopupMenuProxyMac::hidePopupMenu()
 }
 
 } // namespace WebKit
+
+#endif // USE(APPKIT)

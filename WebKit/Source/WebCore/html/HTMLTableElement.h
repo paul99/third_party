@@ -53,31 +53,31 @@ public:
     void deleteTHead();
     PassRefPtr<HTMLElement> createTFoot();
     void deleteTFoot();
+    PassRefPtr<HTMLElement> createTBody();
     PassRefPtr<HTMLElement> createCaption();
     void deleteCaption();
     PassRefPtr<HTMLElement> insertRow(int index, ExceptionCode&);
     void deleteRow(int index, ExceptionCode&);
 
-    HTMLCollection* rows();
-    HTMLCollection* tBodies();
+    PassRefPtr<HTMLCollection> rows();
+    PassRefPtr<HTMLCollection> tBodies();
 
     String rules() const;
     String summary() const;
 
-    virtual void attach();
-
-    PassRefPtr<CSSMutableStyleDeclaration> additionalCellStyle();
-    PassRefPtr<CSSMutableStyleDeclaration> additionalGroupStyle(bool rows);
+    const StylePropertySet* additionalCellStyle();
+    const StylePropertySet* additionalGroupStyle(bool rows);
 
 private:
     HTMLTableElement(const QualifiedName&, Document*);
 
-    virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
-    virtual void parseMappedAttribute(Attribute*);
-    virtual bool isURLAttribute(Attribute*) const;
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForPresentationAttribute(const Attribute&, StylePropertySet*) OVERRIDE;
+    virtual bool isURLAttribute(const Attribute&) const OVERRIDE;
 
     // Used to obtain either a solid or outset border decl and to deal with the frame and rules attributes.
-    virtual PassRefPtr<CSSMutableStyleDeclaration> additionalAttributeStyle() OVERRIDE;
+    virtual const StylePropertySet* additionalPresentationAttributeStyle() OVERRIDE;
 
     virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
 
@@ -86,7 +86,7 @@ private:
 
     CellBorders cellBorders() const;
 
-    PassRefPtr<CSSMutableStyleDeclaration> createSharedCellStyle();
+    PassRefPtr<StylePropertySet> createSharedCellStyle();
 
     HTMLTableSectionElement* lastBody() const;
 
@@ -97,8 +97,7 @@ private:
                                 // are present, to none otherwise).
 
     unsigned short m_padding;
-    OwnPtr<HTMLTableRowsCollection> m_rowsCollection;
-    RefPtr<CSSMutableStyleDeclaration> m_sharedCellStyle;
+    RefPtr<StylePropertySet> m_sharedCellStyle;
 };
 
 } //namespace

@@ -33,6 +33,7 @@
 #include "HRTFDatabaseLoader.h"
 
 #include "HRTFDatabase.h"
+#include "PlatformMemoryInstrumentation.h"
 #include <wtf/MainThread.h>
 
 namespace WebCore {
@@ -80,13 +81,11 @@ HRTFDatabaseLoader::~HRTFDatabaseLoader()
 
 
 // Asynchronously load the database in this thread.
-static void* databaseLoaderEntry(void* threadData)
+static void databaseLoaderEntry(void* threadData)
 {
     HRTFDatabaseLoader* loader = reinterpret_cast<HRTFDatabaseLoader*>(threadData);
     ASSERT(loader);
     loader->load();
-    
-    return 0;
 }
 
 void HRTFDatabaseLoader::load()
@@ -121,7 +120,7 @@ void HRTFDatabaseLoader::waitForLoaderThreadCompletion()
     
     // waitForThreadCompletion() should not be called twice for the same thread.
     if (m_databaseLoaderThread)
-        waitForThreadCompletion(m_databaseLoaderThread, 0);
+        waitForThreadCompletion(m_databaseLoaderThread);
     m_databaseLoaderThread = 0;
 }
 
@@ -131,6 +130,12 @@ HRTFDatabase* HRTFDatabaseLoader::defaultHRTFDatabase()
         return 0;
     
     return s_loader->database();
+}
+
+void HRTFDatabaseLoader::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, PlatformMemoryTypes::AudioSharedData);
+    info.addMember(m_hrtfDatabase);
 }
 
 } // namespace WebCore

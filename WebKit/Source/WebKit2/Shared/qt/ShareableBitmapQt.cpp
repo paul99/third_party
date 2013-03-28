@@ -26,11 +26,12 @@
 #include "config.h"
 #include "ShareableBitmap.h"
 
+#include "NativeImageQt.h"
 #include <QImage>
 #include <QPainter>
+#include <QtGlobal>
 #include <WebCore/BitmapImage.h>
 #include <WebCore/GraphicsContext.h>
-#include <WebCore/NotImplemented.h>
 
 using namespace WebCore;
 
@@ -38,8 +39,15 @@ namespace WebKit {
 
 QImage ShareableBitmap::createQImage()
 {
+    ref(); // Balanced by deref in releaseSharedMemoryData
     return QImage(reinterpret_cast<uchar*>(data()), m_size.width(), m_size.height(), m_size.width() * 4,
-                  m_flags & SupportsAlpha ? QImage::Format_ARGB32_Premultiplied : QImage::Format_RGB32);
+                  m_flags & SupportsAlpha ? NativeImageQt::defaultFormatForAlphaEnabledImages() : NativeImageQt::defaultFormatForOpaqueImages(),
+                  releaseSharedMemoryData, this);
+}
+
+void ShareableBitmap::releaseSharedMemoryData(void* typelessBitmap)
+{
+    static_cast<ShareableBitmap*>(typelessBitmap)->deref(); // Balanced by ref in createQImage.
 }
 
 PassRefPtr<Image> ShareableBitmap::createImage()
@@ -52,7 +60,9 @@ PassOwnPtr<GraphicsContext> ShareableBitmap::createGraphicsContext()
 {
     // FIXME: Should this be OwnPtr<QImage>?
     QImage* image = new QImage(createQImage());
-    OwnPtr<GraphicsContext> context = adoptPtr(new GraphicsContext(new QPainter(image)));
+    QPainter* painter = new QPainter(image);
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    OwnPtr<GraphicsContext> context = adoptPtr(new GraphicsContext(painter));
     context->takeOwnershipOfPlatformContext();
     return context.release();
 }
@@ -64,22 +74,20 @@ void ShareableBitmap::paint(GraphicsContext& context, const IntPoint& dstPoint, 
     painter->drawImage(dstPoint, image, QRect(srcRect));
 }
 
-void ShareableBitmap::paint(GraphicsContext& /*context*/, float /*scaleFactor*/, const IntPoint& /*dstPoint*/, const IntRect& /*srcRect*/)
+void ShareableBitmap::paint(GraphicsContext& context, float scaleFactor, const IntPoint& dstPoint, const IntRect& srcRect)
 {
-    // See <https://bugs.webkit.org/show_bug.cgi?id=64663>.
-    notImplemented();
-}
-
-void ShareableBitmap::swizzleRGB()
-{
-    uint32_t* data = reinterpret_cast<uint32_t*>(this->data());
-    int width = size().width();
-    int height = size().height();
-    for (int y = 0; y < height; ++y) {
-        uint32_t* p = data + y * width;
-        for (int x = 0; x < width; ++x)
-            p[x] = ((p[x] << 16) & 0xff0000) | ((p[x] >> 16) & 0xff) | (p[x] & 0xff00ff00);
+    if (qFuzzyCompare(scaleFactor, 1)) {
+        paint(context, dstPoint, srcRect);
+        return;
     }
+
+    QImage image = createQImage();
+    QPainter* painter = context.platformContext();
+
+    painter->save();
+    painter->scale(scaleFactor, scaleFactor);
+    painter->drawImage(dstPoint, image, QRect(srcRect));
+    painter->restore();
 }
 
 }

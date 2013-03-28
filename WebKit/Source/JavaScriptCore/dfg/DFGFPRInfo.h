@@ -78,12 +78,11 @@ public:
         return (unsigned)reg;
     }
 
-#ifndef NDEBUG
     static const char* debugName(FPRReg reg)
     {
         ASSERT(reg != InvalidFPRReg);
 #if CPU(X86_64)
-        ASSERT(reg < 16);
+        ASSERT(static_cast<int>(reg) < 16);
         static const char* nameForRegister[16] = {
             "xmm0", "xmm1", "xmm2", "xmm3",
             "xmm4", "xmm5", "xmm6", "xmm7",
@@ -91,7 +90,7 @@ public:
             "xmm12", "xmm13", "xmm14", "xmm15"
         };
 #elif CPU(X86)
-        ASSERT(reg < 8);
+        ASSERT(static_cast<int>(reg) < 8);
         static const char* nameForRegister[8] = {
             "xmm0", "xmm1", "xmm2", "xmm3",
             "xmm4", "xmm5", "xmm6", "xmm7"
@@ -99,12 +98,11 @@ public:
 #endif
         return nameForRegister[reg];
     }
-#endif
 };
 
 #endif
 
-#if CPU(ARM_THUMB2)
+#if CPU(ARM)
 
 class FPRInfo {
 public:
@@ -124,6 +122,11 @@ public:
     // we'll return in d0 for simplicity.
     static const FPRReg returnValueFPR = ARMRegisters::d0; // fpRegT0
 
+#if CPU(ARM_HARDFP)
+    static const FPRReg argumentFPR0 = ARMRegisters::d0; // fpRegT0
+    static const FPRReg argumentFPR1 = ARMRegisters::d1; // fpRegT1
+#endif
+
     // FPRReg mapping is direct, the machine regsiter numbers can
     // be used directly as indices into the FPR RegisterBank.
     COMPILE_ASSERT(ARMRegisters::d0 == 0, d0_is_0);
@@ -141,7 +144,6 @@ public:
         return (unsigned)reg;
     }
 
-#ifndef NDEBUG
     static const char* debugName(FPRReg reg)
     {
         ASSERT(reg != InvalidFPRReg);
@@ -158,7 +160,6 @@ public:
         };
         return nameForRegister[reg];
     }
-#endif
 };
 
 #endif

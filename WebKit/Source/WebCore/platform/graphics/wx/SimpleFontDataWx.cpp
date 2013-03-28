@@ -90,32 +90,12 @@ void SimpleFontData::platformDestroy()
 #endif
 }
 
-PassOwnPtr<SimpleFontData> SimpleFontData::createScaledFontData(const FontDescription& fontDescription, float scaleFactor) const
+PassRefPtr<SimpleFontData> SimpleFontData::createScaledFontData(const FontDescription& fontDescription, float scaleFactor) const
 {
     FontDescription desc = FontDescription(fontDescription);
     desc.setSpecifiedSize(scaleFactor * fontDescription.computedSize());
     FontPlatformData platformData(desc, desc.family().family());
-    return adoptPtr(new SimpleFontData(platformData, isCustomFont(), false));
-}
-
-SimpleFontData* SimpleFontData::smallCapsFontData(const FontDescription& fontDescription) const
-{
-    if (!m_derivedFontData)
-        m_derivedFontData = DerivedFontData::create(isCustomFont());
-    if (!m_derivedFontData->smallCaps)
-        m_derivedFontData->smallCaps = createScaledFontData(fontDescription, .7);
-
-    return m_derivedFontData->smallCaps.get();
-}
-
-SimpleFontData* SimpleFontData::emphasisMarkFontData(const FontDescription& fontDescription) const
-{
-    if (!m_derivedFontData)
-        m_derivedFontData = DerivedFontData::create(isCustomFont());
-    if (!m_derivedFontData->emphasisMark)
-        m_derivedFontData->emphasisMark = createScaledFontData(fontDescription, .5);
-
-    return m_derivedFontData->emphasisMark.get();
+    return SimpleFontData::create(platformData, isCustomFont(), false);
 }
 
 bool SimpleFontData::containsCharacters(const UChar* characters, int length) const
@@ -192,6 +172,14 @@ float SimpleFontData::widthForGDIGlyph(Glyph glyph) const
     ReleaseDC(0, hdc);
     return width;
 }
+#endif
+    
+#if OS(DARWIN)
+const SimpleFontData* SimpleFontData::getCompositeFontReferenceFontData(NSFont *key) const
+{
+    return 0;
+}
+    
 #endif
 
 }

@@ -48,9 +48,9 @@
 #include "HitTestRequest.h"
 #include "HitTestResult.h"
 #include "InlineTextBox.h"
+#include "NodeTraversal.h"
 #include "Page.h"
 #include "Range.h"
-#include "RenderLayer.h"
 #include "RenderText.h"
 #include "RenderTextControl.h"
 #include "RenderTheme.h"
@@ -76,7 +76,7 @@ using namespace HTMLNames;
 
 static inline LayoutUnit NoXPosForVerticalArrowNavigation()
 {
-    return std::numeric_limits<LayoutUnit>::min();
+    return LayoutUnit::min();
 }
 
 CaretBase::CaretBase(CaretVisibility visibility)
@@ -123,6 +123,14 @@ Element* FrameSelection::rootEditableElementOrDocumentElement() const
 {
     Element* selectionRoot = m_selection.rootEditableElement();
     return selectionRoot ? selectionRoot : m_frame->document()->documentElement();
+}
+
+Element* FrameSelection::rootEditableElementRespectingShadowTree() const
+{
+    Element* selectionRoot = m_selection.rootEditableElement();
+    if (selectionRoot && selectionRoot->isInShadowTree())
+        selectionRoot = selectionRoot->shadowHost();
+    return selectionRoot;
 }
 
 void FrameSelection::moveTo(const VisiblePosition &pos, EUserTriggered userTriggered, CursorAlignOnScroll align)
@@ -287,8 +295,15 @@ void FrameSelection::setSelection(const VisibleSelection& newSelection, SetSelec
     
     if (!s.isNone() && !(options & DoNotSetFocus))
         setFocusedNodeIfNeeded();
-    
-    updateAppearance();
+
+    if (!(options & DoNotUpdateAppearance)) {
+#if ENABLE(TEXT_CARET)
+        m_frame->document()->updateLayoutIgnorePendingStylesheets();
+#else
+        m_frame->document()->updateStyleIfNeeded();
+#endif
+        updateAppearance();
+    }
 
     // Always clear the x position used for vertical arrow navigation.
     // It will be restored by the vertical arrow navigation code if necessary.
@@ -304,7 +319,7 @@ void FrameSelection::setSelection(const VisibleSelection& newSelection, SetSelec
         else
             alignment = (align == AlignCursorOnScrollAlways) ? ScrollAlignment::alignTopAlways : ScrollAlignment::alignToEdgeIfNeeded;
 
-        revealSelection(alignment, true);
+        revealSelection(alignment, RevealExtent);
     }
 
     notifyAccessibilityForSelectionChange();
@@ -330,7 +345,7 @@ static void clearRenderViewSelection(const Position& position)
 {
     RefPtr<Document> document = position.anchorNode()->document();
     document->updateStyleIfNeeded();
-    if (RenderView* view = toRenderView(document->renderer()))
+    if (RenderView* view = document->renderView())
         view->clearSelection();
 }
 
@@ -423,12 +438,21 @@ static void updatePositionAfterAdoptingTextReplacement(Position& position, Chara
     // (positionOffset > offset + oldLength) to avoid having a stale offset.
     if (positionOffset > offset + oldLength)
         position.moveToOffset(positionOffset - oldLength + newLength);
+
+    ASSERT(static_cast<unsigned>(position.offsetInContainerNode()) <= node->length());
 }
 
-void FrameSelection::textWillBeReplaced(CharacterData* node, unsigned offset, unsigned oldLength, unsigned newLength)
+static inline bool nodeIsDetachedFromDocument(Node* node)
+{
+    ASSERT(node);
+    Node* highest = highestAncestor(node);
+    return highest->nodeType() == Node::DOCUMENT_FRAGMENT_NODE && !highest->isShadowRoot();
+}
+
+void FrameSelection::textWasReplaced(CharacterData* node, unsigned offset, unsigned oldLength, unsigned newLength)
 {
     // The fragment check is a performance optimization. See http://trac.webkit.org/changeset/30062.
-    if (isNone() || !node || highestAncestor(node)->nodeType() == Node::DOCUMENT_FRAGMENT_NODE)
+    if (isNone() || !node || nodeIsDetachedFromDocument(node))
         return;
 
     Position base = m_selection.base();
@@ -540,6 +564,14 @@ VisiblePosition FrameSelection::endForPlatform() const
     return positionForPlatform(false);
 }
 
+#if ENABLE(USERSELECT_ALL)
+static void adjustPositionForUserSelectAll(VisiblePosition& pos, bool isForward)
+{
+    if (Node* rootUserSelectAll = Position::rootUserSelectAllForNode(pos.deepEquivalent().anchorNode()))
+        pos = isForward ? positionAfterNode(rootUserSelectAll).downstream(CanCrossEditingBoundary) : positionBeforeNode(rootUserSelectAll).upstream(CanCrossEditingBoundary);
+}
+#endif
+
 VisiblePosition FrameSelection::modifyExtendingRight(TextGranularity granularity)
 {
     VisiblePosition pos(m_selection.extent(), m_selection.affinity());
@@ -578,6 +610,9 @@ VisiblePosition FrameSelection::modifyExtendingRight(TextGranularity granularity
         pos = modifyExtendingForward(granularity);
         break;
     }
+#if ENABLE(USERSELECT_ALL)
+    adjustPositionForUserSelectAll(pos, directionOfEnclosingBlock() == LTR);
+#endif
     return pos;
 }
 
@@ -617,7 +652,9 @@ VisiblePosition FrameSelection::modifyExtendingForward(TextGranularity granulari
             pos = endOfDocument(pos);
         break;
     }
-    
+#if ENABLE(USERSELECT_ALL)
+     adjustPositionForUserSelectAll(pos, directionOfEnclosingBlock() == LTR);
+#endif
     return pos;
 }
 
@@ -634,12 +671,15 @@ VisiblePosition FrameSelection::modifyMovingRight(TextGranularity granularity)
         } else
             pos = VisiblePosition(m_selection.extent(), m_selection.affinity()).right(true);
         break;
-    case WordGranularity:
-        if (visualWordMovementEnabled()
-            || (m_frame && m_frame->editor()->behavior().shouldMoveLeftRightByWordInVisualOrder())) {
-            pos = rightWordPosition(VisiblePosition(m_selection.extent(), m_selection.affinity()));
-            break;
-        }
+    case WordGranularity: {
+#if USE(ICU_UNICODE)
+        // Visual word movement relies on isWordTextBreak which is not implemented in WinCE and QT.
+        // https://bugs.webkit.org/show_bug.cgi?id=81136.
+        bool skipsSpaceWhenMovingRight = m_frame && m_frame->editor()->behavior().shouldSkipSpaceWhenMovingRight();
+        pos = rightWordPosition(VisiblePosition(m_selection.extent(), m_selection.affinity()), skipsSpaceWhenMovingRight);
+        break;
+#endif
+    }
     case SentenceGranularity:
     case LineGranularity:
     case ParagraphGranularity:
@@ -741,6 +781,9 @@ VisiblePosition FrameSelection::modifyExtendingLeft(TextGranularity granularity)
         pos = modifyExtendingBackward(granularity);
         break;
     }
+#if ENABLE(USERSELECT_ALL)
+    adjustPositionForUserSelectAll(pos, !(directionOfEnclosingBlock() == LTR));
+#endif
     return pos;
 }
        
@@ -785,6 +828,9 @@ VisiblePosition FrameSelection::modifyExtendingBackward(TextGranularity granular
             pos = startOfDocument(pos);
         break;
     }
+#if ENABLE(USERSELECT_ALL)
+    adjustPositionForUserSelectAll(pos, !(directionOfEnclosingBlock() == LTR));
+#endif
     return pos;
 }
 
@@ -801,12 +847,13 @@ VisiblePosition FrameSelection::modifyMovingLeft(TextGranularity granularity)
         else
             pos = VisiblePosition(m_selection.extent(), m_selection.affinity()).left(true);
         break;
-    case WordGranularity:
-        if (visualWordMovementEnabled()
-            || (m_frame && m_frame->editor()->behavior().shouldMoveLeftRightByWordInVisualOrder())) {
-            pos = leftWordPosition(VisiblePosition(m_selection.extent(), m_selection.affinity()));
-            break;
-        }
+    case WordGranularity: {
+#if USE(ICU_UNICODE)
+        bool skipsSpaceWhenMovingRight = m_frame && m_frame->editor()->behavior().shouldSkipSpaceWhenMovingRight();
+        pos = leftWordPosition(VisiblePosition(m_selection.extent(), m_selection.affinity()), skipsSpaceWhenMovingRight);
+        break;
+#endif
+    }
     case SentenceGranularity:
     case LineGranularity:
     case ParagraphGranularity:
@@ -936,6 +983,7 @@ bool FrameSelection::modify(EAlteration alter, SelectionDirection direction, Tex
         moveTo(position, userTriggered);
         break;
     case AlterationExtend:
+
         if (!m_selection.isCaret()
             && (granularity == WordGranularity || granularity == ParagraphGranularity || granularity == LineGranularity)
             && m_frame && !m_frame->editor()->behavior().shouldExtendSelectionByWordOrLineAcrossCaret()) {
@@ -975,9 +1023,9 @@ bool FrameSelection::modify(EAlteration alter, SelectionDirection direction, Tex
 }
 
 // FIXME: Maybe baseline would be better?
-static bool absoluteCaretY(const VisiblePosition &c, LayoutUnit &y)
+static bool absoluteCaretY(const VisiblePosition &c, int &y)
 {
-    LayoutRect rect = c.absoluteCaretBounds();
+    IntRect rect = c.absoluteCaretBounds();
     if (rect.isEmpty())
         return false;
     y = rect.y() + rect.height() / 2;
@@ -1016,12 +1064,12 @@ bool FrameSelection::modify(EAlteration alter, unsigned verticalDistance, Vertic
         break;
     }
 
-    LayoutUnit startY;
+    int startY;
     if (!absoluteCaretY(pos, startY))
         return false;
     if (direction == DirectionUp)
         startY = -startY;
-    LayoutUnit lastY = startY;
+    int lastY = startY;
 
     VisiblePosition result;
     VisiblePosition next;
@@ -1033,12 +1081,12 @@ bool FrameSelection::modify(EAlteration alter, unsigned verticalDistance, Vertic
 
         if (next.isNull() || next == p)
             break;
-        LayoutUnit nextY;
+        int nextY;
         if (!absoluteCaretY(next, nextY))
             break;
         if (direction == DirectionUp)
             nextY = -nextY;
-        if (nextY - startY > static_cast<LayoutUnit>(verticalDistance))
+        if (nextY - startY > static_cast<int>(verticalDistance))
             break;
         if (nextY >= lastY) {
             lastY = nextY;
@@ -1111,6 +1159,21 @@ void FrameSelection::clear()
     setSelection(VisibleSelection());
 }
 
+void FrameSelection::prepareForDestruction()
+{
+    m_granularity = CharacterGranularity;
+
+#if ENABLE(TEXT_CARET)
+    m_caretBlinkTimer.stop();
+#endif
+
+    RenderView* view = m_frame->contentRenderer();
+    if (view)
+        view->clearSelection();
+
+    setSelection(VisibleSelection(), CloseTyping | ClearTypingStyle | DoNotUpdateAppearance);
+}
+
 void FrameSelection::setStart(const VisiblePosition &pos, EUserTriggered trigger)
 {
     if (m_selection.isBaseFirst())
@@ -1156,6 +1219,25 @@ void CaretBase::clearCaretRect()
     m_caretLocalRect = LayoutRect();
 }
 
+static inline bool caretRendersInsideNode(Node* node)
+{
+    return node && !isTableElement(node) && !editingIgnoresContent(node);
+}
+
+static RenderObject* caretRenderer(Node* node)
+{
+    if (!node)
+        return 0;
+
+    RenderObject* renderer = node->renderer();
+    if (!renderer)
+        return 0;
+
+    // if caretNode is a block and caret is inside it then caret should be painted by that block
+    bool paintedByBlock = renderer->isBlockFlow() && caretRendersInsideNode(node);
+    return paintedByBlock ? renderer : renderer->containingBlock();
+}
+
 bool CaretBase::updateCaretRect(Document* document, const VisiblePosition& caretPosition)
 {
     document->updateStyleIfNeeded();
@@ -1194,39 +1276,25 @@ bool CaretBase::updateCaretRect(Document* document, const VisiblePosition& caret
     return true;
 }
 
-static inline bool caretRendersInsideNode(Node* node)
-{
-    return node && !isTableElement(node) && !editingIgnoresContent(node);
-}
-
-RenderObject* CaretBase::caretRenderer(Node* node) const
-{
-    if (!node)
-        return 0;
-
-    RenderObject* renderer = node->renderer();
-    if (!renderer)
-        return 0;
-
-    // if caretNode is a block and caret is inside it then caret should be painted by that block
-    bool paintedByBlock = renderer->isBlockFlow() && caretRendersInsideNode(node);
-    return paintedByBlock ? renderer : renderer->containingBlock();
-}
-
 RenderObject* FrameSelection::caretRenderer() const
 {
-    return CaretBase::caretRenderer(m_selection.start().deprecatedNode());
+    return WebCore::caretRenderer(m_selection.start().deprecatedNode());
 }
 
 RenderObject* DragCaretController::caretRenderer() const
 {
-    return CaretBase::caretRenderer(m_position.deepEquivalent().deprecatedNode());
+    return WebCore::caretRenderer(m_position.deepEquivalent().deprecatedNode());
+}
+
+static bool isNonOrphanedCaret(const VisibleSelection& selection)
+{
+    return selection.isCaret() && !selection.start().isOrphan() && !selection.end().isOrphan();
 }
 
 LayoutRect FrameSelection::localCaretRect()
 {
     if (shouldUpdateCaretRect()) {
-        if (!isCaret() || m_selection.start().isOrphan() || m_selection.end().isOrphan())
+        if (!isNonOrphanedCaret(m_selection))
             clearCaretRect();
         else if (updateCaretRect(m_frame->document(), VisiblePosition(m_selection.start(), m_selection.affinity())))
             m_absCaretBoundsDirty = true;
@@ -1235,11 +1303,11 @@ LayoutRect FrameSelection::localCaretRect()
     return localCaretRectWithoutUpdate();
 }
 
-LayoutRect CaretBase::absoluteBoundsForLocalRect(Node* node, const LayoutRect& rect) const
+IntRect CaretBase::absoluteBoundsForLocalRect(Node* node, const LayoutRect& rect) const
 {
     RenderObject* caretPainter = caretRenderer(node);
     if (!caretPainter)
-        return LayoutRect();
+        return IntRect();
     
     LayoutRect localRect(rect);
     if (caretPainter->isBox())
@@ -1247,25 +1315,19 @@ LayoutRect CaretBase::absoluteBoundsForLocalRect(Node* node, const LayoutRect& r
     return caretPainter->localToAbsoluteQuad(FloatRect(localRect)).enclosingBoundingBox();
 }
 
-LayoutRect FrameSelection::absoluteCaretBounds()
+IntRect FrameSelection::absoluteCaretBounds()
 {
     recomputeCaretRect();
     return m_absCaretBounds;
 }
 
-static LayoutRect repaintRectForCaret(LayoutRect caret)
+static void repaintCaretForLocalRect(Node* node, const LayoutRect& rect)
 {
-    if (caret.isEmpty())
-        return LayoutRect();
-    // Ensure that the dirty rect intersects the block that paints the caret even in the case where
-    // the caret itself is just outside the block. See <https://bugs.webkit.org/show_bug.cgi?id=19086>.
-    caret.inflateX(1);
-    return caret;
-}
+    RenderObject* caretPainter = caretRenderer(node);
+    if (!caretPainter)
+        return;
 
-LayoutRect CaretBase::caretRepaintRect(Node* node) const
-{
-    return absoluteBoundsForLocalRect(node, repaintRectForCaret(localCaretRectWithoutUpdate()));
+    caretPainter->repaintRectangle(rect);
 }
 
 bool FrameSelection::recomputeCaretRect()
@@ -1285,24 +1347,21 @@ bool FrameSelection::recomputeCaretRect()
     if (oldRect == newRect && !m_absCaretBoundsDirty)
         return false;
 
-    LayoutRect oldAbsCaretBounds = m_absCaretBounds;
-    // FIXME: Rename m_caretRect to m_localCaretRect.
+    IntRect oldAbsCaretBounds = m_absCaretBounds;
     m_absCaretBounds = absoluteBoundsForLocalRect(m_selection.start().deprecatedNode(), localCaretRectWithoutUpdate());
     m_absCaretBoundsDirty = false;
     
     if (oldAbsCaretBounds == m_absCaretBounds)
         return false;
-        
-    LayoutRect oldAbsoluteCaretRepaintBounds = m_absoluteCaretRepaintBounds;
-    // We believe that we need to inflate the local rect before transforming it to obtain the repaint bounds.
-    m_absoluteCaretRepaintBounds = caretRepaintRect(m_selection.start().deprecatedNode());
 
-#if ENABLE(TEXT_CARET)    
-    if (RenderView* view = toRenderView(m_frame->document()->renderer())) {
-        // FIXME: make caret repainting container-aware.
-        view->repaintRectangleInViewAndCompositedLayers(oldAbsoluteCaretRepaintBounds, false);
+#if ENABLE(TEXT_CARET)
+    if (RenderView* view = m_frame->document()->renderView()) {
+        Node* node = m_selection.start().deprecatedNode();
+        if (m_previousCaretNode)
+            repaintCaretForLocalRect(m_previousCaretNode.get(), oldRect);
+        m_previousCaretNode = node;
         if (shouldRepaintCaret(view, isContentEditable()))
-            view->repaintRectangleInViewAndCompositedLayers(m_absoluteCaretRepaintBounds, false);
+            repaintCaretForLocalRect(node, newRect);
     }
 #endif
     return true;
@@ -1339,10 +1398,12 @@ void CaretBase::invalidateCaretRect(Node* node, bool caretRectChanged)
     // away after clicking.
     m_caretRectNeedsUpdate = true;
 
-    if (!caretRectChanged) {
-        RenderView* view = toRenderView(node->document()->renderer());
-        if (view && shouldRepaintCaret(view, node->isContentEditable()))
-            view->repaintRectangleInViewAndCompositedLayers(caretRepaintRect(node), false);
+    if (caretRectChanged)
+        return;
+
+    if (RenderView* view = node->document()->renderView()) {
+        if (shouldRepaintCaret(view, node->isContentEditable(Node::UserSelectAllIsAlwaysNonEditable)))
+            repaintCaretForLocalRect(node, localCaretRectWithoutUpdate());
     }
 }
 
@@ -1362,7 +1423,7 @@ void CaretBase::paintCaret(Node* node, GraphicsContext* context, const LayoutPoi
     RenderObject* renderer = caretRenderer(node);
     if (renderer && renderer->isBox())
         toRenderBox(renderer)->flipForWritingMode(drawingRect);
-    drawingRect.moveBy(paintOffset);
+    drawingRect.moveBy(roundedIntPoint(paintOffset));
     LayoutRect caret = intersection(drawingRect, clipRect);
     if (caret.isEmpty())
         return;
@@ -1462,7 +1523,7 @@ bool FrameSelection::contains(const LayoutPoint& point)
     HitTestRequest request(HitTestRequest::ReadOnly |
                            HitTestRequest::Active);
     HitTestResult result(point);
-    document->renderView()->layer()->hitTest(request, result);
+    document->renderView()->hitTest(request, result);
     Node* innerNode = result.innerNode();
     if (!innerNode || !innerNode->renderer())
         return false;
@@ -1608,8 +1669,8 @@ void FrameSelection::focusedOrActiveStateChanged()
     // Because RenderObject::selectionBackgroundColor() and
     // RenderObject::selectionForegroundColor() check if the frame is active,
     // we have to update places those colors were painted.
-    if (RenderView* view = toRenderView(m_frame->document()->renderer()))
-        view->repaintRectangleInViewAndCompositedLayers(enclosingIntRect(bounds()));
+    if (RenderView* view = m_frame->document()->renderView())
+        view->repaintSelection();
 
     // Caret appears in the active frame.
     if (activeAndFocused)
@@ -1619,7 +1680,7 @@ void FrameSelection::focusedOrActiveStateChanged()
     // Update for caps lock state
     m_frame->eventHandler()->capsLockStateMayHaveChanged();
 
-    // Because CSSStyleSelector::checkOneSelector() and
+    // Because StyleResolver::checkOneSelector() and
     // RenderTheme::isFocused() check if the frame is active, we have to
     // update style and theme state that depended on those.
     if (Node* node = m_frame->document()->focusedNode()) {
@@ -1675,14 +1736,14 @@ inline static bool shouldStopBlinkingDueToTypingCommand(Frame* frame)
 void FrameSelection::updateAppearance()
 {
 #if ENABLE(TEXT_CARET)
-    bool caretRectChanged = recomputeCaretRect();
+    bool caretRectChangedOrCleared = recomputeCaretRect();
 
     bool caretBrowsing = m_frame->settings() && m_frame->settings()->caretBrowsingEnabled();
     bool shouldBlink = caretIsVisible() && isCaret() && (isContentEditable() || caretBrowsing);
 
     // If the caret moved, stop the blink timer so we can restart with a
     // black caret in the new location.
-    if (caretRectChanged || !shouldBlink || shouldStopBlinkingDueToTypingCommand(m_frame))
+    if (caretRectChangedOrCleared || !shouldBlink || shouldStopBlinkingDueToTypingCommand(m_frame))
         m_caretBlinkTimer.stop();
 
     // Start blinking with a black caret. Be sure not to restart if we're
@@ -1697,9 +1758,6 @@ void FrameSelection::updateAppearance()
         }
     }
 #endif
-
-    // We need to update style in case the node containing the selection is made display:none.
-    m_frame->document()->updateStyleIfNeeded();
 
     RenderView* view = m_frame->contentRenderer();
     if (!view)
@@ -1740,19 +1798,19 @@ void FrameSelection::setCaretVisibility(CaretVisibility visibility)
 {
     if (caretVisibility() == visibility)
         return;
-    clearCaretRectIfNeeded();
-    CaretBase::setCaretVisibility(visibility);
-    updateAppearance();
-}
 
-void FrameSelection::clearCaretRectIfNeeded()
-{
 #if ENABLE(TEXT_CARET)
-    if (!m_caretPaint)
-        return;
-    m_caretPaint = false;
-    invalidateCaretRect();
+    m_frame->document()->updateLayoutIgnorePendingStylesheets();
+    if (m_caretPaint) {
+        m_caretPaint = false;
+        invalidateCaretRect();
+    }
+    CaretBase::setCaretVisibility(visibility);
+#else
+    m_frame->document()->updateStyleIfNeeded();
 #endif
+
+    updateAppearance();
 }
 
 void FrameSelection::caretBlinkTimerFired(Timer<FrameSelection>*)
@@ -1837,7 +1895,7 @@ void DragCaretController::paintDragCaret(Frame* frame, GraphicsContext* p, const
 #endif
 }
 
-PassRefPtr<CSSMutableStyleDeclaration> FrameSelection::copyTypingStyle() const
+PassRefPtr<StylePropertySet> FrameSelection::copyTypingStyle() const
 {
     if (!m_typingStyle || !m_typingStyle->style())
         return 0;
@@ -1882,13 +1940,16 @@ void FrameSelection::getClippedVisibleTextRectangles(Vector<FloatRect>& rectangl
 // Scans logically forward from "start", including any child frames.
 static HTMLFormElement* scanForForm(Node* start)
 {
-    for (Node* node = start; node; node = node->traverseNextNode()) {
-        if (node->hasTagName(formTag))
-            return static_cast<HTMLFormElement*>(node);
-        if (node->isHTMLElement() && toHTMLElement(node)->isFormControlElement())
-            return static_cast<HTMLFormControlElement*>(node)->form();
-        if (node->hasTagName(frameTag) || node->hasTagName(iframeTag)) {
-            Node* childDocument = static_cast<HTMLFrameElementBase*>(node)->contentDocument();
+    if (!start)
+        return 0;
+    Element* element = start->isElementNode() ? toElement(start) : ElementTraversal::next(start);
+    for (; element; element = ElementTraversal::next(element)) {
+        if (element->hasTagName(formTag))
+            return static_cast<HTMLFormElement*>(element);
+        if (element->isHTMLElement() && toHTMLElement(element)->isFormControlElement())
+            return static_cast<HTMLFormControlElement*>(element)->form();
+        if (element->hasTagName(frameTag) || element->hasTagName(iframeTag)) {
+            Node* childDocument = static_cast<HTMLFrameElementBase*>(element)->contentDocument();
             if (HTMLFormElement* frameResult = scanForForm(childDocument))
                 return frameResult;
         }
@@ -1917,7 +1978,7 @@ HTMLFormElement* FrameSelection::currentForm() const
     return scanForForm(start);
 }
 
-void FrameSelection::revealSelection(const ScrollAlignment& alignment, bool revealExtent)
+void FrameSelection::revealSelection(const ScrollAlignment& alignment, RevealExtentOption revealExtentOption)
 {
     LayoutRect rect;
 
@@ -1928,7 +1989,7 @@ void FrameSelection::revealSelection(const ScrollAlignment& alignment, bool reve
         rect = absoluteCaretBounds();
         break;
     case VisibleSelection::RangeSelection:
-        rect = revealExtent ? VisiblePosition(extent()).absoluteCaretBounds() : enclosingIntRect(bounds(false));
+        rect = revealExtentOption == RevealExtent ? VisiblePosition(extent()).absoluteCaretBounds() : enclosingIntRect(bounds(false));
         break;
     }
 
@@ -1938,10 +1999,8 @@ void FrameSelection::revealSelection(const ScrollAlignment& alignment, bool reve
         // FIXME: This code only handles scrolling the startContainer's layer, but
         // the selection rect could intersect more than just that.
         // See <rdar://problem/4799899>.
-        if (RenderLayer* layer = start.deprecatedNode()->renderer()->enclosingLayer()) {
-            layer->scrollRectToVisible(rect, alignment, alignment);
+        if (start.deprecatedNode()->renderer()->scrollRectToVisible(rect, alignment, alignment))
             updateAppearance();
-        }
     }
 }
 
@@ -1957,7 +2016,7 @@ void FrameSelection::setSelectionFromNone()
 
     Node* node = document->documentElement();
     while (node && !node->hasTagName(bodyTag))
-        node = node->traverseNextNode();
+        node = NodeTraversal::next(node);
     if (node)
         setSelection(VisibleSelection(firstPositionInOrBeforeNode(node), DOWNSTREAM));
 }

@@ -27,6 +27,7 @@
 #include "CSSParser.h"
 #include "RGBColor.h"
 #include "SVGException.h"
+#include "WebCoreMemoryInstrumentation.h"
 
 namespace WebCore {
 
@@ -90,6 +91,23 @@ String SVGColor::customCssText() const
 
     ASSERT_NOT_REACHED();
     return String();
+}
+
+SVGColor::SVGColor(ClassType classType, const SVGColor& cloneFrom)
+    : CSSValue(classType, /*isCSSOMSafe*/ true)
+    , m_color(cloneFrom.m_color)
+    , m_colorType(cloneFrom.m_colorType)
+{
+}
+
+PassRefPtr<SVGColor> SVGColor::cloneForCSSOM() const
+{
+    return adoptRef(new SVGColor(SVGColorClass, *this));
+}
+
+void SVGColor::reportDescendantMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CSS);
 }
 
 }

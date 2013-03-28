@@ -31,7 +31,8 @@
 
 #include "V8IDBAny.h"
 
-#include "SerializedScriptValue.h"
+#include "ScriptValue.h"
+#include "V8Binding.h"
 #include "V8DOMStringList.h"
 #include "V8IDBCursor.h"
 #include "V8IDBCursorWithValue.h"
@@ -44,36 +45,40 @@
 
 namespace WebCore {
 
-v8::Handle<v8::Value> toV8(IDBAny* impl)
+v8::Handle<v8::Value> toV8(IDBAny* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
 {
     if (!impl)
-        return v8::Null();
+        return v8NullWithCheck(isolate);
 
     switch (impl->type()) {
     case IDBAny::UndefinedType:
         return v8::Undefined();
     case IDBAny::NullType:
-        return v8::Null();
+        return v8NullWithCheck(isolate);
     case IDBAny::DOMStringListType:
-        return toV8(impl->domStringList());
+        return toV8(impl->domStringList(), creationContext, isolate);
     case IDBAny::IDBCursorType:
-        return toV8(impl->idbCursor());
+        return toV8(impl->idbCursor(), creationContext, isolate);
     case IDBAny::IDBCursorWithValueType:
-        return toV8(impl->idbCursorWithValue());
+        return toV8(impl->idbCursorWithValue(), creationContext, isolate);
     case IDBAny::IDBDatabaseType:
-        return toV8(impl->idbDatabase());
+        return toV8(impl->idbDatabase(), creationContext, isolate);
     case IDBAny::IDBFactoryType:
-        return toV8(impl->idbFactory());
+        return toV8(impl->idbFactory(), creationContext, isolate);
     case IDBAny::IDBIndexType:
-        return toV8(impl->idbIndex());
+        return toV8(impl->idbIndex(), creationContext, isolate);
     case IDBAny::IDBKeyType:
-        return toV8(impl->idbKey());
+        return toV8(impl->idbKey(), creationContext, isolate);
     case IDBAny::IDBObjectStoreType:
-        return toV8(impl->idbObjectStore());
+        return toV8(impl->idbObjectStore(), creationContext, isolate);
     case IDBAny::IDBTransactionType:
-        return toV8(impl->idbTransaction());
-    case IDBAny::SerializedScriptValueType:
-        return impl->serializedScriptValue()->deserialize();
+        return toV8(impl->idbTransaction(), creationContext, isolate);
+    case IDBAny::ScriptValueType:
+        return impl->scriptValue().v8Value();
+    case IDBAny::StringType:
+        return v8String(impl->string(), isolate);
+    case IDBAny::IntegerType:
+        return v8::Number::New(impl->integer());
     }
 
     ASSERT_NOT_REACHED();

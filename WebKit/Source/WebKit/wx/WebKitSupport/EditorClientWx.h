@@ -38,13 +38,14 @@
 namespace WebCore {
 
 class EditorClientWx : public EditorClient, public TextCheckerClient {
-friend class ::wxWebView;
-friend class ::wxWebFrame;
+friend class WebKit::WebView;
+friend class WebKit::WebFrame;
 
 public:
     virtual ~EditorClientWx();
     void setPage(Page*);
     virtual void pageDestroyed();
+    virtual void frameWillDetachPage(WebCore::Frame*) { }
 
     virtual bool shouldDeleteRange(Range*);
     virtual bool shouldShowDeleteInterface(HTMLElement*);
@@ -64,7 +65,7 @@ public:
                                   EditorInsertAction);
     virtual bool shouldInsertText(const String&, Range*,
                                   EditorInsertAction);
-    virtual bool shouldApplyStyle(CSSStyleDeclaration*,
+    virtual bool shouldApplyStyle(StylePropertySet*,
                                   Range*);
     virtual bool shouldMoveRangeAfterDelete(Range*, Range*);
     virtual bool shouldChangeSelectedRange(Range* fromRange, Range* toRange, 
@@ -101,6 +102,7 @@ public:
     virtual void textWillBeDeletedInTextField(Element*);
     virtual void textDidChangeInTextArea(Element*);
 
+    virtual bool shouldEraseMarkersAfterChangeSelection(TextCheckingType) const;
     virtual void ignoreWordInSpellDocument(const String&);
     virtual void learnWord(const String&);
     virtual void checkSpellingOfString(const UChar*, int length, int* misspellingLocation, int* misspellingLength);
@@ -114,7 +116,7 @@ public:
 
     virtual void willSetInputMethodState();
     virtual void setInputMethodState(bool enabled);
-    virtual void requestCheckingOfString(WebCore::SpellChecker*, int, WebCore::TextCheckingTypeMask, const WTF::String&) {}
+    virtual void requestCheckingOfString(WTF::PassRefPtr<WebCore::TextCheckingRequest>) { }
     virtual TextCheckerClient* textChecker() { return this; }
 
 private:

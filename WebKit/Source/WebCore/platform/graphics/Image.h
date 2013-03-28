@@ -30,8 +30,9 @@
 #include "Color.h"
 #include "ColorSpace.h"
 #include "GraphicsTypes.h"
-#include "ImageSource.h"
+#include "ImageOrientation.h"
 #include "IntRect.h"
+#include "NativeImagePtr.h"
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RefPtr.h>
@@ -58,6 +59,11 @@ typedef struct HBITMAP__ *HBITMAP;
 
 #if PLATFORM(GTK)
 typedef struct _GdkPixbuf GdkPixbuf;
+#endif
+
+#if PLATFORM(EFL)
+typedef struct _Evas Evas;
+typedef struct _Evas_Object Evas_Object;
 #endif
 
 namespace WebCore {
@@ -160,12 +166,22 @@ public:
     static void setPlatformResource(const char* name, const QPixmap&);
 #endif
 
+#if PLATFORM(EFL)
+    virtual Evas_Object* getEvasObject(Evas*) { return 0; }
+#endif
+
     virtual void drawPattern(GraphicsContext*, const FloatRect& srcRect, const AffineTransform& patternTransform,
                              const FloatPoint& phase, ColorSpace styleColorSpace, CompositeOperator, const FloatRect& destRect);
+
+#if ENABLE(IMAGE_DECODER_DOWN_SAMPLING)
+    FloatRect adjustSourceRectForDownSampling(const FloatRect& srcRect, const IntSize& scaledSize) const;
+#endif
 
 #if !ASSERT_DISABLED
     virtual bool notSolidColor() { return true; }
 #endif
+
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const;
 
 protected:
     Image(ImageObserver* = 0);
@@ -176,7 +192,8 @@ protected:
 #if PLATFORM(WIN)
     virtual void drawFrameMatchingSourceSize(GraphicsContext*, const FloatRect& dstRect, const IntSize& srcSize, ColorSpace styleColorSpace, CompositeOperator) { }
 #endif
-    virtual void draw(GraphicsContext*, const FloatRect& dstRect, const FloatRect& srcRect, ColorSpace styleColorSpace, CompositeOperator) = 0;
+    virtual void draw(GraphicsContext*, const FloatRect& dstRect, const FloatRect& srcRect, ColorSpace styleColorSpace, CompositeOperator, BlendMode) = 0;
+    virtual void draw(GraphicsContext*, const FloatRect& dstRect, const FloatRect& srcRect, ColorSpace styleColorSpace, CompositeOperator, BlendMode, RespectImageOrientationEnum);
     void drawTiled(GraphicsContext*, const FloatRect& dstRect, const FloatPoint& srcPoint, const FloatSize& tileSize, ColorSpace styleColorSpace, CompositeOperator);
     void drawTiled(GraphicsContext*, const FloatRect& dstRect, const FloatRect& srcRect, const FloatSize& tileScaleFactor, TileRule hRule, TileRule vRule, ColorSpace styleColorSpace, CompositeOperator);
 

@@ -2,26 +2,26 @@
  * libjingle
  * Copyright 2004--2005, Google Inc.
  *
- * Redistribution and use in source and binary forms, with or without 
+ * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- *  1. Redistributions of source code must retain the above copyright notice, 
+ *  1. Redistributions of source code must retain the above copyright notice,
  *     this list of conditions and the following disclaimer.
  *  2. Redistributions in binary form must reproduce the above copyright notice,
  *     this list of conditions and the following disclaimer in the documentation
  *     and/or other materials provided with the distribution.
- *  3. The name of the author may not be used to endorse or promote products 
+ *  3. The name of the author may not be used to endorse or promote products
  *     derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF 
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
- * EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
+ * EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
  * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR 
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF 
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
@@ -43,12 +43,12 @@ class Thread;
 
 namespace cricket {
 
-class Port;
 class Connection;
-class StunPort;
-class RelayPort;
 class PortAllocator;
 class PortAllocatorSession;
+class PortInterface;
+class RelayPort;
+class StunPort;
 
 // Implements a channel that just sends bare packets once we have received the
 // address of the other side.  We pick a single address to send them based on
@@ -56,15 +56,15 @@ class PortAllocatorSession;
 class RawTransportChannel : public TransportChannelImpl,
     public talk_base::MessageHandler {
  public:
-  RawTransportChannel(const std::string &name,
-                      const std::string &content_type,
+  RawTransportChannel(const std::string& content_name,
+                      int component,
                       RawTransport* transport,
                       talk_base::Thread *worker_thread,
                       PortAllocator *allocator);
   virtual ~RawTransportChannel();
 
   // Implementation of normal channel packet sending.
-  virtual int SendPacket(const char *data, size_t len);
+  virtual int SendPacket(const char *data, size_t len, int flags);
   virtual int SetOption(talk_base::Socket::Option opt, int value);
   virtual int GetError();
 
@@ -96,12 +96,12 @@ class RawTransportChannel : public TransportChannelImpl,
   PortAllocatorSession* allocator_session_;
   StunPort* stun_port_;
   RelayPort* relay_port_;
-  Port* port_;
+  PortInterface* port_;
   bool use_relay_;
   talk_base::SocketAddress remote_address_;
 
   // Called when the allocator creates another port.
-  void OnPortReady(PortAllocatorSession* session, Port* port);
+  void OnPortReady(PortAllocatorSession* session, PortInterface* port);
 
   // Called when one of the ports we are using has determined its address.
   void OnCandidatesReady(PortAllocatorSession *session,
@@ -109,14 +109,14 @@ class RawTransportChannel : public TransportChannelImpl,
 
   // Called once we have chosen the port to use for communication with the
   // other client.  This will send its address and prepare the port for use.
-  void SetPort(Port* port);
+  void SetPort(PortInterface* port);
 
   // Called once we have a port and a remote address.  This will set mark the
   // channel as writable and signal the route to the client.
   void SetWritable();
 
   // Called when we receive a packet from the other client.
-  void OnReadPacket(Port* port, const char* data, size_t size,
+  void OnReadPacket(PortInterface* port, const char* data, size_t size,
                     const talk_base::SocketAddress& addr);
 
   // Handles a message to destroy unused ports.

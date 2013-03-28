@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 2000 Simon Hausmann <hausmann@kde.org>
- * Copyright (C) 2004, 2005, 2006, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2008, 2009, 2010, 2012 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -28,6 +28,7 @@
 namespace WebCore {
 
 class MouseEvent;
+class TextRun;
 
 // Renderer for embeds and objects, often, but not always, rendered via plug-ins.
 // For example, <embed src="foo.html"> does not invoke a plug-in.
@@ -36,57 +37,81 @@ public:
     RenderEmbeddedObject(Element*);
     virtual ~RenderEmbeddedObject();
 
-    bool pluginCrashedOrWasMissing() const;
-    
-    void setShowsMissingPluginIndicator();
-    void setShowsCrashedPluginIndicator();
-    bool showsMissingPluginIndicator() const { return m_showsMissingPluginIndicator; }
+    enum PluginUnavailabilityReason {
+        PluginMissing,
+        PluginCrashed,
+        PluginBlockedByContentSecurityPolicy,
+        InsecurePluginVersion,
+        PluginInactive,
+    };
+    void setPluginUnavailabilityReason(PluginUnavailabilityReason);
+    bool showsUnavailablePluginIndicator() const;
 
     // FIXME: This belongs on HTMLObjectElement.
     bool hasFallbackContent() const { return m_hasFallbackContent; }
     void setHasFallbackContent(bool hasFallbackContent) { m_hasFallbackContent = hasFallbackContent; }
 
-    void handleMissingPluginIndicatorEvent(Event*);
+    void handleUnavailablePluginIndicatorEvent(Event*);
 
 #if USE(ACCELERATED_COMPOSITING)
     virtual bool allowsAcceleratedCompositing() const;
 #endif
 
+protected:
+    virtual void paintReplaced(PaintInfo&, const LayoutPoint&);
+    virtual void paint(PaintInfo&, const LayoutPoint&);
+
+    virtual CursorDirective getCursor(const LayoutPoint&, Cursor&) const;
+
+#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
+    const RenderObjectChildList* children() const { return &m_children; }
+    RenderObjectChildList* children() { return &m_children; }
+#endif
+
+protected:
+    virtual void layout() OVERRIDE;
+
 private:
     virtual const char* renderName() const { return "RenderEmbeddedObject"; }
     virtual bool isEmbeddedObject() const { return true; }
-
-    virtual void paintReplaced(PaintInfo&, const LayoutPoint&);
-    virtual void paint(PaintInfo&, const LayoutPoint&);
-    virtual CursorDirective getCursor(const LayoutPoint&, Cursor&) const;
 
 #if USE(ACCELERATED_COMPOSITING)
     virtual bool requiresLayer() const;
 #endif
 
-    virtual void layout();
     virtual void viewCleared();
 
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction);
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) OVERRIDE;
 
     virtual bool scroll(ScrollDirection, ScrollGranularity, float multiplier, Node** stopNode);
     virtual bool logicalScroll(ScrollLogicalDirection, ScrollGranularity, float multiplier, Node** stopNode);
 
-    void setMissingPluginIndicatorIsPressed(bool);
-    bool isInMissingPluginIndicator(MouseEvent*) const;
-    bool isInMissingPluginIndicator(const LayoutPoint&) const;
+    void setUnavailablePluginIndicatorIsPressed(bool);
+    bool isInUnavailablePluginIndicator(MouseEvent*) const;
+    bool isInUnavailablePluginIndicator(const LayoutPoint&) const;
     bool getReplacementTextGeometry(const LayoutPoint& accumulatedOffset, FloatRect& contentRect, Path&, FloatRect& replacementTextRect, Font&, TextRun&, float& textWidth) const;
 
-    String m_replacementText;
+#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
+    virtual bool canHaveChildren() const { return node() && toElement(node())->isMediaElement(); }
+    virtual RenderObjectChildList* virtualChildren() { return children(); }
+    virtual const RenderObjectChildList* virtualChildren() const { return children(); }
+#endif
+
     bool m_hasFallbackContent; // FIXME: This belongs on HTMLObjectElement.
-    bool m_showsMissingPluginIndicator;
-    bool m_missingPluginIndicatorIsPressed;
-    bool m_mouseDownWasInMissingPluginIndicator;
+
+    bool m_showsUnavailablePluginIndicator;
+    PluginUnavailabilityReason m_pluginUnavailabilityReason;
+    String m_unavailablePluginReplacementText;
+    bool m_unavailablePluginIndicatorIsPressed;
+    bool m_mouseDownWasInUnavailablePluginIndicator;
+#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
+    RenderObjectChildList m_children;
+#endif
 };
 
 inline RenderEmbeddedObject* toRenderEmbeddedObject(RenderObject* object)
 {
-    ASSERT(!object || !strcmp(object->renderName(), "RenderEmbeddedObject"));
+    ASSERT(!object || object->isEmbeddedObject());
     return static_cast<RenderEmbeddedObject*>(object);
 }
 

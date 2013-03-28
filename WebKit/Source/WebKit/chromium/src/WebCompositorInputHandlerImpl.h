@@ -26,9 +26,12 @@
 #ifndef WebCompositorInputHandlerImpl_h
 #define WebCompositorInputHandlerImpl_h
 
-#include "WebCompositor.h"
+#include "WebActiveWheelFlingParameters.h"
 #include "WebCompositorInputHandler.h"
-#include "cc/CCInputHandler.h"
+#include "WebInputEvent.h"
+#include <public/WebGestureCurve.h>
+#include <public/WebGestureCurveTarget.h>
+#include <public/WebInputHandler.h>
 #include <wtf/HashSet.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/OwnPtr.h>
@@ -38,52 +41,67 @@ class Mutex;
 }
 
 namespace WebCore {
-class CCInputHandlerClient;
-class CCThread;
+class IntPoint;
 }
 
 namespace WebKit {
 
 class WebCompositorInputHandlerClient;
 
-#if OS(ANDROID)
-class FlingAnimator;
-#endif
-
-// Temporarily subclassing from WebCompositor while downstream changes land.
-class WebCompositorInputHandlerImpl : public WebCompositor, public WebCore::CCInputHandler {
+class WebCompositorInputHandlerImpl : public WebCompositorInputHandler, public WebInputHandler, public WebGestureCurveTarget {
     WTF_MAKE_NONCOPYABLE(WebCompositorInputHandlerImpl);
 public:
-    static PassOwnPtr<WebCompositorInputHandlerImpl> create(WebCore::CCInputHandlerClient*);
     static WebCompositorInputHandler* fromIdentifier(int identifier);
 
+    WebCompositorInputHandlerImpl();
     virtual ~WebCompositorInputHandlerImpl();
 
-    // WebCompositor implementation
+    // WebCompositorInputHandler implementation.
     virtual void setClient(WebCompositorInputHandlerClient*);
     virtual void handleInputEvent(const WebInputEvent&);
-    virtual void didVSync(double frameBeginMonotonic, double currentFrameIntervalInSec);
 
-    // WebCore::CCInputHandler implementation
-    virtual int identifier() const;
-    virtual void willDraw(double monotonicTime);
+    // WebInputHandler implementation.
+    virtual void bindToClient(WebInputHandlerClient*);
+    virtual void animate(double monotonicTime);
+    virtual void mainThreadHasStoppedFlinging();
+
+    // WebGestureCurveTarget implementation.
+    virtual void scrollBy(const WebPoint&);
+
+    int identifier() const { return m_identifier; }
 
 private:
-    explicit WebCompositorInputHandlerImpl(WebCore::CCInputHandlerClient*);
+
+    enum EventDisposition { DidHandle, DidNotHandle, DropEvent };
+    // This function processes the input event and determines the disposition, but does not make
+    // any calls out to the WebCompositorInputHandlerClient. Some input types defer to helpers.
+    EventDisposition handleInputEventInternal(const WebInputEvent&);
+
+    EventDisposition handleGestureFling(const WebGestureEvent&);
+
+    // Returns true if we scrolled by the increment.
+    bool touchpadFlingScroll(const WebPoint& increment);
+
+    // Returns true if we actually had an active fling to cancel.
+    bool cancelCurrentFling();
+
+    OwnPtr<WebGestureCurve> m_flingCurve;
+    // Parameters for the active fling animation, stored in case we need to transfer it out later.
+    WebActiveWheelFlingParameters m_flingParameters;
 
     WebCompositorInputHandlerClient* m_client;
     int m_identifier;
-    WebCore::CCInputHandlerClient* m_inputHandlerClient;
-
-#if OS(ANDROID)
-    OwnPtr<FlingAnimator> m_flingAnimator;
-#endif
+    WebInputHandlerClient* m_inputHandlerClient;
 
 #ifndef NDEBUG
     bool m_expectScrollUpdateEnd;
     bool m_expectPinchUpdateEnd;
 #endif
-    bool m_scrollStarted;
+    bool m_gestureScrollOnImplThread;
+    bool m_gesturePinchOnImplThread;
+    // This is always false when there are no flings on the main thread, but conservative in the
+    // sense that we might not be actually flinging when it is true.
+    bool m_flingActiveOnMainThread;
 
     static int s_nextAvailableIdentifier;
     static HashSet<WebCompositorInputHandlerImpl*>* s_compositors;

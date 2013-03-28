@@ -26,19 +26,17 @@
 #ifndef MIMETypeRegistry_h
 #define MIMETypeRegistry_h
 
-#include "PlatformString.h"
 #include <wtf/HashSet.h>
 #include <wtf/Vector.h>
 #include <wtf/text/StringHash.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 class MIMETypeRegistry {
 public:
     static String getMIMETypeForExtension(const String& extension);
-#if ENABLE(FILE_SYSTEM)
     static String getWellKnownMIMETypeForExtension(const String& extension);
-#endif
 
     static Vector<String> getExtensionsForMIMEType(const String& type);
     static String getPreferredExtensionForMIMEType(const String& type);
@@ -80,12 +78,19 @@ public:
     // browser (e.g. a Qt Plugin).
     static bool isApplicationPluginMIMEType(const String& mimeType);
 
+    // Check to see if a mime type is suitable for being shown inside a page.
+    // Returns true if any of isSupportedImageMIMEType(), isSupportedNonImageMIMEType(), isSupportedMediaMIMEType() returns true
+    // or if given mime type begins with "text/" and isUnsupportedTextMIMEType() returns false.
+    static bool canShowMIMEType(const String& mimeType);
+
     static HashSet<String>& getSupportedImageMIMETypes();
     static HashSet<String>& getSupportedImageResourceMIMETypes();
     static HashSet<String>& getSupportedImageMIMETypesForEncoding();
     static HashSet<String>& getSupportedNonImageMIMETypes();
     static HashSet<String>& getSupportedMediaMIMETypes();
     static HashSet<String>& getUnsupportedTextMIMETypes();
+
+    static String getNormalizedMIMEType(const String&);
 };
 
 const String& defaultMIMEType();

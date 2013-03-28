@@ -26,10 +26,13 @@
 #include "config.h"
 #include "WebDatabaseManagerProxy.h"
 
+#if ENABLE(SQL_DATABASE)
+
 #include "ImmutableArray.h"
 #include "ImmutableDictionary.h"
-#include "WebDatabaseManagerMessages.h"
 #include "WebContext.h"
+#include "WebDatabaseManagerMessages.h"
+#include "WebDatabaseManagerProxyMessages.h"
 #include "WebSecurityOrigin.h"
 
 using namespace WebCore;
@@ -38,49 +41,49 @@ namespace WebKit {
 
 String WebDatabaseManagerProxy::originKey()
 {
-    DEFINE_STATIC_LOCAL(String, key, ("WebDatabaseManagerOriginKey"));
+    DEFINE_STATIC_LOCAL(String, key, (ASCIILiteral("WebDatabaseManagerOriginKey")));
     return key;
 }
 
 String WebDatabaseManagerProxy::originQuotaKey()
 {
-    DEFINE_STATIC_LOCAL(String, key, ("WebDatabaseManagerOriginQuotaKey"));
+    DEFINE_STATIC_LOCAL(String, key, (ASCIILiteral("WebDatabaseManagerOriginQuotaKey")));
     return key;
 }
 
 String WebDatabaseManagerProxy::originUsageKey()
 {
-    DEFINE_STATIC_LOCAL(String, key, ("WebDatabaseManagerOriginUsageKey"));
+    DEFINE_STATIC_LOCAL(String, key, (ASCIILiteral("WebDatabaseManagerOriginUsageKey")));
     return key;
 }
 
 String WebDatabaseManagerProxy::databaseDetailsKey()
 {
-    DEFINE_STATIC_LOCAL(String, key, ("WebDatabaseManagerDatabaseDetailsKey"));
+    DEFINE_STATIC_LOCAL(String, key, (ASCIILiteral("WebDatabaseManagerDatabaseDetailsKey")));
     return key;
 }
 
 String WebDatabaseManagerProxy::databaseDetailsNameKey()
 {
-    DEFINE_STATIC_LOCAL(String, key, ("WebDatabaseManagerDatabaseDetailsNameKey"));
+    DEFINE_STATIC_LOCAL(String, key, (ASCIILiteral("WebDatabaseManagerDatabaseDetailsNameKey")));
     return key;
 }
 
 String WebDatabaseManagerProxy::databaseDetailsDisplayNameKey()
 {
-    DEFINE_STATIC_LOCAL(String, key, ("WebDatabaseManagerDatabaseDetailsDisplayNameKey"));
+    DEFINE_STATIC_LOCAL(String, key, (ASCIILiteral("WebDatabaseManagerDatabaseDetailsDisplayNameKey")));
     return key;
 }
 
 String WebDatabaseManagerProxy::databaseDetailsExpectedUsageKey()
 {
-    DEFINE_STATIC_LOCAL(String, key, ("WebDatabaseManagerDatabaseDetailsExpectedUsageKey"));
+    DEFINE_STATIC_LOCAL(String, key, (ASCIILiteral("WebDatabaseManagerDatabaseDetailsExpectedUsageKey")));
     return key;
 }
 
 String WebDatabaseManagerProxy::databaseDetailsCurrentUsageKey()
 {
-    DEFINE_STATIC_LOCAL(String, key, ("WebDatabaseManagerDatabaseDetailsCurrentUsageKey"));
+    DEFINE_STATIC_LOCAL(String, key, (ASCIILiteral("WebDatabaseManagerDatabaseDetailsCurrentUsageKey")));
     return key;
 }
 
@@ -92,6 +95,7 @@ PassRefPtr<WebDatabaseManagerProxy> WebDatabaseManagerProxy::create(WebContext* 
 WebDatabaseManagerProxy::WebDatabaseManagerProxy(WebContext* webContext)
     : m_webContext(webContext)
 {
+    m_webContext->addMessageReceiver(Messages::WebDatabaseManagerProxy::messageReceiverName(), this);
 }
 
 WebDatabaseManagerProxy::~WebDatabaseManagerProxy()
@@ -119,7 +123,7 @@ void WebDatabaseManagerProxy::getDatabasesByOrigin(PassRefPtr<ArrayCallback> prp
     uint64_t callbackID = callback->callbackID();
     m_arrayCallbacks.set(callbackID, callback.release());
 
-    // FIXME (Multi-WebProcess): Databases shouldn't be stored in the web process.
+    // FIXME (Multi-WebProcess): <rdar://problem/12239765> Databases shouldn't be stored in the web process.
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebDatabaseManager::GetDatabasesByOrigin(callbackID));
 }
 
@@ -172,7 +176,7 @@ void WebDatabaseManagerProxy::getDatabaseOrigins(PassRefPtr<ArrayCallback> prpCa
     uint64_t callbackID = callback->callbackID();
     m_arrayCallbacks.set(callbackID, callback.release());
 
-    // FIXME (Multi-WebProcess): Databases shouldn't be stored in the web process.
+    // FIXME (Multi-WebProcess): <rdar://problem/12239765> Databases shouldn't be stored in the web process.
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebDatabaseManager::GetDatabaseOrigins(callbackID));
 }
 
@@ -195,25 +199,25 @@ void WebDatabaseManagerProxy::didGetDatabaseOrigins(const Vector<String>& origin
 
 void WebDatabaseManagerProxy::deleteDatabaseWithNameForOrigin(const String& databaseIdentifier, WebSecurityOrigin* origin)
 {
-    // FIXME (Multi-WebProcess): Databases shouldn't be stored in the web process.
+    // FIXME (Multi-WebProcess): <rdar://problem/7855696> Databases shouldn't be stored in the web process.
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebDatabaseManager::DeleteDatabaseWithNameForOrigin(databaseIdentifier, origin->databaseIdentifier()));
 }
 
 void WebDatabaseManagerProxy::deleteDatabasesForOrigin(WebSecurityOrigin* origin)
 {
-    // FIXME (Multi-WebProcess): Databases shouldn't be stored in the web process.
+    // FIXME (Multi-WebProcess): <rdar://problem/7855696> Databases shouldn't be stored in the web process.
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebDatabaseManager::DeleteDatabasesForOrigin(origin->databaseIdentifier()));
 }
 
 void WebDatabaseManagerProxy::deleteAllDatabases()
 {
-    // FIXME (Multi-WebProcess): Databases shouldn't be stored in the web process.
+    // FIXME (Multi-WebProcess): <rdar://problem/7855696> Databases shouldn't be stored in the web process.
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebDatabaseManager::DeleteAllDatabases());
 }
 
 void WebDatabaseManagerProxy::setQuotaForOrigin(WebSecurityOrigin* origin, uint64_t quota)
 {
-    // FIXME (Multi-WebProcess): Databases shouldn't be stored in the web process.
+    // FIXME (Multi-WebProcess): <rdar://problem/7855696> Databases shouldn't be stored in the web process.
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebDatabaseManager::SetQuotaForOrigin(origin->databaseIdentifier(), quota));
 }
 
@@ -229,5 +233,11 @@ void WebDatabaseManagerProxy::didModifyDatabase(const String& originIdentifier, 
     m_client.didModifyDatabase(this, origin.get(), databaseIdentifier);
 }
 
+void WebDatabaseManagerProxy::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
+{
+    didReceiveWebDatabaseManagerProxyMessage(connection, messageID, decoder);
+}
+
 } // namespace WebKit
 
+#endif // ENABLE(SQL_DATABASE)

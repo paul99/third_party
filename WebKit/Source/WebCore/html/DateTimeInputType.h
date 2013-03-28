@@ -34,27 +34,36 @@
 #include "BaseDateAndTimeInputType.h"
 
 #if ENABLE(INPUT_TYPE_DATETIME)
+#include "BaseChooserOnlyDateAndTimeInputType.h"
+#include "BaseMultipleFieldsDateAndTimeInputType.h"
 
 namespace WebCore {
 
-class DateTimeInputType : public BaseDateAndTimeInputType {
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+typedef BaseMultipleFieldsDateAndTimeInputType BaseDateTimeInputType;
+#else
+typedef BaseChooserOnlyDateAndTimeInputType BaseDateTimeInputType;
+#endif
+
+class DateTimeInputType : public BaseDateTimeInputType {
 public:
     static PassOwnPtr<InputType> create(HTMLInputElement*);
 
 private:
-    DateTimeInputType(HTMLInputElement* element) : BaseDateAndTimeInputType(element) { }
+    DateTimeInputType(HTMLInputElement* element) : BaseDateTimeInputType(element) { }
     virtual const AtomicString& formControlType() const OVERRIDE;
     virtual DateComponents::Type dateType() const OVERRIDE;
-    virtual double defaultValueForStepUp() const OVERRIDE;
-    virtual double minimum() const OVERRIDE;
-    virtual double maximum() const OVERRIDE;
-    virtual double defaultStep() const OVERRIDE;
-    virtual double stepScaleFactor() const OVERRIDE;
-    virtual bool scaledStepValueShouldBeInteger() const OVERRIDE;
+    virtual StepRange createStepRange(AnyStepHandling) const OVERRIDE;
+    virtual Decimal defaultValueForStepUp() const OVERRIDE;
     virtual bool parseToDateComponentsInternal(const UChar*, unsigned length, DateComponents*) const OVERRIDE;
     virtual bool setMillisecondToDateComponents(double, DateComponents*) const OVERRIDE;
-#if OS(ANDROID)
     virtual bool isDateTimeField() const OVERRIDE;
+    virtual String sanitizeValue(const String&) const OVERRIDE;
+
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+    // BaseMultipleFieldsDateAndTimeInputType functions
+    virtual String formatDateTimeFieldsState(const DateTimeFieldsState&) const OVERRIDE FINAL;
+    virtual void setupLayoutParameters(DateTimeEditElement::LayoutParameters&, const DateComponents&) const OVERRIDE FINAL;
 #endif
 };
 

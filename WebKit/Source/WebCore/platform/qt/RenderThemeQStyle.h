@@ -1,7 +1,7 @@
 /*
  * This file is part of the theme implementation for form controls in WebCore.
  *
- * Copyright (C) 2011 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (C) 2011-2012 Nokia Corporation and/or its subsidiary(-ies).
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,66 +22,68 @@
 #ifndef RenderThemeQStyle_h
 #define RenderThemeQStyle_h
 
+#include "QStyleFacade.h"
 #include "RenderThemeQt.h"
-
-#include <QStyle>
-
-QT_BEGIN_NAMESPACE
-#ifndef QT_NO_LINEEDIT
-class QLineEdit;
-#endif
-class QPainter;
-class QWidget;
-QT_END_NAMESPACE
 
 namespace WebCore {
 
-class ScrollbarThemeQt;
+class ScrollbarThemeQStyle;
+
+class Page;
+class QStyleFacade;
+struct QStyleFacadeOption;
+
+typedef QStyleFacade* (*QtStyleFactoryFunction)(Page*);
 
 class RenderThemeQStyle : public RenderThemeQt {
 private:
+    friend class StylePainterQStyle;
+
     RenderThemeQStyle(Page*);
     virtual ~RenderThemeQStyle();
 
 public:
     static PassRefPtr<RenderTheme> create(Page*);
 
-    virtual void adjustSliderThumbSize(RenderStyle*) const;
+    static void setStyleFactoryFunction(QtStyleFactoryFunction);
+    static QtStyleFactoryFunction styleFactory();
 
-    QStyle* qStyle() const;
+    virtual void adjustSliderThumbSize(RenderStyle*, Element*) const;
+
+    QStyleFacade* qStyle() { return m_qStyle.get(); }
 
 protected:
-    virtual void adjustButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual void adjustButtonStyle(StyleResolver*, RenderStyle*, Element*) const;
     virtual bool paintButton(RenderObject*, const PaintInfo&, const IntRect&);
 
     virtual bool paintTextField(RenderObject*, const PaintInfo&, const IntRect&);
 
     virtual bool paintTextArea(RenderObject*, const PaintInfo&, const IntRect&);
-    virtual void adjustTextAreaStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual void adjustTextAreaStyle(StyleResolver*, RenderStyle*, Element*) const;
 
     virtual bool paintMenuList(RenderObject*, const PaintInfo&, const IntRect&);
 
     virtual bool paintMenuListButton(RenderObject*, const PaintInfo&, const IntRect&);
-    virtual void adjustMenuListButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual void adjustMenuListButtonStyle(StyleResolver*, RenderStyle*, Element*) const;
 
-#if ENABLE(PROGRESS_TAG)
+#if ENABLE(PROGRESS_ELEMENT)
     // Returns the duration of the animation for the progress bar.
     virtual double animationDurationForProgressBar(RenderProgress*) const;
     virtual bool paintProgressBar(RenderObject*, const PaintInfo&, const IntRect&);
 #endif
 
     virtual bool paintSliderTrack(RenderObject*, const PaintInfo&, const IntRect&);
-    virtual void adjustSliderTrackStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual void adjustSliderTrackStyle(StyleResolver*, RenderStyle*, Element*) const;
 
     virtual bool paintSliderThumb(RenderObject*, const PaintInfo&, const IntRect&);
-    virtual void adjustSliderThumbStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual void adjustSliderThumbStyle(StyleResolver*, RenderStyle*, Element*) const;
 
     virtual bool paintSearchField(RenderObject*, const PaintInfo&, const IntRect&);
 
-    virtual void adjustSearchFieldDecorationStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual void adjustSearchFieldDecorationStyle(StyleResolver*, RenderStyle*, Element*) const;
     virtual bool paintSearchFieldDecoration(RenderObject*, const PaintInfo&, const IntRect&);
 
-    virtual void adjustSearchFieldResultsDecorationStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual void adjustSearchFieldResultsDecorationStyle(StyleResolver*, RenderStyle*, Element*) const;
     virtual bool paintSearchFieldResultsDecoration(RenderObject*, const PaintInfo&, const IntRect&);
 
 #ifndef QT_NO_SPINBOX
@@ -97,44 +99,56 @@ protected:
 
     virtual void setPopupPadding(RenderStyle*) const;
 
+    virtual QPalette colorPalette() const;
+
 private:
-    ControlPart initializeCommonQStyleOptions(QStyleOption&, RenderObject*) const;
+    ControlPart initializeCommonQStyleOptions(QStyleFacadeOption&, RenderObject*) const;
 
     void setButtonPadding(RenderStyle*) const;
 
-    int findFrameLineWidth(QStyle*) const;
-
-    QStyle* fallbackStyle() const;
+    void setPaletteFromPageClientIfExists(QPalette&) const;
 
 #ifdef Q_OS_MAC
     int m_buttonFontPixelSize;
 #endif
 
-    QStyle* m_fallbackStyle;
-#ifndef QT_NO_LINEEDIT
-    mutable QLineEdit* m_lineEdit;
-#endif
+    OwnPtr<QStyleFacade> m_qStyle;
 };
 
 class StylePainterQStyle : public StylePainter {
 public:
-    explicit StylePainterQStyle(RenderThemeQStyle*, const PaintInfo&);
-    explicit StylePainterQStyle(ScrollbarThemeQt*, GraphicsContext*);
+    explicit StylePainterQStyle(RenderThemeQStyle*, const PaintInfo&, RenderObject*);
+    explicit StylePainterQStyle(ScrollbarThemeQStyle*, GraphicsContext*);
 
-    bool isValid() const { return style && StylePainter::isValid(); }
+    bool isValid() const { return qStyle && qStyle->isValid() && StylePainter::isValid(); }
 
-    QWidget* widget;
-    QStyle* style;
+    QStyleFacade* qStyle;
+    QStyleFacadeOption styleOption;
+    ControlPart appearance;
 
-    void drawPrimitive(QStyle::PrimitiveElement pe, const QStyleOption& opt)
-    { style->drawPrimitive(pe, &opt, painter, widget); }
-    void drawControl(QStyle::ControlElement ce, const QStyleOption& opt)
-    { style->drawControl(ce, &opt, painter, widget); }
-    void drawComplexControl(QStyle::ComplexControl cc, const QStyleOptionComplex& opt)
-    { style->drawComplexControl(cc, &opt, painter, widget); }
+    void paintButton(QStyleFacade::ButtonType type)
+    { qStyle->paintButton(painter, type, styleOption); }
+    void paintTextField()
+    { qStyle->paintTextField(painter, styleOption); }
+    void paintComboBox()
+    { qStyle->paintComboBox(painter, styleOption); }
+    void paintComboBoxArrow()
+    { qStyle->paintComboBoxArrow(painter, styleOption); }
+    void paintSliderTrack()
+    { qStyle->paintSliderTrack(painter, styleOption); }
+    void paintSliderThumb()
+    { qStyle->paintSliderThumb(painter, styleOption); }
+    void paintInnerSpinButton(bool spinBoxUp)
+    { qStyle->paintInnerSpinButton(painter, styleOption, spinBoxUp); }
+    void paintProgressBar(double progress, double animationProgress)
+    { qStyle->paintProgressBar(painter, styleOption, progress, animationProgress); }
+    void paintScrollCorner(const QRect& rect)
+    { qStyle->paintScrollCorner(painter, rect); }
+    void paintScrollBar()
+    { qStyle->paintScrollBar(painter, styleOption); }
 
 private:
-    void init(GraphicsContext*, QStyle*);
+    void init(GraphicsContext*);
 
     Q_DISABLE_COPY(StylePainterQStyle)
 };

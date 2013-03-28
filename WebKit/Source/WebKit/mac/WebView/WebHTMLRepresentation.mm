@@ -54,6 +54,7 @@
 #import <WebCore/HTMLNames.h>
 #import <WebCore/HTMLTableCellElement.h>
 #import <WebCore/MIMETypeRegistry.h>
+#import <WebCore/NodeTraversal.h>
 #import <WebCore/Range.h>
 #import <WebCore/RegularExpression.h>
 #import <WebCore/RenderObject.h>
@@ -214,14 +215,6 @@ static NSArray *concatenateArrays(NSArray *first, NSArray *second)
 
     if (!webFrame)
         return;
-
-    if (![self _isDisplayingWebArchive]) {
-        // Telling the frame we received some data and passing nil as the data is our
-        // way to get work done that is normally done when the first bit of data is
-        // received, even for the case of a document with no data (like about:blank).
-        [webFrame _commitData:nil];
-    }
-
     WebView *webView = [webFrame webView];
     if ([webView mainFrame] == webFrame && [webView isEditable])
         core(webFrame)->editor()->applyEditingStyleToBodyElement();
@@ -445,9 +438,9 @@ static NSString* searchForLabelsBeforeElement(Frame* frame, NSArray* labels, Ele
     // walk backwards in the node tree, until another element, or form, or end of tree
     unsigned lengthSearched = 0;
     Node* n;
-    for (n = element->traversePreviousNode();
+    for (n = NodeTraversal::previous(element);
          n && lengthSearched < charsSearchedThreshold;
-         n = n->traversePreviousNode())
+         n = NodeTraversal::previous(n))
     {
         if (n->hasTagName(formTag)
             || (n->isHTMLElement() && static_cast<Element*>(n)->isFormControlElement()))

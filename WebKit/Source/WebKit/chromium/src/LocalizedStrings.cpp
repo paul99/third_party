@@ -31,14 +31,13 @@
 #include "config.h"
 #include "LocalizedStrings.h"
 
+#include "DateTimeFormat.h"
 #include "IntSize.h"
 #include "NotImplemented.h"
 
-#include "WebKit.h"
-#include "platform/WebKitPlatformSupport.h"
-#include "platform/WebLocalizedString.h"
-#include "platform/WebString.h"
-
+#include <public/Platform.h>
+#include <public/WebLocalizedString.h>
+#include <public/WebString.h>
 #include <wtf/text/StringBuilder.h>
 #include <wtf/text/WTFString.h>
 
@@ -49,17 +48,17 @@ namespace WebCore {
 
 static String query(WebLocalizedString::Name name)
 {
-    return WebKit::webKitPlatformSupport()->queryLocalizedString(name);
+    return WebKit::Platform::current()->queryLocalizedString(name);
 }
 
 static String query(WebLocalizedString::Name name, const WebString& parameter)
 {
-    return WebKit::webKitPlatformSupport()->queryLocalizedString(name, parameter);
+    return WebKit::Platform::current()->queryLocalizedString(name, parameter);
 }
 
 static String query(WebLocalizedString::Name name, const WebString& parameter1, const WebString& parameter2)
 {
-    return WebKit::webKitPlatformSupport()->queryLocalizedString(name, parameter1, parameter2);
+    return WebKit::Platform::current()->queryLocalizedString(name, parameter1, parameter2);
 }
 
 String searchableIndexIntroduction()
@@ -158,6 +157,12 @@ String AXDefinitionListDefinitionText()
     return String("definition");
 }
 
+String AXFooterRoleDescriptionText()
+{
+    notImplemented();
+    return String("footer");
+}
+
 String AXButtonActionVerb()
 {
     return query(WebLocalizedString::AXButtonActionVerb);
@@ -198,16 +203,124 @@ String AXMenuListActionVerb()
     return String();
 }
     
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+String AXAMPMFieldText()
+{
+    return query(WebLocalizedString::AXAMPMFieldText);
+}
+
+String AXDayOfMonthFieldText()
+{
+    return query(WebLocalizedString::AXDayOfMonthFieldText);
+}
+
+String AXDateTimeFieldEmptyValueText()
+{
+    return query(WebLocalizedString::AXDateTimeFieldEmptyValueText);
+}
+
+String AXHourFieldText()
+{
+    return query(WebLocalizedString::AXHourFieldText);
+}
+
+String AXMillisecondFieldText()
+{
+    return query(WebLocalizedString::AXMillisecondFieldText);
+}
+
+String AXMinuteFieldText()
+{
+    return query(WebLocalizedString::AXMinuteFieldText);
+}
+
+String AXMonthFieldText()
+{
+    return query(WebLocalizedString::AXMonthFieldText);
+}
+
+String AXSecondFieldText()
+{
+    return query(WebLocalizedString::AXSecondFieldText);
+}
+
+String AXWeekOfYearFieldText()
+{
+    return query(WebLocalizedString::AXWeekOfYearFieldText);
+}
+
+String AXYearFieldText()
+{
+    return query(WebLocalizedString::AXYearFieldText);
+}
+
+String placeholderForDayOfMonthField()
+{
+    return query(WebLocalizedString::PlaceholderForDayOfMonthField);
+}
+
+String placeholderForMonthField()
+{
+    return query(WebLocalizedString::PlaceholderForMonthField);
+}
+
+String placeholderForYearField()
+{
+    return query(WebLocalizedString::PlaceholderForYearField);
+}
+#endif
+
+#if ENABLE(INPUT_TYPE_WEEK)
+String weekFormatInLDML()
+{
+    String templ = query(WebLocalizedString::WeekFormatTemplate);
+    // Converts a string like "Week $2, $1" to an LDML date format pattern like
+    // "'Week 'ww', 'yyyy".
+    StringBuilder builder;
+    unsigned literalStart = 0;
+    unsigned length = templ.length();
+    for (unsigned i = 0; i + 1 < length; ++i) {
+        if (templ[i] == '$' && (templ[i + 1] == '1' || templ[i + 1] == '2')) {
+            if (literalStart < i)
+                DateTimeFormat::quoteAndAppendLiteral(templ.substring(literalStart, i - literalStart), builder);
+            builder.append(templ[++i] == '1' ? "yyyy" : "ww");
+            literalStart = i + 1;
+        }
+    }
+    if (literalStart < length)
+        DateTimeFormat::quoteAndAppendLiteral(templ.substring(literalStart, length - literalStart), builder);
+    return builder.toString();
+}
+
+#endif
+
 String missingPluginText()
 {
-    notImplemented();
-    return String("Missing Plug-in");
+    return query(WebLocalizedString::MissingPluginText);
 }
 
 String crashedPluginText()
 {
     notImplemented();
     return String("Plug-in Failure");
+}
+
+String blockedPluginByContentSecurityPolicyText()
+{
+    notImplemented();
+    return String();
+}
+
+String insecurePluginVersionText()
+{
+    notImplemented();
+    return String();
+}
+
+String inactivePluginText()
+{
+    notImplemented();
+    return String();
 }
 
 String multipleFileUploadText(unsigned numberOfFiles)
@@ -390,5 +503,17 @@ String validationMessageStepMismatchText(const String& base, const String& step)
 {
     return query(WebLocalizedString::ValidationStepMismatch, base, step);
 }
+
+String validationMessageBadInputForNumberText()
+{
+    return query(WebLocalizedString::ValidationBadInputForNumber);
+}
+
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+String validationMessageBadInputForDateTimeText()
+{
+    return query(WebLocalizedString::ValidationBadInputForDateTime);
+}
+#endif
 
 } // namespace WebCore

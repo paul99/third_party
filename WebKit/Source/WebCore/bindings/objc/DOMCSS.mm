@@ -28,6 +28,7 @@
 #import "config.h"
 
 #import "CSSRule.h"
+#import "CSSStyleSheet.h"
 #import "CSSValue.h"
 #import "DOMCSSCharsetRule.h"
 #import "DOMCSSFontFaceRule.h"
@@ -44,13 +45,21 @@
 #import "DOMCSSValueList.h"
 #import "DOMInternal.h"
 #import "DOMStyleSheetInternal.h"
+#import "DOMWebKitCSSKeyframeRule.h"
+#import "DOMWebKitCSSKeyframesRule.h"
+#import "DOMWebKitCSSTransformValue.h"
+
 #if ENABLE(CSS_FILTERS)
 #import "DOMWebKitCSSFilterValue.h"
 #endif
-#import "DOMWebKitCSSKeyframeRule.h"
-#import "DOMWebKitCSSKeyframesRule.h"
+
+#if ENABLE(CSS_REGIONS)
 #import "DOMWebKitCSSRegionRule.h"
-#import "DOMWebKitCSSTransformValue.h"
+#endif
+
+#if ENABLE(CSS_DEVICE_ADAPTATION)
+#import "DOMWebKitCSSViewportRule.h"
+#endif
 
 #if ENABLE(SVG_DOM_OBJC_BINDINGS)
 #import "DOMSVGPaint.h"
@@ -90,8 +99,14 @@ Class kitClass(WebCore::CSSRule* impl)
             return [DOMWebKitCSSKeyframesRule class];
         case DOM_WEBKIT_KEYFRAME_RULE:
             return [DOMWebKitCSSKeyframeRule class];
+#if ENABLE(CSS_DEVICE_ADAPTATION)
+        case DOM_WEBKIT_VIEWPORT_RULE:
+            return [DOMWebKitCSSViewportRule class];
+#endif
+#if ENABLE(CSS_REGIONS)
         case DOM_WEBKIT_REGION_RULE:
             return [DOMWebKitCSSRegionRule class];
+#endif
     }
     ASSERT_NOT_REACHED();
     return nil;

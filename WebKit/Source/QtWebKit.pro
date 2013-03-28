@@ -10,22 +10,32 @@ CONFIG += ordered
 api.file = api.pri
 SUBDIRS += api
 
-!no_webkit2 {
-    webprocess.file = WebKit2/WebProcess.pro
-    SUBDIRS += webprocess
+build?(webkit1) {
+    webkitwidgets.file = widgetsapi.pri
+    SUBDIRS += webkitwidgets
 }
 
-include(WebKit/qt/docs/docs.pri)
+build?(webkit2) {
+    webprocess.file = WebKit2/WebProcess.pro
+    SUBDIRS += webprocess
+    enable?(PLUGIN_PROCESS) {
+        pluginprocess.file = WebKit2/PluginProcess.pro
+        SUBDIRS += pluginprocess
+    }
+}
 
 declarative.file = WebKit/qt/declarative/declarative.pro
 declarative.makefile = Makefile.declarative
-SUBDIRS += declarative
+have?(QTQUICK): SUBDIRS += declarative
 
-tests.file = tests.pri
-SUBDIRS += tests
+build?(webkit1) {
+    build?(tests) {
+        tests.file = tests.pri
+        SUBDIRS += tests
+    }
 
-examples.file = WebKit/qt/examples/examples.pro
-examples.CONFIG += no_default_target
-examples.makefile = Makefile
-SUBDIRS += examples
-
+    examples.file = WebKit/qt/examples/examples.pro
+    examples.CONFIG += no_default_target
+    examples.makefile = Makefile
+    SUBDIRS += examples
+}

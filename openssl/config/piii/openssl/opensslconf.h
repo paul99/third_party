@@ -8,11 +8,17 @@
 #ifndef OPENSSL_NO_CAMELLIA
 # define OPENSSL_NO_CAMELLIA
 #endif
+#ifndef OPENSSL_NO_CAST
+# define OPENSSL_NO_CAST
+#endif
 #ifndef OPENSSL_NO_CAPIENG
 # define OPENSSL_NO_CAPIENG
 #endif
 #ifndef OPENSSL_NO_CMS
 # define OPENSSL_NO_CMS
+#endif
+#ifndef OPENSSL_NO_EC_NISTP_64_GCC_128
+# define OPENSSL_NO_EC_NISTP_64_GCC_128
 #endif
 #ifndef OPENSSL_NO_FIPS
 # define OPENSSL_NO_FIPS
@@ -38,11 +44,17 @@
 #ifndef OPENSSL_NO_RFC3779
 # define OPENSSL_NO_RFC3779
 #endif
+#ifndef OPENSSL_NO_SCTP
+# define OPENSSL_NO_SCTP
+#endif
 #ifndef OPENSSL_NO_SEED
 # define OPENSSL_NO_SEED
 #endif
-#ifndef OPENSSL_NO_ASM
-# define OPENSSL_NO_ASM
+#ifndef OPENSSL_NO_SHA0
+# define OPENSSL_NO_SHA0
+#endif
+#ifndef OPENSSL_NO_WHIRLPOOL
+# define OPENSSL_NO_WHIRLPOOL
 #endif
 
 #endif /* OPENSSL_DOING_MAKEDEPEND */
@@ -53,6 +65,20 @@
 #ifndef OPENSSL_NO_DYNAMIC_ENGINE
 # define OPENSSL_NO_DYNAMIC_ENGINE
 #endif
+
+/* Use x86 assembler functions - taken from Android/x86 config */
+# define OPENSSL_BN_ASM_GF2m
+# define OPENSSL_BN_ASM_MONT
+# define OPENSSL_BN_ASM_PART_WORDS
+# define AES_ASM
+# define GHASH_ASM
+# define SHA1_ASM
+# define SHA256_ASM
+# define SHA512_ASM
+# define MD5_ASM
+# define DES_PTR
+# define DES_RISC1
+# define DES_UNROLL
 
 /* The OPENSSL_NO_* macros are also defined as NO_* if the application
    asks for it.  This is a transient feature that is provided for those
@@ -96,8 +122,6 @@
 #  define NO_SEED
 # endif
 #endif
-
-#define OPENSSL_CPUID_OBJ
 
 /* crypto/opensslconf.h.in */
 

@@ -24,6 +24,8 @@
 
 #include <BlackBerryPlatformKeyboardEvent.h>
 #include <BlackBerryPlatformLog.h>
+#include <BlackBerryPlatformScreen.h>
+#include <wtf/CurrentTime.h>
 #include <wtf/text/CString.h>
 
 namespace WebCore {
@@ -436,11 +438,11 @@ static inline PlatformKeyboardEvent::Type toWebCorePlatformKeyboardEventType(con
     }
 }
 
-PlatformKeyboardEvent::PlatformKeyboardEvent(BlackBerry::Platform::KeyboardEvent event)
-    : PlatformEvent(toWebCorePlatformKeyboardEventType(event.type()), event.shiftActive() || (event.character() == KEYCODE_BACK_TAB), event.ctrlActive(), event.altActive(), false)
+PlatformKeyboardEvent::PlatformKeyboardEvent(const BlackBerry::Platform::KeyboardEvent& event)
+    : PlatformEvent(toWebCorePlatformKeyboardEventType(event.type()), event.shiftActive() || (event.character() == KEYCODE_BACK_TAB), event.ctrlActive(), event.altActive(), false, currentTime())
     , m_keyIdentifier(keyIdentifierForBlackBerryCharacter(event.character()))
-    , m_autoRepeat(false)
     , m_windowsVirtualKeyCode(windowsKeyCodeForBlackBerryCharacter(event.character()))
+    , m_autoRepeat(false)
     , m_isKeypad(false)
     , m_unmodifiedCharacter(event.character())
 {
@@ -448,7 +450,10 @@ PlatformKeyboardEvent::PlatformKeyboardEvent(BlackBerry::Platform::KeyboardEvent
     m_text = String(&character, 1);
     m_unmodifiedText = m_text;
 
-    BlackBerry::Platform::log(BlackBerry::Platform::LogLevelInfo, "Keyboard event received text=%lc, keyIdentifier=%s, windowsVirtualKeyCode=%d", event.character(), m_keyIdentifier.latin1().data(), m_windowsVirtualKeyCode);
+    if (event.character() == KEYCODE_BACK_TAB)
+        m_modifiers |= ShiftKey; // BackTab should be treated as Shift + Tab.
+
+    BBLOG(BlackBerry::Platform::LogLevelInfo, "Keyboard event received text=%lc, keyIdentifier=%s, windowsVirtualKeyCode=%d", event.character(), m_keyIdentifier.latin1().data(), m_windowsVirtualKeyCode);
 }
 
 bool PlatformKeyboardEvent::currentCapsLockState()
@@ -475,9 +480,13 @@ void PlatformKeyboardEvent::disambiguateKeyDownEvent(PlatformEvent::Type type, b
     }
 }
 
-void PlatformKeyboardEvent::getCurrentModifierState(bool&, bool&, bool&, bool&)
+void PlatformKeyboardEvent::getCurrentModifierState(bool& shiftKey, bool& ctrlKey, bool& altKey, bool& metaKey)
 {
-    notImplemented();
+    int modifiers = BlackBerry::Platform::Graphics::Screen::primaryScreen()->getCurrentModifiersState();
+    shiftKey = modifiers & KEYMOD_SHIFT;
+    ctrlKey = modifiers & KEYMOD_CTRL;
+    altKey = modifiers & KEYMOD_ALT;
+    metaKey = false;
 }
 
 } // namespace WebCore

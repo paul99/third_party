@@ -23,7 +23,7 @@ static const int kCallbackFlags = kCFSocketReadCallBack |
                                   kCFSocketConnectCallBack |
                                   kCFSocketWriteCallBack;
 
-MacAsyncSocket::MacAsyncSocket(MacBaseSocketServer* ss)
+MacAsyncSocket::MacAsyncSocket(MacBaseSocketServer* ss, int family)
     : ss_(ss),
       socket_(NULL),
       native_socket_(INVALID_SOCKET),
@@ -31,8 +31,9 @@ MacAsyncSocket::MacAsyncSocket(MacBaseSocketServer* ss)
       current_callbacks_(0),
       disabled_(false),
       error_(0),
-      state_(CS_CLOSED) {
-  Initialize();
+      state_(CS_CLOSED),
+      resolver_(NULL) {
+  Initialize(family);
 }
 
 MacAsyncSocket::~MacAsyncSocket() {
@@ -47,13 +48,12 @@ SocketAddress MacAsyncSocket::GetLocalAddress() const {
   // The CFSocket doesn't pick up on implicit binds from the connect call.
   // Calling bind in before connect explicitly causes errors, so just query
   // the underlying bsd socket.
-  sockaddr_in addr;
+  sockaddr_storage addr;
   socklen_t addrlen = sizeof(addr);
   int result = ::getsockname(native_socket_,
                              reinterpret_cast<sockaddr*>(&addr), &addrlen);
   if (result >= 0) {
-    ASSERT(addrlen == sizeof(addr));
-    address.FromSockAddr(addr);
+    SocketAddressFromSockAddrStorage(addr, &address);
   }
   return address;
 }
@@ -64,48 +64,72 @@ SocketAddress MacAsyncSocket::GetRemoteAddress() const {
   SocketAddress address;
 
   // Use native_socket for consistency with GetLocalAddress.
-  sockaddr_in addr;
+  sockaddr_storage addr;
   socklen_t addrlen = sizeof(addr);
   int result = ::getpeername(native_socket_,
                              reinterpret_cast<sockaddr*>(&addr), &addrlen);
   if (result >= 0) {
-    ASSERT(addrlen == sizeof(addr));
-    address.FromSockAddr(addr);
+    SocketAddressFromSockAddrStorage(addr, &address);
   }
   return address;
 }
 
 // Bind the socket to a local address.
 int MacAsyncSocket::Bind(const SocketAddress& address) {
-  sockaddr_in saddr;
-  address.ToSockAddr(&saddr);
-  int err = ::bind(native_socket_, reinterpret_cast<sockaddr*>(&saddr),
-                   sizeof(saddr));
+  sockaddr_storage saddr = {0};
+  size_t len = address.ToSockAddrStorage(&saddr);
+  int err = ::bind(native_socket_, reinterpret_cast<sockaddr*>(&saddr), len);
   if (err == SOCKET_ERROR) error_ = errno;
   return err;
 }
 
+void MacAsyncSocket::OnResolveResult(SignalThread* thread) {
+  if (thread != resolver_) {
+    return;
+  }
+  int error = resolver_->error();
+  if (error == 0) {
+    error = DoConnect(resolver_->address());
+  } else {
+    Close();
+  }
+  if (error) {
+    error_ = error;
+    SignalCloseEvent(this, error_);
+  }
+}
+
 // Connect to a remote address.
-int MacAsyncSocket::Connect(const SocketAddress& address) {
+int MacAsyncSocket::Connect(const SocketAddress& addr) {
+  // TODO(djw): Consolidate all the connect->resolve->doconnect implementations.
+  if (state_ != CS_CLOSED) {
+    SetError(EALREADY);
+    return SOCKET_ERROR;
+  }
+  if (addr.IsUnresolved()) {
+    LOG(LS_VERBOSE) << "Resolving addr in MacAsyncSocket::Connect";
+    resolver_ = new AsyncResolver();
+    resolver_->set_address(addr);
+    resolver_->SignalWorkDone.connect(this,
+                                      &MacAsyncSocket::OnResolveResult);
+    resolver_->Start();
+    state_ = CS_CONNECTING;
+    return 0;
+  }
+  return DoConnect(addr);
+}
+
+int MacAsyncSocket::DoConnect(const SocketAddress& addr) {
   if (!valid()) {
-    Initialize();
+    Initialize(addr.family());
     if (!valid())
       return SOCKET_ERROR;
   }
 
-  SocketAddress addr2(address);
-  if (addr2.IsUnresolved()) {
-    LOG(LS_VERBOSE) << "Resolving addr in MacAsyncSocket::Connect";
-    // TODO: Convert to using AsyncResolver
-    if (!addr2.ResolveIP(false, &error_)) {
-      return SOCKET_ERROR;
-    }
-  }
-
-  sockaddr_in saddr;
-  addr2.ToSockAddr(&saddr);
+  sockaddr_storage saddr;
+  size_t len = addr.ToSockAddrStorage(&saddr);
   int result = ::connect(native_socket_, reinterpret_cast<sockaddr*>(&saddr),
-                         sizeof(saddr));
+                         len);
 
   if (result != SOCKET_ERROR) {
     state_ = CS_CONNECTED;
@@ -120,19 +144,18 @@ int MacAsyncSocket::Connect(const SocketAddress& address) {
 }
 
 // Send to the remote end we're connected to.
-int MacAsyncSocket::Send(const void* pv, size_t cb) {
+int MacAsyncSocket::Send(const void* buffer, size_t length) {
   if (!valid()) {
     return SOCKET_ERROR;
   }
 
-  int sent = ::send(native_socket_, pv, cb, 0);
+  int sent = ::send(native_socket_, buffer, length, 0);
 
   if (sent == SOCKET_ERROR) {
     error_ = errno;
 
     if (IsBlocking()) {
       // Reenable the writable callback (once), since we are flow controlled.
-      LOG(LS_VERBOSE) << "Enabling flow control callback.";
       CFSocketEnableCallBacks(socket_, kCallbackFlags);
       current_callbacks_ = kCallbackFlags;
     }
@@ -141,16 +164,16 @@ int MacAsyncSocket::Send(const void* pv, size_t cb) {
 }
 
 // Send to the given address. We may or may not be connected to anyone.
-int MacAsyncSocket::SendTo(const void* pv, size_t cb,
+int MacAsyncSocket::SendTo(const void* buffer, size_t length,
                            const SocketAddress& address) {
   if (!valid()) {
     return SOCKET_ERROR;
   }
 
-  sockaddr_in saddr;
-  address.ToSockAddr(&saddr);
-  int sent = ::sendto(native_socket_, pv, cb, 0,
-                      reinterpret_cast<sockaddr*>(&saddr), sizeof(saddr));
+  sockaddr_storage saddr;
+  size_t len = address.ToSockAddrStorage(&saddr);
+  int sent = ::sendto(native_socket_, buffer, length, 0,
+                      reinterpret_cast<sockaddr*>(&saddr), len);
 
   if (sent == SOCKET_ERROR) {
     error_ = errno;
@@ -160,23 +183,26 @@ int MacAsyncSocket::SendTo(const void* pv, size_t cb,
 }
 
 // Read data received from the remote end we're connected to.
-int MacAsyncSocket::Recv(void* pv, size_t cb) {
-  int received = ::recv(native_socket_, reinterpret_cast<char*>(pv), cb, 0);
+int MacAsyncSocket::Recv(void* buffer, size_t length) {
+  int received = ::recv(native_socket_, reinterpret_cast<char*>(buffer),
+                        length, 0);
   if (received == SOCKET_ERROR) error_ = errno;
 
   // Recv should only be called when there is data to read
-  ASSERT((received != 0) || (cb == 0));
+  ASSERT((received != 0) || (length == 0));
   return received;
 }
 
 // Read data received from any remote party
-int MacAsyncSocket::RecvFrom(void* pv, size_t cb, SocketAddress* paddr) {
-  sockaddr_in saddr;
-  socklen_t cbAddr = sizeof(saddr);
-  int received = ::recvfrom(native_socket_, reinterpret_cast<char*>(pv), cb, 0,
-                          reinterpret_cast<sockaddr*>(&saddr), &cbAddr);
-  if (received >= 0 && paddr != NULL) {
-    paddr->FromSockAddr(saddr);
+int MacAsyncSocket::RecvFrom(void* buffer, size_t length,
+                             SocketAddress* out_addr) {
+  sockaddr_storage saddr;
+  socklen_t addr_len = sizeof(saddr);
+  int received = ::recvfrom(native_socket_, reinterpret_cast<char*>(buffer),
+                            length, 0, reinterpret_cast<sockaddr*>(&saddr),
+                            &addr_len);
+  if (received >= 0 && out_addr != NULL) {
+    SocketAddressFromSockAddrStorage(saddr, out_addr);
   } else if (received == SOCKET_ERROR) {
     error_ = errno;
   }
@@ -197,22 +223,22 @@ int MacAsyncSocket::Listen(int backlog) {
   return res;
 }
 
-MacAsyncSocket* MacAsyncSocket::Accept(SocketAddress* paddr) {
-  sockaddr_in saddr;
-  socklen_t cbAddr = sizeof(saddr);
+MacAsyncSocket* MacAsyncSocket::Accept(SocketAddress* out_addr) {
+  sockaddr_storage saddr;
+  socklen_t addr_len = sizeof(saddr);
 
   int socket_fd = ::accept(native_socket_, reinterpret_cast<sockaddr*>(&saddr),
-                           &cbAddr);
+                           &addr_len);
   if (socket_fd == INVALID_SOCKET) {
     error_ = errno;
     return NULL;
   }
 
-  MacAsyncSocket* s = new MacAsyncSocket(ss_, socket_fd);
+  MacAsyncSocket* s = new MacAsyncSocket(ss_, saddr.ss_family, socket_fd);
   if (s && s->valid()) {
     s->state_ = CS_CONNECTED;
-    if (paddr)
-      paddr->FromSockAddr(saddr);
+    if (out_addr)
+      SocketAddressFromSockAddrStorage(saddr, out_addr);
   } else {
     delete s;
     s = NULL;
@@ -232,6 +258,11 @@ int MacAsyncSocket::Close() {
     CFSocketInvalidate(socket_);
     CFRelease(socket_);
     socket_ = NULL;
+  }
+
+  if (resolver_) {
+    resolver_->Destroy(false);
+    resolver_ = NULL;
   }
 
   native_socket_ = INVALID_SOCKET;  // invalidates the socket
@@ -281,7 +312,8 @@ void MacAsyncSocket::DisableCallbacks() {
   }
 }
 
-MacAsyncSocket::MacAsyncSocket(MacBaseSocketServer* ss, int native_socket)
+MacAsyncSocket::MacAsyncSocket(MacBaseSocketServer* ss, int family,
+                               int native_socket)
     : ss_(ss),
       socket_(NULL),
       native_socket_(native_socket),
@@ -289,15 +321,16 @@ MacAsyncSocket::MacAsyncSocket(MacBaseSocketServer* ss, int native_socket)
       current_callbacks_(0),
       disabled_(false),
       error_(0),
-      state_(CS_CLOSED) {
-  Initialize();
+      state_(CS_CLOSED),
+      resolver_(NULL) {
+  Initialize(family);
 }
 
 // Create a new socket, wrapping the native socket if provided or creating one
 // otherwise. In case of any failure, consume the native socket.  We assume the
 // wrapped socket is in the closed state.  If this is not the case you must
 // update the state_ field for this socket yourself.
-void MacAsyncSocket::Initialize() {
+void MacAsyncSocket::Initialize(int family) {
   CFSocketContext ctx = { 0 };
   ctx.info = this;
 
@@ -306,7 +339,7 @@ void MacAsyncSocket::Initialize() {
   bool res = false;
   if (native_socket_ == INVALID_SOCKET) {
     cf_socket = CFSocketCreate(kCFAllocatorDefault,
-                               PF_INET, SOCK_STREAM, IPPROTO_TCP,
+                               family, SOCK_STREAM, IPPROTO_TCP,
                                kCallbackFlags, MacAsyncSocketCallBack, &ctx);
   } else {
     cf_socket = CFSocketCreateWithNative(kCFAllocatorDefault,
@@ -349,13 +382,13 @@ void MacAsyncSocket::Initialize() {
 
 // Call CFRelease on the result when done using it
 CFDataRef MacAsyncSocket::CopyCFAddress(const SocketAddress& address) {
-  sockaddr_in saddr;
-  address.ToSockAddr(&saddr);
+  sockaddr_storage saddr;
+  size_t len = address.ToSockAddrStorage(&saddr);
 
   const UInt8* bytes = reinterpret_cast<UInt8*>(&saddr);
 
   CFDataRef cf_address = CFDataCreate(kCFAllocatorDefault,
-                                      bytes, sizeof(saddr));
+                                      bytes, len);
 
   ASSERT(cf_address != NULL);
   return cf_address;

@@ -23,6 +23,7 @@
 #include "config.h"
 #include "JSDOMWindowBase.h"
 
+#include "BindingSecurity.h"
 #include "Chrome.h"
 #include "Console.h"
 #include "DOMWindow.h"
@@ -32,18 +33,25 @@
 #include "JSNode.h"
 #include "Logging.h"
 #include "Page.h"
+#include "ScriptController.h"
 #include "SecurityOrigin.h"
 #include "Settings.h"
 #include "WebCoreJSClientData.h"
 #include <wtf/MainThread.h>
+#include <wtf/UnusedParam.h>
 
 using namespace JSC;
 
 namespace WebCore {
 
+static bool shouldAllowAccessFrom(const JSGlobalObject* thisObject, ExecState* exec)
+{
+    return BindingSecurity::shouldAllowAccessToDOMWindow(exec, asJSDOMWindow(thisObject)->impl());
+}
+
 const ClassInfo JSDOMWindowBase::s_info = { "Window", &JSDOMGlobalObject::s_info, 0, 0, CREATE_METHOD_TABLE(JSDOMWindowBase) };
 
-const GlobalObjectMethodTable JSDOMWindowBase::s_globalObjectMethodTable = { &supportsProfiling, &supportsRichSourceInfo, &shouldInterruptScript };
+const GlobalObjectMethodTable JSDOMWindowBase::s_globalObjectMethodTable = { &shouldAllowAccessFrom, &supportsProfiling, &supportsRichSourceInfo, &shouldInterruptScript, &javaScriptExperimentsEnabled };
 
 JSDOMWindowBase::JSDOMWindowBase(JSGlobalData& globalData, Structure* structure, PassRefPtr<DOMWindow> window, JSDOMWindowShell* shell)
     : JSDOMGlobalObject(globalData, structure, shell->world(), &s_globalObjectMethodTable)
@@ -67,24 +75,19 @@ void JSDOMWindowBase::finishCreation(JSGlobalData& globalData, JSDOMWindowShell*
 
 void JSDOMWindowBase::destroy(JSCell* cell)
 {
-    jsCast<JSDOMWindowBase*>(cell)->JSDOMWindowBase::~JSDOMWindowBase();
+    static_cast<JSDOMWindowBase*>(cell)->JSDOMWindowBase::~JSDOMWindowBase();
 }
 
 void JSDOMWindowBase::updateDocument()
 {
     ASSERT(m_impl->document());
     ExecState* exec = globalExec();
-    symbolTablePutWithAttributes(exec->globalData(), Identifier(exec, "document"), toJS(exec, this, m_impl->document()), DontDelete | ReadOnly);
+    symbolTablePutWithAttributes(this, exec->globalData(), Identifier(exec, "document"), toJS(exec, this, m_impl->document()), DontDelete | ReadOnly);
 }
 
 ScriptExecutionContext* JSDOMWindowBase::scriptExecutionContext() const
 {
     return m_impl->document();
-}
-
-String JSDOMWindowBase::crossDomainAccessErrorMessage(const JSGlobalObject* other) const
-{
-    return m_shell->window()->impl()->crossDomainAccessErrorMessage(asJSDOMWindow(other)->impl());
 }
 
 void JSDOMWindowBase::printErrorMessage(const String& message) const
@@ -95,6 +98,7 @@ void JSDOMWindowBase::printErrorMessage(const String& message) const
 bool JSDOMWindowBase::supportsProfiling(const JSGlobalObject* object)
 {
 #if !ENABLE(JAVASCRIPT_DEBUGGER) || !ENABLE(INSPECTOR)
+    UNUSED_PARAM(object);
     return false;
 #else
     const JSDOMWindowBase* thisObject = static_cast<const JSDOMWindowBase*>(object);
@@ -113,6 +117,7 @@ bool JSDOMWindowBase::supportsProfiling(const JSGlobalObject* object)
 bool JSDOMWindowBase::supportsRichSourceInfo(const JSGlobalObject* object)
 {
 #if !ENABLE(JAVASCRIPT_DEBUGGER) || !ENABLE(INSPECTOR)
+    UNUSED_PARAM(object);
     return false;
 #else
     const JSDOMWindowBase* thisObject = static_cast<const JSDOMWindowBase*>(object);
@@ -150,14 +155,21 @@ bool JSDOMWindowBase::shouldInterruptScript(const JSGlobalObject* object)
     return page->chrome()->shouldInterruptJavaScript();
 }
 
+bool JSDOMWindowBase::javaScriptExperimentsEnabled(const JSGlobalObject* object)
+{
+    const JSDOMWindowBase* thisObject = static_cast<const JSDOMWindowBase*>(object);
+    Frame* frame = thisObject->impl()->frame();
+    if (!frame)
+        return false;
+    Settings* settings = frame->settings();
+    if (!settings)
+        return false;
+    return settings->javaScriptExperimentsEnabled();
+}
+
 void JSDOMWindowBase::willRemoveFromWindowShell()
 {
     setCurrentEvent(0);
-}
-
-JSObject* JSDOMWindowBase::toThisObject(JSCell* cell, ExecState*)
-{
-    return jsCast<JSDOMWindowBase*>(cell)->shell();
 }
 
 JSDOMWindowShell* JSDOMWindowBase::shell() const
@@ -171,7 +183,8 @@ JSGlobalData* JSDOMWindowBase::commonJSGlobalData()
 
     static JSGlobalData* globalData = 0;
     if (!globalData) {
-        globalData = JSGlobalData::createLeaked(ThreadStackTypeLarge, LargeHeap).leakRef();
+        ScriptController::initializeThreading();
+        globalData = JSGlobalData::createLeaked(LargeHeap).leakRef();
         globalData->timeoutChecker.setTimeoutInterval(10000); // 10 seconds
 #ifndef NDEBUG
         globalData->exclusiveThread = currentThread();
@@ -212,9 +225,9 @@ JSDOMWindow* toJSDOMWindow(JSValue value)
         return 0;
     const ClassInfo* classInfo = asObject(value)->classInfo();
     if (classInfo == &JSDOMWindow::s_info)
-        return static_cast<JSDOMWindow*>(asObject(value));
+        return jsCast<JSDOMWindow*>(asObject(value));
     if (classInfo == &JSDOMWindowShell::s_info)
-        return static_cast<JSDOMWindowShell*>(asObject(value))->window();
+        return jsCast<JSDOMWindowShell*>(asObject(value))->window();
     return 0;
 }
 

@@ -30,7 +30,6 @@
 #include "PlatformCAAnimation.h"
 
 #include "FloatConversion.h"
-#include "PlatformString.h"
 #include "TimingFunction.h"
 #include <QuartzCore/CACFAnimation.h>
 #include <QuartzCore/CACFTiming.h>
@@ -38,6 +37,7 @@
 #include <QuartzCore/CACFValueFunction.h>
 #include <QuartzCore/CACFVector.h>
 #include <wtf/UnusedParam.h>
+#include <wtf/text/WTFString.h>
 
 using namespace WebCore;
 
@@ -151,8 +151,7 @@ PlatformCAAnimation::PlatformCAAnimation(AnimationType type, const String& keyPa
     else
         m_animation.adoptCF(CACFAnimationCreate(kCACFKeyframeAnimation));
     
-    RetainPtr<CFStringRef> s(AdoptCF, keyPath.createCFString());
-    CACFAnimationSetKeyPath(m_animation.get(), s.get());
+    CACFAnimationSetKeyPath(m_animation.get(), keyPath.createCFString().get());
 }
 
 PlatformCAAnimation::PlatformCAAnimation(PlatformAnimationRef animation)
@@ -288,14 +287,17 @@ void PlatformCAAnimation::setFillMode(FillModeType value)
     CACFAnimationSetFillMode(m_animation.get(), toCACFFillModeType(value));
 }
 
-void PlatformCAAnimation::setTimingFunction(const TimingFunction* value)
+void PlatformCAAnimation::setTimingFunction(const TimingFunction* value, bool reverse)
 {
+    UNUSED_PARAM(reverse);
     CACFAnimationSetTimingFunction(m_animation.get(), toCACFTimingFunction(value).get());
 }
 
 void PlatformCAAnimation::copyTimingFunctionFrom(const PlatformCAAnimation* value)
 {
-    CACFAnimationSetTimingFunction(m_animation.get(), CACFAnimationGetTimingFunction(value->m_animation.get()));
+    CACFTimingFunctionRef timingFunc = CACFAnimationGetTimingFunction(value->m_animation.get());
+    if (timingFunc)
+        CACFAnimationSetTimingFunction(m_animation.get(), timingFunc);
 }
 
 bool PlatformCAAnimation::isRemovedOnCompletion() const
@@ -368,6 +370,13 @@ void PlatformCAAnimation::setFromValue(const WebCore::Color& value)
     CACFAnimationSetFromValue(m_animation.get(), v.get());
 }
 
+#if ENABLE(CSS_FILTERS)
+void PlatformCAAnimation::setFromValue(const FilterOperation*, int)
+{
+    // FIXME: Hardware filter animation not implemented on Windows
+}
+#endif
+
 void PlatformCAAnimation::copyFromValueFrom(const PlatformCAAnimation* value)
 {
     if (animationType() != Basic || value->animationType() != Basic)
@@ -413,6 +422,13 @@ void PlatformCAAnimation::setToValue(const WebCore::Color& value)
     RetainPtr<CACFVectorRef> v(AdoptCF, CACFVectorCreate(4, a));
     CACFAnimationSetToValue(m_animation.get(), v.get());
 }
+
+#if ENABLE(CSS_FILTERS)
+void PlatformCAAnimation::setToValue(const FilterOperation*, int)
+{
+    // FIXME: Hardware filter animation not implemented on Windows
+}
+#endif
 
 void PlatformCAAnimation::copyToValueFrom(const PlatformCAAnimation* value)
 {
@@ -482,6 +498,13 @@ void PlatformCAAnimation::setValues(const Vector<WebCore::Color>& value)
     CACFAnimationSetValues(m_animation.get(), array.get());
 }
 
+#if ENABLE(CSS_FILTERS)
+void PlatformCAAnimation::setValues(const Vector<RefPtr<FilterOperation> >&, int)
+{
+    // FIXME: Hardware filter animation not implemented on Windows
+}
+#endif
+
 void PlatformCAAnimation::copyValuesFrom(const PlatformCAAnimation* value)
 {
     if (animationType() != Keyframe || value->animationType() != Keyframe)
@@ -512,8 +535,9 @@ void PlatformCAAnimation::copyKeyTimesFrom(const PlatformCAAnimation* value)
     CACFAnimationSetKeyTimes(m_animation.get(), CACFAnimationGetKeyTimes(value->platformAnimation()));
 }
 
-void PlatformCAAnimation::setTimingFunctions(const Vector<const TimingFunction*>& value)
+void PlatformCAAnimation::setTimingFunctions(const Vector<const TimingFunction*>& value, bool reverse)
 {
+    UNUSED_PARAM(reverse);
     if (animationType() != Keyframe)
         return;
 
@@ -530,5 +554,19 @@ void PlatformCAAnimation::copyTimingFunctionsFrom(const PlatformCAAnimation* val
 {
     CACFAnimationSetTimingFunctions(m_animation.get(), CACFAnimationGetTimingFunctions(value->platformAnimation()));
 }
+
+#if ENABLE(CSS_FILTERS)
+int PlatformCAAnimation::numAnimatedFilterProperties(FilterOperation::OperationType)
+{
+    // FIXME: Hardware filter animation not implemented on Windows
+    return 0;
+}
+
+const char* PlatformCAAnimation::animatedFilterPropertyName(FilterOperation::OperationType, int)
+{
+    // FIXME: Hardware filter animation not implemented on Windows
+    return "";
+}
+#endif
 
 #endif // USE(ACCELERATED_COMPOSITING)

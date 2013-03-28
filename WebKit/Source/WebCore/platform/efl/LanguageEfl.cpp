@@ -29,10 +29,9 @@
 #include "config.h"
 #include "Language.h"
 
-#include "PlatformString.h"
-
 #include <locale.h>
 #include <wtf/Vector.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -42,13 +41,14 @@ static String platformLanguage()
 
     if (!localeDefault)
         return String("c");
- 
-    char* ptr = strchr(localeDefault, '_');
 
-    if (ptr)
-        *ptr = '-';
-  
-    return String(localeDefault);
+    String locale = String(localeDefault);
+    locale.replace('_', '-');
+    size_t position = locale.find('.');
+    if (position != notFound)
+        locale = locale.left(position);
+
+    return locale;
 }
 
 Vector<String> platformUserPreferredLanguages()

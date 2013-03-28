@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2005, 2006, 2007, 2008, 2009, 2012 Apple Inc. All rights reserved.
  * Copyright (C) 2010 Igalia S.L
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,17 +29,19 @@
 
 #import "WebTypesInternal.h"
 #import "WebDelegateImplementationCaching.h"
+#import <WebCore/AlternativeTextClient.h>
 #import <WebCore/LayerFlushScheduler.h>
 #import <WebCore/LayerFlushSchedulerClient.h>
-#import <WebCore/PlatformString.h>
 #import <WebCore/WebCoreKeyboardUIMode.h>
 #import <wtf/HashMap.h>
 #import <wtf/PassOwnPtr.h>
 #import <wtf/RetainPtr.h>
+#import <wtf/text/WTFString.h>
 
 namespace WebCore {
-    class HistoryItem;
-    class Page;
+class AlternativeTextUIController;
+class HistoryItem;
+class Page;
 }
 
 @class WebInspector;
@@ -50,6 +52,7 @@ namespace WebCore {
 @protocol WebFormDelegate;
 @protocol WebDeviceOrientationProvider;
 @protocol WebGeolocationProvider;
+@protocol WebNotificationProvider;
 #if ENABLE(VIDEO)
 @class WebVideoFullscreenController;
 #endif
@@ -134,7 +137,6 @@ private:
     BOOL becomingFirstResponder;
     BOOL becomingFirstResponderFromOutside;
     BOOL usesPageCache;
-    BOOL catchesDelegateExceptions;
     BOOL cssAnimationsSuspended;
 
     NSColor *backgroundColor;
@@ -191,6 +193,7 @@ private:
 #endif
     id<WebGeolocationProvider> _geolocationProvider;
     id<WebDeviceOrientationProvider> m_deviceOrientationProvider;
+    id<WebNotificationProvider> _notificationProvider;
 
     RefPtr<WebCore::HistoryItem> _globalHistoryItem;
 
@@ -198,5 +201,9 @@ private:
     int validationMessageTimerMagnification;
 
     float customDeviceScaleFactor;
+
+#if USE(DICTATION_ALTERNATIVES)
+    OwnPtr<WebCore::AlternativeTextUIController> m_alternativeTextUIController;
+#endif
 }
 @end

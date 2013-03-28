@@ -34,8 +34,6 @@
 
 namespace WebCore {
 
-class StyleImage;
-
 class StyleInheritedData : public RefCounted<StyleInheritedData> {
 public:
     static PassRefPtr<StyleInheritedData> create() { return adoptRef(new StyleInheritedData); }
@@ -54,11 +52,6 @@ public:
     // could be packed in a short but doesn't
     // make a difference currently because of padding
     Length line_height;
-#if OS(ANDROID) && ENABLE(FONT_BOOSTING)
-    Length specified_line_height;
-#endif
-
-    RefPtr<StyleImage> list_style_image;
 
     Font font;
     Color color;

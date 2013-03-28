@@ -47,22 +47,19 @@ PassRefPtr<HTMLUListElement> HTMLUListElement::create(const QualifiedName& tagNa
     return adoptRef(new HTMLUListElement(tagName, document));
 }
 
-bool HTMLUListElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+bool HTMLUListElement::isPresentationAttribute(const QualifiedName& name) const
 {
-    if (attrName == typeAttr) {
-        result = eUnorderedList;
-        return false;
-    }
-    
-    return HTMLElement::mapToEntry(attrName, result);
+    if (name == typeAttr)
+        return true;
+    return HTMLElement::isPresentationAttribute(name);
 }
 
-void HTMLUListElement::parseMappedAttribute(Attribute* attr)
+void HTMLUListElement::collectStyleForPresentationAttribute(const Attribute& attribute, StylePropertySet* style)
 {
-    if (attr->name() == typeAttr)
-        addCSSProperty(attr, CSSPropertyListStyleType, attr->value());
+    if (attribute.name() == typeAttr)
+        addPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType, attribute.value());
     else
-        HTMLElement::parseMappedAttribute(attr);
+        HTMLElement::collectStyleForPresentationAttribute(attribute, style);
 }
 
 }

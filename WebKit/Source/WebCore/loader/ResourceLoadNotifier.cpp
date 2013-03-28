@@ -71,7 +71,7 @@ void ResourceLoadNotifier::didReceiveResponse(ResourceLoader* loader, const Reso
     if (Page* page = m_frame->page())
         page->progress()->incrementProgress(loader->identifier(), r);
 
-    dispatchDidReceiveResponse(loader->documentLoader(), loader->identifier(), r);
+    dispatchDidReceiveResponse(loader->documentLoader(), loader->identifier(), r, loader);
 }
 
 void ResourceLoadNotifier::didReceiveData(ResourceLoader* loader, const char* data, int dataLength, int encodedDataLength)
@@ -121,13 +121,17 @@ void ResourceLoadNotifier::dispatchWillSendRequest(DocumentLoader* loader, unsig
     // Report WebTiming for all frames.
     if (loader && !request.isNull() && request.url() == loader->requestURL())
         request.setReportLoadTiming(true);
+
+#if ENABLE(RESOURCE_TIMING)
+    request.setReportLoadTiming(true);
+#endif
 }
 
-void ResourceLoadNotifier::dispatchDidReceiveResponse(DocumentLoader* loader, unsigned long identifier, const ResourceResponse& r)
+void ResourceLoadNotifier::dispatchDidReceiveResponse(DocumentLoader* loader, unsigned long identifier, const ResourceResponse& r, ResourceLoader* resourceLoader)
 {
     InspectorInstrumentationCookie cookie = InspectorInstrumentation::willReceiveResourceResponse(m_frame, identifier, r);
     m_frame->loader()->client()->dispatchDidReceiveResponse(loader, identifier, r);
-    InspectorInstrumentation::didReceiveResourceResponse(cookie, identifier, loader, r);
+    InspectorInstrumentation::didReceiveResourceResponse(cookie, identifier, loader, r, resourceLoader);
 }
 
 void ResourceLoadNotifier::dispatchDidReceiveData(DocumentLoader* loader, unsigned long identifier, const char* data, int dataLength, int encodedDataLength)
@@ -142,14 +146,6 @@ void ResourceLoadNotifier::dispatchDidFinishLoading(DocumentLoader* loader, unsi
     m_frame->loader()->client()->dispatchDidFinishLoading(loader, identifier);
 
     InspectorInstrumentation::didFinishLoading(m_frame, loader, identifier, finishTime);
-}
-
-void ResourceLoadNotifier::dispatchTransferLoadingResourceFromPage(ResourceLoader* loader, const ResourceRequest& request, Page* oldPage)
-{
-    ASSERT(oldPage != m_frame->page());
-    m_frame->loader()->client()->transferLoadingResourceFromPage(loader, request, oldPage);
-
-    oldPage->progress()->completeProgress(loader->identifier());
 }
 
 void ResourceLoadNotifier::sendRemainingDelegateMessages(DocumentLoader* loader, unsigned long identifier, const ResourceResponse& response, const char* data, int dataLength, int encodedDataLength, const ResourceError& error)

@@ -28,7 +28,7 @@
 
 #if ENABLE(DFG_JIT)
 
-#include <dfg/DFGGraph.h>
+#include "DFGGraph.h"
 #include <wtf/BitVector.h>
 #include <wtf/Vector.h>
 
@@ -58,14 +58,27 @@ public:
         }
     }
 
-#if DFG_ENABLE(CONSISTENCY_CHECK)
     ~ScoreBoard()
     {
-        // For every entry in the used list the use count of the virtual register should be zero.
-        for (size_t i = 0; i < m_free.size(); ++i)
-            ASSERT(!m_used[i] || m_used[i] == max());
+        assertClear();
     }
+    
+    void assertClear()
+    {
+#if !ASSERT_DISABLED
+        // For every entry in the used list the use count of the virtual register should be zero, or max, due to it being a preserved local.
+        for (size_t i = 0; i < m_used.size(); ++i)
+            ASSERT(!m_used[i] || m_used[i] == max());
+        // For every entry in the free list, the use count should be zero.
+        for (size_t i = 0; i < m_free.size(); ++i)
+            ASSERT(!m_used[m_free[i]]);
+        // There must not be duplicates in the free list.
+        for (size_t i = 0; i < m_free.size(); ++i) {
+            for (size_t j = i + 1; j < m_free.size(); ++j)
+                ASSERT(m_free[i] != m_free[j]);
+        }
 #endif
+    }
 
     VirtualRegister allocate()
     {
@@ -99,12 +112,32 @@ public:
         uint32_t index = node.virtualRegister();
         ASSERT(m_used[index] != max());
         if (node.refCount() == ++m_used[index]) {
+#if DFG_ENABLE(DEBUG_PROPAGATION_VERBOSE)
+            dataLogF(" Freeing virtual register %u.", index);
+#endif
             // If the use count in the scoreboard reaches the use count for the node,
             // then this was its last use; the virtual register is now free.
             // Clear the use count & add to the free list.
             m_used[index] = 0;
             m_free.append(index);
+        } else {
+#if DFG_ENABLE(DEBUG_PROPAGATION_VERBOSE)
+            dataLogF(" Virtual register %u is at %u/%u uses.", index, m_used[index], node.refCount());
+#endif
         }
+    }
+    void use(Edge child)
+    {
+        use(child.indexUnchecked());
+    }
+    
+    void useIfHasResult(Edge child)
+    {
+        if (!child)
+            return;
+        if (!m_graph[child].hasResult())
+            return;
+        use(child);
     }
 
     unsigned highWatermark()
@@ -115,26 +148,26 @@ public:
 #ifndef NDEBUG
     void dump()
     {
-        printf("    USED: [ ");
+        dataLogF("    USED: [ ");
         for (unsigned i = 0; i < m_used.size(); ++i) {
             if (!m_free.contains(i)) {
-                printf("%d:", i);
+                dataLogF("%d:", i);
                 if (m_used[i] == max())
-                    printf("local ");
+                    dataLogF("local ");
                 else
-                    printf("%d ", m_used[i]);
+                    dataLogF("%d ", m_used[i]);
             }
         }
-        printf("]\n");
+        dataLogF("]\n");
 
-        printf("    FREE: [ ");
+        dataLogF("    FREE: [ ");
         for (unsigned i = 0; i < m_used.size(); ++i) {
             if (m_free.contains(i) && m_used[i] != max()) {
                 ASSERT(!m_used[i]);
-                printf("%d ", i);
+                dataLogF("%d ", i);
             }
         }
-        printf("]\n");
+        dataLogF("]\n");
     }
 
 #endif

@@ -38,7 +38,6 @@ namespace WebCore { class Element; }
 #endif
 
 namespace WebKit {
-class WebNamedNodeMap;
 struct WebRect;
 
     // Provides access to some properties of a DOM element node.
@@ -52,15 +51,25 @@ struct WebRect;
 
         WEBKIT_EXPORT bool isFormControlElement() const;
         WEBKIT_EXPORT bool isTextFormControlElement() const;
+        // Returns the qualified name, which may contain a prefix and a colon.
         WEBKIT_EXPORT WebString tagName() const;
+        // Check if this element has the specified qualified name. This function
+        // doesn't makes much sense because we have no ways to check namespace
+        // URI. Do not use this.
         WEBKIT_EXPORT bool hasTagName(const WebString&) const;
+        // Check if this element has the specified local tag name, and the HTML
+        // namespace. Tag name matching is case-insensitive.
+        WEBKIT_EXPORT bool hasHTMLTagName(const WebString&) const;
         WEBKIT_EXPORT bool hasAttribute(const WebString&) const;
+        WEBKIT_EXPORT void removeAttribute(const WebString&);
         WEBKIT_EXPORT WebString getAttribute(const WebString&) const;
         WEBKIT_EXPORT bool setAttribute(const WebString& name, const WebString& value);
-        WEBKIT_EXPORT WebNamedNodeMap attributes() const;
         WEBKIT_EXPORT WebString innerText();
         WEBKIT_EXPORT WebDocument document() const;
         WEBKIT_EXPORT void requestFullScreen();
+        WEBKIT_EXPORT WebString attributeLocalName(unsigned index) const;
+        WEBKIT_EXPORT WebString attributeValue(unsigned index) const;
+        WEBKIT_EXPORT unsigned attributeCount() const;
 
         // Returns the language code specified for this element.  This attribute
         // is inherited, so the returned value is drawn from the closest parent

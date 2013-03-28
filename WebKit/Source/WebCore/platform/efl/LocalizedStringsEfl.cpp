@@ -34,7 +34,7 @@
 #include "LocalizedStrings.h"
 
 #include "NotImplemented.h"
-#include "PlatformString.h"
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -379,6 +379,11 @@ String AXDefinitionListDefinitionText()
     return String::fromUTF8("definition");
 }
 
+String AXFooterRoleDescriptionText()
+{
+    return String::fromUTF8("footer");
+}
+
 String AXButtonActionVerb()
 {
     return String::fromUTF8("press");
@@ -414,26 +419,26 @@ String unknownFileSizeText()
     return String::fromUTF8("Unknown");
 }
 
-String imageTitle(const String& filename, const IntSize& size)
+String imageTitle(const String&, const IntSize&)
 {
     notImplemented();
     return String();
 }
 
 #if ENABLE(VIDEO)
-String localizedMediaControlElementString(const String& name)
+String localizedMediaControlElementString(const String&)
 {
     notImplemented();
     return String();
 }
 
-String localizedMediaControlElementHelpText(const String& name)
+String localizedMediaControlElementHelpText(const String&)
 {
     notImplemented();
     return String();
 }
 
-String localizedMediaTimeDescription(float time)
+String localizedMediaTimeDescription(float)
 {
     notImplemented();
     return String();
@@ -530,6 +535,12 @@ String validationMessageValueMissingForSelectText()
     return validationMessageValueMissingText();
 }
 
+String validationMessageBadInputForNumberText()
+{
+    notImplemented();
+    return validationMessageTypeMismatchText();
+}
+
 String missingPluginText()
 {
     return String::fromUTF8("missing plugin");
@@ -553,6 +564,29 @@ String multipleFileUploadText(unsigned numberOfFiles)
 String crashedPluginText()
 {
     return String::fromUTF8("plugin crashed");
+}
+
+String blockedPluginByContentSecurityPolicyText()
+{
+    notImplemented();
+    return String();
+}
+
+String insecurePluginVersionText()
+{
+    notImplemented();
+    return String();
+}
+
+String inactivePluginText()
+{
+    notImplemented();
+    return String();
+}
+
+String unacceptableTLSCertificate()
+{
+    return String::fromUTF8("Unacceptable TLS certificate");
 }
 
 String localizedString(const char* key)

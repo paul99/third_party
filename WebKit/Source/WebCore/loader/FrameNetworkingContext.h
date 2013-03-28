@@ -33,7 +33,7 @@ public:
     }
 
 protected:
-    FrameNetworkingContext(Frame* frame)
+    explicit FrameNetworkingContext(Frame* frame)
         : m_frame(frame)
     {
     }
@@ -41,7 +41,7 @@ protected:
     Frame* frame() const { return m_frame; }
 
 private:
-    virtual bool isValid() const { return m_frame; }
+    virtual bool isValid() const OVERRIDE { return m_frame; }
 
     Frame* m_frame;
 };

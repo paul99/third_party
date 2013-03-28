@@ -25,6 +25,7 @@
 
 #include "Attribute.h"
 #include "FloatPoint.h"
+#include "RenderSVGEllipse.h"
 #include "RenderSVGPath.h"
 #include "RenderSVGResource.h"
 #include "SVGElementInstance.h"
@@ -81,27 +82,27 @@ bool SVGEllipseElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<QualifiedName, SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGEllipseElement::parseMappedAttribute(Attribute* attr)
+void SVGEllipseElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
     SVGParsingError parseError = NoError;
 
-    if (!isSupportedAttribute(attr->name()))
-        SVGStyledTransformableElement::parseMappedAttribute(attr);
-    else if (attr->name() == SVGNames::cxAttr)
-        setCxBaseValue(SVGLength::construct(LengthModeWidth, attr->value(), parseError));
-    else if (attr->name() == SVGNames::cyAttr)
-        setCyBaseValue(SVGLength::construct(LengthModeHeight, attr->value(), parseError));
-    else if (attr->name() == SVGNames::rxAttr)
-        setRxBaseValue(SVGLength::construct(LengthModeWidth, attr->value(), parseError, ForbidNegativeLengths));
-    else if (attr->name() == SVGNames::ryAttr)
-        setRyBaseValue(SVGLength::construct(LengthModeHeight, attr->value(), parseError, ForbidNegativeLengths));
-    else if (SVGTests::parseMappedAttribute(attr)
-             || SVGLangSpace::parseMappedAttribute(attr)
-             || SVGExternalResourcesRequired::parseMappedAttribute(attr)) {
+    if (!isSupportedAttribute(name))
+        SVGStyledTransformableElement::parseAttribute(name, value);
+    else if (name == SVGNames::cxAttr)
+        setCxBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
+    else if (name == SVGNames::cyAttr)
+        setCyBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
+    else if (name == SVGNames::rxAttr)
+        setRxBaseValue(SVGLength::construct(LengthModeWidth, value, parseError, ForbidNegativeLengths));
+    else if (name == SVGNames::ryAttr)
+        setRyBaseValue(SVGLength::construct(LengthModeHeight, value, parseError, ForbidNegativeLengths));
+    else if (SVGTests::parseAttribute(name, value)
+             || SVGLangSpace::parseAttribute(name, value)
+             || SVGExternalResourcesRequired::parseAttribute(name, value)) {
     } else
         ASSERT_NOT_REACHED();
 
-    reportAttributeParsingError(parseError, attr);
+    reportAttributeParsingError(parseError, name, value);
 }
 
 void SVGEllipseElement::svgAttributeChanged(const QualifiedName& attrName)
@@ -124,7 +125,7 @@ void SVGEllipseElement::svgAttributeChanged(const QualifiedName& attrName)
     if (SVGTests::handleAttributeChange(this, attrName))
         return;
 
-    RenderSVGPath* renderer = static_cast<RenderSVGPath*>(this->renderer());
+    RenderSVGEllipse* renderer = static_cast<RenderSVGEllipse*>(this->renderer());
     if (!renderer)
         return;
 
@@ -148,6 +149,11 @@ bool SVGEllipseElement::selfHasRelativeLengths() const
         || cy().isRelative()
         || rx().isRelative()
         || ry().isRelative();
+}
+
+RenderObject* SVGEllipseElement::createRenderer(RenderArena* arena, RenderStyle*)
+{
+    return new (arena) RenderSVGEllipse(this);
 }
 
 }

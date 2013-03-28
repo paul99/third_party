@@ -40,7 +40,12 @@ public:
     static PassRefPtr<IDBDatabaseCallbacksProxy> create(PassOwnPtr<WebIDBDatabaseCallbacks>);
     virtual ~IDBDatabaseCallbacksProxy();
 
+    virtual void onForcedClose();
     virtual void onVersionChange(const String& requestedVersion);
+    virtual void onVersionChange(int64_t oldVersion, int64_t newVersion);
+
+    virtual void onAbort(int64_t transactionId, PassRefPtr<WebCore::IDBDatabaseError>);
+    virtual void onComplete(int64_t transactionId);
 
 private:
     IDBDatabaseCallbacksProxy(PassOwnPtr<WebIDBDatabaseCallbacks>);

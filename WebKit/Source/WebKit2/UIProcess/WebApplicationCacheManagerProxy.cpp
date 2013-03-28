@@ -28,6 +28,7 @@
 
 #include "SecurityOriginData.h"
 #include "WebApplicationCacheManagerMessages.h"
+#include "WebApplicationCacheManagerProxyMessages.h"
 #include "WebContext.h"
 #include "WebSecurityOrigin.h"
 
@@ -41,6 +42,7 @@ PassRefPtr<WebApplicationCacheManagerProxy> WebApplicationCacheManagerProxy::cre
 WebApplicationCacheManagerProxy::WebApplicationCacheManagerProxy(WebContext* context)
     : m_webContext(context)
 {
+    m_webContext->addMessageReceiver(Messages::WebApplicationCacheManagerProxy::messageReceiverName(), this);
 }
 
 WebApplicationCacheManagerProxy::~WebApplicationCacheManagerProxy()
@@ -57,9 +59,9 @@ bool WebApplicationCacheManagerProxy::shouldTerminate(WebProcessProxy*) const
     return m_arrayCallbacks.isEmpty();
 }
 
-void WebApplicationCacheManagerProxy::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::ArgumentDecoder* arguments)
+void WebApplicationCacheManagerProxy::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
 {
-    didReceiveWebApplicationCacheManagerProxyMessage(connection, messageID, arguments);
+    didReceiveWebApplicationCacheManagerProxyMessage(connection, messageID, decoder);
 }
 
 void WebApplicationCacheManagerProxy::getApplicationCacheOrigins(PassRefPtr<ArrayCallback> prpCallback)
@@ -69,7 +71,7 @@ void WebApplicationCacheManagerProxy::getApplicationCacheOrigins(PassRefPtr<Arra
     uint64_t callbackID = callback->callbackID();
     m_arrayCallbacks.set(callbackID, callback.release());
 
-    // FIXME (Multi-WebProcess): The application cache shouldn't be stored in the web process.
+    // FIXME (Multi-WebProcess): <rdar://problem/12239765> Make manipulating cache information work with per-tab WebProcess.
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebApplicationCacheManager::GetApplicationCacheOrigins(callbackID));
 }
     
@@ -86,13 +88,13 @@ void WebApplicationCacheManagerProxy::deleteEntriesForOrigin(WebSecurityOrigin* 
     securityOriginData.host = origin->host();
     securityOriginData.port = origin->port();
 
-    // FIXME (Multi-WebProcess): The application cache shouldn't be stored in the web process.
+    // FIXME (Multi-WebProcess): <rdar://problem/12239765> Make manipulating cache information work with per-tab WebProcess.
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebApplicationCacheManager::DeleteEntriesForOrigin(securityOriginData));
 }
 
 void WebApplicationCacheManagerProxy::deleteAllEntries()
 {
-    // FIXME (Multi-WebProcess): The application cache shouldn't be stored in the web process.
+    // FIXME (Multi-WebProcess): <rdar://problem/12239765> Make manipulating cache information work with per-tab WebProcess.
     m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebApplicationCacheManager::DeleteAllEntries());
 }
 

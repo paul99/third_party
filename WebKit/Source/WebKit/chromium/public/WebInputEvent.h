@@ -33,6 +33,7 @@
 
 #include "WebTouchPoint.h"
 #include "platform/WebCommon.h"
+#include "platform/WebRect.h"
 
 #include <string.h>
 
@@ -45,16 +46,26 @@ namespace WebKit {
 // WARNING! These classes must remain PODs (plain old data).  They are
 // intended to be "serializable" by copying their raw bytes, so they must
 // not contain any non-bit-copyable member variables!
+//
+// Furthermore, the class members need to be packed so they are aligned
+// properly and don't have paddings/gaps, otherwise memory check tools
+// like Valgrind will complain about uninitialized memory usage when
+// transferring these classes over the wire.
+
+#pragma pack(push, 4)
 
 // WebInputEvent --------------------------------------------------------------
 
 class WebInputEvent {
 public:
     WebInputEvent(unsigned sizeParam = sizeof(WebInputEvent))
-        : size(sizeParam)
-        , type(Undefined)
-        , modifiers(0)
-        , timeStampSeconds(0.0) { }
+    {
+        memset(this, 0, sizeParam);
+        timeStampSeconds = 0.0;
+        size = sizeParam;
+        type = Undefined;
+        modifiers = 0;
+    }
 
     // When we use an input method (or an input method editor), we receive
     // two events for a keypress. The former event is a keydown, which
@@ -106,17 +117,16 @@ public:
         GestureScrollUpdate,
         GestureFlingStart,
         GestureFlingCancel,
+        GestureTap,
+        GestureTapDown,
+        GestureTapCancel,
+        GestureDoubleTap,
+        GestureTwoFingerTap,
+        GestureLongPress,
+        GestureLongTap,
         GesturePinchBegin,
         GesturePinchEnd,
         GesturePinchUpdate,
-        GestureTap,
-        GestureTapDown,
-        GestureDoubleTap,
-
-#if defined(ANDROID)
-        // WebPageScaleAnimationGestureEvent
-        GesturePageScaleAnimation,
-#endif
 
         // WebTouchEvent
         TouchStart,
@@ -146,14 +156,26 @@ public:
         // event and back will not preserve these flags.
         CapsLockOn       = 1 << 9,
         NumLockOn        = 1 << 10,
+
+        // Left/right modifiers for keyboard events.
+        IsLeft           = 1 << 11,
+        IsRight          = 1 << 12,
+
+        // Last input event to be sent for the current vsync interval. If this
+        // flag is set, the sender guarantees that no more input events will be
+        // delivered until the next vsync and the receiver can schedule
+        // rendering accordingly. If it isn't set, the receiver should not make
+        // any assumptions about the delivery times of future input events
+        // w.r.t. vsync.
+        IsLastInputEventForCurrentVSync = 1 << 13,
     };
 
     static const int InputModifiers = ShiftKey | ControlKey | AltKey | MetaKey;
 
-    unsigned size;   // The size of this structure, for serialization.
+    double timeStampSeconds; // Seconds since epoch.
+    unsigned size; // The size of this structure, for serialization.
     Type type;
     int modifiers;
-    double timeStampSeconds;   // Seconds since epoch.
 
     // Returns true if the WebInputEvent |type| is a mouse event.
     static bool isMouseEventType(int type)
@@ -194,8 +216,8 @@ public:
             || type == TouchEnd;
     }
 
-    // Returns true if the WebInputEvent |type| should be handled as scroll gesture.
-    static bool isScrollGestureEventType(int type)
+    // Returns true if the WebInputEvent is a gesture event.
+    static bool isGestureEventType(int type)
     {
         return type == GestureScrollBegin
             || type == GestureScrollEnd
@@ -205,7 +227,16 @@ public:
             || type == GesturePinchBegin
             || type == GesturePinchEnd
             || type == GesturePinchUpdate
-            || type == GestureTap; // FIXME: Why is GestureTap on this list?
+            || type == GestureTap
+            || type == GestureTapDown
+            || type == GestureTapCancel
+            || type == GestureDoubleTap
+            || type == GestureTwoFingerTap
+            || type == GestureLongPress
+            || type == GestureLongTap
+            || type == GesturePinchBegin
+            || type == GesturePinchEnd
+            || type == GesturePinchUpdate;
     }
 };
 
@@ -225,13 +256,25 @@ public:
     // |windowsKeyCode| is the Windows key code associated with this key
     // event.  Sometimes it's direct from the event (i.e. on Windows),
     // sometimes it's via a mapping function.  If you want a list, see
-    // WebCore/platform/chromium/KeyboardCodes* .
+    // WebCore/platform/chromium/KeyboardCodes* . Note that this should
+    // ALWAYS store the non-locational version of a keycode as this is
+    // what is returned by the Windows API. For example, it should
+    // store VK_SHIFT instead of VK_RSHIFT. The location information
+    // should be stored in |modifiers|.
     int windowsKeyCode;
 
     // The actual key code genenerated by the platform.  The DOM spec runs
     // on Windows-equivalent codes (thus |windowsKeyCode| above) but it
     // doesn't hurt to have this one around.
     int nativeKeyCode;
+
+    // This identifies whether this event was tagged by the system as being
+    // a "system key" event (see
+    // http://msdn.microsoft.com/en-us/library/ms646286(VS.85).aspx for
+    // details). Other platforms don't have this concept, but it's just
+    // easier to leave it always false than ifdef.
+    // See comment at the top of the file for why an int is used here.
+    bool isSystemKey;
 
     // |text| is the text generated by this keystroke.  |unmodifiedText| is
     // |text|, but unmodified by an concurrently-held modifiers (except
@@ -244,17 +287,6 @@ public:
 
     // This is a string identifying the key pressed.
     char keyIdentifier[keyIdentifierLengthCap];
-
-    // This identifies whether this event was tagged by the system as being
-    // a "system key" event (see
-    // http://msdn.microsoft.com/en-us/library/ms646286(VS.85).aspx for
-    // details).  Other platforms don't have this concept, but it's just
-    // easier to leave it always false than ifdef.
-    // int is used instead of bool to ensure the size of this structure is
-    // strictly aligned to a factor of 4 bytes, otherwise memory check tools
-    // like valgrind may complain about uninitialized memory usage when
-    // transfering it over the wire.
-    int isSystemKey;
 
     WebKeyboardEvent(unsigned sizeParam = sizeof(WebKeyboardEvent))
         : WebInputEvent(sizeParam)
@@ -270,6 +302,9 @@ public:
     // Sets keyIdentifier based on the value of windowsKeyCode.  This is
     // handy for generating synthetic keyboard events.
     WEBKIT_EXPORT void setKeyIdentifierFromWindowsKeyCode();
+
+    static int windowsKeyCodeWithoutLocation(int keycode);
+    static int locationModifiersFromWindowsKeyCode(int keycode);
 };
 
 // WebMouseEvent --------------------------------------------------------------
@@ -330,13 +365,11 @@ public:
     float wheelTicksX;
     float wheelTicksY;
 
-    // int is used instead of bool to ensure the size of this structure is
-    // strictly aligned to a factor of 4 bytes, otherwise memory check tools
-    // like valgrind may complain about uninitialized memory usage when
-    // transfering it over the wire.
+    // See comment at the top of the file for why an int is used here.
     int scrollByPage;
 
-    bool hasPreciseScrollingDeltas;
+    // See comment at the top of the file for why an int is used here.
+    int hasPreciseScrollingDeltas;
     Phase phase;
     Phase momentumPhase;
 
@@ -358,12 +391,57 @@ public:
 
 class WebGestureEvent : public WebInputEvent {
 public:
+    enum SourceDevice {
+        Touchpad,
+        Touchscreen,
+    };
+
     int x;
     int y;
     int globalX;
     int globalY;
-    float deltaX;
-    float deltaY;
+    SourceDevice sourceDevice;
+
+    union {
+        struct {
+            int tapCount;
+            int width;
+            int height;
+        } tap;
+
+        struct {
+            int width;
+            int height;
+        } tapDown;
+
+        struct {
+            int width;
+            int height;
+        } longPress;
+
+        struct {
+            int firstFingerWidth;
+            int firstFingerHeight;
+        } twoFingerTap;
+
+        struct {
+            float deltaX;
+            float deltaY;
+            float velocityX;
+            float velocityY;
+        } scrollUpdate;
+
+        struct {
+            float velocityX;
+            float velocityY;
+            // FIXME: Remove this when Chromium uses the top-level field.
+            SourceDevice sourceDevice;
+        } flingStart;
+
+        struct {
+            float scale;
+        } pinchUpdate;
+    } data; 
 
     WebGestureEvent(unsigned sizeParam = sizeof(WebGestureEvent))
         : WebInputEvent(sizeParam)
@@ -371,44 +449,18 @@ public:
         , y(0)
         , globalX(0)
         , globalY(0)
-        , deltaX(0.0f)
-        , deltaY(0.0f)
     {
+      memset(&data, 0, sizeof(data)); 
     }
 };
-
-#if defined(ANDROID)
-// TODO(aelias): Temp code, not for upstreaming. In long term, we want to
-// send "raw" double-tap event to compositor.
-
-// WebPageScaleAnimationGestureEvent ------------------------------------------
-
-// A gesture triggering a self-animated zoom, such as double-tap or tapping
-// on a form field.
-class WebPageScaleAnimationGestureEvent : public WebGestureEvent {
-public:
-    // If true, we should zoom based on gesture local position (anchor point);
-    // if false, we should zoom to the global top-left scroll offset.
-    bool anchorPoint;
-    // Target pageScale at end of zoom.
-    float pageScale;
-    // Duration of animation.
-    double durationMs;
-
-    WebPageScaleAnimationGestureEvent(unsigned sizeParam = sizeof(WebPageScaleAnimationGestureEvent))
-        : WebGestureEvent(sizeParam)
-        , pageScale(1)
-        , durationMs(0)
-    {
-    }
-};
-#endif
 
 // WebTouchEvent --------------------------------------------------------------
 
 class WebTouchEvent : public WebInputEvent {
 public:
-    enum { touchesLengthCap = 8 };
+    // Maximum number of simultaneous touches supported on
+    // Ash/Aura.
+    enum { touchesLengthCap = 12 };
 
     unsigned touchesLength;
     // List of all touches which are currently down.
@@ -430,6 +482,8 @@ public:
     {
     }
 };
+
+#pragma pack(pop)
 
 } // namespace WebKit
 

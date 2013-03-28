@@ -47,7 +47,7 @@ public:
 
     void paintSelectionBackground(PaintInfo&);
     virtual void paint(PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom);
-    virtual IntRect localSelectionRect(int startPosition, int endPosition);
+    virtual LayoutRect localSelectionRect(int startPosition, int endPosition);
 
     bool mapStartEndPositionsIntoFragmentCoordinates(const SVGTextFragment&, int& startPosition, int& endPosition) const;
 
@@ -79,12 +79,12 @@ private:
     void paintTextWithShadows(GraphicsContext*, RenderStyle*, TextRun&, const SVGTextFragment&, int startPosition, int endPosition);
     void paintText(GraphicsContext*, RenderStyle*, RenderStyle* selectionStyle, const SVGTextFragment&, bool hasSelection, bool paintSelectedTextOnly);
 
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom);
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom) OVERRIDE;
 
 private:
     float m_logicalHeight;
-    int m_paintingResourceMode;
-    bool m_startsNewTextChunk : 1;
+    unsigned m_paintingResourceMode : 4;
+    unsigned m_startsNewTextChunk : 1;
     RenderSVGResource* m_paintingResource;
     Vector<SVGTextFragment> m_textFragments;
 };

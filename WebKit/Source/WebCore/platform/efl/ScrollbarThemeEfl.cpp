@@ -29,7 +29,6 @@
 #include "config.h"
 #include "ScrollbarThemeEfl.h"
 
-#include "NotImplemented.h"
 #include <stdio.h>
 
 namespace WebCore {
@@ -44,16 +43,16 @@ ScrollbarThemeEfl::~ScrollbarThemeEfl()
 {
 }
 
-int ScrollbarThemeEfl::scrollbarThickness(ScrollbarControlSize controlSize)
+int ScrollbarThemeEfl::scrollbarThickness(ScrollbarControlSize)
 {
     return 0; // we paint on top
 }
 
-void ScrollbarThemeEfl::registerScrollbar(Scrollbar* scrollbar)
+void ScrollbarThemeEfl::registerScrollbar(ScrollbarThemeClient*)
 {
 }
 
-void ScrollbarThemeEfl::unregisterScrollbar(Scrollbar* scrollbar)
+void ScrollbarThemeEfl::unregisterScrollbar(ScrollbarThemeClient*)
 {
 }
 

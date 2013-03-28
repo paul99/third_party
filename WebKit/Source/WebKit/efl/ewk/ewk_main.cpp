@@ -22,40 +22,36 @@
 #include "ewk_main.h"
 
 #include "FileSystem.h"
-#include "Logging.h"
+#include "InitializeLogging.h"
 #include "PageCache.h"
 #include "PageGroup.h"
+#include "PlatformStrategiesEfl.h"
+#include "ResourceHandle.h"
 #include "ScriptController.h"
 #include "Settings.h"
-#include "ewk_logging.h"
+#include "StorageTracker.h"
+#include "StorageTrackerClientEfl.h"
+#include "ewk_auth_soup_private.h"
 #include "ewk_network.h"
 #include "ewk_private.h"
 #include "ewk_settings.h"
+#include "ewk_settings_private.h"
 #include "runtime/InitializeThreading.h"
 #include <Ecore.h>
 #include <Ecore_Evas.h>
 #include <Edje.h>
+#include <Efreet.h>
 #include <Eina.h>
 #include <Evas.h>
+#include <glib-object.h>
+#include <glib.h>
+#include <libsoup/soup.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <wtf/Threading.h>
 
-#if ENABLE(GLIB_SUPPORT)
-#include <glib-object.h>
-#include <glib.h>
-
-#ifdef ENABLE_GTK_PLUGINS_SUPPORT
-#include <gtk/gtk.h>
-#endif
-
-#endif
-
-#if USE(SOUP)
-// REMOVE-ME: see todo below
-#include "ResourceHandle.h"
-#include "ewk_auth_soup.h"
-#include <libsoup/soup.h>
+#ifdef HAVE_ECORE_X
+#include <Ecore_X.h>
 #endif
 
 static int _ewkInitCount = 0;
@@ -102,6 +98,13 @@ int ewk_init(void)
         goto error_edje;
     }
 
+#ifdef HAVE_ECORE_X
+    if (!ecore_x_init(0)) {
+        CRITICAL("could not init ecore_x.");
+        goto error_ecore_x;
+    }
+#endif
+
     if (!_ewk_init_body()) {
         CRITICAL("could not init body");
         goto error_edje;
@@ -109,6 +112,10 @@ int ewk_init(void)
 
     return ++_ewkInitCount;
 
+#ifdef HAVE_ECORE_X
+error_ecore_x:
+    edje_shutdown();
+#endif
 error_edje:
     ecore_evas_shutdown();
 error_ecore_evas:
@@ -130,6 +137,10 @@ int ewk_shutdown(void)
     if (_ewkInitCount)
         return _ewkInitCount;
 
+#ifdef HAVE_ECORE_X
+    ecore_x_shutdown();
+#endif
+    edje_shutdown();
     ecore_evas_shutdown();
     ecore_shutdown();
     evas_shutdown();
@@ -140,65 +151,55 @@ int ewk_shutdown(void)
     return 0;
 }
 
+static WebCore::StorageTrackerClientEfl* trackerClient()
+{
+    DEFINE_STATIC_LOCAL(WebCore::StorageTrackerClientEfl, trackerClient, ());
+    return &trackerClient;
+}
+
 Eina_Bool _ewk_init_body(void)
 {
-
-#if ENABLE(GLIB_SUPPORT)
+#if !GLIB_CHECK_VERSION(2, 35, 0)
     g_type_init();
-
-    if (!g_thread_supported())
-        g_thread_init(0);
-
-#ifdef ENABLE_GTK_PLUGINS_SUPPORT
-    gdk_threads_init();
-    if (!gtk_init_check(0, 0))
-        WRN("Could not initialize GTK support.");
 #endif
 
     if (!ecore_main_loop_glib_integrate())
-        WRN("Ecore was not compiled with GLib support, some plugins will not "
+        WARN("Ecore was not compiled with GLib support, some plugins will not "
             "work (ie: Adobe Flash)");
-#endif
 
     WebCore::ScriptController::initializeThreading();
+#if !LOG_DISABLED
     WebCore::initializeLoggingChannelsIfNecessary();
+#endif // !LOG_DISABLED
     WebCore::Settings::setDefaultMinDOMTimerInterval(0.004);
+
+    PlatformStrategiesEfl::initialize();
 
     // Page cache capacity (in pages). Comment from Mac port:
     // (Research indicates that value / page drops substantially after 3 pages.)
-    // FIXME: Expose this with an API and/or calculate based on available resources
-    WebCore::pageCache()->setCapacity(3);
+    // FIXME: Calculate based on available resources
+    ewk_settings_page_cache_capacity_set(3);
     WebCore::PageGroup::setShouldTrackVisitedLinks(true);
 
-    String home = WebCore::homeDirectoryPath();
-    struct stat state;
-    // check home directory first
-    if (stat(home.utf8().data(), &state) == -1) {
-        // Exit now - otherwise you may have some crash later
-        int errnowas = errno;
-        CRITICAL("Can't access HOME dir (or /tmp) - no place to save databases: %s", strerror(errnowas));
-        return false;
-    }
+    String localStorageDirectory = String::fromUTF8(efreet_data_home_get()) + "/WebKitEfl/LocalStorage";
+    String webDatabaseDirectory = String::fromUTF8(efreet_cache_home_get()) + "/WebKitEfl/Databases";
+    String applicationCacheDirectory = String::fromUTF8(efreet_cache_home_get()) + "/WebKitEfl/Applications";
+    String fileSystemDirectory = String::fromUTF8(efreet_data_home_get()) + "/WebKitEfl/FileSystem";
 
-    WTF::String webkitDirectory = home + "/.webkit";
-    if (WebCore::makeAllDirectories(webkitDirectory)) {
-        ewk_settings_web_database_path_set(webkitDirectory.utf8().data());
-        ewk_settings_application_cache_path_set(webkitDirectory.utf8().data());
-    }
+    ewk_settings_local_storage_path_set(localStorageDirectory.utf8().data());
+    ewk_settings_web_database_path_set(webDatabaseDirectory.utf8().data());
+    ewk_settings_application_cache_path_set(applicationCacheDirectory.utf8().data());
+    ewk_settings_file_system_path_set(fileSystemDirectory.utf8().data());
 
     ewk_network_tls_certificate_check_set(false);
 
-    // TODO: this should move to WebCore, already reported to webkit-gtk folks:
-#if USE(SOUP)
-    if (1) {
-        SoupSession* session = WebCore::ResourceHandle::defaultSession();
-        soup_session_add_feature_by_type(session, SOUP_TYPE_CONTENT_SNIFFER);
-        soup_session_add_feature_by_type(session, SOUP_TYPE_CONTENT_DECODER);
+    WebCore::StorageTracker::initializeTracker(localStorageDirectory.utf8().data(), trackerClient());
 
-        SoupSessionFeature* auth_dialog = static_cast<SoupSessionFeature*>(g_object_new(EWK_TYPE_SOUP_AUTH_DIALOG, 0));
-        soup_session_add_feature(session, auth_dialog);
-    }
-#endif
+    SoupSession* session = WebCore::ResourceHandle::defaultSession();
+    SoupSessionFeature* auth_dialog = static_cast<SoupSessionFeature*>(g_object_new(EWK_TYPE_SOUP_AUTH_DIALOG, 0));
+    soup_session_add_feature(session, auth_dialog);
+
+    WebCore::ResourceHandle::setIgnoreSSLErrors(true);
 
     return true;
 }

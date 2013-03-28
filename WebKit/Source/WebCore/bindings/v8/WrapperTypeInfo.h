@@ -36,25 +36,34 @@
 namespace WebCore {
     
     class ActiveDOMObject;
-    
+    class DOMDataStore;
+
     static const int v8DOMWrapperTypeIndex = 0;
     static const int v8DOMWrapperObjectIndex = 1;
     static const int v8DefaultWrapperInternalFieldCount = 2;
 
-    static const uint16_t v8DOMSubtreeClassId = 1;
+    static const uint16_t v8DOMNodeClassId = 1;
+    static const uint16_t v8DOMObjectClassId = 2;
 
     typedef v8::Persistent<v8::FunctionTemplate> (*GetTemplateFunction)();
     typedef void (*DerefObjectFunction)(void*);
     typedef ActiveDOMObject* (*ToActiveDOMObjectFunction)(v8::Handle<v8::Object>);
-    
+    typedef void* (*OpaqueRootForGC)(void*, v8::Persistent<v8::Object>);
+    typedef void (*InstallPerContextPrototypePropertiesFunction)(v8::Handle<v8::Object>);
+
+    enum WrapperTypePrototype {
+        WrapperTypeObjectPrototype,
+        WrapperTypeErrorPrototype
+    };
+
     // This struct provides a way to store a bunch of information that is helpful when unwrapping
     // v8 objects. Each v8 bindings class has exactly one static WrapperTypeInfo member, so
     // comparing pointers is a safe way to determine if types match.
     struct WrapperTypeInfo {
-        
+
         static WrapperTypeInfo* unwrap(v8::Handle<v8::Value> typeInfoWrapper)
         {
-            return reinterpret_cast<WrapperTypeInfo*>(v8::External::Unwrap(typeInfoWrapper));
+            return reinterpret_cast<WrapperTypeInfo*>(v8::External::Cast(*typeInfoWrapper)->Value());
         }
         
         
@@ -81,18 +90,47 @@ namespace WebCore {
                 derefObjectFunction(object);
         }
         
+        void installPerContextPrototypeProperties(v8::Handle<v8::Object> proto)
+        {
+            if (installPerContextPrototypePropertiesFunction)
+                installPerContextPrototypePropertiesFunction(proto);
+        }
+
         ActiveDOMObject* toActiveDOMObject(v8::Handle<v8::Object> object)
         {
             if (!toActiveDOMObjectFunction)
                 return 0;
             return toActiveDOMObjectFunction(object);
         }
-        
+
+        void* opaqueRootForGC(void* object, v8::Persistent<v8::Object> wrapper)
+        {
+            if (!opaqueRootForGCFunction)
+                return object;
+            return opaqueRootForGCFunction(object, wrapper);
+        }
+
         const GetTemplateFunction getTemplateFunction;
         const DerefObjectFunction derefObjectFunction;
         const ToActiveDOMObjectFunction toActiveDOMObjectFunction;
+        const OpaqueRootForGC opaqueRootForGCFunction;
+        const InstallPerContextPrototypePropertiesFunction installPerContextPrototypePropertiesFunction;
         const WrapperTypeInfo* parentClass;
+        const WrapperTypePrototype wrapperTypePrototype;
     };
+
+    inline void* toNative(v8::Handle<v8::Object> object)
+    {
+        ASSERT(object->InternalFieldCount() >= v8DOMWrapperObjectIndex);
+        return object->GetAlignedPointerFromInternalField(v8DOMWrapperObjectIndex);
+    }
+
+    inline WrapperTypeInfo* toWrapperTypeInfo(v8::Handle<v8::Object> object)
+    {
+        ASSERT(object->InternalFieldCount() >= v8DOMWrapperTypeIndex);
+        return static_cast<WrapperTypeInfo*>(object->GetAlignedPointerFromInternalField(v8DOMWrapperTypeIndex));
+    }
+
 }
 
 #endif // WrapperTypeInfo_h

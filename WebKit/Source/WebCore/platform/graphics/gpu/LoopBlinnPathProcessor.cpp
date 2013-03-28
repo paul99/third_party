@@ -69,15 +69,15 @@ namespace {
 String valueToString(const FloatRect& arg)
 {
     StringBuilder builder;
-    builder.append("[FloatRect x=");
+    builder.appendLiteral("[FloatRect x=");
     builder.append(String::number(arg.x()));
-    builder.append(" y=");
+    builder.appendLiteral(" y=");
     builder.append(String::number(arg.y()));
-    builder.append(" maxX=");
+    builder.appendLiteral(" maxX=");
     builder.append(String::number(arg.maxX()));
-    builder.append(" maxY=");
+    builder.appendLiteral(" maxY=");
     builder.append(String::number(arg.maxY()));
-    builder.append("]");
+    builder.append(']');
     return builder.toString();
 }
 #endif
@@ -614,6 +614,9 @@ void LoopBlinnPathProcessor::buildContours(const Path& path)
 {
     // Clear out the contours
     m_contours.clear();
+    if (path.isNull())
+        return;
+
 #if USE(SKIA)
     SkPath::Iter iter(*path.platformPath(), false);
     SkPoint points[4];

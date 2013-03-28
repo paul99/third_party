@@ -26,26 +26,28 @@
 #ifndef WebDatabaseManager_h
 #define WebDatabaseManager_h
 
+#if ENABLE(SQL_DATABASE)
+
 #include "Arguments.h"
-#include <WebCore/DatabaseTrackerClient.h>
+#include <WebCore/DatabaseManagerClient.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/text/WTFString.h>
 
 namespace CoreIPC {
-class ArgumentDecoder;
+class MessageDecoder;
 class Connection;
 class MessageID;
 }
 
 namespace WebKit {
 
-class WebDatabaseManager : public WebCore::DatabaseTrackerClient {
+class WebDatabaseManager : public WebCore::DatabaseManagerClient {
     WTF_MAKE_NONCOPYABLE(WebDatabaseManager);
 public:
     static WebDatabaseManager& shared();
     static void initialize(const String& databaseDirectory);
 
-    void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+    void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
     void setQuotaForOrigin(const String& originIdentifier, unsigned long long quota) const;
 
 public:
@@ -56,18 +58,20 @@ private:
     virtual ~WebDatabaseManager();
 
     // Implemented in generated WebDatabaseManagerMessageReceiver.cpp
-    void didReceiveWebDatabaseManagerMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+    void didReceiveWebDatabaseManagerMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
 
     void getDatabasesByOrigin(uint64_t callbackID) const;
     void getDatabaseOrigins(uint64_t callbackID) const;
     void deleteDatabaseWithNameForOrigin(const String& databaseIdentifier, const String& originIdentifier) const;
     void deleteDatabasesForOrigin(const String& originIdentifier) const;
 
-    // WebCore::DatabaseTrackerClient
+    // WebCore::DatabaseManagerClient
     virtual void dispatchDidModifyOrigin(WebCore::SecurityOrigin*) OVERRIDE;
     virtual void dispatchDidModifyDatabase(WebCore::SecurityOrigin*, const String& databaseIdentifier) OVERRIDE;
 };
 
 } // namespace WebKit
+
+#endif // ENABLE(SQL_DATABASE)
 
 #endif // WebDatabaseManager_h

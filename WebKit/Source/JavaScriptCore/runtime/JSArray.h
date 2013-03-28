@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2003, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ *  Copyright (C) 2003, 2007, 2008, 2009, 2012 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -21,308 +21,295 @@
 #ifndef JSArray_h
 #define JSArray_h
 
+#include "ArrayConventions.h"
+#include "ButterflyInlines.h"
 #include "JSObject.h"
-
-#define CHECK_ARRAY_CONSISTENCY 0
 
 namespace JSC {
 
-    class JSArray;
+class JSArray;
+class LLIntOffsetsExtractor;
 
-    struct SparseArrayEntry : public WriteBarrier<Unknown> {
-        typedef WriteBarrier<Unknown> Base;
+class JSArray : public JSNonFinalObject {
+    friend class LLIntOffsetsExtractor;
+    friend class Walker;
+    friend class JIT;
 
-        SparseArrayEntry() : attributes(0) {}
+public:
+    typedef JSNonFinalObject Base;
 
-        JSValue get(ExecState*, JSArray*) const;
-        void get(PropertySlot&) const;
-        void get(PropertyDescriptor&) const;
-        JSValue getNonSparseMode() const;
+protected:
+    explicit JSArray(JSGlobalData& globalData, Structure* structure, Butterfly* butterfly)
+        : JSNonFinalObject(globalData, structure, butterfly)
+    {
+    }
 
-        unsigned attributes;
-    };
+public:
+    static JSArray* create(JSGlobalData&, Structure*, unsigned initialLength = 0);
 
-    class SparseArrayValueMap {
-        typedef HashMap<uint64_t, SparseArrayEntry, WTF::IntHash<uint64_t>, WTF::UnsignedWithZeroKeyHashTraits<uint64_t> > Map;
+    // tryCreateUninitialized is used for fast construction of arrays whose size and
+    // contents are known at time of creation. Clients of this interface must:
+    //   - null-check the result (indicating out of memory, or otherwise unable to allocate vector).
+    //   - call 'initializeIndex' for all properties in sequence, for 0 <= i < initialLength.
+    static JSArray* tryCreateUninitialized(JSGlobalData&, Structure*, unsigned initialLength);
 
-        enum Flags {
-            Normal = 0,
-            SparseMode = 1,
-            LengthIsReadOnly = 2,
-        };
+    JS_EXPORT_PRIVATE static bool defineOwnProperty(JSObject*, ExecState*, PropertyName, PropertyDescriptor&, bool throwException);
 
-    public:
-        typedef Map::iterator iterator;
-        typedef Map::const_iterator const_iterator;
+    static bool getOwnPropertySlot(JSCell*, ExecState*, PropertyName, PropertySlot&);
+    static bool getOwnPropertyDescriptor(JSObject*, ExecState*, PropertyName, PropertyDescriptor&);
 
-        SparseArrayValueMap()
-            : m_flags(Normal)
-            , m_reportedCapacity(0)
-        {
-        }
-
-        void visitChildren(SlotVisitor&);
-
-        bool sparseMode()
-        {
-            return m_flags & SparseMode;
-        }
-
-        void setSparseMode()
-        {
-            m_flags = static_cast<Flags>(m_flags | SparseMode);
-        }
-
-        bool lengthIsReadOnly()
-        {
-            return m_flags & LengthIsReadOnly;
-        }
-
-        void setLengthIsReadOnly()
-        {
-            m_flags = static_cast<Flags>(m_flags | LengthIsReadOnly);
-        }
-
-        // These methods may mutate the contents of the map
-        void put(ExecState*, JSArray*, unsigned, JSValue);
-        std::pair<iterator, bool> add(JSArray*, unsigned);
-        iterator find(unsigned i) { return m_map.find(i); }
-        // This should ASSERT the remove is valid (check the result of the find).
-        void remove(iterator it) { m_map.remove(it); }
-        void remove(unsigned i) { m_map.remove(i); }
-
-        // These methods do not mutate the contents of the map.
-        iterator notFound() { return m_map.end(); }
-        bool isEmpty() const { return m_map.isEmpty(); }
-        bool contains(unsigned i) const { return m_map.contains(i); }
-        size_t size() const { return m_map.size(); }
-        // Only allow const begin/end iteration.
-        const_iterator begin() const { return m_map.begin(); }
-        const_iterator end() const { return m_map.end(); }
-
-    private:
-        Map m_map;
-        Flags m_flags;
-        size_t m_reportedCapacity;
-    };
-
-    // This struct holds the actual data values of an array.  A JSArray object points to it's contained ArrayStorage
-    // struct by pointing to m_vector.  To access the contained ArrayStorage struct, use the getStorage() and 
-    // setStorage() methods.  It is important to note that there may be space before the ArrayStorage that 
-    // is used to quick unshift / shift operation.  The actual allocated pointer is available by using:
-    //     getStorage() - m_indexBias * sizeof(JSValue)
-    struct ArrayStorage {
-        unsigned m_length; // The "length" property on the array
-        unsigned m_numValuesInVector;
-        void* m_allocBase; // Pointer to base address returned by malloc().  Keeping this pointer does eliminate false positives from the leak detector.
-#if CHECK_ARRAY_CONSISTENCY
-        bool m_inCompactInitialization;
-#endif
-        WriteBarrier<Unknown> m_vector[1];
-    };
-
-    class JSArray : public JSNonFinalObject {
-        friend class Walker;
-
-    protected:
-        JS_EXPORT_PRIVATE explicit JSArray(JSGlobalData&, Structure*);
-
-        JS_EXPORT_PRIVATE void finishCreation(JSGlobalData&, unsigned initialLength = 0);
-        JS_EXPORT_PRIVATE JSArray* tryFinishCreationUninitialized(JSGlobalData&, unsigned initialLength);
-    
-    public:
-        typedef JSNonFinalObject Base;
-
-        JS_EXPORT_PRIVATE ~JSArray();
-        JS_EXPORT_PRIVATE static void destroy(JSCell*);
-
-        static JSArray* create(JSGlobalData& globalData, Structure* structure, unsigned initialLength = 0)
-        {
-            JSArray* array = new (NotNull, allocateCell<JSArray>(globalData.heap)) JSArray(globalData, structure);
-            array->finishCreation(globalData, initialLength);
-            return array;
-        }
-
-        // tryCreateUninitialized is used for fast construction of arrays whose size and
-        // contents are known at time of creation. Clients of this interface must:
-        //   - null-check the result (indicating out of memory, or otherwise unable to allocate vector).
-        //   - call 'initializeIndex' for all properties in sequence, for 0 <= i < initialLength.
-        //   - called 'completeInitialization' after all properties have been initialized.
-        static JSArray* tryCreateUninitialized(JSGlobalData& globalData, Structure* structure, unsigned initialLength)
-        {
-            JSArray* array = new (NotNull, allocateCell<JSArray>(globalData.heap)) JSArray(globalData, structure);
-            return array->tryFinishCreationUninitialized(globalData, initialLength);
-        }
-
-        JS_EXPORT_PRIVATE static bool defineOwnProperty(JSObject*, ExecState*, const Identifier&, PropertyDescriptor&, bool throwException);
-
-        static bool getOwnPropertySlot(JSCell*, ExecState*, const Identifier&, PropertySlot&);
-        JS_EXPORT_PRIVATE static bool getOwnPropertySlotByIndex(JSCell*, ExecState*, unsigned propertyName, PropertySlot&);
-        static bool getOwnPropertyDescriptor(JSObject*, ExecState*, const Identifier&, PropertyDescriptor&);
-        static void putByIndex(JSCell*, ExecState*, unsigned propertyName, JSValue);
-
-        static JS_EXPORTDATA const ClassInfo s_info;
+    static JS_EXPORTDATA const ClassInfo s_info;
         
-        unsigned length() const { return m_storage->m_length; }
-        // OK to use on new arrays, but not if it might be a RegExpMatchArray.
-        bool setLength(ExecState*, unsigned, bool throwException = false);
+    unsigned length() const { return getArrayLength(); }
+    // OK to use on new arrays, but not if it might be a RegExpMatchArray.
+    bool setLength(ExecState*, unsigned, bool throwException = false);
 
-        void sort(ExecState*);
-        void sort(ExecState*, JSValue compareFunction, CallType, const CallData&);
-        void sortNumeric(ExecState*, JSValue compareFunction, CallType, const CallData&);
+    void sort(ExecState*);
+    void sort(ExecState*, JSValue compareFunction, CallType, const CallData&);
+    void sortNumeric(ExecState*, JSValue compareFunction, CallType, const CallData&);
 
-        void push(ExecState*, JSValue);
-        JSValue pop(ExecState*);
+    void push(ExecState*, JSValue);
+    JSValue pop(ExecState*);
 
-        void shiftCount(ExecState*, unsigned count);
-        void unshiftCount(ExecState*, unsigned count);
-
-        bool canGetIndex(unsigned i) { return i < m_vectorLength && m_storage->m_vector[i]; }
-        JSValue getIndex(unsigned i)
-        {
-            ASSERT(canGetIndex(i));
-            return m_storage->m_vector[i].get();
-        }
-
-        bool canSetIndex(unsigned i) { return i < m_vectorLength; }
-        void setIndex(JSGlobalData& globalData, unsigned i, JSValue v)
-        {
-            ASSERT(canSetIndex(i));
+    enum ShiftCountMode {
+        // This form of shift hints that we're doing queueing. With this assumption in hand,
+        // we convert to ArrayStorage, which has queue optimizations.
+        ShiftCountForShift,
             
-            WriteBarrier<Unknown>& x = m_storage->m_vector[i];
-            if (!x) {
-                ArrayStorage *storage = m_storage;
-                ++storage->m_numValuesInVector;
-                if (i >= storage->m_length)
-                    storage->m_length = i + 1;
-            }
-            x.set(globalData, this, v);
-        }
-        
-        inline void initializeIndex(JSGlobalData& globalData, unsigned i, JSValue v)
-        {
-            ASSERT(canSetIndex(i));
-            ArrayStorage *storage = m_storage;
-#if CHECK_ARRAY_CONSISTENCY
-            ASSERT(storage->m_inCompactInitialization);
-#endif
-            // Check that we are initializing the next index in sequence.
-            ASSERT_UNUSED(i, i == storage->m_length);
-            // tryCreateUninitialized set m_numValuesInVector to the initialLength,
-            // check we do not try to initialize more than this number of properties.
-            ASSERT(storage->m_length < storage->m_numValuesInVector);
-            // It is improtant that we increment length here, so that all newly added
-            // values in the array still get marked during the initialization phase.
-            storage->m_vector[storage->m_length++].set(globalData, this, v);
-        }
-
-        inline void completeInitialization(unsigned newLength)
-        {
-            // Check that we have initialized as meny properties as we think we have.
-            ASSERT_UNUSED(newLength, newLength == m_storage->m_length);
-            // Check that the number of propreties initialized matches the initialLength.
-            ASSERT(m_storage->m_length == m_storage->m_numValuesInVector);
-#if CHECK_ARRAY_CONSISTENCY
-            ASSERT(m_storage->m_inCompactInitialization);
-            m_storage->m_inCompactInitialization = false;
-#endif
-        }
-
-        bool inSparseMode()
-        {
-            SparseArrayValueMap* map = m_sparseValueMap;
-            return map && map->sparseMode();
-        }
-
-        void fillArgList(ExecState*, MarkedArgumentBuffer&);
-        void copyToArguments(ExecState*, CallFrame*, uint32_t length);
-
-        static Structure* createStructure(JSGlobalData& globalData, JSGlobalObject* globalObject, JSValue prototype)
-        {
-            return Structure::create(globalData, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), &s_info);
-        }
-        
-        static ptrdiff_t storageOffset()
-        {
-            return OBJECT_OFFSETOF(JSArray, m_storage);
-        }
-
-        static ptrdiff_t vectorLengthOffset()
-        {
-            return OBJECT_OFFSETOF(JSArray, m_vectorLength);
-        }
-
-        JS_EXPORT_PRIVATE static void visitChildren(JSCell*, SlotVisitor&);
-
-    protected:
-        static const unsigned StructureFlags = OverridesGetOwnPropertySlot | OverridesVisitChildren | OverridesGetPropertyNames | JSObject::StructureFlags;
-        static void put(JSCell*, ExecState*, const Identifier& propertyName, JSValue, PutPropertySlot&);
-
-        static bool deleteProperty(JSCell*, ExecState*, const Identifier& propertyName);
-        static bool deletePropertyByIndex(JSCell*, ExecState*, unsigned propertyName);
-        static void getOwnPropertyNames(JSObject*, ExecState*, PropertyNameArray&, EnumerationMode);
-
-        JS_EXPORT_PRIVATE void* subclassData() const;
-        JS_EXPORT_PRIVATE void setSubclassData(void*);
-
-    private:
-        bool isLengthWritable()
-        {
-            SparseArrayValueMap* map = m_sparseValueMap;
-            return !map || !map->lengthIsReadOnly();
-        }
-
-        void setLengthWritable(ExecState*, bool writable);
-        void putDescriptor(ExecState*, SparseArrayEntry*, PropertyDescriptor&, PropertyDescriptor& old);
-        bool defineOwnNumericProperty(ExecState*, unsigned, PropertyDescriptor&, bool throwException);
-        void enterSparseMode(JSGlobalData&);
-
-        bool getOwnPropertySlotSlowCase(ExecState*, unsigned propertyName, PropertySlot&);
-        void putByIndexBeyondVectorLength(ExecState*, unsigned propertyName, JSValue);
-
-        unsigned getNewVectorLength(unsigned desiredLength);
-        bool increaseVectorLength(JSGlobalData&, unsigned newLength);
-        bool unshiftCountSlowCase(JSGlobalData&, unsigned count);
-        
-        unsigned compactForSorting(JSGlobalData&);
-
-        enum ConsistencyCheckType { NormalConsistencyCheck, DestructorConsistencyCheck, SortConsistencyCheck };
-        void checkConsistency(ConsistencyCheckType = NormalConsistencyCheck);
-
-        unsigned m_vectorLength; // The valid length of m_vector
-        unsigned m_indexBias; // The number of JSValue sized blocks before ArrayStorage.
-        ArrayStorage *m_storage;
-
-        // FIXME: Maybe SparseArrayValueMap should be put into its own JSCell?
-        SparseArrayValueMap* m_sparseValueMap;
-        void* m_subclassData; // A JSArray subclass can use this to fill the vector lazily.
+        // This form of shift hints that we're just doing care and feeding on an array that
+        // is probably typically used for ordinary accesses. With this assumption in hand,
+        // we try to preserve whatever indexing type it has already.
+        ShiftCountForSplice
     };
 
-    JSArray* asArray(JSValue);
-
-    inline JSArray* asArray(JSCell* cell)
+    bool shiftCountForShift(ExecState* exec, unsigned startIndex, unsigned count)
     {
-        ASSERT(cell->inherits(&JSArray::s_info));
-        return static_cast<JSArray*>(cell);
+        return shiftCountWithArrayStorage(startIndex, count, ensureArrayStorage(exec->globalData()));
+    }
+    bool shiftCountForSplice(ExecState* exec, unsigned startIndex, unsigned count)
+    {
+        return shiftCountWithAnyIndexingType(exec, startIndex, count);
+    }
+    template<ShiftCountMode shiftCountMode>
+    bool shiftCount(ExecState* exec, unsigned startIndex, unsigned count)
+    {
+        switch (shiftCountMode) {
+        case ShiftCountForShift:
+            return shiftCountForShift(exec, startIndex, count);
+        case ShiftCountForSplice:
+            return shiftCountForSplice(exec, startIndex, count);
+        default:
+            CRASH();
+            return false;
+        }
+    }
+        
+    bool unshiftCountForShift(ExecState* exec, unsigned startIndex, unsigned count)
+    {
+        return unshiftCountWithArrayStorage(exec, startIndex, count, ensureArrayStorage(exec->globalData()));
+    }
+    bool unshiftCountForSplice(ExecState* exec, unsigned startIndex, unsigned count)
+    {
+        return unshiftCountWithAnyIndexingType(exec, startIndex, count);
+    }
+    template<ShiftCountMode shiftCountMode>
+    bool unshiftCount(ExecState* exec, unsigned startIndex, unsigned count)
+    {
+        switch (shiftCountMode) {
+        case ShiftCountForShift:
+            return unshiftCountForShift(exec, startIndex, count);
+        case ShiftCountForSplice:
+            return unshiftCountForSplice(exec, startIndex, count);
+        default:
+            CRASH();
+            return false;
+        }
     }
 
-    inline JSArray* asArray(JSValue value)
-    {
-        return asArray(value.asCell());
-    }
+    void fillArgList(ExecState*, MarkedArgumentBuffer&);
+    void copyToArguments(ExecState*, CallFrame*, uint32_t length);
 
-    inline bool isJSArray(JSCell* cell) { return cell->classInfo() == &JSArray::s_info; }
-    inline bool isJSArray(JSValue v) { return v.isCell() && isJSArray(v.asCell()); }
-
-    // Rule from ECMA 15.2 about what an array index is.
-    // Must exactly match string form of an unsigned integer, and be less than 2^32 - 1.
-    inline unsigned Identifier::toArrayIndex(bool& ok) const
+    static Structure* createStructure(JSGlobalData& globalData, JSGlobalObject* globalObject, JSValue prototype, IndexingType indexingType)
     {
-        unsigned i = toUInt32(ok);
-        if (ok && i >= 0xFFFFFFFFU)
-            ok = false;
-        return i;
+        return Structure::create(globalData, globalObject, prototype, TypeInfo(ObjectType, StructureFlags), &s_info, indexingType);
     }
+        
+protected:
+    static const unsigned StructureFlags = OverridesGetOwnPropertySlot | OverridesGetPropertyNames | JSObject::StructureFlags;
+    static void put(JSCell*, ExecState*, PropertyName, JSValue, PutPropertySlot&);
+
+    static bool deleteProperty(JSCell*, ExecState*, PropertyName);
+    JS_EXPORT_PRIVATE static void getOwnNonIndexPropertyNames(JSObject*, ExecState*, PropertyNameArray&, EnumerationMode);
+
+private:
+    bool isLengthWritable()
+    {
+        ArrayStorage* storage = arrayStorageOrNull();
+        if (!storage)
+            return true;
+        SparseArrayValueMap* map = storage->m_sparseMap.get();
+        return !map || !map->lengthIsReadOnly();
+    }
+        
+    bool shiftCountWithAnyIndexingType(ExecState*, unsigned startIndex, unsigned count);
+    bool shiftCountWithArrayStorage(unsigned startIndex, unsigned count, ArrayStorage*);
+
+    bool unshiftCountWithAnyIndexingType(ExecState*, unsigned startIndex, unsigned count);
+    bool unshiftCountWithArrayStorage(ExecState*, unsigned startIndex, unsigned count, ArrayStorage*);
+    bool unshiftCountSlowCase(JSGlobalData&, bool, unsigned);
+
+    template<IndexingType indexingType>
+    void sortNumericVector(ExecState*, JSValue compareFunction, CallType, const CallData&);
+        
+    template<IndexingType indexingType>
+    void sortCompactedVector(ExecState*, void* begin, unsigned relevantLength);
+        
+    template<IndexingType indexingType>
+    void sortVector(ExecState*, JSValue compareFunction, CallType, const CallData&);
+
+    bool setLengthWithArrayStorage(ExecState*, unsigned newLength, bool throwException, ArrayStorage*);
+    void setLengthWritable(ExecState*, bool writable);
+        
+    template<IndexingType indexingType>
+    void compactForSorting(unsigned& numDefined, unsigned& newRelevantLength);
+};
+
+inline Butterfly* createContiguousArrayButterfly(JSGlobalData& globalData, unsigned length, unsigned& vectorLength)
+{
+    IndexingHeader header;
+    vectorLength = std::max(length, BASE_VECTOR_LEN);
+    header.setVectorLength(vectorLength);
+    header.setPublicLength(length);
+    Butterfly* result = Butterfly::create(
+        globalData, 0, 0, true, header, vectorLength * sizeof(EncodedJSValue));
+    return result;
+}
+
+inline Butterfly* createArrayButterfly(JSGlobalData& globalData, unsigned initialLength)
+{
+    Butterfly* butterfly = Butterfly::create(
+        globalData, 0, 0, true, baseIndexingHeaderForArray(initialLength), ArrayStorage::sizeFor(BASE_VECTOR_LEN));
+    ArrayStorage* storage = butterfly->arrayStorage();
+    storage->m_indexBias = 0;
+    storage->m_sparseMap.clear();
+    storage->m_numValuesInVector = 0;
+    return butterfly;
+}
+
+Butterfly* createArrayButterflyInDictionaryIndexingMode(JSGlobalData&, unsigned initialLength);
+
+inline JSArray* JSArray::create(JSGlobalData& globalData, Structure* structure, unsigned initialLength)
+{
+    Butterfly* butterfly;
+    if (LIKELY(!hasArrayStorage(structure->indexingType()))) {
+        ASSERT(
+            hasUndecided(structure->indexingType())
+            || hasInt32(structure->indexingType())
+            || hasDouble(structure->indexingType())
+            || hasContiguous(structure->indexingType()));
+        unsigned vectorLength;
+        butterfly = createContiguousArrayButterfly(globalData, initialLength, vectorLength);
+        ASSERT(initialLength < MIN_SPARSE_ARRAY_INDEX);
+        if (hasDouble(structure->indexingType())) {
+            for (unsigned i = 0; i < vectorLength; ++i)
+                butterfly->contiguousDouble()[i] = QNaN;
+        }
+    } else {
+        ASSERT(
+            structure->indexingType() == ArrayWithSlowPutArrayStorage
+            || structure->indexingType() == ArrayWithArrayStorage);
+        butterfly = createArrayButterfly(globalData, initialLength);
+    }
+    JSArray* array = new (NotNull, allocateCell<JSArray>(globalData.heap)) JSArray(globalData, structure, butterfly);
+    array->finishCreation(globalData);
+    return array;
+}
+
+inline JSArray* JSArray::tryCreateUninitialized(JSGlobalData& globalData, Structure* structure, unsigned initialLength)
+{
+    unsigned vectorLength = std::max(BASE_VECTOR_LEN, initialLength);
+    if (vectorLength > MAX_STORAGE_VECTOR_LENGTH)
+        return 0;
+        
+    Butterfly* butterfly;
+    if (LIKELY(!hasArrayStorage(structure->indexingType()))) {
+        ASSERT(
+            hasUndecided(structure->indexingType())
+            || hasInt32(structure->indexingType())
+            || hasDouble(structure->indexingType())
+            || hasContiguous(structure->indexingType()));
+
+        void* temp;
+        if (!globalData.heap.tryAllocateStorage(Butterfly::totalSize(0, 0, true, vectorLength * sizeof(EncodedJSValue)), &temp))
+            return 0;
+        butterfly = Butterfly::fromBase(temp, 0, 0);
+        butterfly->setVectorLength(vectorLength);
+        butterfly->setPublicLength(initialLength);
+    } else {
+        void* temp;
+        if (!globalData.heap.tryAllocateStorage(Butterfly::totalSize(0, 0, true, ArrayStorage::sizeFor(vectorLength)), &temp))
+            return 0;
+        butterfly = Butterfly::fromBase(temp, 0, 0);
+        *butterfly->indexingHeader() = indexingHeaderForArray(initialLength, vectorLength);
+        ArrayStorage* storage = butterfly->arrayStorage();
+        storage->m_indexBias = 0;
+        storage->m_sparseMap.clear();
+        storage->m_numValuesInVector = initialLength;
+    }
+        
+    JSArray* array = new (NotNull, allocateCell<JSArray>(globalData.heap)) JSArray(globalData, structure, butterfly);
+    array->finishCreation(globalData);
+    return array;
+}
+
+JSArray* asArray(JSValue);
+
+inline JSArray* asArray(JSCell* cell)
+{
+    ASSERT(cell->inherits(&JSArray::s_info));
+    return jsCast<JSArray*>(cell);
+}
+
+inline JSArray* asArray(JSValue value)
+{
+    return asArray(value.asCell());
+}
+
+inline bool isJSArray(JSCell* cell) { return cell->classInfo() == &JSArray::s_info; }
+inline bool isJSArray(JSValue v) { return v.isCell() && isJSArray(v.asCell()); }
+
+inline JSArray* constructArray(ExecState* exec, Structure* arrayStructure, const ArgList& values)
+{
+    JSGlobalData& globalData = exec->globalData();
+    unsigned length = values.size();
+    JSArray* array = JSArray::tryCreateUninitialized(globalData, arrayStructure, length);
+
+    // FIXME: we should probably throw an out of memory error here, but
+    // when making this change we should check that all clients of this
+    // function will correctly handle an exception being thrown from here.
+    if (!array)
+        CRASH();
+
+    for (unsigned i = 0; i < length; ++i)
+        array->initializeIndex(globalData, i, values.at(i));
+    return array;
+}
+    
+inline JSArray* constructArray(ExecState* exec, Structure* arrayStructure, const JSValue* values, unsigned length)
+{
+    JSGlobalData& globalData = exec->globalData();
+    JSArray* array = JSArray::tryCreateUninitialized(globalData, arrayStructure, length);
+
+    // FIXME: we should probably throw an out of memory error here, but
+    // when making this change we should check that all clients of this
+    // function will correctly handle an exception being thrown from here.
+    if (!array)
+        CRASH();
+
+    for (unsigned i = 0; i < length; ++i)
+        array->initializeIndex(globalData, i, values[i]);
+    return array;
+}
 
 } // namespace JSC
 

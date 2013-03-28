@@ -29,16 +29,18 @@
 #include "config.h"
 #include "FileSystem.h"
 
-#include "PlatformString.h"
+#include "FileMetadata.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
 #include <libgen.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -180,12 +182,28 @@ bool getFileModificationTime(const String& path, time_t& result)
     return true;
 }
 
+bool getFileMetadata(const String& path, FileMetadata& metadata)
+{
+    CString fsRep = fileSystemRepresentation(path);
+
+    if (!fsRep.data() || fsRep.data()[0] == '\0')
+        return false;
+
+    struct stat fileInfo;
+    if (stat(fsRep.data(), &fileInfo))
+        return false;
+
+    metadata.modificationTime = fileInfo.st_mtime;
+    metadata.length = fileInfo.st_size;
+    metadata.type = S_ISDIR(fileInfo.st_mode) ? FileMetadata::TypeDirectory : FileMetadata::TypeFile;
+    return true;
+}
+
 String pathByAppendingComponent(const String& path, const String& component)
 {
-    if (path.endsWith("/"))
+    if (path.endsWith('/'))
         return path + component;
-    else
-        return path + "/" + component;
+    return path + "/" + component;
 }
 
 bool makeAllDirectories(const String& path)
@@ -252,6 +270,30 @@ Vector<String> listDirectory(const String& path, const String& filter)
         closedir(dir);
     }
     return entries;
+}
+#endif
+
+#if !PLATFORM(MAC)
+String openTemporaryFile(const String& prefix, PlatformFileHandle& handle)
+{
+    char buffer[PATH_MAX];
+    const char* tmpDir = getenv("TMPDIR");
+
+    if (!tmpDir)
+        tmpDir = "/tmp";
+
+    if (snprintf(buffer, PATH_MAX, "%s/%sXXXXXX", tmpDir, prefix.utf8().data()) >= PATH_MAX)
+        goto end;
+
+    handle = mkstemp(buffer);
+    if (handle < 0)
+        goto end;
+
+    return String::fromUTF8(buffer);
+
+end:
+    handle = invalidPlatformFileHandle;
+    return String();
 }
 #endif
 

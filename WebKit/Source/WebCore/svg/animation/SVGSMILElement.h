@@ -32,7 +32,7 @@
 #include <wtf/HashMap.h>
 
 namespace WebCore {
-    
+
 class ConditionEventListener;
 class SMILTimeContainer;
 
@@ -44,17 +44,19 @@ public:
 
     static bool isSMILElement(Node*);
 
-    virtual void parseMappedAttribute(Attribute*);
-    virtual void attributeChanged(Attribute*, bool preserveDecls);
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
+    bool isSupportedAttribute(const QualifiedName&);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
+    virtual void svgAttributeChanged(const QualifiedName&) OVERRIDE;
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
+    virtual void removedFrom(ContainerNode*) OVERRIDE;
     
     virtual bool hasValidAttributeType() = 0;
+    virtual bool hasValidAttributeName();
+    virtual void animationAttributeChanged() = 0;
 
     SMILTimeContainer* timeContainer() const { return m_timeContainer.get(); }
 
-    SVGElement* targetElement();
-    void resetTargetElement();
+    SVGElement* targetElement() const { return m_targetElement; }
     const QualifiedName& attributeName() const { return m_attributeName; }
 
     void beginByLinkActivation();
@@ -74,8 +76,6 @@ public:
 
     FillMode fill() const;
 
-    String xlinkHref() const;
-
     SMILTime dur() const;
     SMILTime repeatDur() const;
     SMILTime repeatCount() const;
@@ -89,7 +89,8 @@ public:
     SMILTime previousIntervalBegin() const { return m_previousIntervalBegin; }
     SMILTime simpleDuration() const;
 
-    void progress(SMILTime elapsed, SVGSMILElement* resultsElement);
+    void seekToIntervalCorrespondingToTime(SMILTime elapsed);
+    bool progress(SMILTime elapsed, SVGSMILElement* resultsElement, bool seekToTime);
     SMILTime nextProgressTime() const;
 
     void reset();
@@ -105,22 +106,27 @@ public:
     void setDocumentOrderIndex(unsigned index) { m_documentOrderIndex = index; }
 
     virtual bool isAdditive() const = 0;
-    virtual void resetToBaseValue(const String&) = 0;
+    virtual void resetAnimatedType() = 0;
+    virtual void clearAnimatedType(SVGElement* targetElement) = 0;
     virtual void applyResultsToTarget() = 0;
 
 protected:
-    void addBeginTime(SMILTime eventTime, SMILTime endTime);
-    void addEndTime(SMILTime eventTime, SMILTime endTime);
+    void addBeginTime(SMILTime eventTime, SMILTime endTime, SMILTimeWithOrigin::Origin = SMILTimeWithOrigin::ParserOrigin);
+    void addEndTime(SMILTime eventTime, SMILTime endTime, SMILTimeWithOrigin::Origin = SMILTimeWithOrigin::ParserOrigin);
 
     void setInactive() { m_activeState = Inactive; }
 
     // Sub-classes may need to take action when the target is changed.
-    virtual void targetElementDidChange(SVGElement*) { }
+    virtual void setTargetElement(SVGElement*);
+    virtual void setAttributeName(const QualifiedName&);
 
 private:
+    void buildPendingResource();
+    void clearResourceReferences();
+
     virtual void startedActiveInterval() = 0;
+    void endedActiveInterval();
     virtual void updateAnimation(float percent, unsigned repeat, SVGSMILElement* resultElement) = 0;
-    virtual void endedActiveInterval() = 0;
 
     enum BeginOrEnd {
         Begin,
@@ -129,14 +135,13 @@ private:
     
     SMILTime findInstanceTime(BeginOrEnd, SMILTime minimumTime, bool equalsMinimumOK) const;
     void resolveFirstInterval();
-    void resolveNextInterval();
+    void resolveNextInterval(bool notifyDependents);
     void resolveInterval(bool first, SMILTime& beginResult, SMILTime& endResult) const;
     SMILTime resolveActiveEnd(SMILTime resolvedBegin, SMILTime resolvedEnd) const;
     SMILTime repeatingDuration() const;
     void checkRestart(SMILTime elapsed);
     void beginListChanged(SMILTime eventTime);
     void endListChanged(SMILTime eventTime);
-    void reschedule();
 
     // This represents conditions on elements begin or end list that need to be resolved on runtime
     // for example <animate begin="otherElement.begin + 8s; button.click" ... />
@@ -202,8 +207,8 @@ private:
     TimeDependentSet m_timeDependents;
 
     // Instance time lists
-    Vector<SMILTime> m_beginTimes;
-    Vector<SMILTime> m_endTimes;
+    Vector<SMILTimeWithOrigin> m_beginTimes;
+    Vector<SMILTimeWithOrigin> m_endTimes;
 
     // This is the upcoming or current interval
     SMILTime m_intervalBegin;

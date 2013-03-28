@@ -26,34 +26,33 @@
 #include "config.h"
 #include "ScrollbarGroup.h"
 
-#include "Page.h"
+#include "FrameView.h"
 #include "Scrollbar.h"
 #include "ScrollbarTheme.h"
-#include "platform/WebRect.h"
-#include "WebScrollbarImpl.h"
+#include "WebPluginScrollbarImpl.h"
+#include <public/WebRect.h>
 
 using namespace WebCore;
 
 namespace WebKit {
 
-ScrollbarGroup::ScrollbarGroup(Page* page)
-    : m_page(page)
+ScrollbarGroup::ScrollbarGroup(FrameView* frameView, const IntRect& frameRect)
+    : m_frameView(frameView)
+    , m_frameRect(frameRect)
     , m_horizontalScrollbar(0)
     , m_verticalScrollbar(0)
 {
-    m_page->addScrollableArea(this);
 }
 
 ScrollbarGroup::~ScrollbarGroup()
 {
     ASSERT(!m_horizontalScrollbar);
     ASSERT(!m_verticalScrollbar);
-    if (m_page)
-        m_page->removeScrollableArea(this);
 }
 
-void ScrollbarGroup::scrollbarCreated(WebScrollbarImpl* scrollbar)
+void ScrollbarGroup::scrollbarCreated(WebPluginScrollbarImpl* scrollbar)
 {
+    bool hadScrollbars = m_horizontalScrollbar || m_verticalScrollbar;
     if (scrollbar->scrollbar()->orientation() == HorizontalScrollbar) {
         ASSERT(!m_horizontalScrollbar);
         m_horizontalScrollbar = scrollbar;
@@ -63,9 +62,14 @@ void ScrollbarGroup::scrollbarCreated(WebScrollbarImpl* scrollbar)
         m_verticalScrollbar = scrollbar;
         didAddVerticalScrollbar(scrollbar->scrollbar());
     }
+
+    if (!hadScrollbars) {
+        m_frameView->addScrollableArea(this);
+        m_frameView->setNeedsLayout();
+    }
 }
 
-void ScrollbarGroup::scrollbarDestroyed(WebScrollbarImpl* scrollbar)
+void ScrollbarGroup::scrollbarDestroyed(WebPluginScrollbarImpl* scrollbar)
 {
     if (scrollbar == m_horizontalScrollbar) {
         willRemoveHorizontalScrollbar(scrollbar->scrollbar());
@@ -74,6 +78,11 @@ void ScrollbarGroup::scrollbarDestroyed(WebScrollbarImpl* scrollbar)
         ASSERT(scrollbar == m_verticalScrollbar);
         willRemoveVerticalScrollbar(scrollbar->scrollbar());
         m_verticalScrollbar = 0;
+    }
+
+    if (!m_horizontalScrollbar && !m_verticalScrollbar) {
+        m_frameView->removeScrollableArea(this);
+        m_frameView->setNeedsLayout();
     }
 }
 
@@ -84,7 +93,7 @@ void ScrollbarGroup::setLastMousePosition(const IntPoint& point)
 
 int ScrollbarGroup::scrollSize(WebCore::ScrollbarOrientation orientation) const
 {
-    WebScrollbarImpl* webScrollbar = orientation == HorizontalScrollbar ? m_horizontalScrollbar : m_verticalScrollbar;
+    WebPluginScrollbarImpl* webScrollbar = orientation == HorizontalScrollbar ? m_horizontalScrollbar : m_verticalScrollbar;
     if (!webScrollbar)
         return 0;
     Scrollbar* scrollbar = webScrollbar->scrollbar();
@@ -93,7 +102,7 @@ int ScrollbarGroup::scrollSize(WebCore::ScrollbarOrientation orientation) const
 
 int ScrollbarGroup::scrollPosition(Scrollbar* scrollbar) const
 {
-    WebScrollbarImpl* webScrollbar = scrollbar->orientation() == HorizontalScrollbar ? m_horizontalScrollbar : m_verticalScrollbar;
+    WebPluginScrollbarImpl* webScrollbar = scrollbar->orientation() == HorizontalScrollbar ? m_horizontalScrollbar : m_verticalScrollbar;
     if (!webScrollbar)
         return 0;
     return webScrollbar->scrollOffset();
@@ -128,6 +137,16 @@ ScrollableArea* ScrollbarGroup::enclosingScrollableArea() const
 {
     // FIXME: Return a parent scrollable area that can be scrolled.
     return 0;
+}
+
+void ScrollbarGroup::setFrameRect(const IntRect& frameRect)
+{
+    m_frameRect = frameRect;
+}
+
+IntRect ScrollbarGroup::scrollableAreaBoundingBox() const
+{
+    return m_frameRect;
 }
 
 bool ScrollbarGroup::isScrollCornerVisible() const
@@ -206,14 +225,14 @@ IntSize ScrollbarGroup::contentsSize() const
     else if (m_verticalScrollbar) {
         size.setWidth(m_verticalScrollbar->scrollbar()->x());
         if (m_verticalScrollbar->scrollbar()->isOverlayScrollbar())
-            size.expand(WebScrollbar::defaultThickness(), 0);
+            size.expand(WebPluginScrollbar::defaultThickness(), 0);
     }
     if (m_verticalScrollbar)
         size.setHeight(m_verticalScrollbar->scrollbar()->totalSize());
     else if (m_horizontalScrollbar) {
         size.setHeight(m_horizontalScrollbar->scrollbar()->y());
         if (m_horizontalScrollbar->scrollbar()->isOverlayScrollbar())
-            size.expand(0, WebScrollbar::defaultThickness());
+            size.expand(0, WebPluginScrollbar::defaultThickness());
     }
     return size;
 }
@@ -223,7 +242,7 @@ IntSize ScrollbarGroup::overhangAmount() const
     return IntSize();
 }
 
-IntPoint ScrollbarGroup::currentMousePosition() const
+IntPoint ScrollbarGroup::lastKnownMousePosition() const
 {
     return m_lastMousePosition;
 }
@@ -244,14 +263,9 @@ void ScrollbarGroup::scrollbarStyleChanged(int, bool forceUpdate)
         m_verticalScrollbar->scrollbarStyleChanged();
 }
 
-bool ScrollbarGroup::isOnActivePage() const
+bool ScrollbarGroup::scrollbarsCanBeActive() const
 {
     return true;
-}
-
-void ScrollbarGroup::disconnectFromPage()
-{
-    m_page = 0;
 }
 
 } // namespace WebKit

@@ -33,36 +33,38 @@
 #define ChromeClientImpl_h
 
 #include "ChromeClientChromium.h"
-// TODO: we need this to make Linux bot happy. Need to find out why as it is not needed in clank case.
-#include "GraphicsLayer.h"
+#include "NavigatorContentUtilsClient.h"
 #include "PopupMenu.h"
 #include "SearchPopupMenu.h"
+#include "WebNavigationPolicy.h"
+#include <public/WebColor.h>
+#include <wtf/PassOwnPtr.h>
 
 namespace WebCore {
 class AccessibilityObject;
-#if ENABLE(INPUT_COLOR)
 class ColorChooser;
 class ColorChooserClient;
-#endif
 class Element;
 class FileChooser;
-class GraphicsLayer;
 class PopupContainer;
 class PopupMenuClient;
-class Region;
 class RenderBox;
-class ScrollableArea;
 class SecurityOrigin;
+class DateTimeChooser;
+class DateTimeChooserClient;
 struct WindowFeatures;
 }
 
 namespace WebKit {
+class WebColorChooser;
+class WebColorChooserClient;
 class WebViewImpl;
 struct WebCursorInfo;
+struct WebScreenInfo;
 struct WebPopupMenuInfo;
 
 // Handles window-level notifications from WebCore on behalf of a WebView.
-class ChromeClientImpl : public WebCore::ChromeClientChromium {
+class ChromeClientImpl : public WebCore::ChromeClientChromium, public WebCore::PageClientChromium {
 public:
     explicit ChromeClientImpl(WebViewImpl* webView);
     virtual ~ChromeClientImpl();
@@ -95,7 +97,7 @@ public:
     virtual bool menubarVisible();
     virtual void setResizable(bool);
     virtual void addMessageToConsole(
-        WebCore::MessageSource, WebCore::MessageType, WebCore::MessageLevel,
+        WebCore::MessageSource, WebCore::MessageLevel,
         const WTF::String& message, unsigned lineNumber,
         const WTF::String& sourceID);
     virtual bool canRunBeforeUnloadConfirmPanel();
@@ -111,9 +113,6 @@ public:
     virtual bool shouldInterruptJavaScript();
     virtual WebCore::KeyboardUIMode keyboardUIMode();
     virtual WebCore::IntRect windowResizerRect() const;
-#if ENABLE(REGISTER_PROTOCOL_HANDLER)
-    virtual void registerProtocolHandler(const String& scheme, const String& baseURL, const String& url, const String& title);
-#endif
     virtual void invalidateRootView(const WebCore::IntRect&, bool);
     virtual void invalidateContentsAndRootView(const WebCore::IntRect&, bool);
     virtual void invalidateContentsForSlowScroll(const WebCore::IntRect&, bool);
@@ -125,7 +124,7 @@ public:
         const WebCore::IntRect& clipRect);
     virtual WebCore::IntPoint screenToRootView(const WebCore::IntPoint&) const;
     virtual WebCore::IntRect rootViewToScreen(const WebCore::IntRect&) const;
-    virtual PlatformPageClient platformPageClient() const { return 0; }
+    virtual PlatformPageClient platformPageClient() const { return PlatformPageClient(this); }
     virtual void contentsSizeChanged(WebCore::Frame*, const WebCore::IntSize&) const;
     virtual void layoutUpdated(WebCore::Frame*) const;
     virtual void scrollRectIntoView(
@@ -140,11 +139,16 @@ public:
         WebCore::Frame*, const WTF::String& databaseName);
     virtual void reachedMaxAppCacheSize(int64_t spaceNeeded);
     virtual void reachedApplicationCacheOriginQuota(WebCore::SecurityOrigin*, int64_t totalSpaceNeeded);
+#if ENABLE(DRAGGABLE_REGION)
+    virtual void annotatedRegionsChanged();
+#endif
     virtual bool paintCustomOverhangArea(WebCore::GraphicsContext*, const WebCore::IntRect&, const WebCore::IntRect&, const WebCore::IntRect&);
-    virtual void requestGeolocationPermissionForFrame(WebCore::Frame*, WebCore::Geolocation*);
-    virtual void cancelGeolocationPermissionRequestForFrame(WebCore::Frame*, WebCore::Geolocation*);
-#if ENABLE(INPUT_COLOR)
+#if ENABLE(INPUT_TYPE_COLOR)
     virtual PassOwnPtr<WebCore::ColorChooser> createColorChooser(WebCore::ColorChooserClient*, const WebCore::Color&) OVERRIDE;
+    PassOwnPtr<WebColorChooser> createWebColorChooser(WebColorChooserClient*, const WebColor&);
+#endif
+#if ENABLE(DATE_AND_TIME_INPUT_TYPES)
+    virtual PassRefPtr<WebCore::DateTimeChooser> openDateTimeChooser(WebCore::DateTimeChooserClient*, const WebCore::DateTimeChooserParameters&) OVERRIDE;
 #endif
     virtual void runOpenPanel(WebCore::Frame*, PassRefPtr<WebCore::FileChooser>);
     virtual void loadIconForFiles(const Vector<WTF::String>&, WebCore::FileIconLoader*);
@@ -155,7 +159,7 @@ public:
     virtual void setCursorHiddenUntilMouseMoves(bool);
     virtual void formStateDidChange(const WebCore::Node*);
 #if ENABLE(TOUCH_EVENTS)
-    virtual void needTouchEvents(bool needTouchEvents);
+    virtual void needTouchEvents(bool needTouchEvents) OVERRIDE;
 #endif
 
 #if USE(ACCELERATED_COMPOSITING)
@@ -168,15 +172,9 @@ public:
 
     // Sets a flag to specify that the view needs to be updated, so we need
     // to do an eager layout before the drawing.
-    virtual void scheduleCompositingLayerSync();
+    virtual void scheduleCompositingLayerFlush();
 
     virtual CompositingTriggerFlags allowedCompositingTriggers() const;
-
-#if OS(ANDROID)
-    virtual void addOrUpdateScrollingLayer(WebCore::GraphicsLayer*, WebCore::ScrollableArea*, ScrollingBehavior);
-    virtual void removeScrollingLayer(WebCore::GraphicsLayer*);
-    virtual void setLayerInputEventRegion(WebCore::PlatformLayer*, const WebCore::Region&);
-#endif // OS(ANDROID)
 #endif
 
     virtual bool supportsFullscreenForNode(const WebCore::Node*);
@@ -190,10 +188,6 @@ public:
     virtual void fullScreenRendererChanged(WebCore::RenderBox*);
 #endif
 
-#if OS(ANDROID) && ENABLE(FONT_BOOSTING)
-    virtual int visibleWidth() const;
-#endif
-
     // ChromeClientChromium methods:
     virtual void popupOpened(WebCore::PopupContainer* popupContainer,
                              const WebCore::IntRect& bounds,
@@ -201,18 +195,26 @@ public:
     virtual void popupClosed(WebCore::PopupContainer* popupContainer);
     virtual void postAccessibilityNotification(WebCore::AccessibilityObject*, WebCore::AXObjectCache::AXNotification);
 
+    // PageClientChromium methods:
+    virtual WebScreenInfo screenInfo();
+
     // ChromeClientImpl:
     void setCursorForPlugin(const WebCursorInfo&);
+    void setNewWindowNavigationPolicy(WebNavigationPolicy);
 
     virtual bool selectItemWritingDirectionIsNatural();
     virtual bool selectItemAlignmentFollowsMenuWritingDirection();
     virtual bool hasOpenedPopup() const OVERRIDE;
     virtual PassRefPtr<WebCore::PopupMenu> createPopupMenu(WebCore::PopupMenuClient*) const;
     virtual PassRefPtr<WebCore::SearchPopupMenu> createSearchPopupMenu(WebCore::PopupMenuClient*) const;
-
-#if ENABLE(CONTEXT_MENUS)
-    virtual void showContextMenu() { }
+#if ENABLE(PAGE_POPUP)
+    virtual WebCore::PagePopup* openPagePopup(WebCore::PagePopupClient*, const WebCore::IntRect&) OVERRIDE;
+    virtual void closePagePopup(WebCore::PagePopup*) OVERRIDE;
+    virtual void setPagePopupDriver(WebCore::PagePopupDriver*) OVERRIDE;
+    virtual void resetPagePopupDriver() OVERRIDE;
 #endif
+    virtual bool willAddTextFieldDecorationsTo(WebCore::HTMLInputElement*) OVERRIDE;
+    virtual void addTextFieldDecorationsTo(WebCore::HTMLInputElement*) OVERRIDE;
 
     virtual bool shouldRunModalDialogDuringPageDismissal(const DialogType&, const String& dialogMessage, WebCore::FrameLoader::PageDismissalType) const;
 
@@ -226,6 +228,7 @@ public:
 #endif
 
 private:
+    WebNavigationPolicy getNavigationPolicy();
     void getPopupMenuInfo(WebCore::PopupContainer*, WebPopupMenuInfo*);
     void setCursor(const WebCursorInfo&);
 
@@ -235,6 +238,25 @@ private:
     bool m_scrollbarsVisible;
     bool m_menubarVisible;
     bool m_resizable;
+
+    // The policy for how the next webview to be created will be shown.
+    WebNavigationPolicy m_nextNewWindowNavigationPolicy;
+#if ENABLE(PAGE_POPUP)
+    WebCore::PagePopupDriver* m_pagePopupDriver;
+#endif
+};
+
+class NavigatorContentUtilsClientImpl : public WebCore::NavigatorContentUtilsClient {
+public:
+    static PassOwnPtr<NavigatorContentUtilsClientImpl> create(WebViewImpl*);
+    ~NavigatorContentUtilsClientImpl() { }
+
+    virtual void registerProtocolHandler(const String& scheme, const String& baseURL, const String& url, const String& title) OVERRIDE;
+
+private:
+    explicit NavigatorContentUtilsClientImpl(WebViewImpl*);
+
+    WebViewImpl* m_webView;
 };
 
 } // namespace WebKit

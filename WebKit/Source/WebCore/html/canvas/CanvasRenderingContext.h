@@ -28,6 +28,7 @@
 
 #include "GraphicsLayer.h"
 #include "HTMLCanvasElement.h"
+#include "ScriptWrappable.h"
 #include <wtf/HashSet.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/text/StringHash.h>
@@ -41,7 +42,7 @@ class HTMLVideoElement;
 class KURL;
 class WebGLObject;
 
-class CanvasRenderingContext {
+class CanvasRenderingContext : public ScriptWrappable {
     WTF_MAKE_NONCOPYABLE(CanvasRenderingContext); WTF_MAKE_FAST_ALLOCATED;
 public:
     virtual ~CanvasRenderingContext() { }
@@ -55,7 +56,6 @@ public:
     virtual bool isAccelerated() const { return false; }
 
     virtual void paintRenderingResultsToCanvas() {}
-    virtual bool paintsIntoCanvasBuffer() const { return true; }
 
 #if USE(ACCELERATED_COMPOSITING)
     virtual PlatformLayer* platformLayer() const { return 0; }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@
 #if ENABLE(DFG_JIT)
 
 #include "DFGAbstractValue.h"
+#include "DFGBranchDirection.h"
 #include "DFGGraph.h"
 #include "DFGNode.h"
 #include <wtf/Vector.h>
@@ -92,13 +93,23 @@ public:
         MergeToSuccessors
     };
     
-    AbstractState(CodeBlock*, Graph&);
+    AbstractState(Graph&);
     
     ~AbstractState();
     
     AbstractValue& forNode(NodeIndex nodeIndex)
     {
-        return m_nodes[nodeIndex - m_block->begin];
+        return m_nodes[nodeIndex];
+    }
+    
+    AbstractValue& forNode(Edge nodeUse)
+    {
+        return forNode(nodeUse.index());
+    }
+    
+    Operands<AbstractValue>& variables()
+    {
+        return m_variables;
     }
     
     // Call this before beginning CFA to initialize the abstract values of
@@ -141,13 +152,16 @@ public:
     void reset();
     
     // Abstractly executes the given node. The new abstract state is stored into an
-    // abstract register file stored in *this. Loads of local variables (that span
+    // abstract stack stored in *this. Loads of local variables (that span
     // basic blocks) interrogate the basic block's notion of the state at the head.
     // Stores to local variables are handled in endBasicBlock(). This returns true
     // if execution should continue past this node. Notably, it will return true
     // for block terminals, so long as those terminals are not Return or variants
     // of Throw.
-    bool execute(NodeIndex);
+    bool execute(unsigned);
+    
+    // Did the last executed node clobber the world?
+    bool didClobber() const { return m_didClobber; }
     
     // Is the execution state still valid? This will be false if execute() has
     // returned false previously.
@@ -158,34 +172,106 @@ public:
     // that block must be abstractly interpreted again. This also sets
     // to->cfaShouldRevisit to true, if it returns true, or if to has not been
     // visited yet.
-    static bool merge(BasicBlock* from, BasicBlock* to);
+    bool merge(BasicBlock* from, BasicBlock* to);
     
     // Merge the abstract state stored at the block's tail into all of its
     // successors. Returns true if any of the successors' states changed. Note
     // that this is automatically called in endBasicBlock() if MergeMode is
     // MergeToSuccessors.
-    static bool mergeToSuccessors(Graph&, BasicBlock*);
-
-#ifndef NDEBUG
-    void dump(FILE* out);
-#endif
+    bool mergeToSuccessors(Graph&, BasicBlock*);
+    
+    void dump(PrintStream& out);
     
 private:
-    void clobberStructures(NodeIndex);
+    void clobberWorld(const CodeOrigin&, unsigned indexInBlock);
+    void clobberCapturedVars(const CodeOrigin&);
+    void clobberStructures(unsigned indexInBlock);
     
     bool mergeStateAtTail(AbstractValue& destination, AbstractValue& inVariable, NodeIndex);
     
     static bool mergeVariableBetweenBlocks(AbstractValue& destination, AbstractValue& source, NodeIndex destinationNodeIndex, NodeIndex sourceNodeIndex);
     
+    void speculateInt32Unary(Node& node, bool forceCanExit = false)
+    {
+        AbstractValue& childValue = forNode(node.child1());
+        node.setCanExit(forceCanExit || !isInt32Speculation(childValue.m_type));
+        childValue.filter(SpecInt32);
+    }
+    
+    void speculateNumberUnary(Node& node)
+    {
+        AbstractValue& childValue = forNode(node.child1());
+        node.setCanExit(!isNumberSpeculation(childValue.m_type));
+        childValue.filter(SpecNumber);
+    }
+    
+    void speculateBooleanUnary(Node& node)
+    {
+        AbstractValue& childValue = forNode(node.child1());
+        node.setCanExit(!isBooleanSpeculation(childValue.m_type));
+        childValue.filter(SpecBoolean);
+    }
+    
+    void speculateInt32Binary(Node& node, bool forceCanExit = false)
+    {
+        AbstractValue& childValue1 = forNode(node.child1());
+        AbstractValue& childValue2 = forNode(node.child2());
+        node.setCanExit(
+            forceCanExit
+            || !isInt32Speculation(childValue1.m_type)
+            || !isInt32Speculation(childValue2.m_type));
+        childValue1.filter(SpecInt32);
+        childValue2.filter(SpecInt32);
+    }
+    
+    void speculateNumberBinary(Node& node)
+    {
+        AbstractValue& childValue1 = forNode(node.child1());
+        AbstractValue& childValue2 = forNode(node.child2());
+        node.setCanExit(
+            !isNumberSpeculation(childValue1.m_type)
+            || !isNumberSpeculation(childValue2.m_type));
+        childValue1.filter(SpecNumber);
+        childValue2.filter(SpecNumber);
+    }
+    
+    enum BooleanResult {
+        UnknownBooleanResult,
+        DefinitelyFalse,
+        DefinitelyTrue
+    };
+    BooleanResult booleanResult(Node&, AbstractValue&);
+    
+    bool trySetConstant(NodeIndex nodeIndex, JSValue value)
+    {
+        // Make sure we don't constant fold something that will produce values that contravene
+        // predictions. If that happens then we know that the code will OSR exit, forcing
+        // recompilation. But if we tried to constant fold then we'll have a very degenerate
+        // IR: namely we'll have a JSConstant that contravenes its own prediction. There's a
+        // lot of subtle code that assumes that
+        // speculationFromValue(jsConstant) == jsConstant.prediction(). "Hardening" that code
+        // is probably less sane than just pulling back on constant folding.
+        SpeculatedType oldType = m_graph[nodeIndex].prediction();
+        if (mergeSpeculations(speculationFromValue(value), oldType) != oldType)
+            return false;
+        
+        forNode(nodeIndex).set(value);
+        return true;
+    }
+    
     CodeBlock* m_codeBlock;
     Graph& m_graph;
     
-    Vector<AbstractValue, 32> m_nodes;
+    Vector<AbstractValue, 64> m_nodes;
     Operands<AbstractValue> m_variables;
     BasicBlock* m_block;
     bool m_haveStructures;
+    bool m_foundConstants;
     
     bool m_isValid;
+    bool m_didClobber;
+    
+    BranchDirection m_branchDirection; // This is only set for blocks that end in Branch and that execute to completion (i.e. m_isValid == true).
 };
 
 } } // namespace JSC::DFG

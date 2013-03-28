@@ -26,10 +26,11 @@
 #ifndef WriteBarrier_h
 #define WriteBarrier_h
 
+#include "GCAssertions.h"
 #include "HandleTypes.h"
 #include "Heap.h"
 #include "SamplingCounter.h"
-#include "TypeTraits.h"
+#include <wtf/TypeTraits.h>
 
 namespace JSC {
 
@@ -73,6 +74,13 @@ public:
         validateCell(value);
         setEarlyValue(globalData, owner, value);
     }
+    
+    // This is meant to be used like operator=, but is called copyFrom instead, in
+    // order to kindly inform the C++ compiler that its advice is not appreciated.
+    void copyFrom(const WriteBarrierBase<T>& other)
+    {
+        m_cell = other.m_cell;
+    }
 
     void setMayBeNull(JSGlobalData& globalData, const JSCell* owner, T* value)
     {
@@ -93,7 +101,7 @@ public:
     {
         if (m_cell)
             validateCell(m_cell);
-        return reinterpret_cast<T*>(m_cell);
+        return reinterpret_cast<T*>(static_cast<void*>(m_cell));
     }
 
     T* operator*() const
@@ -128,7 +136,7 @@ public:
     }
 
 #if ENABLE(GC_VALIDATION)
-    T* unvalidatedGet() const { return reinterpret_cast<T*>(m_cell); }
+    T* unvalidatedGet() const { return reinterpret_cast<T*>(static_cast<void*>(m_cell)); }
 #endif
 
 private:
@@ -168,6 +176,9 @@ public:
         u.v = &m_value;
         return u.slot;
     }
+    
+    int32_t* tagPointer() { return &bitwise_cast<EncodedValueDescriptor*>(&m_value)->asBits.tag; }
+    int32_t* payloadPointer() { return &bitwise_cast<EncodedValueDescriptor*>(&m_value)->asBits.payload; }
     
     typedef JSValue (WriteBarrierBase::*UnspecifiedBoolType);
     operator UnspecifiedBoolType*() const { return get() ? reinterpret_cast<UnspecifiedBoolType*>(1) : 0; }
@@ -214,14 +225,14 @@ template <typename U, typename V> inline bool operator==(const WriteBarrierBase<
     return lhs.get() == rhs.get();
 }
 
-// MarkStack functions
+// SlotVisitor functions
 
-template<typename T> inline void MarkStack::append(WriteBarrierBase<T>* slot)
+template<typename T> inline void SlotVisitor::append(WriteBarrierBase<T>* slot)
 {
     internalAppend(*slot->slot());
 }
 
-ALWAYS_INLINE void MarkStack::appendValues(WriteBarrierBase<Unknown>* barriers, size_t count)
+ALWAYS_INLINE void SlotVisitor::appendValues(WriteBarrierBase<Unknown>* barriers, size_t count)
 {
     append(barriers->slot(), count);
 }

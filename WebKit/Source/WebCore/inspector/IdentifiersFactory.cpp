@@ -24,11 +24,10 @@
  */
 
 #include "config.h"
-#include "IdentifiersFactory.h"
-
-#include <wtf/text/StringBuilder.h>
 
 #if ENABLE(INSPECTOR)
+
+#include "IdentifiersFactory.h"
 
 #include <wtf/text/StringBuilder.h>
 
@@ -50,15 +49,17 @@ String IdentifiersFactory::createIdentifier()
 // static
 String IdentifiersFactory::requestId(unsigned long identifier)
 {
-    return addProcessIdPrefixTo(String::number(identifier));
+    if (identifier)
+        return addProcessIdPrefixTo(String::number(identifier));
+    return String();
 }
 
 // static
 String IdentifiersFactory::addProcessIdPrefixTo(const String& id)
 {
     StringBuilder builder;
-    builder.append(String::number(s_processId));
-    builder.append(".");
+    builder.appendNumber(s_processId);
+    builder.append('.');
     builder.append(id);
     return builder.toString();
 }

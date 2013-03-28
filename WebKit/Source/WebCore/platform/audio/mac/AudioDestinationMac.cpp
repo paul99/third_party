@@ -32,18 +32,21 @@
 
 #include "AudioDestinationMac.h"
 
-#include "AudioSourceProvider.h"
+#include "AudioIOCallback.h"
 #include "FloatConversion.h"
+#include "VectorMath.h"
 #include <CoreAudio/AudioHardware.h>
 
 namespace WebCore {
 
 const int kBufferSize = 128;
+const float kLowThreshold = -1;
+const float kHighThreshold = 1;
 
 // Factory method: Mac-implementation
-PassOwnPtr<AudioDestination> AudioDestination::create(AudioSourceProvider& provider, float sampleRate)
+PassOwnPtr<AudioDestination> AudioDestination::create(AudioIOCallback& callback, float sampleRate)
 {
-    return adoptPtr(new AudioDestinationMac(provider, sampleRate));
+    return adoptPtr(new AudioDestinationMac(callback, sampleRate));
 }
 
 float AudioDestination::hardwareSampleRate()
@@ -68,9 +71,9 @@ float AudioDestination::hardwareSampleRate()
     return narrowPrecisionToFloat(nominalSampleRate);
 }
 
-AudioDestinationMac::AudioDestinationMac(AudioSourceProvider& provider, float sampleRate)
+AudioDestinationMac::AudioDestinationMac(AudioIOCallback& callback, float sampleRate)
     : m_outputUnit(0)
-    , m_provider(provider)
+    , m_callback(callback)
     , m_renderBus(2, kBufferSize, false)
     , m_sampleRate(sampleRate)
     , m_isPlaying(false)
@@ -155,7 +158,14 @@ OSStatus AudioDestinationMac::render(UInt32 numberOfFrames, AudioBufferList* ioD
     m_renderBus.setChannelMemory(0, (float*)buffers[0].mData, numberOfFrames);
     m_renderBus.setChannelMemory(1, (float*)buffers[1].mData, numberOfFrames);
 
-    m_provider.provideInput(&m_renderBus, numberOfFrames);
+    // FIXME: Add support for local/live audio input.
+    m_callback.render(0, &m_renderBus, numberOfFrames);
+
+    // Clamp values at 0db (i.e., [-1.0, 1.0])
+    for (unsigned i = 0; i < m_renderBus.numberOfChannels(); ++i) {
+        AudioChannel* channel = m_renderBus.channel(i);
+        VectorMath::vclip(channel->data(), 1, &kLowThreshold, &kHighThreshold, channel->mutableData(), 1, numberOfFrames);
+    }
 
     return noErr;
 }

@@ -36,14 +36,13 @@
 #include "Font.h"
 #include "FontCache.h"
 #include "FontDescription.h"
+#include "FontPlatformDataChromiumWin.h"
 #include "HWndDC.h"
-#include "PlatformSupport.h"
-#include <wtf/MathExtras.h>
-
+#include <mlang.h>
+#include <objidl.h>
 #include <unicode/uchar.h>
 #include <unicode/unorm.h>
-#include <objidl.h>
-#include <mlang.h>
+#include <wtf/MathExtras.h>
 
 namespace WebCore {
 
@@ -61,7 +60,7 @@ void SimpleFontData::platformInit()
 
     TEXTMETRIC textMetric = {0};
     if (!GetTextMetrics(dc, &textMetric)) {
-        if (PlatformSupport::ensureFontLoaded(m_platformData.hfont())) {
+        if (FontPlatformData::ensureFontLoaded(m_platformData.hfont())) {
             // Retry GetTextMetrics.
             // FIXME: Handle gracefully the error if this call also fails.
             // See http://crbug.com/6401.
@@ -81,6 +80,8 @@ void SimpleFontData::platformInit()
 
     OUTLINETEXTMETRIC outlineTextMetric;
     if (GetOutlineTextMetrics(dc, sizeof(outlineTextMetric), &outlineTextMetric) > 0) {
+        m_fontMetrics.setUnitsPerEm(outlineTextMetric.otmEMSquare);
+
         // This is a TrueType font.  We might be able to get an accurate xHeight.
         GLYPHMETRICS glyphMetrics = {0};
         MAT2 identityMatrix = {{0, 1}, {0, 0}, {0, 0}, {0, 1}};
@@ -107,34 +108,14 @@ void SimpleFontData::platformDestroy()
 {
 }
 
-PassOwnPtr<SimpleFontData> SimpleFontData::createScaledFontData(const FontDescription& fontDescription, float scaleFactor) const
+PassRefPtr<SimpleFontData> SimpleFontData::createScaledFontData(const FontDescription& fontDescription, float scaleFactor) const
 {
     LOGFONT winFont;
     GetObject(m_platformData.hfont(), sizeof(LOGFONT), &winFont);
     float scaledSize = scaleFactor * fontDescription.computedSize();
     winFont.lfHeight = -lroundf(scaledSize);
     HFONT hfont = CreateFontIndirect(&winFont);
-    return adoptPtr(new SimpleFontData(FontPlatformData(hfont, scaledSize), isCustomFont(), false));
-}
-
-SimpleFontData* SimpleFontData::smallCapsFontData(const FontDescription& fontDescription) const
-{
-    if (!m_derivedFontData)
-        m_derivedFontData = DerivedFontData::create(isCustomFont());
-    if (!m_derivedFontData->smallCaps)
-        m_derivedFontData->smallCaps = createScaledFontData(fontDescription, .7);
-
-    return m_derivedFontData->smallCaps.get();
-}
-
-SimpleFontData* SimpleFontData::emphasisMarkFontData(const FontDescription& fontDescription) const
-{
-    if (!m_derivedFontData)
-        m_derivedFontData = DerivedFontData::create(isCustomFont());
-    if (!m_derivedFontData->emphasisMark)
-        m_derivedFontData->emphasisMark = createScaledFontData(fontDescription, .5);
-
-    return m_derivedFontData->emphasisMark.get();
+    return SimpleFontData::create(FontPlatformData(hfont, scaledSize, m_platformData.orientation()), isCustomFont(), false);
 }
 
 bool SimpleFontData::containsCharacters(const UChar* characters, int length) const
@@ -154,7 +135,7 @@ void SimpleFontData::determinePitch()
     // is *not* fixed pitch.  Unbelievable but true.
     TEXTMETRIC textMetric = {0};
     if (!GetTextMetrics(dc, &textMetric)) {
-        if (PlatformSupport::ensureFontLoaded(m_platformData.hfont())) {
+        if (FontPlatformData::ensureFontLoaded(m_platformData.hfont())) {
             // Retry GetTextMetrics.
             // FIXME: Handle gracefully the error if this call also fails.
             // See http://crbug.com/6401.
@@ -168,9 +149,28 @@ void SimpleFontData::determinePitch()
     SelectObject(dc, oldFont);
 }
 
-FloatRect SimpleFontData::platformBoundsForGlyph(Glyph) const
+FloatRect SimpleFontData::platformBoundsForGlyph(Glyph glyph) const
 {
-    return FloatRect();
+    HWndDC hdc(0);
+    SetGraphicsMode(hdc, GM_ADVANCED);
+    HGDIOBJ oldFont = SelectObject(hdc, m_platformData.hfont());
+
+    GLYPHMETRICS gdiMetrics;
+    static const MAT2 identity = { 0, 1,  0, 0,  0, 0,  0, 1 };
+    if (GetGlyphOutline(hdc, glyph, GGO_METRICS | GGO_GLYPH_INDEX, &gdiMetrics, 0, 0, &identity) == -1) {
+        if (FontPlatformData::ensureFontLoaded(m_platformData.hfont())) {
+            // Retry GetTextMetrics.
+            // FIXME: Handle gracefully the error if this call also fails.
+            // See http://crbug.com/6401.
+            if (GetGlyphOutline(hdc, glyph, GGO_METRICS | GGO_GLYPH_INDEX, &gdiMetrics, 0, 0, &identity) == -1)
+                LOG_ERROR("Unable to get the glyph metrics after second attempt");
+        }
+    }
+
+    SelectObject(hdc, oldFont);
+
+    return FloatRect(gdiMetrics.gmptGlyphOrigin.x, -gdiMetrics.gmptGlyphOrigin.y,
+        gdiMetrics.gmBlackBoxX, gdiMetrics.gmBlackBoxY);
 }
 
 float SimpleFontData::platformWidthForGlyph(Glyph glyph) const
@@ -184,7 +184,7 @@ float SimpleFontData::platformWidthForGlyph(Glyph glyph) const
     int width = 0;
     if (!GetCharWidthI(dc, glyph, 1, 0, &width)) {
         // Ask the browser to preload the font and retry.
-        if (PlatformSupport::ensureFontLoaded(m_platformData.hfont())) {
+        if (FontPlatformData::ensureFontLoaded(m_platformData.hfont())) {
             // FIXME: Handle gracefully the error if this call also fails.
             // See http://crbug.com/6401.
             if (!GetCharWidthI(dc, glyph, 1, 0, &width))

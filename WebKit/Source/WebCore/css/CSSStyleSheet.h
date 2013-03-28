@@ -1,6 +1,6 @@
 /*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
- * Copyright (C) 2004, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2006, 2007, 2008, 2009, 2010, 2012 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,114 +21,134 @@
 #ifndef CSSStyleSheet_h
 #define CSSStyleSheet_h
 
-#include "CSSRuleList.h"
+#include "CSSParserMode.h"
+#include "CSSRule.h"
 #include "StyleSheet.h"
+#include <wtf/HashMap.h>
+#include <wtf/Noncopyable.h>
+#include <wtf/text/AtomicStringHash.h>
 
 namespace WebCore {
 
-struct CSSNamespace;
+class CSSCharsetRule;
+class CSSImportRule;
 class CSSParser;
 class CSSRule;
-class CachedResourceLoader;
+class CSSRuleList;
+class CSSStyleSheet;
+class CachedCSSStyleSheet;
 class Document;
+class MediaQuerySet;
+class SecurityOrigin;
+class StyleSheetContents;
 
 typedef int ExceptionCode;
 
 class CSSStyleSheet : public StyleSheet {
 public:
-    static PassRefPtr<CSSStyleSheet> create()
-    {
-        return adoptRef(new CSSStyleSheet(static_cast<CSSImportRule*>(0), String(), KURL(), String()));
-    }
-    static PassRefPtr<CSSStyleSheet> create(Node* ownerNode)
-    {
-        return adoptRef(new CSSStyleSheet(ownerNode, String(), KURL(), String()));
-    }
-    static PassRefPtr<CSSStyleSheet> create(Node* ownerNode, const String& originalURL, const KURL& finalURL, const String& charset)
-    {
-        return adoptRef(new CSSStyleSheet(ownerNode, originalURL, finalURL, charset));
-    }
-    static PassRefPtr<CSSStyleSheet> create(CSSImportRule* ownerRule, const String& originalURL, const KURL& finalURL, const String& charset)
-    {
-        return adoptRef(new CSSStyleSheet(ownerRule, originalURL, finalURL, charset));
-    }
-    static PassRefPtr<CSSStyleSheet> createInline(Node* ownerNode, const KURL& finalURL)
-    {
-        return adoptRef(new CSSStyleSheet(ownerNode, finalURL.string(), finalURL, String()));
-    }
+    static PassRefPtr<CSSStyleSheet> create(PassRefPtr<StyleSheetContents>, CSSImportRule* ownerRule = 0);
+    static PassRefPtr<CSSStyleSheet> create(PassRefPtr<StyleSheetContents>, Node* ownerNode);
+    static PassRefPtr<CSSStyleSheet> createInline(Node*, const KURL&, const String& encoding = String());
 
     virtual ~CSSStyleSheet();
 
-    CSSStyleSheet* parentStyleSheet() const
-    {
-        StyleSheet* parentSheet = StyleSheet::parentStyleSheet();
-        ASSERT(!parentSheet || parentSheet->isCSSStyleSheet());
-        return static_cast<CSSStyleSheet*>(parentSheet);
-    }
-
-    PassRefPtr<CSSRuleList> cssRules(bool omitCharsetRules = false);
+    virtual CSSStyleSheet* parentStyleSheet() const OVERRIDE;
+    virtual Node* ownerNode() const OVERRIDE { return m_ownerNode; }
+    virtual MediaList* media() const OVERRIDE;
+    virtual String href() const OVERRIDE;
+    virtual String title() const OVERRIDE { return m_title; }
+    virtual bool disabled() const OVERRIDE { return m_isDisabled; }
+    virtual void setDisabled(bool) OVERRIDE;
+    
+    PassRefPtr<CSSRuleList> cssRules();
     unsigned insertRule(const String& rule, unsigned index, ExceptionCode&);
     void deleteRule(unsigned index, ExceptionCode&);
-
+    
     // IE Extensions
-    PassRefPtr<CSSRuleList> rules() { return cssRules(true); }
+    PassRefPtr<CSSRuleList> rules();
     int addRule(const String& selector, const String& style, int index, ExceptionCode&);
     int addRule(const String& selector, const String& style, ExceptionCode&);
     void removeRule(unsigned index, ExceptionCode& ec) { deleteRule(index, ec); }
+    
+    // For CSSRuleList.
+    unsigned length() const;
+    CSSRule* item(unsigned index);
 
-    void addNamespace(CSSParser*, const AtomicString& prefix, const AtomicString& uri);
-    const AtomicString& determineNamespace(const AtomicString& prefix);
+    virtual void clearOwnerNode() OVERRIDE { m_ownerNode = 0; }
+    virtual CSSImportRule* ownerRule() const OVERRIDE { return m_ownerRule; }
+    virtual KURL baseURL() const OVERRIDE;
+    virtual bool isLoading() const OVERRIDE;
+    
+    void clearOwnerRule() { m_ownerRule = 0; }
+    Document* ownerDocument() const;
+    MediaQuerySet* mediaQueries() const { return m_mediaQueries.get(); }
+    void setMediaQueries(PassRefPtr<MediaQuerySet>);
+    void setTitle(const String& title) { m_title = title; }
 
-    void styleSheetChanged();
+    class RuleMutationScope {
+        WTF_MAKE_NONCOPYABLE(RuleMutationScope);
+    public:
+        RuleMutationScope(CSSStyleSheet*);
+        RuleMutationScope(CSSRule*);
+        ~RuleMutationScope();
 
-    virtual bool parseString(const String&, bool strict = true);
+    private:
+        CSSStyleSheet* m_styleSheet;
+    };
 
-    bool parseStringAtLine(const String&, bool strict, int startLineNumber);
+    void willMutateRules();
+    void didMutateRules();
+    void didMutate();
+    
+    void clearChildRuleCSSOMWrappers();
+    void reattachChildRuleCSSOMWrappers();
 
-    virtual bool isLoading();
+    StyleSheetContents* contents() const { return m_contents.get(); }
 
-    void checkLoaded();
-    void startLoadingDynamicSheet();
-
-    Node* findStyleSheetOwnerNode() const;
-    Document* findDocument();
-
-    const String& charset() const { return m_charset; }
-
-    bool loadCompleted() const { return m_loadCompleted; }
-
-    KURL completeURL(const String& url) const;
-    void addSubresourceStyleURLs(ListHashSet<KURL>&);
-
-    void setStrictParsing(bool b) { m_strictParsing = b; }
-    bool useStrictParsing() const { return m_strictParsing; }
-
-    void setIsUserStyleSheet(bool b) { m_isUserStyleSheet = b; }
-    bool isUserStyleSheet() const { return m_isUserStyleSheet; }
-    void setHasSyntacticallyValidCSSHeader(bool b) { m_hasSyntacticallyValidCSSHeader = b; }
-    bool hasSyntacticallyValidCSSHeader() const { return m_hasSyntacticallyValidCSSHeader; }
-
-    void append(PassRefPtr<CSSRule>);
-    void remove(unsigned index);
-
-    unsigned length() const { return m_children.size(); }
-    CSSRule* item(unsigned index) { return index < length() ? m_children.at(index).get() : 0; }
+    void reportMemoryUsage(MemoryObjectInfo*) const;
 
 private:
-    CSSStyleSheet(Node* ownerNode, const String& originalURL, const KURL& finalURL, const String& charset);
-    CSSStyleSheet(CSSImportRule* ownerRule, const String& originalURL, const KURL& finalURL, const String& charset);
+    CSSStyleSheet(PassRefPtr<StyleSheetContents>, CSSImportRule* ownerRule);
+    CSSStyleSheet(PassRefPtr<StyleSheetContents>, Node* ownerNode, bool isInlineStylesheet);
 
     virtual bool isCSSStyleSheet() const { return true; }
     virtual String type() const { return "text/css"; }
 
-    Vector<RefPtr<CSSRule> > m_children;
-    OwnPtr<CSSNamespace> m_namespaces;
-    String m_charset;
-    bool m_loadCompleted : 1;
-    bool m_strictParsing : 1;
-    bool m_isUserStyleSheet : 1;
-    bool m_hasSyntacticallyValidCSSHeader : 1;
+    bool canAccessRules() const;
+    
+    RefPtr<StyleSheetContents> m_contents;
+    bool m_isInlineStylesheet;
+    bool m_isDisabled;
+    String m_title;
+    RefPtr<MediaQuerySet> m_mediaQueries;
+
+    Node* m_ownerNode;
+    CSSImportRule* m_ownerRule;
+
+    mutable RefPtr<MediaList> m_mediaCSSOMWrapper;
+    mutable Vector<RefPtr<CSSRule> > m_childRuleCSSOMWrappers;
+    mutable OwnPtr<CSSRuleList> m_ruleListCSSOMWrapper;
 };
+
+inline CSSStyleSheet::RuleMutationScope::RuleMutationScope(CSSStyleSheet* sheet)
+    : m_styleSheet(sheet)
+{
+    if (m_styleSheet)
+        m_styleSheet->willMutateRules();
+}
+
+inline CSSStyleSheet::RuleMutationScope::RuleMutationScope(CSSRule* rule)
+    : m_styleSheet(rule ? rule->parentStyleSheet() : 0)
+{
+    if (m_styleSheet)
+        m_styleSheet->willMutateRules();
+}
+
+inline CSSStyleSheet::RuleMutationScope::~RuleMutationScope()
+{
+    if (m_styleSheet)
+        m_styleSheet->didMutateRules();
+}
 
 } // namespace
 

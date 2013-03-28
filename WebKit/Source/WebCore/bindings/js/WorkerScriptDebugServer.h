@@ -42,19 +42,31 @@ class WorkerContext;
 class WorkerScriptDebugServer : public ScriptDebugServer {
     WTF_MAKE_NONCOPYABLE(WorkerScriptDebugServer);
 public:
-    WorkerScriptDebugServer();
+    explicit WorkerScriptDebugServer(WorkerContext*);
     ~WorkerScriptDebugServer() { }
 
-    void addListener(ScriptDebugListener*, WorkerContext*);
-    void removeListener(ScriptDebugListener*, WorkerContext*);
+    void addListener(ScriptDebugListener*);
+    void removeListener(ScriptDebugListener*);
 
     static const char* debuggerTaskMode;
 
+    void interruptAndRunTask(PassOwnPtr<ScriptDebugServer::Task>);
+
+    void recompileAllJSFunctions(Timer<ScriptDebugServer>*);
+
 private:
-    virtual void recompileAllJSFunctions(Timer<ScriptDebugServer>*) { }
-    virtual ListenerSet* getListenersForGlobalObject(JSC::JSGlobalObject*) { return 0; }
+    virtual ListenerSet* getListenersForGlobalObject(JSC::JSGlobalObject*) { return &m_listeners; }
     virtual void didPause(JSC::JSGlobalObject*) { }
     virtual void didContinue(JSC::JSGlobalObject*) { }
+
+    virtual bool isContentScript(JSC::ExecState*) { return false; }
+
+    virtual void willExecuteProgram(const JSC::DebuggerCallFrame&, intptr_t sourceID, int lineno, int columnNumber);
+
+    virtual void runEventLoopWhilePaused();
+
+    WorkerContext* m_workerContext;
+    ListenerSet m_listeners;
 };
 
 } // namespace WebCore

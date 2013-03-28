@@ -20,7 +20,7 @@
 #include "config.h"
 #include "NotificationPresenterClientEfl.h"
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 #include "NotImplemented.h"
 
 namespace WebCore {
@@ -59,7 +59,7 @@ void NotificationPresenterClientEfl::requestPermission(ScriptExecutionContext* c
     notImplemented();
 }
 
-NotificationPresenter::Permission NotificationPresenterClientEfl::checkPermission(ScriptExecutionContext* context)
+NotificationClient::Permission NotificationPresenterClientEfl::checkPermission(ScriptExecutionContext* context)
 {
     notImplemented();
     return PermissionDenied;

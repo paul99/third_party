@@ -34,25 +34,25 @@
 #if ENABLE(FILE_SYSTEM)
 
 #include "AsyncFileSystemCallbacks.h"
-#include "FileSystem.h"
+#include "ExceptionCode.h"
 #include "NotImplemented.h"
 
 namespace WebCore {
 
-#if !PLATFORM(CHROMIUM)
+#if !PLATFORM(CHROMIUM) && !PLATFORM(GTK) && !PLATFORM(BLACKBERRY) && !PLATFORM(EFL)
 bool AsyncFileSystem::isAvailable()
 {
     notImplemented();
     return false;
 }
 
-PassOwnPtr<AsyncFileSystem> AsyncFileSystem::create(Type, const String&)
+void AsyncFileSystem::openFileSystem(const String& basePath, const String& storageIdentifier, FileSystemType, bool, PassOwnPtr<AsyncFileSystemCallbacks> callbacks)
 {
     notImplemented();
-    return 0;
+    callbacks->didFail(NOT_SUPPORTED_ERR);
 }
 
-void AsyncFileSystem::openFileSystem(const String& basePath, const String& storageIdentifier, Type type, bool, PassOwnPtr<AsyncFileSystemCallbacks> callbacks)
+void AsyncFileSystem::deleteFileSystem(const String& basePath, const String& storageIdentifier, FileSystemType type, PassOwnPtr<AsyncFileSystemCallbacks> callbacks)
 {
     notImplemented();
     callbacks->didFail(NOT_SUPPORTED_ERR);

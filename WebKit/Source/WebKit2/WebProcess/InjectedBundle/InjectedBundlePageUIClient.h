@@ -29,12 +29,14 @@
 #include "APIClient.h"
 #include "WKBundlePage.h"
 #include "WebEvent.h"
+#include "WebImage.h"
+#include <WebCore/RenderSnapshottedPlugIn.h>
 #include <wtf/Forward.h>
 
 namespace WebCore {
-    class GraphicsContext;
-    class HitTestResult;
-    class IntRect;
+class GraphicsContext;
+class HitTestResult;
+class IntRect;
 }
 
 namespace WebKit {
@@ -42,6 +44,7 @@ namespace WebKit {
 class APIObject;
 class WebFrame;
 class WebPage;
+class WebSecurityOrigin;
 
 class InjectedBundlePageUIClient : public APIClient<WKBundlePageUIClient, kWKBundlePageUIClientCurrentVersion> {
 public:
@@ -64,6 +67,11 @@ public:
     WKBundlePageUIElementVisibility statusBarIsVisible(WebPage*);
     WKBundlePageUIElementVisibility menuBarIsVisible(WebPage*);
     WKBundlePageUIElementVisibility toolbarsAreVisible(WebPage*);
+
+    void didReachApplicationCacheOriginQuota(WebPage*, WebSecurityOrigin*, int64_t totalBytesNeeded);
+    uint64_t didExceedDatabaseQuota(WebPage*, WebSecurityOrigin*, const String& databaseName, const String& databaseDisplayName, uint64_t currentQuotaBytes, uint64_t currentOriginUsageBytes, uint64_t currentDatabaseUsageBytes, uint64_t expectedUsageBytes);
+
+    PassRefPtr<WebImage> plugInStartLabelImage(WebCore::RenderSnapshottedPlugIn::LabelSize) const;
 };
 
 } // namespace WebKit

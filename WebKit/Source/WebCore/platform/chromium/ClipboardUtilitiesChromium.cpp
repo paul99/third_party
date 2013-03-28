@@ -33,23 +33,32 @@
 
 #include "KURL.h"
 #include "Pasteboard.h"
-#include "PlatformString.h"
+
+#include <public/WebClipboard.h>
+#include <wtf/text/StringBuilder.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-PasteboardPrivate::ClipboardBuffer currentPasteboardBuffer()
+WebKit::WebClipboard::Buffer currentPasteboardBuffer()
 {
     return Pasteboard::generalPasteboard()->isSelectionMode() ?
-        PasteboardPrivate::SelectionBuffer :
-        PasteboardPrivate::StandardBuffer;
+        WebKit::WebClipboard::BufferSelection :
+        WebKit::WebClipboard::BufferStandard;
 }
 
 #if OS(WINDOWS)
 void replaceNewlinesWithWindowsStyleNewlines(String& str)
 {
-    static const UChar Newline = '\n';
-    static const char* const WindowsNewline("\r\n");
-    str.replace(Newline, WindowsNewline);
+    DEFINE_STATIC_LOCAL(String, windowsNewline, (ASCIILiteral("\r\n")));
+    StringBuilder result;
+    for (unsigned index = 0; index < str.length(); ++index) {
+        if (str[index] != '\n' || (index > 0 && str[index - 1] == '\r'))
+            result.append(str[index]);
+        else
+            result.append(windowsNewline);
+    }
+    str = result.toString();
 }
 #endif
 
@@ -58,6 +67,28 @@ void replaceNBSPWithSpace(String& str)
     static const UChar NonBreakingSpaceCharacter = 0xA0;
     static const UChar SpaceCharacter = ' ';
     str.replace(NonBreakingSpaceCharacter, SpaceCharacter);
+}
+
+String convertURIListToURL(const String& uriList)
+{
+    Vector<String> items;
+    // Line separator is \r\n per RFC 2483 - however, for compatibility
+    // reasons we allow just \n here.
+    uriList.split('\n', items);
+    // Process the input and return the first valid URL. In case no URLs can
+    // be found, return an empty string. This is in line with the HTML5 spec.
+    for (size_t i = 0; i < items.size(); ++i) {
+        String& line = items[i];
+        line = line.stripWhiteSpace();
+        if (line.isEmpty())
+            continue;
+        if (line[0] == '#')
+            continue;
+        KURL url = KURL(ParsedURLString, line);
+        if (url.isValid())
+            return url;
+    }
+    return String();
 }
 
 } // namespace WebCore

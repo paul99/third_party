@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2012 Nokia Corporation and/or its subsidiary(-ies)
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,8 +30,10 @@
 // FIXME: We should probably move to makeing the WebCore/PlatformFooEvents trivial classes so that
 // we can use them as the event type.
 
+#include <WebCore/FloatPoint.h>
 #include <WebCore/FloatSize.h>
 #include <WebCore/IntPoint.h>
+#include <WebCore/IntSize.h>
 #include <wtf/text/WTFString.h>
 
 namespace CoreIPC {
@@ -100,7 +103,7 @@ protected:
 
     WebEvent(Type, Modifiers, double timestamp);
 
-    void encode(CoreIPC::ArgumentEncoder*) const;
+    void encode(CoreIPC::ArgumentEncoder&) const;
     static bool decode(CoreIPC::ArgumentDecoder*, WebEvent&);
 
 private:
@@ -137,7 +140,7 @@ public:
     bool didActivateWebView() const { return m_didActivateWebView; }
 #endif
 
-    void encode(CoreIPC::ArgumentEncoder*) const;
+    void encode(CoreIPC::ArgumentEncoder&) const;
     static bool decode(CoreIPC::ArgumentDecoder*, WebMouseEvent&);
 
 private:
@@ -179,7 +182,7 @@ public:
 
     WebWheelEvent(Type, const WebCore::IntPoint& position, const WebCore::IntPoint& globalPosition, const WebCore::FloatSize& delta, const WebCore::FloatSize& wheelTicks, Granularity, Modifiers, double timestamp);
 #if PLATFORM(MAC)
-    WebWheelEvent(Type, const WebCore::IntPoint& position, const WebCore::IntPoint& globalPosition, const WebCore::FloatSize& delta, const WebCore::FloatSize& wheelTicks, Granularity, Phase, Phase momentumPhase, bool hasPreciseScrollingDeltas, Modifiers, double timestamp, bool directionInvertedFromDevice);
+    WebWheelEvent(Type, const WebCore::IntPoint& position, const WebCore::IntPoint& globalPosition, const WebCore::FloatSize& delta, const WebCore::FloatSize& wheelTicks, Granularity, bool directionInvertedFromDevice, Phase, Phase momentumPhase, bool hasPreciseScrollingDeltas, uint32_t scrollCount, const WebCore::FloatSize& unacceleratedScrollingDelta, Modifiers, double timestamp);
 #endif
 
     const WebCore::IntPoint position() const { return m_position; }
@@ -192,9 +195,11 @@ public:
     Phase phase() const { return static_cast<Phase>(m_phase); }
     Phase momentumPhase() const { return static_cast<Phase>(m_momentumPhase); }
     bool hasPreciseScrollingDeltas() const { return m_hasPreciseScrollingDeltas; }
+    uint32_t scrollCount() const { return m_scrollCount; }
+    const WebCore::FloatSize& unacceleratedScrollingDelta() const { return m_unacceleratedScrollingDelta; }
 #endif
 
-    void encode(CoreIPC::ArgumentEncoder*) const;
+    void encode(CoreIPC::ArgumentEncoder&) const;
     static bool decode(CoreIPC::ArgumentDecoder*, WebWheelEvent&);
 
 private:
@@ -210,6 +215,8 @@ private:
     uint32_t m_phase; // Phase
     uint32_t m_momentumPhase; // Phase
     bool m_hasPreciseScrollingDeltas;
+    uint32_t m_scrollCount;
+    WebCore::FloatSize m_unacceleratedScrollingDelta;
 #endif
 };
 
@@ -230,7 +237,7 @@ public:
     bool isKeypad() const { return m_isKeypad; }
     bool isSystemKey() const { return m_isSystemKey; }
 
-    void encode(CoreIPC::ArgumentEncoder*) const;
+    void encode(CoreIPC::ArgumentEncoder&) const;
     static bool decode(CoreIPC::ArgumentDecoder*, WebKeyboardEvent&);
 
     static bool isKeyboardEventType(Type);
@@ -254,11 +261,14 @@ class WebGestureEvent : public WebEvent {
 public:
     WebGestureEvent() { }
     WebGestureEvent(Type, const WebCore::IntPoint& position, const WebCore::IntPoint& globalPosition, Modifiers, double timestamp);
+    WebGestureEvent(Type, const WebCore::IntPoint& position, const WebCore::IntPoint& globalPosition, Modifiers, double timestamp, const WebCore::IntSize& area, const WebCore::FloatPoint& delta);
 
     const WebCore::IntPoint position() const { return m_position; }
     const WebCore::IntPoint globalPosition() const { return m_globalPosition; }
+    const WebCore::IntSize area() const { return m_area; }
+    const WebCore::FloatPoint delta() const { return m_delta; }
 
-    void encode(CoreIPC::ArgumentEncoder*) const;
+    void encode(CoreIPC::ArgumentEncoder&) const;
     static bool decode(CoreIPC::ArgumentDecoder*, WebGestureEvent&);
 
 private:
@@ -266,6 +276,8 @@ private:
 
     WebCore::IntPoint m_position;
     WebCore::IntPoint m_globalPosition;
+    WebCore::IntSize m_area;
+    WebCore::FloatPoint m_delta;
 };
 #endif // ENABLE(GESTURE_EVENTS)
 
@@ -284,19 +296,24 @@ public:
         TouchCancelled
     };
 
-    WebPlatformTouchPoint() { }
+    WebPlatformTouchPoint() : m_rotationAngle(0.0), m_force(0.0) { }
 
     WebPlatformTouchPoint(uint32_t id, TouchPointState, const WebCore::IntPoint& screenPosition, const WebCore::IntPoint& position);
 
+    WebPlatformTouchPoint(uint32_t id, TouchPointState, const WebCore::IntPoint& screenPosition, const WebCore::IntPoint& position, const WebCore::IntSize& radius, float rotationAngle = 0.0, float force = 0.0);
+    
     uint32_t id() const { return m_id; }
     TouchPointState state() const { return static_cast<TouchPointState>(m_state); }
 
     const WebCore::IntPoint& screenPosition() const { return m_screenPosition; }
     const WebCore::IntPoint& position() const { return m_position; }
-          
+    const WebCore::IntSize& radius() const { return m_radius; }
+    float rotationAngle() const { return m_rotationAngle; }
+    float force() const { return m_force; }
+
     void setState(TouchPointState state) { m_state = state; }
 
-    void encode(CoreIPC::ArgumentEncoder*) const;
+    void encode(CoreIPC::ArgumentEncoder&) const;
     static bool decode(CoreIPC::ArgumentDecoder*, WebPlatformTouchPoint&);
 
 private:
@@ -304,7 +321,9 @@ private:
     uint32_t m_state;
     WebCore::IntPoint m_screenPosition;
     WebCore::IntPoint m_position;
-
+    WebCore::IntSize m_radius;
+    float m_rotationAngle;
+    float m_force;
 };
 
 // FIXME: Move this class to its own header file.
@@ -317,7 +336,7 @@ public:
 
     const Vector<WebPlatformTouchPoint>& touchPoints() const { return m_touchPoints; }
 
-    void encode(CoreIPC::ArgumentEncoder*) const;
+    void encode(CoreIPC::ArgumentEncoder&) const;
     static bool decode(CoreIPC::ArgumentDecoder*, WebTouchEvent&);
   
 private:

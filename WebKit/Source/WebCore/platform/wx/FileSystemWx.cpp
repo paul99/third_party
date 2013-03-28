@@ -30,6 +30,7 @@
 #include "config.h"
 #include "FileSystem.h"
 
+#include "FileMetadata.h"
 #include <wx/wx.h>
 #include <wx/datetime.h>
 #include <wx/dir.h>
@@ -39,8 +40,8 @@
 #include <wx/filename.h>
 
 #include "NotImplemented.h"
-#include "PlatformString.h"
 #include <wtf/text/CString.h>
+#include <wtf/text/WTFString.h>
 
 #if OS(DARWIN)
 #include <CoreFoundation/CoreFoundation.h>
@@ -83,6 +84,17 @@ bool getFileModificationTime(const String& path, time_t& t)
         return true;
     }
     return false;
+}
+
+bool getFileMetadata(const String& path, FileMetadata& metadata)
+{
+    if (!wxFileExists(path))
+        return false;
+    wxFileName fileName(path);
+    metadata.length = fileName.GetSize().GetValue();
+    metadata.modificationTime = fileName.GetModificationTime().GetTicks();
+    metadata.type = fileName.IsDir() ? FileMetadata::TypeDirectory : FileMetadata::TypeFile;
+    return true;
 }
 
 bool makeAllDirectories(const String& path)

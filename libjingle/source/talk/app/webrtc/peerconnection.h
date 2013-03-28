@@ -1,6 +1,6 @@
 /*
  * libjingle
- * Copyright 2011, Google Inc.
+ * Copyright 2012, Google Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -25,252 +25,144 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-// This file contains the PeerConnection interface as defined in
-// http://dev.w3.org/2011/webrtc/editor/webrtc.html#peer-to-peer-connections.
-// Applications must use this interface to implement peerconnection.
-// PeerConnectionFactory class provides factory methods to create
-// peerconnection, mediastream and media tracks objects.
-//
-// The Following steps are needed to setup a typical call.
-// 1. Create a PeerConnectionFactoryInterface. Check constructors for more
-// information about input parameters.
-// 2. Create a PeerConnection object. Provide a configuration string which
-// points either to stun or turn server to generate ICE candidates and provide
-// an object that implements the PeerConnectionObserver interface.
-// Now PeerConnection will startcollecting ICE candidates.
-// 3. Create local MediaStream and MediaTracks using the PeerConnectionFactory
-// and add it to PeerConnection by calling AddStream.
-// 4. Once all mediastreams are added to peerconnection, call
-// CommitStreamChanges. Now PeerConnection starts generating an offer based on
-// the local mediastreams.
-// 5. When PeerConnection have generated the ICE candidates it will call the
-// observer OnSignalingMessage callback with the initial offer.
-// 6. When an Answer from peer received it must be supplied to the
-// PeerConnection by calling ProcessSignalingMessage.
-// At this point PeerConnection knows remote capabilities and ICE candidates.
-// Media will start flowing to the remote peer.
-
-// The Receiver of a call can decide to accept or reject the call.
-// This decision will be taken by the application not peerconnection.
-// If application decides to accept the call
-// 1. Create PeerConnectionFactoryInterface if it doesn't exist.
-// 2. Create new PeerConnection
-// 3. Provide the remote offer to the new PeerConnection object by calling
-// ProcessSignalingMessage.
-// 4. PeerConnection will call the observer function OnAddStream with remote
-// MediaStream and tracks information.
-// 5. PeerConnection will call the observer function OnSignalingMessage with
-// local ICE candidates in a answer message.
-// 6. Application can add it's own MediaStreams by calling AddStream.
-// When all streams have been added the application must call
-// CommitStreamChanges. Streams can be added at any time after the
-// PeerConnection object have been created.
-
 #ifndef TALK_APP_WEBRTC_PEERCONNECTION_H_
 #define TALK_APP_WEBRTC_PEERCONNECTION_H_
 
 #include <string>
-#include <vector>
 
-#include "talk/app/webrtc/mediastream.h"
-#include "talk/base/socketaddress.h"
-
-namespace talk_base {
-class Thread;
-}
-
-namespace cricket {
-class PortAllocator;
-}
+#include "talk/app/webrtc/mediastreamsignaling.h"
+#include "talk/app/webrtc/peerconnectioninterface.h"
+#include "talk/app/webrtc/peerconnectionfactory.h"
+#include "talk/app/webrtc/statscollector.h"
+#include "talk/app/webrtc/streamcollection.h"
+#include "talk/app/webrtc/webrtcsession.h"
+#include "talk/base/scoped_ptr.h"
 
 namespace webrtc {
-class VideoCaptureModule;
+class MediaStreamHandlers;
 
-// MediaStream container interface.
-class StreamCollectionInterface : public talk_base::RefCountInterface {
+typedef std::vector<PortAllocatorFactoryInterface::StunConfiguration>
+    StunConfigurations;
+typedef std::vector<PortAllocatorFactoryInterface::TurnConfiguration>
+    TurnConfigurations;
+
+// PeerConnectionImpl implements the PeerConnection interface.
+// It uses MediaStreamSignaling and WebRtcSession to implement
+// the PeerConnection functionality.
+class PeerConnection : public PeerConnectionInterface,
+                       public RemoteMediaStreamObserver,
+                       public IceCandidateObserver,
+                       public talk_base::MessageHandler,
+                       public sigslot::has_slots<> {
  public:
-  virtual size_t count() = 0;
-  virtual MediaStreamInterface* at(size_t index) = 0;
-  virtual MediaStreamInterface* find(const std::string& label) = 0;
- protected:
-  // Dtor protected as objects shouldn't be deleted via this interface.
-  ~StreamCollectionInterface() {}
-};
+  explicit PeerConnection(PeerConnectionFactory* factory);
 
-// PeerConnection callback interface. Application should implement these
-// methods.
-class PeerConnectionObserver {
- public:
-  enum StateType {
-    kReadyState,
-    kIceState,
-    kSdpState,
-  };
+  bool Initialize(const JsepInterface::IceServers& configuration,
+                  const MediaConstraintsInterface* constraints,
+                  webrtc::PortAllocatorFactoryInterface* allocator_factory,
+                  PeerConnectionObserver* observer);
+  virtual talk_base::scoped_refptr<StreamCollectionInterface> local_streams();
+  virtual talk_base::scoped_refptr<StreamCollectionInterface> remote_streams();
+  virtual bool AddStream(MediaStreamInterface* local_stream,
+                         const MediaConstraintsInterface* constraints);
+  virtual void RemoveStream(MediaStreamInterface* local_stream);
+  virtual bool CanSendDtmf(const AudioTrackInterface* track);
+  virtual bool SendDtmf(const AudioTrackInterface* send_track,
+                        const std::string& tones, int duration,
+                        const AudioTrackInterface* play_track);
 
-  virtual void OnError() = 0;
-
-  virtual void OnMessage(const std::string& msg) = 0;
-
-  // Serialized signaling message
-  virtual void OnSignalingMessage(const std::string& msg) = 0;
-
-  // Triggered when ReadyState, SdpState or IceState have changed.
-  virtual void OnStateChange(StateType state_changed) = 0;
-
-  // Triggered when media is received on a new stream from remote peer.
-  virtual void OnAddStream(MediaStreamInterface* stream) = 0;
-
-  // Triggered when a remote peer close a stream.
-  virtual void OnRemoveStream(MediaStreamInterface* stream) = 0;
-
- protected:
-  // Dtor protected as objects shouldn't be deleted via this interface.
-  ~PeerConnectionObserver() {}
-};
+  virtual talk_base::scoped_refptr<DataChannelInterface> CreateDataChannel(
+      const std::string& label,
+      const DataChannelInit* config);
+  virtual bool GetStats(StatsObserver* observer,
+                        webrtc::MediaStreamTrackInterface* track);
 
 
-class PeerConnectionInterface : public talk_base::RefCountInterface {
- public:
-  enum ReadyState {
-    kNew,
-    kNegotiating,
-    kActive,
-    kClosing,
-    kClosed,
-  };
+  virtual ReadyState ready_state();
+  virtual IceState ice_state();
 
-  enum SdpState {
-    kSdpNew,
-    kSdpIdle,
-    kSdpWaiting,
-  };
+  // TODO(ronghuawu): Remove deprecated Jsep functions.
+  virtual SessionDescriptionInterface* CreateOffer(const MediaHints& hints);
+  virtual SessionDescriptionInterface* CreateAnswer(
+      const MediaHints& hints,
+      const SessionDescriptionInterface* offer);
+  virtual bool StartIce(IceOptions options);
+  virtual bool SetLocalDescription(Action action,
+                                   SessionDescriptionInterface* desc);
+  virtual bool SetRemoteDescription(Action action,
+                                    SessionDescriptionInterface* desc);
+  virtual bool ProcessIceMessage(const IceCandidateInterface* ice_candidate);
 
-  // Process a signaling message using the ROAP protocol.
-  virtual void ProcessSignalingMessage(const std::string& msg) = 0;
+  virtual const SessionDescriptionInterface* local_description() const;
+  virtual const SessionDescriptionInterface* remote_description() const;
 
-  // Sends the msg over a data stream.
-  virtual bool Send(const std::string& msg) = 0;
-
-  // Accessor methods to active local streams.
-  virtual talk_base::scoped_refptr<StreamCollectionInterface>
-      local_streams() = 0;
-
-  // Accessor methods to remote streams.
-  virtual talk_base::scoped_refptr<StreamCollectionInterface>
-      remote_streams() = 0;
-
-  // Add a new local stream.
-  // This function does not trigger any changes to the stream until
-  // CommitStreamChanges is called.
-  virtual void AddStream(LocalMediaStreamInterface* stream) = 0;
-
-  // Remove a local stream and stop sending it.
-  // This function does not trigger any changes to the stream until
-  // CommitStreamChanges is called.
-  virtual void RemoveStream(LocalMediaStreamInterface* stream) = 0;
-
-  // Commit Stream changes. This will start sending media on new streams
-  // and stop sending media on removed streams.
-  virtual void CommitStreamChanges() = 0;
-
-  // Close the current session. This will trigger a Shutdown message
-  // being sent and the readiness state change to Closing.
-  // After calling this function no changes can be made to the sending streams.
-  virtual void Close() = 0;
-
-  // Returns the current ReadyState.
-  virtual ReadyState ready_state() = 0;
-
-  // Returns the current SdpState.
-  virtual SdpState sdp_state() = 0;
+  // JSEP01
+  virtual void CreateOffer(CreateSessionDescriptionObserver* observer,
+                           const MediaConstraintsInterface* constraints);
+  virtual void CreateAnswer(CreateSessionDescriptionObserver* observer,
+                            const MediaConstraintsInterface* constraints);
+  virtual void SetLocalDescription(SetSessionDescriptionObserver* observer,
+                                   SessionDescriptionInterface* desc);
+  virtual void SetRemoteDescription(SetSessionDescriptionObserver* observer,
+                                    SessionDescriptionInterface* desc);
+  virtual bool UpdateIce(const IceServers& configuration,
+                         const MediaConstraintsInterface* constraints);
+  virtual bool AddIceCandidate(const IceCandidateInterface* candidate);
 
  protected:
-  // Dtor protected as objects shouldn't be deleted via this interface.
-  ~PeerConnectionInterface() {}
+  virtual ~PeerConnection();
+
+ private:
+  // Implements MessageHandler.
+  virtual void OnMessage(talk_base::Message* msg);
+
+  // Implements RemoteMediaStreamObserver.
+  virtual void OnAddStream(MediaStreamInterface* stream);
+  virtual void OnRemoveStream(MediaStreamInterface* stream);
+  virtual void OnAddDataChannel(DataChannelInterface* data_channel);
+
+  // Implements IceCandidateObserver
+  virtual void OnIceChange();
+  virtual void OnIceCandidate(const IceCandidateInterface* candidate);
+  virtual void OnIceComplete();
+
+  // Signals from WebRtcSession.
+  void OnSessionStateChange(cricket::BaseSession* session,
+                            cricket::BaseSession::State state);
+  void ChangeReadyState(PeerConnectionInterface::ReadyState ready_state);
+
+  bool DoInitialize(const StunConfigurations& stun_config,
+                    const TurnConfigurations& turn_config,
+                    const MediaConstraintsInterface* constraints,
+                    webrtc::PortAllocatorFactoryInterface* allocator_factory,
+                    PeerConnectionObserver* observer);
+
+  talk_base::Thread* signaling_thread() const {
+    return factory_->signaling_thread();
+  }
+
+  void PostSetSessionDescriptionFailure(SetSessionDescriptionObserver* observer,
+                                        const std::string& error);
+
+  // Storing the factory as a scoped reference pointer ensures that the memory
+  // in the PeerConnectionFactoryImpl remains available as long as the
+  // PeerConnection is running. It is passed to PeerConnection as a raw pointer.
+  // However, since the reference counting is done in the
+  // PeerConnectionFactoryInteface all instances created using the raw pointer
+  // will refer to the same reference count.
+  talk_base::scoped_refptr<PeerConnectionFactory> factory_;
+  PeerConnectionObserver* observer_;
+  ReadyState ready_state_;
+  // TODO(ronghuawu): Implement ice_state.
+  IceState ice_state_;
+  talk_base::scoped_refptr<StreamCollection> local_media_streams_;
+
+  talk_base::scoped_ptr<cricket::PortAllocator> port_allocator_;
+  talk_base::scoped_ptr<WebRtcSession> session_;
+  talk_base::scoped_ptr<MediaStreamSignaling> mediastream_signaling_;
+  talk_base::scoped_ptr<MediaStreamHandlers> stream_handler_;
+  StatsCollector stats_;
 };
-
-// Helper function to create a new instance of cricket::VideoCapturer
-// from VideoCaptureModule.
-// TODO: This function should be removed once chrome implement video
-// capture as the cricket::VideoCapturer.
-cricket::VideoCapturer* CreateVideoCapturer(VideoCaptureModule* vcm);
-
-// Factory class used for creating cricket::PortAllocator that is used
-// for ICE negotiation.
-class PortAllocatorFactoryInterface : public talk_base::RefCountInterface {
- public:
-  struct StunConfiguration {
-    StunConfiguration(const std::string& address, int port)
-        : server(address, port) {}
-    // STUN server address and port.
-    talk_base::SocketAddress server;
-  };
-
-  struct TurnConfiguration {
-    TurnConfiguration(const std::string& address,
-                      int port,
-                      const std::string& username,
-                      const std::string& password)
-        : server(address, port),
-          username(username),
-          password(password) {}
-    talk_base::SocketAddress server;
-    std::string username;
-    std::string password;
-  };
-
-  virtual cricket::PortAllocator* CreatePortAllocator(
-      const std::vector<StunConfiguration>& stun_servers,
-      const std::vector<TurnConfiguration>& turn_configurations) = 0;
-
- protected:
-  PortAllocatorFactoryInterface() {}
-  ~PortAllocatorFactoryInterface() {}
-};
-
-// PeerConnectionFactoryInterface is the factory interface use for creating
-// PeerConnection, MediaStream and media tracks.
-// PeerConnectionFactoryInterface will create required libjingle threads,
-// socket and network manager factory classes for networking.
-// If application decides to provide its own implementation of these classes
-// it should use alternate create method which accepts a threads and a
-// PortAllocatorFactoryInterface as input.
-class PeerConnectionFactoryInterface : public talk_base::RefCountInterface {
- public:
-  virtual talk_base::scoped_refptr<PeerConnectionInterface>
-      CreatePeerConnection(const std::string& config,
-                           PeerConnectionObserver* observer) = 0;
-
-  virtual talk_base::scoped_refptr<LocalMediaStreamInterface>
-      CreateLocalMediaStream(const std::string& label) = 0;
-
-  virtual talk_base::scoped_refptr<LocalVideoTrackInterface>
-      CreateLocalVideoTrack(const std::string& label,
-                            cricket::VideoCapturer* video_device) = 0;
-
-  virtual talk_base::scoped_refptr<LocalAudioTrackInterface>
-      CreateLocalAudioTrack(const std::string& label,
-                            AudioDeviceModule* audio_device) = 0;
-
- protected:
-  // Dtor and ctor protected as objects shouldn't be created or deleted via
-  // this interface.
-  PeerConnectionFactoryInterface() {}
-  ~PeerConnectionFactoryInterface() {} // NOLINT
-};
-
-// Create a new instance of PeerConnectionFactoryInterface.
-talk_base::scoped_refptr<PeerConnectionFactoryInterface>
-CreatePeerConnectionFactory();
-
-// Create a new instance of PeerConnectionFactoryInterface.
-// Ownership of the arguments are not transfered to this object and must
-// remain in scope for the lifetime of the PeerConnectionFactoryInterface.
-talk_base::scoped_refptr<PeerConnectionFactoryInterface>
-CreatePeerConnectionFactory(talk_base::Thread* worker_thread,
-                            talk_base::Thread* signaling_thread,
-                            PortAllocatorFactoryInterface* factory,
-                            AudioDeviceModule* default_adm);
 
 }  // namespace webrtc
 

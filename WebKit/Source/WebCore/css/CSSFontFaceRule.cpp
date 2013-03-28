@@ -1,7 +1,7 @@
 /*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2005, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2002, 2005, 2006, 2008, 2012 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,35 +22,60 @@
 #include "config.h"
 #include "CSSFontFaceRule.h"
 
-#include "CSSMutableStyleDeclaration.h"
+#include "PropertySetCSSStyleDeclaration.h"
+#include "StylePropertySet.h"
+#include "StyleRule.h"
+#include "WebCoreMemoryInstrumentation.h"
+#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
-CSSFontFaceRule::CSSFontFaceRule(CSSStyleSheet* parent)
-    : CSSRule(parent, CSSRule::FONT_FACE_RULE)
+CSSFontFaceRule::CSSFontFaceRule(StyleRuleFontFace* fontFaceRule, CSSStyleSheet* parent)
+    : CSSRule(parent)
+    , m_fontFaceRule(fontFaceRule)
 {
 }
 
 CSSFontFaceRule::~CSSFontFaceRule()
 {
-    // FIXME: SVGFontFaceElement's style declaration should probably be parented to the rule too.
-    if (m_style && !m_style->isElementStyleDeclaration())
-        m_style->clearParentRule();
+    if (m_propertiesCSSOMWrapper)
+        m_propertiesCSSOMWrapper->clearParentRule();
+}
+
+CSSStyleDeclaration* CSSFontFaceRule::style() const
+{
+    if (!m_propertiesCSSOMWrapper)
+        m_propertiesCSSOMWrapper = StyleRuleCSSStyleDeclaration::create(m_fontFaceRule->mutableProperties(), const_cast<CSSFontFaceRule*>(this));
+    return m_propertiesCSSOMWrapper.get();
 }
 
 String CSSFontFaceRule::cssText() const
 {
-    String result("@font-face");
-    result += " { ";
-    result += m_style->asText();
-    result += "}";
-    return result;
+    StringBuilder result;
+    result.appendLiteral("@font-face { ");
+    String descs = m_fontFaceRule->properties()->asText();
+    result.append(descs);
+    if (!descs.isEmpty())
+        result.append(' ');
+    result.append('}');
+    return result.toString();
 }
 
-void CSSFontFaceRule::addSubresourceStyleURLs(ListHashSet<KURL>& urls)
+void CSSFontFaceRule::reattach(StyleRuleBase* rule)
 {
-    if (m_style)
-        m_style->addSubresourceStyleURLs(urls);
+    ASSERT(rule);
+    ASSERT(rule->isFontFaceRule());
+    m_fontFaceRule = static_cast<StyleRuleFontFace*>(rule);
+    if (m_propertiesCSSOMWrapper)
+        m_propertiesCSSOMWrapper->reattach(m_fontFaceRule->mutableProperties());
+}
+
+void CSSFontFaceRule::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CSS);
+    CSSRule::reportMemoryUsage(memoryObjectInfo);
+    info.addMember(m_fontFaceRule);
+    info.addMember(m_propertiesCSSOMWrapper);
 }
 
 } // namespace WebCore

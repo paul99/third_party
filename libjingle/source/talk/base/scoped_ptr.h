@@ -104,6 +104,13 @@ class scoped_ptr {
   T** use() {
     return &ptr;
   }
+
+  // Allow scoped_ptr<T> to be used in boolean expressions, but not
+  // implicitly convertible to a real bool (which is dangerous).
+  // Borrowed from chromium's scoped_ptr implementation.
+  typedef T* scoped_ptr::*Testable;
+  operator Testable() const { return ptr ? &scoped_ptr::ptr : NULL; }
+
 };
 
 template<typename T> inline
@@ -178,6 +185,12 @@ class scoped_array {
     }
     return &ptr;
   }
+
+  // Allow scoped_array<T> to be used in boolean expressions, but not
+  // implicitly convertible to a real bool (which is dangerous).
+  // Borrowed from chromium's scoped_array implementation.
+  typedef T* scoped_array::*Testable;
+  operator Testable() const { return ptr ? &scoped_array::ptr : NULL; }
 };
 
 template<class T> inline
@@ -188,7 +201,7 @@ void swap(scoped_array<T>& a, scoped_array<T>& b) {
 // scoped_ptr_malloc<> is similar to scoped_ptr<>, but it accepts a
 // second template argument, the function used to free the object.
 
-template<typename T, void (*FF)(void*) = free> class scoped_ptr_malloc {
+template<typename T, void (*FF)(T*) = free> class scoped_ptr_malloc {
  private:
 
   T* ptr;
@@ -203,12 +216,12 @@ template<typename T, void (*FF)(void*) = free> class scoped_ptr_malloc {
   explicit scoped_ptr_malloc(T* p = 0): ptr(p) {}
 
   ~scoped_ptr_malloc() {
-    FF(static_cast<void*>(ptr));
+    FF(ptr);
   }
 
   void reset(T* p = 0) {
     if (ptr != p) {
-      FF(static_cast<void*>(ptr));
+      FF(ptr);
       ptr = p;
     }
   }
@@ -241,14 +254,20 @@ template<typename T, void (*FF)(void*) = free> class scoped_ptr_malloc {
 
   T** accept() {
     if (ptr) {
-      FF(static_cast<void*>(ptr));
+      FF(ptr);
       ptr = 0;
     }
     return &ptr;
   }
+
+  // Allow scoped_ptr_malloc<T> to be used in boolean expressions, but not
+  // implicitly convertible to a real bool (which is dangerous).
+  // Borrowed from chromium's scoped_ptr_malloc implementation.
+  typedef T* scoped_ptr_malloc::*Testable;
+  operator Testable() const { return ptr ? &scoped_ptr_malloc::ptr : NULL; }
 };
 
-template<typename T, void (*FF)(void*)> inline
+template<typename T, void (*FF)(T*)> inline
 void swap(scoped_ptr_malloc<T,FF>& a, scoped_ptr_malloc<T,FF>& b) {
   a.swap(b);
 }

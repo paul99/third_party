@@ -20,17 +20,17 @@
 #include "config.h"
 #include "WebKitNavigationPolicyDecision.h"
 
+#include "WebEvent.h"
 #include "WebKitEnumTypes.h"
 #include "WebKitPolicyDecisionPrivate.h"
-#include "WebKitPrivate.h"
 #include "WebKitURIRequestPrivate.h"
 #include "WebURLRequest.h"
-#include <gdk/gdk.h>
 #include <glib/gi18n-lib.h>
 #include <wtf/gobject/GRefPtr.h>
 #include <wtf/text/CString.h>
 
 using namespace WebKit;
+using namespace WebCore;
 
 /**
  * SECTION: WebKitNavigationPolicyDecision
@@ -39,11 +39,9 @@ using namespace WebKit;
  * @See_also: #WebKitPolicyDecision, #WebKitWebView
  *
  * WebKitNavigationPolicyDecision represents a policy decision for events associated with
- * navigations. If the value of WebKitNavigationPolicyDecision:mouse-button is not 0, then
+ * navigations. If the value of #WebKitNavigationPolicyDecision:mouse-button is not 0, then
  * the navigation was triggered by a mouse event.
  */
-
-G_DEFINE_TYPE(WebKitNavigationPolicyDecision, webkit_navigation_policy_decision, WEBKIT_TYPE_POLICY_DECISION)
 
 struct _WebKitNavigationPolicyDecisionPrivate {
     WebKitNavigationType navigationType;
@@ -53,6 +51,8 @@ struct _WebKitNavigationPolicyDecisionPrivate {
     CString frameName;
 };
 
+WEBKIT_DEFINE_TYPE(WebKitNavigationPolicyDecision, webkit_navigation_policy_decision, WEBKIT_TYPE_POLICY_DECISION)
+
 enum {
     PROP_0,
     PROP_NAVIGATION_TYPE,
@@ -61,18 +61,6 @@ enum {
     PROP_REQUEST,
     PROP_FRAME_NAME,
 };
-
-static void webkit_navigation_policy_decision_init(WebKitNavigationPolicyDecision* decision)
-{
-    decision->priv = G_TYPE_INSTANCE_GET_PRIVATE(decision, WEBKIT_TYPE_NAVIGATION_POLICY_DECISION, WebKitNavigationPolicyDecisionPrivate);
-    new (decision->priv) WebKitNavigationPolicyDecisionPrivate();
-}
-
-static void webkitNavigationPolicyDecisionFinalize(GObject* object)
-{
-    WEBKIT_NAVIGATION_POLICY_DECISION(object)->priv->~WebKitNavigationPolicyDecisionPrivate();
-    G_OBJECT_CLASS(webkit_navigation_policy_decision_parent_class)->finalize(object);
-}
 
 static void webkitNavigationPolicyDecisionGetProperty(GObject* object, guint propId, GValue* value, GParamSpec* paramSpec)
 {
@@ -102,9 +90,7 @@ static void webkitNavigationPolicyDecisionGetProperty(GObject* object, guint pro
 static void webkit_navigation_policy_decision_class_init(WebKitNavigationPolicyDecisionClass* decisionClass)
 {
     GObjectClass* objectClass = G_OBJECT_CLASS(decisionClass);
-    objectClass->finalize = webkitNavigationPolicyDecisionFinalize;
     objectClass->get_property = webkitNavigationPolicyDecisionGetProperty;
-    g_type_class_add_private(decisionClass, sizeof(WebKitNavigationPolicyDecisionPrivate));
 
     /**
      * WebKitNavigationPolicyDecision:navigation-type:
@@ -144,7 +130,7 @@ static void webkit_navigation_policy_decision_class_init(WebKitNavigationPolicyD
      *
      * If the navigation associated with this policy decision was originally
      * triggered by a mouse event, this property contains a bitmask of various
-     * GdkModifierType values describing the modifiers used for that click.
+     * #GdkModifierType values describing the modifiers used for that click.
      * If the navigation was not triggered by a mouse event or no modifiers
      * were active, the value of this property will be zero.
      */
@@ -249,7 +235,7 @@ WebKitURIRequest* webkit_navigation_policy_decision_get_request(WebKitNavigation
  *
  * Gets the value of the #WebKitNavigationPolicyDecision:frame-name property.
  *
- * Returns: The name of the new frame this navigation action targets or %NULL 
+ * Returns: The name of the new frame this navigation action targets or %NULL
  */
 const char* webkit_navigation_policy_decision_get_frame_name(WebKitNavigationPolicyDecision* decision)
 {
@@ -257,50 +243,20 @@ const char* webkit_navigation_policy_decision_get_frame_name(WebKitNavigationPol
     return decision->priv->frameName.data();
 }
 
-COMPILE_ASSERT_MATCHING_ENUM(WEBKIT_NAVIGATION_TYPE_LINK_CLICKED, kWKFrameNavigationTypeLinkClicked);
-COMPILE_ASSERT_MATCHING_ENUM(WEBKIT_NAVIGATION_TYPE_FORM_SUBMITTED, kWKFrameNavigationTypeFormSubmitted);
-COMPILE_ASSERT_MATCHING_ENUM(WEBKIT_NAVIGATION_TYPE_BACK_FORWARD, kWKFrameNavigationTypeBackForward);
-COMPILE_ASSERT_MATCHING_ENUM(WEBKIT_NAVIGATION_TYPE_RELOAD, kWKFrameNavigationTypeReload);
-COMPILE_ASSERT_MATCHING_ENUM(WEBKIT_NAVIGATION_TYPE_FORM_RESUBMITTED, kWKFrameNavigationTypeFormResubmitted);
-COMPILE_ASSERT_MATCHING_ENUM(WEBKIT_NAVIGATION_TYPE_OTHER, kWKFrameNavigationTypeOther);
+COMPILE_ASSERT_MATCHING_ENUM(WEBKIT_NAVIGATION_TYPE_LINK_CLICKED, NavigationTypeLinkClicked);
+COMPILE_ASSERT_MATCHING_ENUM(WEBKIT_NAVIGATION_TYPE_FORM_SUBMITTED, NavigationTypeFormSubmitted);
+COMPILE_ASSERT_MATCHING_ENUM(WEBKIT_NAVIGATION_TYPE_BACK_FORWARD, NavigationTypeBackForward);
+COMPILE_ASSERT_MATCHING_ENUM(WEBKIT_NAVIGATION_TYPE_RELOAD, NavigationTypeReload);
+COMPILE_ASSERT_MATCHING_ENUM(WEBKIT_NAVIGATION_TYPE_FORM_RESUBMITTED, NavigationTypeFormResubmitted);
+COMPILE_ASSERT_MATCHING_ENUM(WEBKIT_NAVIGATION_TYPE_OTHER, NavigationTypeOther);
 
-static unsigned wkEventMouseButtonToWebKitMouseButton(WKEventMouseButton wkButton)
-{
-    switch (wkButton) {
-    case kWKEventMouseButtonNoButton:
-        return 0;
-    case kWKEventMouseButtonLeftButton:
-        return 1;
-    case kWKEventMouseButtonMiddleButton:
-        return 2;
-    case kWKEventMouseButtonRightButton:
-        return 3;
-    }
-    ASSERT_NOT_REACHED();
-    return 0;
-}
-
-unsigned wkEventModifiersToUnsigned(WKEventModifiers wkModifiers)
-{
-    unsigned modifiers = 0;
-    if (wkModifiers & kWKEventModifiersShiftKey)
-        modifiers |= GDK_SHIFT_MASK;
-    if (wkModifiers & kWKEventModifiersControlKey)
-        modifiers |= GDK_CONTROL_MASK;
-    if (wkModifiers & kWKEventModifiersAltKey)
-        modifiers |= GDK_MOD1_MASK;
-    if (wkModifiers & kWKEventModifiersMetaKey)
-        modifiers |= GDK_META_MASK;
-    return modifiers;
-}
-
-WebKitNavigationPolicyDecision* webkitNavigationPolicyDecisionCreate(WKFrameNavigationType navigationType, WKEventMouseButton mouseButton, WKEventModifiers modifiers, WKURLRequestRef request, const char* frameName, WKFramePolicyListenerRef listener)
+WebKitNavigationPolicyDecision* webkitNavigationPolicyDecisionCreate(WebKitNavigationType navigationType, unsigned mouseButton, unsigned modifiers, WebURLRequest* request, const char* frameName, WebFramePolicyListenerProxy* listener)
 {
     WebKitNavigationPolicyDecision* decision = WEBKIT_NAVIGATION_POLICY_DECISION(g_object_new(WEBKIT_TYPE_NAVIGATION_POLICY_DECISION, NULL));
-    decision->priv->navigationType = static_cast<WebKitNavigationType>(navigationType);
-    decision->priv->mouseButton = wkEventMouseButtonToWebKitMouseButton(mouseButton);
-    decision->priv->modifiers = wkEventModifiersToUnsigned(modifiers);
-    decision->priv->request = adoptGRef(webkitURIRequestCreateForResourceRequest(toImpl(request)->resourceRequest()));
+    decision->priv->navigationType = navigationType;
+    decision->priv->mouseButton = mouseButton;
+    decision->priv->modifiers = modifiers;
+    decision->priv->request = adoptGRef(webkitURIRequestCreateForResourceRequest(request->resourceRequest()));
     decision->priv->frameName = frameName;
     webkitPolicyDecisionSetListener(WEBKIT_POLICY_DECISION(decision), listener);
     return decision;

@@ -37,9 +37,9 @@ namespace talk_base {
 class SystemInfo {
  public:
   enum Architecture {
-    ARCH_X86 = 0,
-    ARCH_X64 = 1,
-    ARCH_ARM = 2
+    SI_ARCH_X86 = 0,
+    SI_ARCH_X64 = 1,
+    SI_ARCH_ARM = 2
   };
 
   SystemInfo();
@@ -56,7 +56,9 @@ class SystemInfo {
   int GetCpuFamily();
   int GetCpuModel();
   int GetCpuStepping();
-  // Estimated speed of the CPUs, in MHz.
+  // Return size of CPU cache in bytes.  Uses largest available cache (L3).
+  int GetCpuCacheSize();
+  // Estimated speed of the CPUs, in MHz.  e.g. 2400 for 2.4 GHz
   int GetMaxCpuSpeed();
   int GetCurCpuSpeed();
   // Total amount of physical memory, in bytes.
@@ -79,6 +81,7 @@ class SystemInfo {
  private:
   int physical_cpus_;
   int logical_cpus_;
+  int cache_size_;
   Architecture cpu_arch_;
   std::string cpu_vendor_;
   int cpu_family_;
@@ -89,6 +92,6 @@ class SystemInfo {
   std::string machine_model_;
 };
 
-}
+}  // namespace talk_base
 
 #endif  // TALK_BASE_SYSTEMINFO_H__

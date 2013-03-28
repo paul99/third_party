@@ -1,7 +1,7 @@
 /*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2002, 2006, 2008, 2012 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,12 +23,23 @@
 #define CSSUnknownRule_h
 
 #include "CSSRule.h"
+#include "WebCoreMemoryInstrumentation.h"
 
 namespace WebCore {
 
 class CSSUnknownRule : public CSSRule {
 public:
-    CSSUnknownRule() : CSSRule(0, CSSRule::UNKNOWN_RULE) { }
+    CSSUnknownRule() : CSSRule(0) { }
+    virtual ~CSSUnknownRule() { }
+
+    virtual CSSRule::Type type() const OVERRIDE { return UNKNOWN_RULE; }
+    virtual String cssText() const OVERRIDE { return String(); }
+    virtual void reattach(StyleRuleBase*) OVERRIDE { }
+    virtual void reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const OVERRIDE
+    {
+        MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CSS);
+        CSSRule::reportMemoryUsage(memoryObjectInfo);
+    }
 };
 
 } // namespace WebCore

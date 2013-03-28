@@ -1,5 +1,71 @@
 Libjingle
 
+0.7.1 - Oct 2, 2012
+  - Fix for the "google-ice" ICE option in answer.
+
+0.7.0 - Sep 14, 2012
+  - Enable RFC 5245 ICE for PeerConnection.
+
+0.6.23 - Aug 29, 2012
+  - MessageQueue threading fixes.
+  - ByteBuffer cleanups.
+  - Updates in the JSON parser.
+
+0.6.22 - Aug 14, 2012
+  - Start gathering ice candidates before user sets local description.
+  - Support for muting individual streams based on SSRC.
+
+0.6.21 - Aug 2, 2012
+  - Fixed the issue on PeerConnection offer rejection.
+  - Factored out the usage of cricket::CaptureResult.
+
+0.6.20 - Aug 1, 2012
+  - Removed ROAP support from PeerConnection.
+  - Moved session/phone into session/media, media/base, media/webrtc,
+    media/devices and media/other.
+  - Added MediaTrack enabling/disabling support to PeerConnection.
+  - Bug fixes.
+
+0.6.19 - May 16, 2012
+  - Added ice-ufrag and ice-pwd.
+  - Added RFC 5245 defined ICE attributes.
+  - Bug fixes.
+
+0.6.18 - May 7, 2012
+  - JSEP PRANSWER support in WebRtc
+  - Bug fixes.
+
+0.6.17 - Mar 19, 2012
+  - Implemented ROAP on top of JSEP.
+  - Added a new signal after PortAllocatorSesison discoves all candidates for
+    the channel.
+
+0.6.16 - Mar 12, 2012
+  - Add support for data channel to libjingle.
+  - Update to use the latest webrtc.
+  - JSEP refactoring.
+
+0.6.15 - Mar 06, 2012
+  - Add Md5Digest, Sha1Digest and HMAC that works with any digest.
+  - Add app/webrtc/test.
+  - Remove win socket dependency from byteorder.
+  - Allow to use Thread without socketserver.
+  - Bug fixes.
+
+0.6.14 - Feb 28, 2012
+  - Initial JSEP support in WebRTC.
+  - Bug fixes.
+
+0.6.13 - Feb 16, 2012
+  - SDP compliance to WebRTC Signaling messages.
+  - Initial BUNDLE support in Jingle messages.
+  - Implementation of WebRTC external StartRender() and StopRender().
+  - Bug fixes.
+
+0.6.12 - Feb 07, 2012
+  - PeerConnection client for Windows.
+  - Bug fixes.
+
 0.6.11 - Jan 24, 2012
   - Improved ipv6 support.
   - Initial DTLS support.

@@ -44,8 +44,6 @@ using namespace JSC;
 
 namespace WebCore {
 
-ASSERT_CLASS_FITS_IN_CELL(JSWorkerContextBase);
-
 const ClassInfo JSWorkerContextBase::s_info = { "WorkerContext", &JSDOMGlobalObject::s_info, 0, 0, CREATE_METHOD_TABLE(JSWorkerContextBase) };
 
 JSWorkerContextBase::JSWorkerContextBase(JSC::JSGlobalData& globalData, JSC::Structure* structure, PassRefPtr<WorkerContext> impl)
@@ -62,7 +60,7 @@ void JSWorkerContextBase::finishCreation(JSGlobalData& globalData)
 
 void JSWorkerContextBase::destroy(JSCell* cell)
 {
-    jsCast<JSWorkerContextBase*>(cell)->JSWorkerContextBase::~JSWorkerContextBase();
+    static_cast<JSWorkerContextBase*>(cell)->JSWorkerContextBase::~JSWorkerContextBase();
 }
 
 ScriptExecutionContext* JSWorkerContextBase::scriptExecutionContext() const
@@ -93,7 +91,7 @@ JSDedicatedWorkerContext* toJSDedicatedWorkerContext(JSValue value)
         return 0;
     const ClassInfo* classInfo = asObject(value)->classInfo();
     if (classInfo == &JSDedicatedWorkerContext::s_info)
-        return static_cast<JSDedicatedWorkerContext*>(asObject(value));
+        return jsCast<JSDedicatedWorkerContext*>(asObject(value));
     return 0;
 }
 
@@ -104,7 +102,7 @@ JSSharedWorkerContext* toJSSharedWorkerContext(JSValue value)
         return 0;
     const ClassInfo* classInfo = asObject(value)->classInfo();
     if (classInfo == &JSSharedWorkerContext::s_info)
-        return static_cast<JSSharedWorkerContext*>(asObject(value));
+        return jsCast<JSSharedWorkerContext*>(asObject(value));
     return 0;
 }
 #endif

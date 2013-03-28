@@ -49,6 +49,9 @@ namespace WebCore {
 
 #if ENABLE(CONTEXT_MENUS)
     String contextMenuItemTagOpenLinkInNewWindow();
+#if PLATFORM(QT)
+    String contextMenuItemTagOpenLinkInThisWindow();
+#endif
     String contextMenuItemTagDownloadLinkToDisk();
     String contextMenuItemTagCopyLinkToClipboard();
     String contextMenuItemTagOpenImageInNewWindow();
@@ -69,6 +72,16 @@ namespace WebCore {
     String contextMenuItemTagDelete();
     String contextMenuItemTagInputMethods();
     String contextMenuItemTagUnicode();
+    String contextMenuItemTagUnicodeInsertLRMMark();
+    String contextMenuItemTagUnicodeInsertRLMMark();
+    String contextMenuItemTagUnicodeInsertLREMark();
+    String contextMenuItemTagUnicodeInsertRLEMark();
+    String contextMenuItemTagUnicodeInsertLROMark();
+    String contextMenuItemTagUnicodeInsertRLOMark();
+    String contextMenuItemTagUnicodeInsertPDFMark();
+    String contextMenuItemTagUnicodeInsertZWSMark();
+    String contextMenuItemTagUnicodeInsertZWJMark();
+    String contextMenuItemTagUnicodeInsertZWNJMark();
 #endif
 #if PLATFORM(GTK) || PLATFORM(QT) || PLATFORM(EFL)
     String contextMenuItemTagSelectAll();
@@ -141,7 +154,8 @@ namespace WebCore {
     String AXHeadingText();
     String AXDefinitionListTermText();
     String AXDefinitionListDefinitionText();
-
+    String AXFooterRoleDescriptionText();
+    String AXFileUploadButtonText();
 #if PLATFORM(MAC)
     String AXARIAContentGroupText(const String& ariaType);
 #endif
@@ -155,8 +169,45 @@ namespace WebCore {
     String AXMenuListPopupActionVerb();
     String AXLinkActionVerb();
 
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+    String AXAMPMFieldText();
+    String AXDayOfMonthFieldText();
+    String AXDateTimeFieldEmptyValueText();
+    String AXHourFieldText();
+    String AXMillisecondFieldText();
+    String AXMinuteFieldText();
+    String AXMonthFieldText();
+    String AXSecondFieldText();
+    String AXWeekOfYearFieldText();
+    String AXYearFieldText();
+
+    // placeholderForDayOfMonthField() returns localized placeholder text, e.g.
+    // "dd", for date field used in multiple fields "date", "datetime", and
+    // "datetime-local" input UI instead "--".
+    String placeholderForDayOfMonthField();
+
+    // placeholderForfMonthField() returns localized placeholder text, e.g.
+    // "mm", for month field used in multiple fields "date", "datetime", and
+    // "datetime-local" input UI instead "--".
+    String placeholderForMonthField();
+
+    // placeholderForYearField() returns localized placeholder text, e.g.
+    // "yyyy", for year field used in multiple fields "date", "datetime", and
+    // "datetime-local" input UI instead "----".
+    String placeholderForYearField();
+#endif
+#if ENABLE(INPUT_TYPE_WEEK)
+    // weekFormatInLDML() returns week and year format in LDML, Unicode
+    // technical standard 35, Locale Data Markup Language, e.g. "'Week' ww, yyyy"
+    String weekFormatInLDML();
+#endif
+
     String missingPluginText();
     String crashedPluginText();
+    String blockedPluginByContentSecurityPolicyText();
+    String insecurePluginVersionText();
+    String inactivePluginText();
+
     String multipleFileUploadText(unsigned numberOfFiles);
     String unknownFileSizeText();
 
@@ -168,10 +219,15 @@ namespace WebCore {
 #if PLATFORM(MAC)
     String builtInPDFPluginName();
     String pdfDocumentTypeDescription();
+    String postScriptDocumentTypeDescription();
     String keygenMenuItem512();
     String keygenMenuItem1024();
     String keygenMenuItem2048();
     String keygenKeychainItemName(const String& host);
+#endif
+
+#if PLATFORM(IOS)
+    String htmlSelectMultipleItems(size_t num);
 #endif
 
     String imageTitle(const String& filename, const IntSize& size);
@@ -197,12 +253,22 @@ namespace WebCore {
     String validationMessageRangeUnderflowText(const String& minimum);
     String validationMessageRangeOverflowText(const String& maximum);
     String validationMessageStepMismatchText(const String& base, const String& step);
+    String validationMessageBadInputForNumberText();
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+    String validationMessageBadInputForDateTimeText();
+#endif
+#if USE(SOUP)
+    String unacceptableTLSCertificate();
+#endif
 
+    String clickToExitFullScreenText();
 
+#if !PLATFORM(CHROMIUM)
 #define WEB_UI_STRING(string, description) WebCore::localizedString(string)
 #define WEB_UI_STRING_KEY(string, key, description) WebCore::localizedString(key)
 
     String localizedString(const char* key);
+#endif
 
 } // namespace WebCore
 

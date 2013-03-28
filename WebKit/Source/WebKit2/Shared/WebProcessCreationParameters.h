@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010, 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -38,6 +38,10 @@
 #include "MachPort.h"
 #endif
 
+#if USE(SOUP)
+#include "HTTPCookieAcceptPolicy.h"
+#endif
+
 namespace CoreIPC {
     class ArgumentDecoder;
     class ArgumentEncoder;
@@ -48,23 +52,39 @@ namespace WebKit {
 struct WebProcessCreationParameters {
     WebProcessCreationParameters();
 
-    void encode(CoreIPC::ArgumentEncoder*) const;
+    void encode(CoreIPC::ArgumentEncoder&) const;
     static bool decode(CoreIPC::ArgumentDecoder*, WebProcessCreationParameters&);
 
     String injectedBundlePath;
     SandboxExtension::Handle injectedBundlePathExtensionHandle;
 
     String applicationCacheDirectory;    
+    SandboxExtension::Handle applicationCacheDirectoryExtensionHandle;
     String databaseDirectory;
+    SandboxExtension::Handle databaseDirectoryExtensionHandle;
     String localStorageDirectory;
-    String webInspectorLocalizedStringsPath;
+    SandboxExtension::Handle localStorageDirectoryExtensionHandle;
+    String diskCacheDirectory;
+    SandboxExtension::Handle diskCacheDirectoryExtensionHandle;
+    String cookieStorageDirectory;
+    SandboxExtension::Handle cookieStorageDirectoryExtensionHandle;
 
     Vector<String> urlSchemesRegistererdAsEmptyDocument;
     Vector<String> urlSchemesRegisteredAsSecure;
     Vector<String> urlSchemesForWhichDomainRelaxationIsForbidden;
-
-    // MIME types for which the UI process will handle showing the data.
-    Vector<String> mimeTypesWithCustomRepresentation;
+    Vector<String> urlSchemesRegisteredAsLocal;
+    Vector<String> urlSchemesRegisteredAsNoAccess;
+    Vector<String> urlSchemesRegisteredAsDisplayIsolated;
+    Vector<String> urlSchemesRegisteredAsCORSEnabled;
+#if ENABLE(CUSTOM_PROTOCOLS)
+    Vector<String> urlSchemesRegisteredForCustomProtocols;
+#endif
+#if USE(SOUP)
+    Vector<String> urlSchemesRegistered;
+    String cookiePersistentStoragePath;
+    uint32_t cookiePersistentStorageType;
+    HTTPCookieAcceptPolicy cookieAcceptPolicy;
+#endif
 
     CacheModel cacheModel;
     bool shouldTrackVisitedLinks;
@@ -74,9 +94,7 @@ struct WebProcessCreationParameters {
 
     bool iconDatabaseEnabled;
 
-#if ENABLE(PLUGIN_PROCESS)
-    bool disablePluginProcessMessageTimeout;
-#endif
+    double terminationTimeout;
 
     Vector<String> languages;
 
@@ -86,28 +104,25 @@ struct WebProcessCreationParameters {
 
     double defaultRequestTimeoutInterval;
 
-#if USE(CFURLSTORAGESESSIONS)
+#if PLATFORM(MAC) || USE(CFNETWORK)
     String uiProcessBundleIdentifier;
 #endif
 
 #if PLATFORM(MAC)
-    String parentProcessName;
-
     pid_t presenterApplicationPid;
 
-    // FIXME: These should be merged with CFURLCache counterparts below.
-    String nsURLCachePath;
     uint64_t nsURLCacheMemoryCapacity;
     uint64_t nsURLCacheDiskCapacity;
 
     CoreIPC::MachPort acceleratedCompositingPort;
 
     String uiProcessBundleResourcePath;
+    SandboxExtension::Handle uiProcessBundleResourcePathExtensionHandle;
 
-    String webInspectorBaseDirectory;
+    bool shouldForceScreenFontSubstitution;
+    bool shouldEnableKerningAndLigaturesByDefault;
 
 #elif PLATFORM(WIN)
-    String cfURLCachePath;
     uint64_t cfURLCacheDiskCapacity;
     uint64_t cfURLCacheMemoryCapacity;
 
@@ -115,17 +130,20 @@ struct WebProcessCreationParameters {
 
     bool shouldPaintNativeControls;
 
-#if USE(CFURLSTORAGESESSIONS)
+#if USE(CFNETWORK)
     RetainPtr<CFDataRef> serializedDefaultStorageSession;
-#endif // USE(CFURLSTORAGESESSIONS)
-#endif // PLATFORM(WIN)
-#if PLATFORM(QT)
-    String cookieStorageDirectory;
 #endif
+#endif // PLATFORM(WIN)
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     HashMap<String, bool> notificationPermissions;
 #endif
+
+#if ENABLE(NETWORK_PROCESS)
+    bool usesNetworkProcess;
+#endif
+
+    Vector<unsigned> plugInAutoStartOrigins;
 };
 
 } // namespace WebKit

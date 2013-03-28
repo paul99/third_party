@@ -26,11 +26,12 @@
 #include "FontPlatformData.h"
 
 #include "HWndDC.h"
-#include "PlatformString.h"
+#include "SharedBuffer.h"
 #include <wtf/HashMap.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/Vector.h>
 #include <wtf/text/StringHash.h>
+#include <wtf/text/WTFString.h>
 
 using std::min;
 
@@ -40,7 +41,6 @@ FontPlatformData::FontPlatformData(HFONT font, float size, bool bold, bool obliq
     : m_font(RefCountedGDIHandle<HFONT>::create(font))
     , m_size(size)
     , m_orientation(Horizontal)
-    , m_textOrientation(TextOrientationVerticalRight)
     , m_widthVariant(RegularWidth)
 #if USE(CG)
     , m_cgFont(0)
@@ -72,6 +72,23 @@ FontPlatformData::FontPlatformData(HFONT font, float size, bool bold, bool obliq
     }
 
     RestoreDC(hdc, -1);
+}
+
+PassRefPtr<SharedBuffer> FontPlatformData::openTypeTable(uint32_t table) const
+{
+    HWndDC hdc(0);
+    HGDIOBJ oldFont = SelectObject(hdc, hfont());
+
+    DWORD size = GetFontData(hdc, table, 0, 0, 0);
+    RefPtr<SharedBuffer> buffer;
+    if (size != GDI_ERROR) {
+        buffer = SharedBuffer::create(size);
+        DWORD result = GetFontData(hdc, table, 0, (PVOID)buffer->data(), size);
+        ASSERT(result == size);
+    }
+
+    SelectObject(hdc, oldFont);
+    return buffer.release();
 }
 
 #ifndef NDEBUG

@@ -24,7 +24,10 @@
 #ifndef JSFunction_h
 #define JSFunction_h
 
-#include "JSObject.h"
+#include "InternalFunction.h"
+#include "JSDestructibleObject.h"
+#include "JSScope.h"
+#include "Watchpoint.h"
 
 namespace JSC {
 
@@ -33,6 +36,7 @@ namespace JSC {
     class FunctionPrototype;
     class JSActivation;
     class JSGlobalObject;
+    class LLIntOffsetsExtractor;
     class NativeExecutable;
     class SourceCode;
     namespace DFG {
@@ -42,50 +46,52 @@ namespace JSC {
 
     JS_EXPORT_PRIVATE EncodedJSValue JSC_HOST_CALL callHostFunctionAsConstructor(ExecState*);
 
-    class JSFunction : public JSNonFinalObject {
+    JS_EXPORT_PRIVATE String getCalculatedDisplayName(CallFrame*, JSObject*);
+    
+    class JSFunction : public JSDestructibleObject {
         friend class JIT;
         friend class DFG::SpeculativeJIT;
         friend class DFG::JITCompiler;
         friend class JSGlobalData;
 
     public:
-        typedef JSNonFinalObject Base;
+        typedef JSDestructibleObject Base;
 
-        JS_EXPORT_PRIVATE static JSFunction* create(ExecState*, JSGlobalObject*, int length, const Identifier& name, NativeFunction nativeFunction, NativeFunction nativeConstructor = callHostFunctionAsConstructor);
-        static JSFunction* create(ExecState*, JSGlobalObject*, int length, const Identifier& name, NativeExecutable* nativeExecutable);
+        JS_EXPORT_PRIVATE static JSFunction* create(ExecState*, JSGlobalObject*, int length, const String& name, NativeFunction, Intrinsic = NoIntrinsic, NativeFunction nativeConstructor = callHostFunctionAsConstructor);
 
-        static JSFunction* create(ExecState* exec, FunctionExecutable* executable, ScopeChainNode* scopeChain)
+        static JSFunction* create(ExecState* exec, FunctionExecutable* executable, JSScope* scope)
         {
-            JSFunction* function = new (NotNull, allocateCell<JSFunction>(*exec->heap())) JSFunction(exec, executable, scopeChain);
+            JSGlobalData& globalData = exec->globalData();
+            JSFunction* function = new (NotNull, allocateCell<JSFunction>(globalData.heap)) JSFunction(globalData, executable, scope);
             ASSERT(function->structure()->globalObject());
-            function->finishCreation(exec, executable, scopeChain);
+            function->finishCreation(globalData);
             return function;
         }
         
         static void destroy(JSCell*);
+        
+        JS_EXPORT_PRIVATE String name(ExecState*);
+        JS_EXPORT_PRIVATE String displayName(ExecState*);
+        const String calculatedDisplayName(ExecState*);
 
-        JS_EXPORT_PRIVATE const UString& name(ExecState*);
-        JS_EXPORT_PRIVATE const UString displayName(ExecState*);
-        const UString calculatedDisplayName(ExecState*);
-
-        ScopeChainNode* scope()
+        JSScope* scope()
         {
             ASSERT(!isHostFunctionNonInline());
-            return m_scopeChain.get();
+            return m_scope.get();
         }
         // This method may be called for host functins, in which case it
         // will return an arbitrary value. This should only be used for
         // optimized paths in which the return value does not matter for
         // host functions, and checking whether the function is a host
         // function is deemed too expensive.
-        ScopeChainNode* scopeUnchecked()
+        JSScope* scopeUnchecked()
         {
-            return m_scopeChain.get();
+            return m_scope.get();
         }
-        void setScope(JSGlobalData& globalData, ScopeChainNode* scopeChain)
+        void setScope(JSGlobalData& globalData, JSScope* scope)
         {
             ASSERT(!isHostFunctionNonInline());
-            m_scopeChain.set(globalData, this, scopeChain);
+            m_scope.set(globalData, this, scope);
         }
 
         ExecutableBase* executable() const { return m_executable.get(); }
@@ -112,7 +118,7 @@ namespace JSC {
 
         static inline size_t offsetOfScopeChain()
         {
-            return OBJECT_OFFSETOF(JSFunction, m_scopeChain);
+            return OBJECT_OFFSETOF(JSFunction, m_scope);
         }
 
         static inline size_t offsetOfExecutable()
@@ -120,42 +126,74 @@ namespace JSC {
             return OBJECT_OFFSETOF(JSFunction, m_executable);
         }
 
+        Structure* cachedInheritorID(ExecState* exec)
+        {
+            if (UNLIKELY(!m_cachedInheritorID))
+                return cacheInheritorID(exec);
+            return m_cachedInheritorID.get();
+        }
+
+        Structure* tryGetKnownInheritorID()
+        {
+            if (!m_cachedInheritorID)
+                return 0;
+            if (m_inheritorIDWatchpoint.hasBeenInvalidated())
+                return 0;
+            return m_cachedInheritorID.get();
+        }
+        
+        void addInheritorIDWatchpoint(Watchpoint* watchpoint)
+        {
+            ASSERT(tryGetKnownInheritorID());
+            m_inheritorIDWatchpoint.add(watchpoint);
+        }
+
+        static size_t offsetOfCachedInheritorID()
+        {
+            return OBJECT_OFFSETOF(JSFunction, m_cachedInheritorID);
+        }
+
     protected:
         const static unsigned StructureFlags = OverridesGetOwnPropertySlot | ImplementsHasInstance | OverridesVisitChildren | OverridesGetPropertyNames | JSObject::StructureFlags;
 
         JS_EXPORT_PRIVATE JSFunction(ExecState*, JSGlobalObject*, Structure*);
-        JSFunction(ExecState*, FunctionExecutable*, ScopeChainNode*);
+        JSFunction(JSGlobalData&, FunctionExecutable*, JSScope*);
         
-        void finishCreation(ExecState*, NativeExecutable*, int length, const Identifier& name);
-        void finishCreation(ExecState*, FunctionExecutable*, ScopeChainNode*);
+        void finishCreation(ExecState*, NativeExecutable*, int length, const String& name);
+        using Base::finishCreation;
 
-        static bool getOwnPropertySlot(JSCell*, ExecState*, const Identifier&, PropertySlot&);
-        static bool getOwnPropertyDescriptor(JSObject*, ExecState*, const Identifier&, PropertyDescriptor&);
-        static void getOwnPropertyNames(JSObject*, ExecState*, PropertyNameArray&, EnumerationMode = ExcludeDontEnumProperties);
+        Structure* cacheInheritorID(ExecState*);
 
-        static void put(JSCell*, ExecState*, const Identifier& propertyName, JSValue, PutPropertySlot&);
+        static bool getOwnPropertySlot(JSCell*, ExecState*, PropertyName, PropertySlot&);
+        static bool getOwnPropertyDescriptor(JSObject*, ExecState*, PropertyName, PropertyDescriptor&);
+        static void getOwnNonIndexPropertyNames(JSObject*, ExecState*, PropertyNameArray&, EnumerationMode = ExcludeDontEnumProperties);
+        static bool defineOwnProperty(JSObject*, ExecState*, PropertyName, PropertyDescriptor&, bool shouldThrow);
 
-        static bool deleteProperty(JSCell*, ExecState*, const Identifier& propertyName);
+        static void put(JSCell*, ExecState*, PropertyName, JSValue, PutPropertySlot&);
+
+        static bool deleteProperty(JSCell*, ExecState*, PropertyName);
 
         static void visitChildren(JSCell*, SlotVisitor&);
 
     private:
+        friend class LLIntOffsetsExtractor;
+        
         JS_EXPORT_PRIVATE bool isHostFunctionNonInline() const;
 
-        static JSValue argumentsGetter(ExecState*, JSValue, const Identifier&);
-        static JSValue callerGetter(ExecState*, JSValue, const Identifier&);
-        static JSValue lengthGetter(ExecState*, JSValue, const Identifier&);
+        static JSValue argumentsGetter(ExecState*, JSValue, PropertyName);
+        static JSValue callerGetter(ExecState*, JSValue, PropertyName);
+        static JSValue lengthGetter(ExecState*, JSValue, PropertyName);
+        static JSValue nameGetter(ExecState*, JSValue, PropertyName);
 
         WriteBarrier<ExecutableBase> m_executable;
-        WriteBarrier<ScopeChainNode> m_scopeChain;
+        WriteBarrier<JSScope> m_scope;
+        WriteBarrier<Structure> m_cachedInheritorID;
+        InlineWatchpointSet m_inheritorIDWatchpoint;
     };
 
-    JSFunction* asFunction(JSValue);
-
-    inline JSFunction* asFunction(JSValue value)
+    inline bool JSValue::isFunction() const
     {
-        ASSERT(asObject(value)->inherits(&JSFunction::s_info));
-        return static_cast<JSFunction*>(asObject(value));
+        return isCell() && (asCell()->inherits(&JSFunction::s_info) || asCell()->inherits(&InternalFunction::s_info));
     }
 
 } // namespace JSC

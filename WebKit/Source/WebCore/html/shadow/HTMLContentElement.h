@@ -31,54 +31,60 @@
 #ifndef HTMLContentElement_h
 #define HTMLContentElement_h
 
-#include "ContentInclusionSelector.h"
-#include "HTMLElement.h"
+#include "CSSSelectorList.h"
+#include "InsertionPoint.h"
 #include <wtf/Forward.h>
 
 namespace WebCore {
 
-class ContentSelectorQuery;
-class ShadowInclusionList;
-
-// NOTE: Current implementation doesn't support dynamic insertion/deletion of HTMLContentElement.
-// You should create HTMLContentElement during the host construction.
-class HTMLContentElement : public HTMLElement {
+class HTMLContentElement : public InsertionPoint {
 public:
+    static const QualifiedName& contentTagName(Document*);
     static PassRefPtr<HTMLContentElement> create(const QualifiedName&, Document*);
     static PassRefPtr<HTMLContentElement> create(Document*);
 
     virtual ~HTMLContentElement();
-    virtual void attach();
-    virtual void detach();
 
-    const AtomicString& select() const;
-
-    // FIXME: Currently this constructor accepts wider query than shadow dom spec.
-    // For example, a selector query should not include contextual selectors.
-    // See https://bugs.webkit.org/show_bug.cgi?id=75946
-    // FIXME: Currently we don't support setting select value dynamically.
-    // See https://bugs.webkit.org/show_bug.cgi?id=76261
     void setSelect(const AtomicString&);
-
-    const ShadowInclusionList* inclusions() const { return m_inclusions.get(); }
-    bool hasInclusion() const { return inclusions()->first(); }
-
-    virtual bool isSelectValid() const;
+    virtual const AtomicString& select() const;
+    virtual bool isSelectValid();
+    virtual const CSSSelectorList& selectorList();
+    virtual Type insertionPointType() const OVERRIDE { return ContentInsertionPoint; }
 
 protected:
     HTMLContentElement(const QualifiedName&, Document*);
 
 private:
-    virtual bool isContentElement() const { return true; }
-    virtual bool rendererIsNeeded(const NodeRenderingContext&) { return false; }
-    virtual RenderObject* createRenderer(RenderArena*, RenderStyle*) { return 0; }
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
+    void ensureSelectParsed();
+    bool validateSelect() const;
 
-    OwnPtr<ShadowInclusionList> m_inclusions;
+    bool m_shouldParseSelectorList;
+    bool m_isValidSelector;
+    CSSSelectorList m_selectorList;
 };
+
+inline void HTMLContentElement::setSelect(const AtomicString& selectValue)
+{
+    setAttribute(HTMLNames::selectAttr, selectValue);
+    m_shouldParseSelectorList = true;
+}
+
+inline const CSSSelectorList& HTMLContentElement::selectorList()
+{
+    ensureSelectParsed();
+    return m_selectorList;
+}
+
+inline bool isHTMLContentElement(const Node* node)
+{
+    ASSERT(node);
+    return node->hasTagName(HTMLContentElement::contentTagName(node->document()));
+}
 
 inline HTMLContentElement* toHTMLContentElement(Node* node)
 {
-    ASSERT(!node || node->isContentElement());
+    ASSERT(!node || isHTMLContentElement(node));
     return static_cast<HTMLContentElement*>(node);
 }
 

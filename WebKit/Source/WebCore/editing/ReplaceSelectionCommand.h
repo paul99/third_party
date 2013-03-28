@@ -27,13 +27,11 @@
 #define ReplaceSelectionCommand_h
 
 #include "CompositeEditCommand.h"
+#include "NodeTraversal.h"
 
 namespace WebCore {
 
-class CSSMutableStyleDeclaration;
 class DocumentFragment;
-class EditingStyle;
-class Node;
 class ReplacementFragment;
 
 class ReplaceSelectionCommand : public CompositeEditCommand {
@@ -68,14 +66,14 @@ private:
 
         Node* firstNodeInserted() const { return m_firstNodeInserted.get(); }
         Node* lastLeafInserted() const { return m_lastNodeInserted->lastDescendant(); }
-        Node* pastLastLeaf() const { return m_firstNodeInserted ? lastLeafInserted()->traverseNextNode() : 0; }
+        Node* pastLastLeaf() const { return m_lastNodeInserted ? NodeTraversal::next(lastLeafInserted()) : 0; }
 
     private:
         RefPtr<Node> m_firstNodeInserted;
         RefPtr<Node> m_lastNodeInserted;
     };
 
-    Node* insertAsListItems(PassRefPtr<Node>, Node* insertionNode, const Position&, InsertedNodes&);
+    Node* insertAsListItems(PassRefPtr<HTMLElement> listElement, Node* insertionNode, const Position&, InsertedNodes&);
 
     void updateNodesInserted(Node*);
     bool shouldRemoveEndBR(Node*, const VisiblePosition&);
@@ -89,7 +87,6 @@ private:
     void removeUnrenderedTextNodesAtEnds(InsertedNodes&);
     
     void removeRedundantStylesAndKeepStyleSpanInline(InsertedNodes&);
-    void removeRedundantMarkup(InsertedNodes&);
     void handleStyleSpans(InsertedNodes&);
     void handlePasteAsQuotationNode();
     
@@ -99,6 +96,7 @@ private:
     bool shouldPerformSmartReplace() const;
     void addSpacesForSmartReplace();
     void completeHTMLReplacement(const Position& lastPositionToSelect);
+    void mergeTextNodesAroundPosition(Position&, Position& positionOnlyToBeUpdated);
 
     bool performTrivialReplace(const ReplacementFragment&);
 

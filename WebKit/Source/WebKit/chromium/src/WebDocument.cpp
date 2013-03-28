@@ -32,9 +32,10 @@
 #include "WebDocument.h"
 
 #include "AXObjectCache.h"
-#include "CSSStyleSheet.h"
+#include "CSSParserMode.h"
 #include "Document.h"
 #include "DocumentLoader.h"
+#include "DocumentStyleSheetCollection.h"
 #include "DocumentType.h"
 #include "Element.h"
 #include "HTMLAllCollection.h"
@@ -44,7 +45,9 @@
 #include "HTMLFormElement.h"
 #include "HTMLHeadElement.h"
 #include "NodeList.h"
+#include "RenderObject.h"
 #include "SecurityOrigin.h"
+#include "StyleSheetContents.h"
 #include "WebAccessibilityObject.h"
 #include "WebDOMEvent.h"
 #include "WebDocumentType.h"
@@ -53,8 +56,7 @@
 #include "WebFrameImpl.h"
 #include "WebNodeCollection.h"
 #include "WebNodeList.h"
-#include "platform/WebURL.h"
-
+#include <public/WebURL.h>
 #include <wtf/PassRefPtr.h>
 
 using namespace WebCore;
@@ -76,6 +78,11 @@ WebSecurityOrigin WebDocument::securityOrigin() const
 WebString WebDocument::encoding() const
 {
     return constUnwrap<Document>()->encoding();
+}
+
+WebString WebDocument::contentLanguage() const
+{
+    return constUnwrap<Document>()->contentLanguage();
 }
 
 WebURL WebDocument::openSearchDescriptionURL() const
@@ -138,6 +145,20 @@ WebNodeCollection WebDocument::all()
     return WebNodeCollection(unwrap<Document>()->all());
 }
 
+void WebDocument::images(WebVector<WebElement>& results)
+{
+    RefPtr<HTMLCollection> images = unwrap<Document>()->images();
+    size_t sourceLength = images->length();
+    Vector<WebElement> temp;
+    temp.reserveCapacity(sourceLength);
+    for (size_t i = 0; i < sourceLength; ++i) {
+        Node* node = images->item(i);
+        if (node && node->isHTMLElement())
+            temp.append(WebElement(static_cast<Element*>(node)));
+    }
+    results.assign(temp);
+}
+
 void WebDocument::forms(WebVector<WebFormElement>& results) const
 {
     RefPtr<HTMLCollection> forms = const_cast<Document*>(constUnwrap<Document>())->forms();
@@ -173,14 +194,17 @@ WebDocumentType WebDocument::doctype() const
     return WebDocumentType(constUnwrap<Document>()->doctype());
 }
 
-void WebDocument::insertUserStyleSheet(const WebString& sourceCode, UserStyleLevel level)
+void WebDocument::insertUserStyleSheet(const WebString& sourceCode, UserStyleLevel styleLevel)
 {
     RefPtr<Document> document = unwrap<Document>();
 
-    RefPtr<CSSStyleSheet> parsedSheet = CSSStyleSheet::create(document.get());
-    parsedSheet->setIsUserStyleSheet(level == UserStyleUserLevel);
-    parsedSheet->parseString(sourceCode, !document->inQuirksMode());
-    document->addUserSheet(parsedSheet.release());
+    RefPtr<StyleSheetContents> parsedSheet = StyleSheetContents::create(document.get());
+    parsedSheet->setIsUserStyleSheet(styleLevel == UserStyleUserLevel);
+    parsedSheet->parseString(sourceCode);
+    if (parsedSheet->isUserStyleSheet())
+        document->styleSheetCollection()->addUserSheet(parsedSheet);
+    else
+        document->styleSheetCollection()->addAuthorSheet(parsedSheet);
 }
 
 void WebDocument::cancelFullScreen()
@@ -208,6 +232,20 @@ WebDOMEvent WebDocument::createEvent(const WebString& eventType)
     return event;
 }
 
+WebReferrerPolicy WebDocument::referrerPolicy() const
+{
+    return static_cast<WebReferrerPolicy>(constUnwrap<Document>()->referrerPolicy());
+}
+
+WebElement WebDocument::createElement(const WebString& tagName)
+{
+    ExceptionCode ec = 0;
+    WebElement element(unwrap<Document>()->createElement(tagName, ec));
+    if (ec)
+        return WebElement();
+    return element;
+}
+
 WebAccessibilityObject WebDocument::accessibilityObject() const
 {
     const Document* document = constUnwrap<Document>();
@@ -220,6 +258,24 @@ WebAccessibilityObject WebDocument::accessibilityObjectFromID(int axID) const
     const Document* document = constUnwrap<Document>();
     return WebAccessibilityObject(
         document->axObjectCache()->objectFromAXID(axID));
+}
+
+WebVector<WebDraggableRegion> WebDocument::draggableRegions() const
+{
+    WebVector<WebDraggableRegion> draggableRegions;
+#if ENABLE(DRAGGABLE_REGION)
+    const Document* document = constUnwrap<Document>();
+    if (document->hasAnnotatedRegions()) {
+        const Vector<AnnotatedRegionValue>& regions = document->annotatedRegions();
+        draggableRegions = WebVector<WebDraggableRegion>(regions.size());
+        for (size_t i = 0; i < regions.size(); i++) {
+            const AnnotatedRegionValue& value = regions[i];
+            draggableRegions[i].draggable = value.draggable;
+            draggableRegions[i].bounds = WebCore::IntRect(value.bounds);
+        }
+    }
+#endif
+    return draggableRegions;
 }
 
 WebDocument::WebDocument(const PassRefPtr<Document>& elem)

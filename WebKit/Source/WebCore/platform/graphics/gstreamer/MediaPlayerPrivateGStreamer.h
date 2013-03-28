@@ -24,12 +24,13 @@
 #define MediaPlayerPrivateGStreamer_h
 #if ENABLE(VIDEO) && USE(GSTREAMER)
 
-#include <wtf/Forward.h>
+#include "GRefPtrGStreamer.h"
 #include "MediaPlayerPrivate.h"
 #include "Timer.h"
 
 #include <glib.h>
 #include <gst/gst.h>
+#include <wtf/Forward.h>
 
 typedef struct _WebKitVideoSink WebKitVideoSink;
 typedef struct _GstBuffer GstBuffer;
@@ -89,7 +90,7 @@ class MediaPlayerPrivateGStreamer : public MediaPlayerPrivateInterface {
 
             PassRefPtr<TimeRanges> buffered() const;
             float maxTimeSeekable() const;
-            unsigned bytesLoaded() const;
+            bool didLoadingProgress() const;
             unsigned totalBytes() const;
 
             void setVisible(bool);
@@ -123,13 +124,16 @@ class MediaPlayerPrivateGStreamer : public MediaPlayerPrivateInterface {
             unsigned audioDecodedByteCount() const;
             unsigned videoDecodedByteCount() const;
 
+            MediaPlayer::MovieLoadType movieLoadType() const;
+
         private:
             MediaPlayerPrivateGStreamer(MediaPlayer*);
 
             static PassOwnPtr<MediaPlayerPrivateInterface> create(MediaPlayer*);
 
             static void getSupportedTypes(HashSet<String>&);
-            static MediaPlayer::SupportsType supportsType(const String& type, const String& codecs);
+            static MediaPlayer::SupportsType supportsType(const String& type, const String& codecs, const KURL&);
+
             static bool isAvailable();
 
             void updateAudioSink();
@@ -146,7 +150,11 @@ class MediaPlayerPrivateGStreamer : public MediaPlayerPrivateInterface {
             bool loadNextLocation();
             void mediaLocationChanged(GstMessage*);
 
+            void setDownloadBuffering();
             void processBufferingStats(GstMessage*);
+
+            virtual String engineDescription() const { return "GStreamer"; }
+            bool isLiveStream() const { return m_isStreaming; }
 
         private:
             MediaPlayer* m_player;
@@ -154,7 +162,7 @@ class MediaPlayerPrivateGStreamer : public MediaPlayerPrivateInterface {
             GstElement* m_webkitVideoSink;
             GstElement* m_videoSinkBin;
             GstElement* m_fpsSink;
-            GstElement* m_source;
+            GRefPtr<GstElement> m_source;
             float m_seekTime;
             bool m_changingRate;
             float m_endTime;
@@ -180,14 +188,23 @@ class MediaPlayerPrivateGStreamer : public MediaPlayerPrivateInterface {
             MediaPlayer::Preload m_preload;
             bool m_delayingLoad;
             bool m_mediaDurationKnown;
+            mutable float m_maxTimeLoadedAtLastDidLoadingProgress;
+#ifndef GST_API_VERSION_1
             RefPtr<GStreamerGWorld> m_gstGWorld;
+#endif
             guint m_volumeTimerHandler;
             guint m_muteTimerHandler;
+            bool m_volumeAndMuteInitialized;
             bool m_hasVideo;
             bool m_hasAudio;
             guint m_audioTimerHandler;
             guint m_videoTimerHandler;
-            GstElement* m_webkitAudioSink;
+            GRefPtr<GstElement> m_webkitAudioSink;
+            mutable long m_totalBytes;
+            GRefPtr<GstPad> m_videoSinkPad;
+            mutable IntSize m_videoSize;
+            KURL m_url;
+            bool m_originalPreloadWasAutoAndWasOverridden;
     };
 }
 

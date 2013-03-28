@@ -28,10 +28,10 @@
 
 #include "Document.h"
 #include "Element.h"
-#include "EditingText.h"
 #include "Editor.h"
 #include "Frame.h"
 #include "HTMLInterchange.h"
+#include "Text.h"
 #include "htmlediting.h"
 #include "visible_units.h"
 #include <wtf/unicode/CharacterNames.h>
@@ -43,6 +43,15 @@ InsertTextCommand::InsertTextCommand(Document* document, const String& text, boo
     , m_text(text)
     , m_selectInsertedText(selectInsertedText)
     , m_rebalanceType(rebalanceType)
+{
+}
+
+InsertTextCommand::InsertTextCommand(Document* document, const String& text, PassRefPtr<TextInsertionMarkerSupplier> markerSupplier)
+    : CompositeEditCommand(document)
+    , m_text(text)
+    , m_selectInsertedText(false)
+    , m_rebalanceType(RebalanceLeadingAndTrailingWhitespaces)
+    , m_markerSupplier(markerSupplier)
 {
 }
 
@@ -107,7 +116,7 @@ void InsertTextCommand::doApply()
     if (endingSelection().isRange()) {
         if (performTrivialReplace(m_text, m_selectInsertedText))
             return;
-        deleteSelection(false, true, true, false);
+        deleteSelection(false, true, true, false, false);
         // deleteSelection eventually makes a new endingSelection out of a Position. If that Position doesn't have
         // a renderer (e.g. it is on a <frameset> in the DOM), the VisibleSelection cannot be canonicalized to 
         // anything other than NoSelection. The rest of this function requires a real endingSelection, so bail out.
@@ -167,6 +176,8 @@ void InsertTextCommand::doApply()
 
         insertTextIntoNode(textNode, offset, m_text);
         endPosition = Position(textNode, offset + m_text.length());
+        if (m_markerSupplier)
+            m_markerSupplier->addMarkersToTextNode(textNode.get(), offset, m_text);
 
         if (m_rebalanceType == RebalanceLeadingAndTrailingWhitespaces) {
             // The insertion may require adjusting adjacent whitespace, if it is present.
@@ -209,7 +220,7 @@ Position InsertTextCommand::insertTab(const Position& pos)
 
     // keep tabs coalesced in tab span
     if (isTabSpanTextNode(node)) {
-        RefPtr<Text> textNode = static_cast<Text*>(node);
+        RefPtr<Text> textNode = toText(node);
         insertTextIntoNode(textNode, offset, "\t");
         return Position(textNode.release(), offset + 1);
     }
@@ -221,7 +232,7 @@ Position InsertTextCommand::insertTab(const Position& pos)
     if (!node->isTextNode()) {
         insertNodeAt(spanNode.get(), insertPos);
     } else {
-        RefPtr<Text> textNode = static_cast<Text*>(node);
+        RefPtr<Text> textNode = toText(node);
         if (offset >= textNode->length())
             insertNodeAfter(spanNode, textNode.release());
         else {

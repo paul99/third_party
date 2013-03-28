@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2006 Apple Computer, Inc.  All rights reserved.
- * Copyright (C) 2008 Google, Inc.
+ * Copyright (C) 2012 Google, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,8 +36,17 @@ namespace WebCore {
 
     class ResourceResponse : public ResourceResponseBase {
     public:
+        // FIXME: move this to ResourceResponseBase and implement for all ports (see history in http://webkit.org/b/86522).
+        enum HTTPVersion { Unknown, HTTP_0_9, HTTP_1_0, HTTP_1_1 };
+
+        class ExtraData : public RefCounted<ExtraData> {
+        public:
+            virtual ~ExtraData() { }
+        };
+
         ResourceResponse()
-            : m_appCacheID(0)
+            : m_httpVersion(Unknown)
+            , m_appCacheID(0)
             , m_isMultipartPayload(false)
             , m_wasFetchedViaSPDY(false)
             , m_wasNpnNegotiated(false)
@@ -50,6 +59,7 @@ namespace WebCore {
 
         ResourceResponse(const KURL& url, const String& mimeType, long long expectedLength, const String& textEncodingName, const String& filename)
             : ResourceResponseBase(url, mimeType, expectedLength, textEncodingName, filename)
+            , m_httpVersion(Unknown)
             , m_appCacheID(0)
             , m_isMultipartPayload(false)
             , m_wasFetchedViaSPDY(false)
@@ -60,6 +70,9 @@ namespace WebCore {
             , m_remotePort(0)
         {
         }
+
+        HTTPVersion httpVersion() const { return m_httpVersion; }
+        void setHTTPVersion(HTTPVersion version) { m_httpVersion = version; }
 
         const CString& getSecurityInfo() const { return m_securityInfo; }
         void setSecurityInfo(const CString& securityInfo) { m_securityInfo = securityInfo; }
@@ -103,13 +116,12 @@ namespace WebCore {
         const File* downloadedFile() const { return m_downloadedFile.get(); }
         void setDownloadedFile(PassRefPtr<File> downloadedFile) { m_downloadedFile = downloadedFile; }
 
+        // Extra data associated with this response.
+        ExtraData* extraData() const { return m_extraData.get(); }
+        void setExtraData(PassRefPtr<ExtraData> extraData) { m_extraData = extraData; }
+
     private:
         friend class ResourceResponseBase;
-
-        // An opaque value that contains some information regarding the security of
-        // the connection for this request, such as SSL connection info (empty
-        // string if not over HTTPS).
-        CString m_securityInfo;
 
         void doUpdateResourceResponse()
         {
@@ -118,6 +130,14 @@ namespace WebCore {
 
         PassOwnPtr<CrossThreadResourceResponseData> doPlatformCopyData(PassOwnPtr<CrossThreadResourceResponseData>) const;
         void doPlatformAdopt(PassOwnPtr<CrossThreadResourceResponseData>);
+
+        // An opaque value that contains some information regarding the security of
+        // the connection for this request, such as SSL connection info (empty
+        // string if not over HTTPS).
+        CString m_securityInfo;
+
+        // HTTP version used in the response, if known.
+        HTTPVersion m_httpVersion;
 
         // The id of the appcache this response was retrieved from, or zero if
         // the response was not retrieved from an appcache.
@@ -155,9 +175,14 @@ namespace WebCore {
 
         // The downloaded file if the load streamed to a file.
         RefPtr<File> m_downloadedFile;
+
+        // ExtraData associated with the response.
+        RefPtr<ExtraData> m_extraData;
     };
 
     struct CrossThreadResourceResponseData : public CrossThreadResourceResponseDataBase {
+        CString m_securityInfo;
+        ResourceResponse::HTTPVersion m_httpVersion;
         long long m_appCacheID;
         KURL m_appCacheManifestURL;
         bool m_isMultipartPayload;

@@ -28,17 +28,15 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-module html {
+[
+    Conditional=MICRODATA,
+    JSGenerateToJSObject,
+    IndexedGetter,
+    NamedGetter
+] interface HTMLPropertiesCollection : HTMLCollection {
+    readonly attribute unsigned long length;
+    Node item(in unsigned long index);
 
-    interface [
-        Conditional=MICRODATA,
-        HasIndexGetter
-    ] HTMLPropertiesCollection : HTMLCollection {
-        readonly attribute unsigned long length;
-        Node item(in unsigned long index);
-
-        readonly attribute DOMStringList names;
-
-        // FIXME: override inherited namedItem()
-    };
-}
+    readonly attribute DOMStringList names;
+    [ImplementedAs=propertyNodeList] PropertyNodeList namedItem(in DOMString name);
+};

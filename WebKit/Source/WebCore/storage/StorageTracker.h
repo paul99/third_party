@@ -26,17 +26,17 @@
 #ifndef StorageTracker_h
 #define StorageTracker_h
 
-#include "PlatformString.h"
 #include "SQLiteDatabase.h"
 #include <wtf/HashSet.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/Vector.h>
 #include <wtf/text/StringHash.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
-class LocalStorageTask;
-class LocalStorageThread;
+class StorageTask;
+class StorageThread;
 class SecurityOrigin;
 class StorageTrackerClient;    
 
@@ -46,6 +46,9 @@ class StorageTracker {
 public:
     static void initializeTracker(const String& storagePath, StorageTrackerClient*);
     static StorageTracker& tracker();
+
+    void setDatabaseDirectoryPath(const String&);
+    String databaseDirectoryPath() const;
 
     void setOriginDetails(const String& originIdentifier, const String& databaseFile);
     
@@ -71,8 +74,11 @@ public:
 
     void syncLocalStorage();
 
+    double storageDatabaseIdleInterval() { return m_StorageDatabaseIdleInterval; }
+    void setStorageDatabaseIdleInterval(double interval) { m_StorageDatabaseIdleInterval = interval; }
+
 private:
-    StorageTracker(const String& storagePath);
+    explicit StorageTracker(const String& storagePath);
     static void scheduleTask(void*);
 
     void internalInitialize();
@@ -110,11 +116,12 @@ private:
     OriginSet m_originSet;
     OriginSet m_originsBeingDeleted;
 
-    OwnPtr<LocalStorageThread> m_thread;
+    OwnPtr<StorageThread> m_thread;
     
     bool m_isActive;
     bool m_needsInitialization;
     bool m_finishedImportingOriginIdentifiers;
+    double m_StorageDatabaseIdleInterval;
 };
     
 } // namespace WebCore

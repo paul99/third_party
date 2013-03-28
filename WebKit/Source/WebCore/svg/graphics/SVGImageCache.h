@@ -31,11 +31,13 @@
 namespace WebCore {
 
 class CachedImage;
+class CachedImageClient;
 class ImageBuffer;
-class RenderObject;
 class SVGImage;
+class RenderObject;
 
 class SVGImageCache {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     ~SVGImageCache();
 
@@ -44,32 +46,43 @@ public:
         return adoptPtr(new SVGImageCache(image));
     }
 
-    struct SizeAndZoom {
-        SizeAndZoom()
+    struct SizeAndScales {
+        SizeAndScales()
             : zoom(1)
+            , scale(0)
         {
         }
 
-        SizeAndZoom(const IntSize& newSize, float newZoom)
+        SizeAndScales(const IntSize& newSize, float newZoom, float newScale)
             : size(newSize)
             , zoom(newZoom)
+            , scale(newScale)
+        {
+        }
+
+        SizeAndScales(const IntSize& newSize, float newZoom)
+            : size(newSize)
+            , zoom(newZoom)
+            , scale(0)
         {
         }
 
         IntSize size;
         float zoom;
+        float scale; // A scale of 0 indicates that the default scale should be used.
     };
 
-    void removeRendererFromCache(const RenderObject*);
+    void removeClientFromCache(const CachedImageClient*);
 
-    void setRequestedSizeAndZoom(const RenderObject*, const SizeAndZoom&);
-    SizeAndZoom requestedSizeAndZoom(const RenderObject*) const;
+    void setRequestedSizeAndScales(const CachedImageClient*, const SizeAndScales&);
+    SizeAndScales requestedSizeAndScales(const CachedImageClient*) const;
 
     Image* lookupOrCreateBitmapImageForRenderer(const RenderObject*);
     void imageContentChanged();
 
 private:
     SVGImageCache(SVGImage*);
+    void redraw();
     void redrawTimerFired(Timer<SVGImageCache>*);
 
     struct ImageData {
@@ -79,26 +92,26 @@ private:
         {
         }
 
-        ImageData(ImageBuffer* newBuffer, PassRefPtr<Image> newImage, const SizeAndZoom& newSizeAndZoom)
+        ImageData(ImageBuffer* newBuffer, PassRefPtr<Image> newImage, const SizeAndScales& newSizeAndScales)
             : imageNeedsUpdate(false)
-            , sizeAndZoom(newSizeAndZoom)
+            , sizeAndScales(newSizeAndScales)
             , buffer(newBuffer)
             , image(newImage)
         {
         }
 
         bool imageNeedsUpdate;
-        SizeAndZoom sizeAndZoom;
+        SizeAndScales sizeAndScales;
 
         ImageBuffer* buffer;
         RefPtr<Image> image;
     };
 
-    typedef HashMap<const RenderObject*, SizeAndZoom> SizeAndZoomMap;
-    typedef HashMap<const RenderObject*, ImageData> ImageDataMap;
+    typedef HashMap<const CachedImageClient*, SizeAndScales> SizeAndScalesMap;
+    typedef HashMap<const CachedImageClient*, ImageData> ImageDataMap;
 
     SVGImage* m_svgImage;
-    SizeAndZoomMap m_sizeAndZoomMap;
+    SizeAndScalesMap m_sizeAndScalesMap;
     ImageDataMap m_imageDataMap;
     Timer<SVGImageCache> m_redrawTimer;
 };

@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 Adobe Systems Incorporated. All Rights Reserved.
+ * Copyright (C) 2012 Adobe Systems Incorporated. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,6 +32,8 @@
 
 #if ENABLE(CSS_SHADERS)
 
+#include "CustomFilterProgramInfo.h"
+
 #include <wtf/HashCountedSet.h>
 #include <wtf/RefCounted.h>
 #include <wtf/text/WTFString.h>
@@ -39,7 +41,7 @@
 namespace WebCore {
 
 class GraphicsContext3D;
-class CustomFilterShader;
+class CustomFilterCompiledProgram;
 class CustomFilterProgramClient;
 
 // This is the base class for the StyleCustomFilterProgram class which knows how to keep
@@ -49,30 +51,37 @@ public:
     virtual ~CustomFilterProgram();
 
     virtual bool isLoaded() const = 0;
-    
+
     void addClient(CustomFilterProgramClient*);
     void removeClient(CustomFilterProgramClient*);
     
-#if ENABLE(WEBGL)
-    PassRefPtr<CustomFilterShader> createShaderWithContext(GraphicsContext3D*);
-#endif
-protected:
-    // StyleCustomFilterProgram can notify the clients that the cached resources are
-    // loaded and it is ready to create CustomFilterShader objects.
-    void notifyClients();
-    
+    CustomFilterProgramInfo programInfo() const;
+
     virtual String vertexShaderString() const = 0;
     virtual String fragmentShaderString() const = 0;
-    
+    CustomFilterProgramType programType() const { return m_programType; }
+    CustomFilterProgramMixSettings mixSettings() const { return m_mixSettings; }
+    CustomFilterMeshType meshType() const { return m_meshType; }
+
+    virtual bool operator==(const CustomFilterProgram&) const;
+    bool operator!=(const CustomFilterProgram& o) const { return !(*this == o); }
+protected:
+    // StyleCustomFilterProgram can notify the clients that the cached resources are
+    // loaded and it is ready to create CustomFilterCompiledProgram objects.
+    void notifyClients();
+
     virtual void willHaveClients() = 0;
     virtual void didRemoveLastClient() = 0;
 
     // Keep the constructor protected to prevent creating this object directly.
-    CustomFilterProgram();
+    CustomFilterProgram(CustomFilterProgramType, const CustomFilterProgramMixSettings&, CustomFilterMeshType);
 
 private:
     typedef HashCountedSet<CustomFilterProgramClient*> CustomFilterProgramClientList;
     CustomFilterProgramClientList m_clients;
+    CustomFilterProgramType m_programType;
+    CustomFilterProgramMixSettings m_mixSettings;
+    CustomFilterMeshType m_meshType;
 };
 
 }

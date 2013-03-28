@@ -24,14 +24,12 @@
  *
  */
 
-module view {
+[
+    IndexedGetter,
+    ImplementationLacksVTable
+] interface ClientRectList {
+    readonly attribute unsigned long length;
+    ClientRect item(in [IsIndex,Optional=DefaultIsUndefined] unsigned long index);
+    // FIXME: Fix list behavior to allow custom exceptions to be thrown.
+};
 
-    interface [
-        HasIndexGetter
-    ] ClientRectList {
-        readonly attribute unsigned long length;
-        ClientRect item(in [IsIndex,Optional=CallWithDefaultValue] unsigned long index);
-        // FIXME: Fix list behavior to allow custom exceptions to be thrown.
-    };
-
-}

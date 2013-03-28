@@ -132,6 +132,7 @@ enum LogErrorContext {
 class LogMessage {
  public:
   static const int NO_LOGGING;
+  static const uint32 WARN_SLOW_LOGS_DELAY = 50;  // ms
 
   LogMessage(const char* file, int line, LoggingSeverity sev,
              LogErrorContext err_ctx = ERRCTX_NONE, int err = 0,
@@ -141,6 +142,17 @@ class LogMessage {
   static inline bool Loggable(LoggingSeverity sev) { return (sev >= min_sev_); }
   std::ostream& stream() { return print_stream_; }
 
+  // Returns the time at which this function was called for the first time.
+  // The time will be used as the logging start time.
+  // If this is not called externally, the LogMessage ctor also calls it, in
+  // which case the logging start time will be the time of the first LogMessage
+  // instance is created.
+  static uint32 LogStartTime();
+
+  // Returns the wall clock equivalent of |LogStartTime|, in seconds from the
+  // epoch.
+  static uint32 WallClockStartTime();
+
   // These are attributes which apply to all logging channels
   //  LogContext: Display the file and line number of the message
   static void LogContext(int min_sev);
@@ -148,11 +160,6 @@ class LogMessage {
   static void LogThreads(bool on = true);
   //  LogTimestamps: Display the elapsed time of the program
   static void LogTimestamps(bool on = true);
-
-  // Timestamps begin with program execution, but can be reset with this
-  // function for measuring the duration of an activity, or to synchronize
-  // timestamps between multiple instances.
-  static void ResetTimestamps();
 
   // These are the available logging channels
   //  Debug: Debug console on Windows, otherwise stderr
@@ -210,6 +217,10 @@ class LogMessage {
   // the message before output.
   std::string extra_;
 
+  // If time it takes to write to stream is more than this, log one
+  // additional warning about it.
+  uint32 warn_slow_logs_delay_;
+
   // Global lock for the logging subsystem
   static CriticalSection crit_;
 
@@ -225,9 +236,6 @@ class LogMessage {
 
   // Flags for formatting options
   static bool thread_, timestamp_;
-
-  // The timestamp at which logging started.
-  static uint32 start_;
 
   // are we in diagnostic mode (as defined by the app)?
   static bool is_diagnostic_mode_;
@@ -300,7 +308,7 @@ class LogMessageVoidify {
     talk_base::LogMessage(__FILE__, __LINE__, sev).stream()
 
 // The _F version prefixes the message with the current function name.
-#if defined(__GNUC__) && defined(_DEBUG)
+#if (defined(__GNUC__) && defined(_DEBUG)) || defined(WANT_PRETTY_LOG_F)
 #define LOG_F(sev) LOG(sev) << __PRETTY_FUNCTION__ << ": "
 #else
 #define LOG_F(sev) LOG(sev) << __FUNCTION__ << ": "

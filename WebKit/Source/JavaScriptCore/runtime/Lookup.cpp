@@ -64,7 +64,7 @@ void HashTable::deleteTable() const
     }
 }
 
-bool setUpStaticFunctionSlot(ExecState* exec, const HashEntry* entry, JSObject* thisObj, const Identifier& propertyName, PropertySlot& slot)
+bool setUpStaticFunctionSlot(ExecState* exec, const HashEntry* entry, JSObject* thisObj, PropertyName propertyName, PropertySlot& slot)
 {
     ASSERT(thisObj->globalObject());
     ASSERT(entry->attributes() & Function);
@@ -76,15 +76,10 @@ bool setUpStaticFunctionSlot(ExecState* exec, const HashEntry* entry, JSObject* 
         if (thisObj->staticFunctionsReified())
             return false;
     
-        JSFunction* function;
-        JSGlobalObject* globalObject = thisObj->globalObject();
-#if ENABLE(JIT)
-        if (exec->globalData().canUseJIT() && entry->intrinsic() != NoIntrinsic)
-            function = JSFunction::create(exec, globalObject, entry->functionLength(), propertyName, exec->globalData().getHostFunction(entry->function(), entry->intrinsic()));
-        else
-#endif
-            function = JSFunction::create(exec, globalObject, entry->functionLength(), propertyName, entry->function());
-
+        StringImpl* name = propertyName.publicName();
+        ASSERT(name);
+        
+        JSFunction* function = JSFunction::create(exec, thisObj->globalObject(), entry->functionLength(), name, entry->function(), entry->intrinsic());
         thisObj->putDirect(exec->globalData(), propertyName, function, entry->attributes());
         location = thisObj->getDirectLocation(exec->globalData(), propertyName);
     }

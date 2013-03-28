@@ -83,6 +83,8 @@ class PlatformMouseEvent;
         virtual bool isDragEvent() const;
         virtual int which() const;
 
+        virtual PassRefPtr<Event> cloneFor(HTMLIFrameElement*) const OVERRIDE;
+
     protected:
         MouseEvent(const AtomicString& type, bool canBubble, bool cancelable, PassRefPtr<AbstractView>,
                    int detail, int screenX, int screenY, int pageX, int pageY,
@@ -92,9 +94,10 @@ class PlatformMouseEvent;
                    bool ctrlKey, bool altKey, bool shiftKey, bool metaKey, unsigned short button,
                    PassRefPtr<EventTarget> relatedTarget, PassRefPtr<Clipboard> clipboard, bool isSimulated);
 
-    private:
+    protected:
         MouseEvent();
 
+    private:
         unsigned short m_button;
         bool m_buttonDown;
         RefPtr<EventTarget> m_relatedTarget;
@@ -112,14 +115,23 @@ private:
 
 class MouseEventDispatchMediator : public EventDispatchMediator {
 public:
-    static PassRefPtr<MouseEventDispatchMediator> create(PassRefPtr<MouseEvent>);
+    enum MouseEventType { SyntheticMouseEvent, NonSyntheticMouseEvent};
+    static PassRefPtr<MouseEventDispatchMediator> create(PassRefPtr<MouseEvent>, MouseEventType = NonSyntheticMouseEvent);
 
 private:
-    explicit MouseEventDispatchMediator(PassRefPtr<MouseEvent>);
+    explicit MouseEventDispatchMediator(PassRefPtr<MouseEvent>, MouseEventType);
     MouseEvent* event() const;
 
     virtual bool dispatchEvent(EventDispatcher*) const;
+    bool isSyntheticMouseEvent() const { return m_mouseEventType == SyntheticMouseEvent; }
+    MouseEventType m_mouseEventType;
 };
+
+inline MouseEvent* toMouseEvent(Event* event)
+{
+    ASSERT(event && event->isMouseEvent());
+    return static_cast<MouseEvent*>(event);
+}
 
 } // namespace WebCore
 

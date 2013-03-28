@@ -1,28 +1,17 @@
+
 /*
- * Copyright 2012 Google Inc.
+ * Copyright 2011 Google Inc.
  *
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
 
-#ifndef PROC_TYPE
-#error PROC_TYPE must be defined before including this file
+// Define NAME_WRAP(x) before including this header to perform name-wrapping
+// E.g. for ARM NEON, defined it as 'x ## _neon' to ensure all important
+// identifiers have a _neon suffix.
+#ifndef NAME_WRAP
+#error "Please define NAME_WRAP() before including this file"
 #endif
-
-#define  GLUE2(x,y)    GLUE2_(x,y)
-#define  GLUE2_(x,y)   x ## y
-
-#define  GLUE3(x,y,z)  GLUE3_(x,y,z)
-#define  GLUE3_(x,y,z) x ## y ## z
-
-#define MAKENAME1(prefix)            GLUE2(prefix,PROC_TYPE)
-#define MAKENAME2(prefix,suffix)     GLUE3(prefix,suffix,PROC_TYPE)
-
-#define SAMPLEPROC32_TABLE_NAME   MAKENAME1(SkBitmapProcState_gSample32)
-#define SAMPLEPROC16_TABLE_NAME   MAKENAME1(SkBitmapProcState_gSample16)
-
-extern const SkBitmapProcState::SampleProc32 SAMPLEPROC32_TABLE_NAME [];
-extern const SkBitmapProcState::SampleProc16 SAMPLEPROC16_TABLE_NAME [];
 
 // returns expanded * 5bits
 static inline uint32_t Filter_565_Expanded(unsigned x, unsigned y,
@@ -30,12 +19,12 @@ static inline uint32_t Filter_565_Expanded(unsigned x, unsigned y,
                                            uint32_t a10, uint32_t a11) {
     SkASSERT((unsigned)x <= 0xF);
     SkASSERT((unsigned)y <= 0xF);
-    
+
     a00 = SkExpand_rgb_16(a00);
     a01 = SkExpand_rgb_16(a01);
     a10 = SkExpand_rgb_16(a10);
     a11 = SkExpand_rgb_16(a11);
-    
+
     int xy = x * y >> 3;
     return  a00 * (32 - 2*y - 2*x + xy) +
             a01 * (2*x - xy) +
@@ -58,7 +47,7 @@ static inline SkPMColor Filter_4444_D32(unsigned x, unsigned y,
                                         uint32_t a10, uint32_t a11) {
     SkASSERT((unsigned)x <= 0xF);
     SkASSERT((unsigned)y <= 0xF);
-    
+
     a00 = SkExpand_4444(a00);
     a01 = SkExpand_4444(a01);
     a10 = SkExpand_4444(a10);
@@ -78,13 +67,13 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
                              U8CPU a10, U8CPU a11) {
     SkASSERT((unsigned)x <= 0xF);
     SkASSERT((unsigned)y <= 0xF);
-    
+
     int xy = x * y;
     unsigned result =   a00 * (256 - 16*y - 16*x + xy) +
                         a01 * (16*x - xy) +
                         a10 * (16*y - xy) +
                         a11 * xy;
-    
+
     return result >> 8;
 }
 
@@ -96,9 +85,9 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
 
 // SRC == 8888
 
-#define FILTER_PROC(x, y, a, b, c, d, dst)   Filter_32_opaque(x, y, a, b, c, d, dst)
+#define FILTER_PROC(x, y, a, b, c, d, dst)   NAME_WRAP(Filter_32_opaque)(x, y, a, b, c, d, dst)
 
-#define MAKENAME(suffix)        MAKENAME2(S32_opaque_D32, suffix)
+#define MAKENAME(suffix)        NAME_WRAP(S32_opaque_D32 ## suffix)
 #define DSTSIZE                 32
 #define SRCTYPE                 SkPMColor
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kARGB_8888_Config); \
@@ -108,9 +97,9 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
 #include "SkBitmapProcState_sample.h"
 
 #undef FILTER_PROC
-#define FILTER_PROC(x, y, a, b, c, d, dst)   Filter_32_alpha(x, y, a, b, c, d, dst, alphaScale)
+#define FILTER_PROC(x, y, a, b, c, d, dst)   NAME_WRAP(Filter_32_alpha)(x, y, a, b, c, d, dst, alphaScale)
 
-#define MAKENAME(suffix)        MAKENAME2(S32_alpha_D32, suffix)
+#define MAKENAME(suffix)        NAME_WRAP(S32_alpha_D32 ## suffix)
 #define DSTSIZE                 32
 #define SRCTYPE                 SkPMColor
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kARGB_8888_Config); \
@@ -129,7 +118,7 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
         *(dst) = SkExpanded_565_To_PMColor(tmp);                \
     } while (0)
 
-#define MAKENAME(suffix)        MAKENAME2(S16_opaque_D32, suffix)
+#define MAKENAME(suffix)        NAME_WRAP(S16_opaque_D32 ## suffix)
 #define DSTSIZE                 32
 #define SRCTYPE                 uint16_t
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kRGB_565_Config); \
@@ -145,7 +134,7 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
         *(dst) = SkAlphaMulQ(SkExpanded_565_To_PMColor(tmp), alphaScale);   \
     } while (0)
 
-#define MAKENAME(suffix)        MAKENAME2(S16_alpha_D32, suffix)
+#define MAKENAME(suffix)        NAME_WRAP(S16_alpha_D32 ## suffix)
 #define DSTSIZE                 32
 #define SRCTYPE                 uint16_t
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kRGB_565_Config); \
@@ -158,9 +147,9 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
 // SRC == Index8
 
 #undef FILTER_PROC
-#define FILTER_PROC(x, y, a, b, c, d, dst)   Filter_32_opaque(x, y, a, b, c, d, dst)
+#define FILTER_PROC(x, y, a, b, c, d, dst)   NAME_WRAP(Filter_32_opaque)(x, y, a, b, c, d, dst)
 
-#define MAKENAME(suffix)        MAKENAME2(SI8_opaque_D32, suffix)
+#define MAKENAME(suffix)        NAME_WRAP(SI8_opaque_D32 ## suffix)
 #define DSTSIZE                 32
 #define SRCTYPE                 uint8_t
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kIndex8_Config); \
@@ -172,9 +161,9 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
 #include "SkBitmapProcState_sample.h"
 
 #undef FILTER_PROC
-#define FILTER_PROC(x, y, a, b, c, d, dst)   Filter_32_alpha(x, y, a, b, c, d, dst, alphaScale)
+#define FILTER_PROC(x, y, a, b, c, d, dst)   NAME_WRAP(Filter_32_alpha)(x, y, a, b, c, d, dst, alphaScale)
 
-#define MAKENAME(suffix)        MAKENAME2(SI8_alpha_D32, suffix)
+#define MAKENAME(suffix)        NAME_WRAP(SI8_alpha_D32 ## suffix)
 #define DSTSIZE                 32
 #define SRCTYPE                 uint8_t
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kIndex8_Config); \
@@ -191,7 +180,7 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
 #undef FILTER_PROC
 #define FILTER_PROC(x, y, a, b, c, d, dst)  *(dst) = Filter_4444_D32(x, y, a, b, c, d)
 
-#define MAKENAME(suffix)        MAKENAME2(S4444_opaque_D32, suffix)
+#define MAKENAME(suffix)        NAME_WRAP(S4444_opaque_D32 ## suffix)
 #define DSTSIZE                 32
 #define SRCTYPE                 SkPMColor16
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kARGB_4444_Config); \
@@ -207,7 +196,7 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
         *(dst) = SkAlphaMulQ(tmp, alphaScale);              \
     } while (0)
 
-#define MAKENAME(suffix)        MAKENAME2(S4444_alpha_D32, suffix)
+#define MAKENAME(suffix)        NAME_WRAP(S4444_alpha_D32 ## suffix)
 #define DSTSIZE                 32
 #define SRCTYPE                 SkPMColor16
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kARGB_4444_Config); \
@@ -226,7 +215,7 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
         *(dst) = SkAlphaMulQ(pmColor, SkAlpha255To256(tmp));    \
     } while (0)
 
-#define MAKENAME(suffix)        MAKENAME2(SA8_alpha_D32, suffix)
+#define MAKENAME(suffix)        NAME_WRAP(SA8_alpha_D32 ## suffix)
 #define DSTSIZE                 32
 #define SRCTYPE                 uint8_t
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kA8_Config);
@@ -247,11 +236,11 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
 #define FILTER_PROC(x, y, a, b, c, d, dst) \
     do {                                                \
         SkPMColor dstColor;                             \
-        Filter_32_opaque(x, y, a, b, c, d, &dstColor);  \
+        NAME_WRAP(Filter_32_opaque)(x, y, a, b, c, d, &dstColor);  \
         (*dst) = SkPixel32ToPixel16(dstColor);          \
     } while (0)
 
-#define MAKENAME(suffix)        MAKENAME2(S32_D16, suffix)
+#define MAKENAME(suffix)        NAME_WRAP(S32_D16 ## suffix)
 #define DSTSIZE                 16
 #define SRCTYPE                 SkPMColor
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kARGB_8888_Config); \
@@ -269,7 +258,7 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
         *(dst) = SkCompact_rgb_16((tmp) >> 5);                  \
     } while (0)
 
-#define MAKENAME(suffix)        MAKENAME2(S16_D16, suffix)
+#define MAKENAME(suffix)        NAME_WRAP(S16_D16 ## suffix)
 #define DSTSIZE                 16
 #define SRCTYPE                 uint16_t
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kRGB_565_Config)
@@ -286,7 +275,7 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
         *(dst) = SkCompact_rgb_16((tmp) >> 5);                  \
     } while (0)
 
-#define MAKENAME(suffix)        MAKENAME2(SI8_D16, suffix)
+#define MAKENAME(suffix)        NAME_WRAP(SI8_D16 ## suffix)
 #define DSTSIZE                 16
 #define SRCTYPE                 uint8_t
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kIndex8_Config); \
@@ -314,7 +303,7 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
 #define TILEX_LOW_BITS(fx, max) (((fx) >> 12) & 0xF)
 #define TILEY_LOW_BITS(fy, max) (((fy) >> 12) & 0xF)
 
-#define MAKENAME(suffix)        MAKENAME2(Clamp_S16_D16, suffix)
+#define MAKENAME(suffix)        NAME_WRAP(Clamp_S16_D16 ## suffix)
 #define SRCTYPE                 uint16_t
 #define DSTTYPE                 uint16_t
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kRGB_565_Config)
@@ -327,7 +316,7 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
 #define TILEX_LOW_BITS(fx, max) ((((fx) & 0xFFFF) * ((max) + 1) >> 12) & 0xF)
 #define TILEY_LOW_BITS(fy, max) ((((fy) & 0xFFFF) * ((max) + 1) >> 12) & 0xF)
 
-#define MAKENAME(suffix)        MAKENAME2(Repeat_S16_D16, suffix)
+#define MAKENAME(suffix)        NAME_WRAP(Repeat_S16_D16 ## suffix)
 #define SRCTYPE                 uint16_t
 #define DSTTYPE                 uint16_t
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kRGB_565_Config)
@@ -341,8 +330,8 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
 #define TILEY_LOW_BITS(fy, max) (((fy) >> 12) & 0xF)
 
 #undef FILTER_PROC
-#define FILTER_PROC(x, y, a, b, c, d, dst)   Filter_32_opaque(x, y, a, b, c, d, dst)
-#define MAKENAME(suffix)        MAKENAME2(Clamp_SI8_opaque_D32, suffix)
+#define FILTER_PROC(x, y, a, b, c, d, dst)   NAME_WRAP(Filter_32_opaque)(x, y, a, b, c, d, dst)
+#define MAKENAME(suffix)        NAME_WRAP(Clamp_SI8_opaque_D32 ## suffix)
 #define SRCTYPE                 uint8_t
 #define DSTTYPE                 uint32_t
 #define CHECKSTATE(state)       SkASSERT(state.fBitmap->config() == SkBitmap::kIndex8_Config)
@@ -351,76 +340,4 @@ static inline U8CPU Filter_8(unsigned x, unsigned y,
 #define POSTAMBLE(state)        state.fBitmap->getColorTable()->unlockColors(false)
 #include "SkBitmapProcState_shaderproc.h"
 
-///////////////////////////////////////////////////////////////////////////////
-
-const SkBitmapProcState::SampleProc32 SAMPLEPROC32_TABLE_NAME [] = {
-    MAKENAME1(S32_opaque_D32_nofilter_DXDY),
-    MAKENAME1(S32_alpha_D32_nofilter_DXDY),
-    MAKENAME1(S32_opaque_D32_nofilter_DX),
-    MAKENAME1(S32_alpha_D32_nofilter_DX),
-    MAKENAME1(S32_opaque_D32_filter_DXDY),
-    MAKENAME1(S32_alpha_D32_filter_DXDY),
-    MAKENAME1(S32_opaque_D32_filter_DX),
-    MAKENAME1(S32_alpha_D32_filter_DX),
-    
-    MAKENAME1(S16_opaque_D32_nofilter_DXDY),
-    MAKENAME1(S16_alpha_D32_nofilter_DXDY),
-    MAKENAME1(S16_opaque_D32_nofilter_DX),
-    MAKENAME1(S16_alpha_D32_nofilter_DX),
-    MAKENAME1(S16_opaque_D32_filter_DXDY),
-    MAKENAME1(S16_alpha_D32_filter_DXDY),
-    MAKENAME1(S16_opaque_D32_filter_DX),
-    MAKENAME1(S16_alpha_D32_filter_DX),
-    
-    MAKENAME1(SI8_opaque_D32_nofilter_DXDY),
-    MAKENAME1(SI8_alpha_D32_nofilter_DXDY),
-    MAKENAME1(SI8_opaque_D32_nofilter_DX),
-    MAKENAME1(SI8_alpha_D32_nofilter_DX),
-    MAKENAME1(SI8_opaque_D32_filter_DXDY),
-    MAKENAME1(SI8_alpha_D32_filter_DXDY),
-    MAKENAME1(SI8_opaque_D32_filter_DX),
-    MAKENAME1(SI8_alpha_D32_filter_DX),
-    
-    MAKENAME1(S4444_opaque_D32_nofilter_DXDY),
-    MAKENAME1(S4444_alpha_D32_nofilter_DXDY),
-    MAKENAME1(S4444_opaque_D32_nofilter_DX),
-    MAKENAME1(S4444_alpha_D32_nofilter_DX),
-    MAKENAME1(S4444_opaque_D32_filter_DXDY),
-    MAKENAME1(S4444_alpha_D32_filter_DXDY),
-    MAKENAME1(S4444_opaque_D32_filter_DX),
-    MAKENAME1(S4444_alpha_D32_filter_DX),
-    
-    // A8 treats alpha/opauqe the same (equally efficient)
-    MAKENAME1(SA8_alpha_D32_nofilter_DXDY),
-    MAKENAME1(SA8_alpha_D32_nofilter_DXDY),
-    MAKENAME1(SA8_alpha_D32_nofilter_DX),
-    MAKENAME1(SA8_alpha_D32_nofilter_DX),
-    MAKENAME1(SA8_alpha_D32_filter_DXDY),
-    MAKENAME1(SA8_alpha_D32_filter_DXDY),
-    MAKENAME1(SA8_alpha_D32_filter_DX),
-    MAKENAME1(SA8_alpha_D32_filter_DX),
-};
-
-const SkBitmapProcState::SampleProc16 SAMPLEPROC16_TABLE_NAME [] = {
-    MAKENAME1(S32_D16_nofilter_DXDY),
-    MAKENAME1(S32_D16_nofilter_DX),
-    MAKENAME1(S32_D16_filter_DXDY),
-    MAKENAME1(S32_D16_filter_DX),
-    
-    MAKENAME1(S16_D16_nofilter_DXDY),
-    MAKENAME1(S16_D16_nofilter_DX),
-    MAKENAME1(S16_D16_filter_DXDY),
-    MAKENAME1(S16_D16_filter_DX),
-    
-    MAKENAME1(SI8_D16_nofilter_DXDY),
-    MAKENAME1(SI8_D16_nofilter_DX),
-    MAKENAME1(SI8_D16_filter_DXDY),
-    MAKENAME1(SI8_D16_filter_DX),
-    
-    // Don't support 4444 -> 565
-    NULL, NULL, NULL, NULL,
-    // Don't support A8 -> 565
-    NULL, NULL, NULL, NULL
-};
-
-#undef PROC_TYPE
+#undef NAME_WRAP

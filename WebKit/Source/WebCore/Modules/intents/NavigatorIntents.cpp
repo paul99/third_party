@@ -49,11 +49,11 @@ NavigatorIntents::~NavigatorIntents()
 {
 }
 
-void NavigatorIntents::startActivity(Navigator* navigator,
-                                     PassRefPtr<Intent> intent,
-                                     PassRefPtr<IntentResultCallback> successCallback,
-                                     PassRefPtr<IntentResultCallback> errorCallback,
-                                     ExceptionCode& ec)
+void NavigatorIntents::webkitStartActivity(Navigator* navigator,
+                                           PassRefPtr<Intent> intent,
+                                           PassRefPtr<IntentResultCallback> successCallback,
+                                           PassRefPtr<IntentResultCallback> errorCallback,
+                                           ExceptionCode& ec)
 {
     if (!navigator->frame() || !intent) {
         ec = INVALID_STATE_ERR;
@@ -61,7 +61,7 @@ void NavigatorIntents::startActivity(Navigator* navigator,
     }
 
     if (intent->action().isEmpty() || intent->type().isEmpty()) {
-        ec = VALIDATION_ERR;
+        ec = TYPE_MISMATCH_ERR;
         return;
     }
 

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2006, 2008, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2012 Research In Motion Limited. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,11 +28,12 @@
 #define HistoryItem_h
 
 #include "IntPoint.h"
-#include "PlatformString.h"
+#include "SerializedScriptValue.h"
 #include <wtf/HashMap.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/PassOwnPtr.h>
 #include <wtf/RefCounted.h>
+#include <wtf/text/WTFString.h>
 
 #if PLATFORM(MAC)
 #import <wtf/RetainPtr.h>
@@ -44,6 +46,10 @@ typedef struct objc_object* id;
 #include <QDataStream>
 #endif
 
+#if PLATFORM(BLACKBERRY)
+#include "HistoryItemViewState.h"
+#endif
+
 namespace WebCore {
 
 class CachedPage;
@@ -53,7 +59,6 @@ class HistoryItem;
 class Image;
 class KURL;
 class ResourceRequest;
-class SerializedScriptValue;
 
 typedef Vector<RefPtr<HistoryItem> > HistoryItemVector;
 
@@ -125,12 +130,7 @@ public:
     
     float pageScaleFactor() const;
     void setPageScaleFactor(float);
-
-#if OS(ANDROID)
-    bool loadComplete() const;
-    void setLoadComplete(bool);
-#endif
-
+    
     const Vector<String>& documentState() const;
     void setDocumentState(const Vector<String>&);
     void clearDocumentState();
@@ -145,7 +145,7 @@ public:
     void setIsTargetItem(bool);
     
     void setStateObject(PassRefPtr<SerializedScriptValue> object);
-    SerializedScriptValue* stateObject() const { return m_stateObject.get(); }
+    PassRefPtr<SerializedScriptValue> stateObject() const { return m_stateObject; }
 
     void setItemSequenceNumber(long long number) { m_itemSequenceNumber = number; }
     long long itemSequenceNumber() const { return m_itemSequenceNumber; }
@@ -171,6 +171,7 @@ public:
     const HistoryItemVector& children() const;
     bool hasChildren() const;
     void clearChildren();
+    bool isAncestorOf(const HistoryItem*) const;
     
     bool shouldDoSameDocumentNavigationTo(HistoryItem* otherItem) const;
     bool hasSameFrames(HistoryItem* otherItem) const;
@@ -204,6 +205,10 @@ public:
     QDataStream& saveState(QDataStream& out, int version) const;
 #endif
 
+#if PLATFORM(BLACKBERRY)
+    HistoryItemViewState& viewState() { return m_viewState; }
+#endif
+
 #ifndef NDEBUG
     int showTree() const;
     int showTreeWithIndent(unsigned indentLevel) const;
@@ -213,15 +218,13 @@ public:
     const Vector<int>& dailyVisitCounts() const { return m_dailyVisitCounts; }
     const Vector<int>& weeklyVisitCounts() const { return m_weeklyVisitCounts; }
 
-    void markForFullStyleRecalc();
-
 private:
     HistoryItem();
     HistoryItem(const String& urlString, const String& title, double lastVisited);
     HistoryItem(const String& urlString, const String& title, const String& alternateTitle, double lastVisited);
     HistoryItem(const KURL& url, const String& frameName, const String& parent, const String& title);
 
-    HistoryItem(const HistoryItem&);
+    explicit HistoryItem(const HistoryItem&);
 
     void padDailyCountsForNewVisit(double time);
     void collapseDailyVisitsToWeekly();
@@ -250,9 +253,6 @@ private:
 
     IntPoint m_scrollPoint;
     float m_pageScaleFactor;
-#if OS(ANDROID)
-    bool m_loadComplete;
-#endif
     Vector<String> m_documentState;
     
     HistoryItemVector m_children;
@@ -297,6 +297,9 @@ private:
     QVariant m_userData;
 #endif
 
+#if PLATFORM(BLACKBERRY)
+    HistoryItemViewState m_viewState;
+#endif
 }; //class HistoryItem
 
 } //namespace WebCore

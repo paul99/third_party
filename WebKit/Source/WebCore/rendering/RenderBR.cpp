@@ -28,8 +28,14 @@
 
 namespace WebCore {
 
+static PassRefPtr<StringImpl> newlineString()
+{
+    DEFINE_STATIC_LOCAL(const String, string, (ASCIILiteral("\n")));
+    return string.impl();
+}
+
 RenderBR::RenderBR(Node* node)
-    : RenderText(node, StringImpl::create("\n"))
+    : RenderText(node, newlineString())
     , m_lineHeight(-1)
 {
 }
@@ -40,14 +46,14 @@ RenderBR::~RenderBR()
 
 int RenderBR::lineHeight(bool firstLine) const
 {
-    if (firstLine && document()->usesFirstLineRules()) {
+    if (firstLine && document()->styleSheetCollection()->usesFirstLineRules()) {
         RenderStyle* s = style(firstLine);
         if (s != style())
-            return s->computedLineHeight();
+            return s->computedLineHeight(view());
     }
     
     if (m_lineHeight == -1)
-        m_lineHeight = style()->computedLineHeight();
+        m_lineHeight = style()->computedLineHeight(view());
     
     return m_lineHeight;
 }

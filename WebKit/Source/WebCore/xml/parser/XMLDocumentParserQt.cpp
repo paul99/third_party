@@ -52,6 +52,7 @@
 #include "ScriptValue.h"
 #include "TextResourceDecoder.h"
 #include "TransformSource.h"
+#include "XMLNSNames.h"
 #include <QDebug>
 #include <wtf/StringExtras.h>
 #include <wtf/Threading.h>
@@ -96,7 +97,7 @@ XMLDocumentParser::XMLDocumentParser(Document* document, FrameView* frameView)
     , m_pendingScript(0)
     , m_scriptStartPosition(TextPosition::belowRangePosition())
     , m_parsingFragment(false)
-    , m_scriptingPermission(FragmentScriptingAllowed)
+    , m_scriptingPermission(AllowScriptingContent)
 {
     m_stream.setEntityResolver(new EntityResolver);
 }
@@ -138,9 +139,9 @@ XMLDocumentParser::XMLDocumentParser(DocumentFragment* fragment, Element* parent
 
     QXmlStreamNamespaceDeclarations namespaces;
     for (Element* element = elemStack.last(); !elemStack.isEmpty(); elemStack.removeLast()) {
-        if (NamedNodeMap* attrs = element->attributes()) {
+        if (const ElementAttributeData* attrs = element->updatedAttributeData()) {
             for (unsigned i = 0; i < attrs->length(); i++) {
-                Attribute* attr = attrs->attributeItem(i);
+                const Attribute* attr = attrs->attributeItem(i);
                 if (attr->localName() == "xmlns")
                     m_defaultNamespaceURI = attr->value();
                 else if (attr->prefix() == "xmlns")
@@ -200,9 +201,15 @@ void XMLDocumentParser::doEnd()
 {
 #if ENABLE(XSLT)
     if (m_sawXSLTransform) {
-        document()->setTransformSource(adoptPtr(new TransformSource(m_originalSourceForTransform)));
+        document()->setTransformSource(adoptPtr(new TransformSource(m_originalSourceForTransform.toString())));
         document()->setParsing(false); // Make the doc think it's done, so it will apply xsl sheets.
-        document()->styleSelectorChanged(RecalcStyleImmediately);
+        document()->styleResolverChanged(RecalcStyleImmediately);
+
+        // styleResolverChanged() call can detach the parser and null out its document.
+        // In that case, we just bail out.
+        if (isDetached())
+            return;
+
         document()->setParsing(true);
         DocumentParser::stopParsing();
     }
@@ -315,22 +322,23 @@ static inline String prefixFromQName(const QString& qName)
         return qName.left(offset);
 }
 
-static inline void handleElementNamespaces(Element* newElement, const QXmlStreamNamespaceDeclarations &ns,
-                                           ExceptionCode& ec, FragmentScriptingPermission scriptingPermission)
+static inline void handleNamespaceAttributes(Vector<Attribute, 8>& prefixedAttributes, const QXmlStreamNamespaceDeclarations &ns, ExceptionCode& ec)
 {
     for (int i = 0; i < ns.count(); ++i) {
         const QXmlStreamNamespaceDeclaration &decl = ns[i];
         String namespaceURI = decl.namespaceUri();
         String namespaceQName = decl.prefix().isEmpty() ? String("xmlns") : String("xmlns:");
         namespaceQName.append(decl.prefix());
-        newElement->setAttributeNS("http://www.w3.org/2000/xmlns/", namespaceQName, namespaceURI, ec, scriptingPermission);
-        if (ec) // exception setting attributes
+
+        QualifiedName parsedName = anyName;
+        if (!Element::parseAttributeName(parsedName, XMLNSNames::xmlnsNamespaceURI, namespaceQName, ec))
             return;
+
+        prefixedAttributes.append(Attribute(parsedName, namespaceURI));
     }
 }
 
-static inline void handleElementAttributes(Element* newElement, const QXmlStreamAttributes &attrs, ExceptionCode& ec,
-                                           FragmentScriptingPermission scriptingPermission)
+static inline void handleElementAttributes(Vector<Attribute, 8>& prefixedAttributes, const QXmlStreamAttributes &attrs, ExceptionCode& ec)
 {
     for (int i = 0; i < attrs.count(); ++i) {
         const QXmlStreamAttribute &attr = attrs[i];
@@ -338,9 +346,12 @@ static inline void handleElementAttributes(Element* newElement, const QXmlStream
         String attrValue     = attr.value();
         String attrURI       = attr.namespaceUri().isEmpty() ? String() : String(attr.namespaceUri());
         String attrQName     = attr.qualifiedName();
-        newElement->setAttributeNS(attrURI, attrQName, attrValue, ec, scriptingPermission);
-        if (ec) // exception setting attributes
+
+        QualifiedName parsedName = anyName;
+        if (!Element::parseAttributeName(parsedName, attrURI, attrQName, ec))
             return;
+
+        prefixedAttributes.append(Attribute(parsedName, attrValue));
     }
 }
 
@@ -422,6 +433,7 @@ void XMLDocumentParser::startDocument()
         QStringRef encoding = m_stream.documentEncoding();
         if (!encoding.isEmpty())
             document()->setXMLEncoding(encoding);
+        document()->setHasXMLDeclaration(!version.isEmpty());
     }
 }
 
@@ -454,14 +466,17 @@ void XMLDocumentParser::parseStartElement()
     bool isFirstElement = !m_sawFirstElement;
     m_sawFirstElement = true;
 
+    Vector<Attribute, 8> prefixedAttributes;
     ExceptionCode ec = 0;
-    handleElementNamespaces(newElement.get(), m_stream.namespaceDeclarations(), ec, m_scriptingPermission);
+    handleNamespaceAttributes(prefixedAttributes, m_stream.namespaceDeclarations(), ec);
     if (ec) {
+        newElement->parserSetAttributes(prefixedAttributes, m_scriptingPermission);
         stopParsing();
         return;
     }
 
-    handleElementAttributes(newElement.get(), m_stream.attributes(), ec, m_scriptingPermission);
+    handleElementAttributes(prefixedAttributes, m_stream.attributes(), ec);
+    newElement->parserSetAttributes(prefixedAttributes, m_scriptingPermission);
     if (ec) {
         stopParsing();
         return;
@@ -471,7 +486,7 @@ void XMLDocumentParser::parseStartElement()
     if (scriptElement)
         m_scriptStartPosition = textPosition();
 
-    m_currentNode->parserAddChild(newElement.get());
+    m_currentNode->parserAppendChild(newElement.get());
 
     pushCurrentNode(newElement.get());
     if (m_view && !newElement->attached())
@@ -491,7 +506,7 @@ void XMLDocumentParser::parseEndElement()
     RefPtr<ContainerNode> n = m_currentNode;
     n->finishParsingChildren();
 
-    if (m_scriptingPermission == FragmentScriptingNotAllowed && n->isElementNode() && toScriptElement(static_cast<Element*>(n.get()))) {
+    if (m_scriptingPermission == DisallowScriptingContent && n->isElementNode() && toScriptElement(static_cast<Element*>(n.get()))) {
         popCurrentNode();
         ExceptionCode ec;
         n->remove(ec);
@@ -563,7 +578,7 @@ void XMLDocumentParser::parseProcessingInstruction()
 
     pi->setCreatedByParser(true);
 
-    m_currentNode->parserAddChild(pi.get());
+    m_currentNode->parserAppendChild(pi.get());
     if (m_view && !pi->attached())
         pi->attach();
 
@@ -584,7 +599,7 @@ void XMLDocumentParser::parseCdata()
 
     RefPtr<CDATASection> newNode = CDATASection::create(document(), m_stream.text());
 
-    m_currentNode->parserAddChild(newNode.get());
+    m_currentNode->parserAppendChild(newNode.get());
     if (m_view && !newNode->attached())
         newNode->attach();
 }
@@ -595,7 +610,7 @@ void XMLDocumentParser::parseComment()
 
     RefPtr<Comment> newNode = Comment::create(document(), m_stream.text());
 
-    m_currentNode->parserAddChild(newNode.get());
+    m_currentNode->parserAppendChild(newNode.get());
     if (m_view && !newNode->attached())
         newNode->attach();
 }
@@ -627,7 +642,7 @@ void XMLDocumentParser::parseDtd()
        )
         setIsXHTMLDocument(true); // controls if we replace entities or not.
     if (!m_parsingFragment)
-        document()->parserAddChild(DocumentType::create(document(), name, publicId, systemId));
+        document()->parserAppendChild(DocumentType::create(document(), name, publicId, systemId));
 
 }
 }

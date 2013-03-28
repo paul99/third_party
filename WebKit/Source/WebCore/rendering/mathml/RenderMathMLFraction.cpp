@@ -33,26 +33,30 @@
 #include "GraphicsContext.h"
 #include "MathMLNames.h"
 #include "PaintInfo.h"
-#include "RenderText.h"
 
 namespace WebCore {
     
 using namespace MathMLNames;
 
-static const float gHorizontalPad = 0.2f;
 static const float gLineThin = 0.33f;
 static const float gLineMedium = 1.f;
 static const float gLineThick = 3.f;
 static const float gFractionBarWidth = 0.05f;
-static const float gDenominatorPad = 0.1f;
 
-RenderMathMLFraction::RenderMathMLFraction(Element* fraction) 
-    : RenderMathMLBlock(fraction)
+RenderMathMLFraction::RenderMathMLFraction(Element* element)
+    : RenderMathMLBlock(element)
     , m_lineThickness(gLineMedium)
 {
-    setChildrenInline(false);
 }
 
+void RenderMathMLFraction::fixChildStyle(RenderObject* child)
+{
+    ASSERT(child->isAnonymous() && child->style()->refCount() == 1);
+    child->style()->setFlexDirection(FlowColumn);
+}
+
+// FIXME: It's cleaner to only call updateFromElement when an attribute has changed. Move parts
+// of this to fixChildStyle or other methods, and call them when needed.
 void RenderMathMLFraction::updateFromElement()
 {
     // FIXME: mfrac where bevelled=true will need to reorganize the descendants
@@ -61,26 +65,10 @@ void RenderMathMLFraction::updateFromElement()
     
     Element* fraction = static_cast<Element*>(node());
     
-    RenderObject* numerator = firstChild();
-    String nalign = fraction->getAttribute(MathMLNames::numalignAttr);
-    if (equalIgnoringCase(nalign, "left"))
-        numerator->style()->setTextAlign(LEFT);
-    else if (equalIgnoringCase(nalign, "right"))
-        numerator->style()->setTextAlign(RIGHT);
-    else
-        numerator->style()->setTextAlign(CENTER);
-    
-    RenderObject* denominator = numerator->nextSibling();
-    if (!denominator)
+    RenderObject* numeratorWrapper = firstChild();
+    RenderObject* denominatorWrapper = numeratorWrapper->nextSibling();
+    if (!denominatorWrapper)
         return;
-    
-    String dalign = fraction->getAttribute(MathMLNames::denomalignAttr);
-    if (equalIgnoringCase(dalign, "left"))
-        denominator->style()->setTextAlign(LEFT);
-    else if (equalIgnoringCase(dalign, "right"))
-        denominator->style()->setTextAlign(RIGHT);
-    else
-        denominator->style()->setTextAlign(CENTER);
     
     // FIXME: parse units
     String thickness = fraction->getAttribute(MathMLNames::linethicknessAttr);
@@ -95,28 +83,47 @@ void RenderMathMLFraction::updateFromElement()
         m_lineThickness = 0;
 
     // Update the style for the padding of the denominator for the line thickness
-    lastChild()->style()->setPaddingTop(Length(static_cast<int>(m_lineThickness + style()->fontSize() * gDenominatorPad), Fixed));
+    lastChild()->style()->setPaddingTop(Length(static_cast<int>(m_lineThickness), Fixed));
 }
 
-void RenderMathMLFraction::addChild(RenderObject* child, RenderObject* beforeChild)
+void RenderMathMLFraction::addChild(RenderObject* child, RenderObject* /* beforeChild */)
 {
-    RenderBlock* row = new (renderArena()) RenderMathMLBlock(node());
-    RefPtr<RenderStyle> rowStyle = makeBlockStyle();
+    if (isEmpty()) {
+        RenderMathMLBlock* numeratorWrapper = createAnonymousMathMLBlock();
+        RenderMathMLBlock::addChild(numeratorWrapper);
+        fixChildStyle(numeratorWrapper);
+        
+        RenderMathMLBlock* denominatorWrapper = createAnonymousMathMLBlock();
+        RenderMathMLBlock::addChild(denominatorWrapper);
+        fixChildStyle(denominatorWrapper);
+    }
     
-    rowStyle->setTextAlign(CENTER);
-    Length pad(static_cast<int>(rowStyle->fontSize() * gHorizontalPad), Fixed);
-    rowStyle->setPaddingLeft(pad);
-    rowStyle->setPaddingRight(pad);
+    if (firstChild()->isEmpty())
+        firstChild()->addChild(child);
+    else
+        lastChild()->addChild(child);
     
-    // Only add padding for rows as denominators
-    bool isNumerator = isEmpty();
-    if (!isNumerator) 
-        rowStyle->setPaddingTop(Length(2, Fixed));
-    
-    row->setStyle(rowStyle.release());
-    RenderBlock::addChild(row, beforeChild);
-    row->addChild(child);
     updateFromElement();
+}
+
+void RenderMathMLFraction::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
+{
+    RenderMathMLBlock::styleDidChange(diff, oldStyle);
+    
+    for (RenderObject* child = firstChild(); child; child = child->nextSibling())
+        fixChildStyle(child);
+    updateFromElement();
+}
+
+RenderMathMLOperator* RenderMathMLFraction::unembellishedOperator()
+{
+    RenderObject* numeratorWrapper = firstChild();
+    if (!numeratorWrapper)
+        return 0;
+    RenderObject* numerator = numeratorWrapper->firstChild();
+    if (!numerator || !numerator->isRenderMathMLBlock())
+        return 0;
+    return toRenderMathMLBlock(numerator)->unembellishedOperator();
 }
 
 void RenderMathMLFraction::layout()
@@ -127,8 +134,7 @@ void RenderMathMLFraction::layout()
     if (lastChild() && lastChild()->isRenderBlock())
         m_lineThickness *= ceilf(gFractionBarWidth * style()->fontSize());
 
-    RenderBlock::layout();
-
+    RenderMathMLBlock::layout();
 }
 
 void RenderMathMLFraction::paint(PaintInfo& info, const LayoutPoint& paintOffset)
@@ -137,24 +143,11 @@ void RenderMathMLFraction::paint(PaintInfo& info, const LayoutPoint& paintOffset
     if (info.context->paintingDisabled() || info.phase != PaintPhaseForeground)
         return;
     
-    if (!firstChild() ||!m_lineThickness)
+    RenderBox* denominatorWrapper = lastChildBox();
+    if (!denominatorWrapper || !m_lineThickness)
         return;
 
-    LayoutUnit verticalOffset = 0;
-    // The children are always RenderMathMLBlock instances
-    if (firstChild()->isRenderMathMLBlock()) {
-        int adjustForThickness = m_lineThickness > 1 ? int(m_lineThickness / 2) : 1;
-        if (int(m_lineThickness) % 2 == 1)
-            adjustForThickness++;
-        RenderMathMLBlock* numerator = toRenderMathMLBlock(firstChild());
-        if (numerator->isRenderMathMLRow())
-            verticalOffset = numerator->offsetHeight() + adjustForThickness;
-        else 
-            verticalOffset = numerator->offsetHeight();        
-    }
-    
-    LayoutPoint adjustedPaintOffset = paintOffset + location();
-    adjustedPaintOffset.setY(adjustedPaintOffset.y() + verticalOffset);
+    IntPoint adjustedPaintOffset = roundedIntPoint(paintOffset + location() + denominatorWrapper->location() + LayoutPoint(0, m_lineThickness / 2));
     
     GraphicsContextStateSaver stateSaver(*info.context);
     
@@ -162,25 +155,16 @@ void RenderMathMLFraction::paint(PaintInfo& info, const LayoutPoint& paintOffset
     info.context->setStrokeStyle(SolidStroke);
     info.context->setStrokeColor(style()->visitedDependentColor(CSSPropertyColor), ColorSpaceSRGB);
     
-    info.context->drawLine(adjustedPaintOffset, IntPoint(adjustedPaintOffset.x() + offsetWidth(), adjustedPaintOffset.y()));
+    info.context->drawLine(adjustedPaintOffset, IntPoint(adjustedPaintOffset.x() + denominatorWrapper->pixelSnappedOffsetWidth(), adjustedPaintOffset.y()));
 }
 
-int RenderMathMLFraction::baselinePosition(FontBaseline, bool firstLine, LineDirectionMode lineDirection, LinePositionMode linePositionMode) const
+int RenderMathMLFraction::firstLineBoxBaseline() const
 {
-    if (firstChild() && firstChild()->isRenderMathMLBlock()) {
-        RenderMathMLBlock* numerator = toRenderMathMLBlock(firstChild());
-        RenderStyle* refStyle = style();
-        if (previousSibling())
-            refStyle = previousSibling()->style();
-        else if (nextSibling())
-            refStyle = nextSibling()->style();
-        int shift = int(ceil((refStyle->fontMetrics().xHeight() + 1) / 2));
-        return numerator->offsetHeight() + shift;
-    }
-    return RenderBlock::baselinePosition(AlphabeticBaseline, firstLine, lineDirection, linePositionMode);
+    if (RenderBox* denominatorWrapper = lastChildBox())
+        return denominatorWrapper->logicalTop() + static_cast<int>(lroundf((m_lineThickness + style()->fontMetrics().xHeight()) / 2));
+    return RenderMathMLBlock::firstLineBoxBaseline();
 }
 
 }
-
 
 #endif // ENABLE(MATHML)

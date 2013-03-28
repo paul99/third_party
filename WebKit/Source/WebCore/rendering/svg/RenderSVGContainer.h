@@ -36,11 +36,17 @@ public:
     explicit RenderSVGContainer(SVGStyledElement*);
     virtual ~RenderSVGContainer();
 
+    RenderObject* firstChild() const { ASSERT(children() == virtualChildren()); return children()->firstChild(); }
+    RenderObject* lastChild() const { ASSERT(children() == virtualChildren()); return children()->lastChild(); }
+
     const RenderObjectChildList* children() const { return &m_children; }
     RenderObjectChildList* children() { return &m_children; }
 
     virtual void paint(PaintInfo&, const LayoutPoint&);
     virtual void setNeedsBoundariesUpdate() { m_needsBoundariesUpdate = true; }
+    virtual bool needsBoundariesUpdate() OVERRIDE { return m_needsBoundariesUpdate; }
+    virtual bool didTransformToRootUpdate() { return false; }
+    bool isObjectBoundingBoxValid() const { return m_objectBoundingBoxValid; }
 
 protected:
     virtual RenderObjectChildList* virtualChildren() { return children(); }
@@ -51,7 +57,9 @@ protected:
 
     virtual void layout();
 
-    virtual void addFocusRingRects(Vector<LayoutRect>&, const LayoutPoint&);
+    virtual void addChild(RenderObject* child, RenderObject* beforeChild = 0) OVERRIDE;
+    virtual void removeChild(RenderObject*) OVERRIDE;
+    virtual void addFocusRingRects(Vector<IntRect>&, const LayoutPoint&);
 
     virtual FloatRect objectBoundingBox() const { return m_objectBoundingBox; }
     virtual FloatRect strokeBoundingBox() const { return m_strokeBoundingBox; }
@@ -67,12 +75,15 @@ protected:
     virtual void applyViewportClip(PaintInfo&) { }
     virtual bool pointIsInsideViewportClip(const FloatPoint& /*pointInParent*/) { return true; }
 
+    virtual void determineIfLayoutSizeChanged() { }
+
     bool selfWillPaint();
     void updateCachedBoundaries();
 
 private:
     RenderObjectChildList m_children;
     FloatRect m_objectBoundingBox;
+    bool m_objectBoundingBoxValid;
     FloatRect m_strokeBoundingBox;
     FloatRect m_repaintBoundingBox;
     bool m_needsBoundariesUpdate : 1;
@@ -80,15 +91,13 @@ private:
   
 inline RenderSVGContainer* toRenderSVGContainer(RenderObject* object)
 {
-    // Note: isSVGContainer is also true for RenderSVGViewportContainer, which is not derived from this.
-    ASSERT(!object || (object->isSVGContainer() && strcmp(object->renderName(), "RenderSVGViewportContainer")));
+    ASSERT(!object || object->isSVGContainer());
     return static_cast<RenderSVGContainer*>(object);
 }
 
 inline const RenderSVGContainer* toRenderSVGContainer(const RenderObject* object)
 {
-    // Note: isSVGContainer is also true for RenderSVGViewportContainer, which is not derived from this.
-    ASSERT(!object || (object->isSVGContainer() && strcmp(object->renderName(), "RenderSVGViewportContainer")));
+    ASSERT(!object || object->isSVGContainer());
     return static_cast<const RenderSVGContainer*>(object);
 }
 

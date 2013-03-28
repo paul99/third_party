@@ -36,24 +36,12 @@
 #include "FrameView.h"
 #include "HostWindow.h"
 #include "NotImplemented.h"
-#include "Widget.h"
 #include "QWebPageClient.h"
-#include <QApplication>
-#include <QDesktopWidget>
+#include "Widget.h"
+#include <QGuiApplication>
+#include <QScreen>
 
 namespace WebCore {
-
-int screenHorizontalDPI(Widget* widget)
-{
-    notImplemented();
-    return 0;
-}
-
-int screenVerticalDPI(Widget* widget)
-{
-    notImplemented();
-    return 0;
-}
 
 static int screenNumber(Widget* w)
 {
@@ -66,21 +54,14 @@ static int screenNumber(Widget* w)
 
 int screenDepth(Widget* w)
 {
-    return QApplication::desktop()->screen(screenNumber(w))->depth();
+    return QGuiApplication::screens().value(screenNumber(w))->depth();
 }
 
 int screenDepthPerComponent(Widget* w)
 {
-    int depth = QApplication::desktop()->screen(0)->depth();
-    if (w) {
-        QWebPageClient* client = w->root()->hostWindow()->platformPageClient();
-
-        if (client) {
-            QWidget* view = client->ownerWidget();
-            if (view)
-                depth = view->depth();
-        }
-    }
+    int depth = QGuiApplication::primaryScreen()->depth();
+    // FIXME: Use widget's screen
+    Q_UNUSED(w);
     // An interface to establish the actual number of bits per color
     // doesn't exist in Qt, or probably at all, so use common-sense
     // values for each screen depth and assume RGB/RGBA where appropriate.
@@ -99,19 +80,26 @@ int screenDepthPerComponent(Widget* w)
 
 bool screenIsMonochrome(Widget* w)
 {
-    return QApplication::desktop()->screen(screenNumber(w))->colorCount() == 2;
+    Q_UNUSED(w);
+    // FIXME: In Qt 5 colorCount() isn't even implemented beyond returning 256 :)
+    return false;
 }
 
-FloatRect screenRect(FrameView* frameView)
+FloatRect screenRect(Widget* widget)
 {
-    QRect r = QApplication::desktop()->screenGeometry(screenNumber(frameView));
+    QRect r = QGuiApplication::screens().value(screenNumber(widget))->geometry();
     return FloatRect(r.x(), r.y(), r.width(), r.height());
 }
 
-FloatRect screenAvailableRect(FrameView* frameView)
+FloatRect screenAvailableRect(Widget* widget)
 {
-    QRect r = QApplication::desktop()->availableGeometry(screenNumber(frameView));
+    QRect r = QGuiApplication::screens().value(screenNumber(widget))->availableGeometry();
     return FloatRect(r.x(), r.y(), r.width(), r.height());
+}
+
+void screenColorProfile(ColorProfile&)
+{
+    notImplemented();
 }
 
 } // namespace WebCore

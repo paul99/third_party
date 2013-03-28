@@ -91,11 +91,10 @@
 #include "KURL.h"
 #include "TextEncoding.h"
 #include "markup.h"
-
 #include "DOMUtilitiesPrivate.h"
 #include "WebFrameImpl.h"
-#include "platform/WebURL.h"
-#include "platform/WebVector.h"
+#include <public/WebURL.h>
+#include <public/WebVector.h>
 
 using namespace WebCore;
 
@@ -298,24 +297,24 @@ void WebPageSerializerImpl::encodeAndFlushBuffer(
 void WebPageSerializerImpl::openTagToString(Element* element,
                                             SerializeDomParam* param)
 {
-    // FIXME: use StringBuilder instead of String.
     bool needSkip;
+    StringBuilder result;
     // Do pre action for open tag.
-    String result = preActionBeforeSerializeOpenTag(element, param, &needSkip);
+    result.append(preActionBeforeSerializeOpenTag(element, param, &needSkip));
     if (needSkip)
         return;
     // Add open tag
-    result += "<" + element->nodeName().lower();
+    result.append('<');
+    result.append(element->nodeName().lower());
     // Go through all attributes and serialize them.
-    const NamedNodeMap *attrMap = element->attributes(true);
-    if (attrMap) {
-        unsigned numAttrs = attrMap->length();
+    if (element->hasAttributes()) {
+        unsigned numAttrs = element->attributeCount();
         for (unsigned i = 0; i < numAttrs; i++) {
-            result += " ";
+            result.append(' ');
             // Add attribute pair
-            const Attribute *attribute = attrMap->attributeItem(i);
-            result += attribute->name().toString();
-            result += "=\"";
+            const Attribute *attribute = element->attributeItem(i);
+            result.append(attribute->name().toString());
+            result.appendLiteral("=\"");
             if (!attribute->value().isEmpty()) {
                 const String& attrValue = attribute->value();
 
@@ -325,7 +324,7 @@ void WebPageSerializerImpl::openTagToString(Element* element,
                 if (elementHasLegalLinkAttribute(element, attrName)) {
                     // For links start with "javascript:", we do not change it.
                     if (attrValue.startsWith("javascript:", false))
-                        result += attrValue;
+                        result.append(attrValue);
                     else {
                         // Get the absolute link
                         WebFrameImpl* subFrame = WebFrameImpl::fromFrameOwnerElement(element);
@@ -333,20 +332,23 @@ void WebPageSerializerImpl::openTagToString(Element* element,
                                                         param->document->completeURL(attrValue);
                         // Check whether we have local files for those link.
                         if (m_localLinks.contains(completeURL)) {
-                            if (!param->directoryName.isEmpty())
-                                result += "./" + param->directoryName + "/";
-                            result += m_localLinks.get(completeURL);
+                            if (!param->directoryName.isEmpty()) {
+                                result.appendLiteral("./");
+                                result.append(param->directoryName);
+                                result.append('/');
+                            }
+                            result.append(m_localLinks.get(completeURL));
                         } else
-                            result += completeURL;
+                            result.append(completeURL);
                     }
                 } else {
                     if (param->isHTMLDocument)
-                        result += m_htmlEntities.convertEntitiesInString(attrValue);
+                        result.append(m_htmlEntities.convertEntitiesInString(attrValue));
                     else
-                        result += m_xmlEntities.convertEntitiesInString(attrValue);
+                        result.append(m_xmlEntities.convertEntitiesInString(attrValue));
                 }
             }
-            result += "\"";
+            result.append('\"');
         }
     }
 
@@ -354,11 +356,11 @@ void WebPageSerializerImpl::openTagToString(Element* element,
     String addedContents = postActionAfterSerializeOpenTag(element, param);
     // Complete the open tag for element when it has child/children.
     if (element->hasChildNodes() || param->haveAddedContentsBeforeEnd)
-        result += ">";
+        result.append('>');
     // Append the added contents generate in  post action of open tag.
-    result += addedContents;
+    result.append(addedContents);
     // Save the result to data buffer.
-    saveHTMLContentToBuffer(result, param);
+    saveHTMLContentToBuffer(result.toString(), param);
 }
 
 // Serialize end tag of an specified element.
@@ -366,37 +368,36 @@ void WebPageSerializerImpl::endTagToString(Element* element,
                                            SerializeDomParam* param)
 {
     bool needSkip;
+    StringBuilder result;
     // Do pre action for end tag.
-    String result = preActionBeforeSerializeEndTag(element,
-                                                   param,
-                                                   &needSkip);
+    result.append(preActionBeforeSerializeEndTag(element, param, &needSkip));
     if (needSkip)
         return;
     // Write end tag when element has child/children.
     if (element->hasChildNodes() || param->haveAddedContentsBeforeEnd) {
-        result += "</";
-        result += element->nodeName().lower();
-        result += ">";
+        result.appendLiteral("</");
+        result.append(element->nodeName().lower());
+        result.append('>');
     } else {
         // Check whether we have to write end tag for empty element.
         if (param->isHTMLDocument) {
-            result += ">";
+            result.append('>');
             // FIXME: This code is horribly wrong.  WebPageSerializerImpl must die.
             if (!static_cast<const HTMLElement*>(element)->ieForbidsInsertHTML()) {
                 // We need to write end tag when it is required.
-                result += "</";
-                result += element->nodeName().lower();
-                result += ">";
+                result.appendLiteral("</");
+                result.append(element->nodeName().lower());
+                result.append('>');
             }
         } else {
             // For xml base document.
-            result += " />";
+            result.appendLiteral(" />");
         }
     }
     // Do post action for end tag.
-    result += postActionAfterSerializeEndTag(element, param);
+    result.append(postActionAfterSerializeEndTag(element, param));
     // Save the result to data buffer.
-    saveHTMLContentToBuffer(result, param);
+    saveHTMLContentToBuffer(result.toString(), param);
 }
 
 void WebPageSerializerImpl::buildContentForNode(Node* node,
@@ -418,7 +419,6 @@ void WebPageSerializerImpl::buildContentForNode(Node* node,
     case Node::ATTRIBUTE_NODE:
     case Node::DOCUMENT_NODE:
     case Node::DOCUMENT_FRAGMENT_NODE:
-    case Node::SHADOW_ROOT_NODE:
         // Should not exist.
         ASSERT_NOT_REACHED();
         break;
@@ -478,8 +478,9 @@ void WebPageSerializerImpl::collectTargetFrames()
         // Get current using document.
         Document* currentDoc = currentFrame->frame()->document();
         // Go through sub-frames.
-        RefPtr<HTMLAllCollection> all = currentDoc->all();
-        for (Node* node = all->firstItem(); node; node = all->nextItem()) {
+        RefPtr<HTMLCollection> all = currentDoc->all();
+
+        for (unsigned i = 0; Node* node = all->item(i); i++) {
             if (!node->isHTMLElement())
                 continue;
             Element* element = static_cast<Element*>(node);

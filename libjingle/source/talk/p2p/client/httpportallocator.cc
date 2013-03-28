@@ -37,6 +37,7 @@
 #include "talk/base/logging.h"
 #include "talk/base/nethelpers.h"
 #include "talk/base/signalthread.h"
+#include "talk/base/stringencode.h"
 
 namespace {
 
@@ -121,13 +122,17 @@ HttpPortAllocatorBase::~HttpPortAllocatorBase() {
 // HttpPortAllocatorSessionBase
 
 HttpPortAllocatorSessionBase::HttpPortAllocatorSessionBase(
-    HttpPortAllocatorBase* allocator, const std::string &name,
-    const std::string& session_type,
+    HttpPortAllocatorBase* allocator,
+    const std::string& content_name,
+    int component,
+    const std::string& ice_ufrag,
+    const std::string& ice_pwd,
     const std::vector<talk_base::SocketAddress>& stun_hosts,
     const std::vector<std::string>& relay_hosts,
     const std::string& relay_token,
     const std::string& user_agent)
-    : BasicPortAllocatorSession(allocator, name, session_type),
+    : BasicPortAllocatorSession(allocator, content_name, component,
+                                ice_ufrag, ice_pwd),
       relay_hosts_(relay_hosts), stun_hosts_(stun_hosts),
       relay_token_(relay_token), agent_(user_agent), attempts_(0) {
 }
@@ -140,7 +145,9 @@ void HttpPortAllocatorSessionBase::GetPortConfigurations() {
   // but for now is done here and added to the initial config.  Note any later
   // configs will have unresolved stun ips and will be discarded by the
   // AllocationSequence.
-  PortConfiguration* config = new PortConfiguration(stun_hosts_[0], "", "", "");
+  PortConfiguration* config = new PortConfiguration(stun_hosts_[0],
+                                                    username(),
+                                                    password());
   ConfigReady(config);
   TryCreateRelaySession();
 }
@@ -173,15 +180,29 @@ void HttpPortAllocatorSessionBase::TryCreateRelaySession() {
   SendSessionRequest(host, talk_base::HTTP_SECURE_PORT);
 }
 
+std::string HttpPortAllocatorSessionBase::GetSessionRequestUrl() {
+  std::string url = std::string(HttpPortAllocator::kCreateSessionURL);
+  if (allocator()->flags() & PORTALLOCATOR_ENABLE_SHARED_UFRAG) {
+    ASSERT(!username().empty());
+    ASSERT(!password().empty());
+    url = url + "?username=" + talk_base::s_url_encode(username()) +
+        "&password=" + talk_base::s_url_encode(password());
+  }
+  return url;
+}
+
 void HttpPortAllocatorSessionBase::ReceiveSessionResponse(
     const std::string& response) {
 
   StringMap map;
   ParseMap(response, map);
 
-  std::string username = map["username"];
-  std::string password = map["password"];
-  std::string magic_cookie = map["magic_cookie"];
+  if (!username().empty() && map["username"] != username()) {
+    LOG(LS_WARNING) << "Received unexpected username value from relay server.";
+  }
+  if (!password().empty() && map["password"] != password()) {
+    LOG(LS_WARNING) << "Received unexpected password value from relay server.";
+  }
 
   std::string relay_ip = map["relay.ip"];
   std::string relay_udp_port = map["relay.udp_port"];
@@ -189,24 +210,23 @@ void HttpPortAllocatorSessionBase::ReceiveSessionResponse(
   std::string relay_ssltcp_port = map["relay.ssltcp_port"];
 
   PortConfiguration* config = new PortConfiguration(stun_hosts_[0],
-                                                    username,
-                                                    password,
-                                                    magic_cookie);
+                                                    map["username"],
+                                                    map["password"]);
 
-  PortConfiguration::PortList ports;
+  RelayServerConfig relay_config(RELAY_GTURN);
   if (!relay_udp_port.empty()) {
     talk_base::SocketAddress address(relay_ip, atoi(relay_udp_port.c_str()));
-    ports.push_back(ProtocolAddress(address, PROTO_UDP));
+    relay_config.ports.push_back(ProtocolAddress(address, PROTO_UDP));
   }
   if (!relay_tcp_port.empty()) {
     talk_base::SocketAddress address(relay_ip, atoi(relay_tcp_port.c_str()));
-    ports.push_back(ProtocolAddress(address, PROTO_TCP));
+    relay_config.ports.push_back(ProtocolAddress(address, PROTO_TCP));
   }
   if (!relay_ssltcp_port.empty()) {
     talk_base::SocketAddress address(relay_ip, atoi(relay_ssltcp_port.c_str()));
-    ports.push_back(ProtocolAddress(address, PROTO_SSLTCP));
+    relay_config.ports.push_back(ProtocolAddress(address, PROTO_SSLTCP));
   }
-  config->AddRelay(ports, 0.0f);
+  config->AddRelay(relay_config);
   ConfigReady(config);
 }
 
@@ -226,23 +246,30 @@ HttpPortAllocator::HttpPortAllocator(
 }
 HttpPortAllocator::~HttpPortAllocator() {}
 
-PortAllocatorSession* HttpPortAllocator::CreateSession(
-    const std::string& name, const std::string& session_type) {
-  return new HttpPortAllocatorSession(this, name, session_type, stun_hosts(),
-      relay_hosts(), relay_token(), user_agent());
+PortAllocatorSession* HttpPortAllocator::CreateSessionInternal(
+    const std::string& content_name,
+    int component,
+    const std::string& ice_ufrag, const std::string& ice_pwd) {
+  return new HttpPortAllocatorSession(this, content_name, component,
+                                      ice_ufrag, ice_pwd, stun_hosts(),
+                                      relay_hosts(), relay_token(),
+                                      user_agent());
 }
 
 // HttpPortAllocatorSession
 
 HttpPortAllocatorSession::HttpPortAllocatorSession(
     HttpPortAllocator* allocator,
-    const std::string& name,
-    const std::string& session_type,
+    const std::string& content_name,
+    int component,
+    const std::string& ice_ufrag,
+    const std::string& ice_pwd,
     const std::vector<talk_base::SocketAddress>& stun_hosts,
     const std::vector<std::string>& relay_hosts,
     const std::string& relay,
     const std::string& agent)
-    : HttpPortAllocatorSessionBase(allocator, name, session_type, stun_hosts,
+    : HttpPortAllocatorSessionBase(allocator, content_name, component,
+                                   ice_ufrag, ice_pwd, stun_hosts,
                                    relay_hosts, relay, agent) {
 }
 
@@ -265,15 +292,14 @@ void HttpPortAllocatorSession::SendSessionRequest(const std::string& host,
   request->set_proxy(allocator()->proxy());
   request->response().document.reset(new talk_base::MemoryStream);
   request->request().verb = talk_base::HV_GET;
-  request->request().path = HttpPortAllocator::kCreateSessionURL;
+  request->request().path = GetSessionRequestUrl();
   request->request().addHeader("X-Talk-Google-Relay-Auth", relay_token(), true);
-  request->request().addHeader("X-Google-Relay-Auth", relay_token(), true);
-  request->request().addHeader("X-Session-Type", session_type(), true);
-  request->request().addHeader("X-Stream-Type", name(), true);
+  request->request().addHeader("X-Stream-Type", "video_rtp", true);
   request->set_host(host);
   request->set_port(port);
   request->Start();
   request->Release();
+
   requests_.push_back(request);
 }
 

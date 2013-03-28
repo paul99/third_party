@@ -38,6 +38,7 @@
 #include "JSDOMWindowCustom.h"
 #include "JSDOMWindowShell.h"
 #include "JSHTMLCollection.h"
+#include "JSMainThreadExecState.h"
 #include "SegmentedString.h"
 #include "DocumentParser.h"
 #include <runtime/Error.h>
@@ -50,25 +51,24 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-bool JSHTMLDocument::canGetItemsForName(ExecState*, HTMLDocument* document, const Identifier& propertyName)
+bool JSHTMLDocument::canGetItemsForName(ExecState*, HTMLDocument* document, PropertyName propertyName)
 {
     AtomicStringImpl* atomicPropertyName = findAtomicString(propertyName);
     return atomicPropertyName && (document->hasNamedItem(atomicPropertyName) || document->hasExtraNamedItem(atomicPropertyName));
 }
 
-JSValue JSHTMLDocument::nameGetter(ExecState* exec, JSValue slotBase, const Identifier& propertyName)
+JSValue JSHTMLDocument::nameGetter(ExecState* exec, JSValue slotBase, PropertyName propertyName)
 {
-    JSHTMLDocument* thisObj = static_cast<JSHTMLDocument*>(asObject(slotBase));
+    JSHTMLDocument* thisObj = jsCast<JSHTMLDocument*>(asObject(slotBase));
     HTMLDocument* document = static_cast<HTMLDocument*>(thisObj->impl());
 
-    HTMLCollection* collection = document->documentNamedItems(identifierToAtomicString(propertyName));
+    RefPtr<HTMLCollection> collection = document->documentNamedItems(propertyNameToAtomicString(propertyName));
 
-    unsigned length = collection->length();
-    if (!length)
+    if (collection->isEmpty())
         return jsUndefined();
 
-    if (length == 1) {
-        Node* node = collection->firstItem();
+    if (collection->hasExactlyOneItem()) {
+        Node* node = collection->item(0);
 
         Frame* frame;
         if (node->hasTagName(iframeTag) && (frame = static_cast<HTMLIFrameElement*>(node)->contentFrame()))
@@ -77,7 +77,7 @@ JSValue JSHTMLDocument::nameGetter(ExecState* exec, JSValue slotBase, const Iden
         return toJS(exec, thisObj->globalObject(), node);
     } 
 
-    return toJS(exec, thisObj->globalObject(), collection);
+    return toJS(exec, thisObj->globalObject(), WTF::getPtr(collection));
 }
 
 // Custom attributes
@@ -113,7 +113,7 @@ JSValue JSHTMLDocument::open(ExecState* exec)
                 CallType callType = ::getCallData(function, callData);
                 if (callType == CallTypeNone)
                     return throwTypeError(exec);
-                return JSC::call(exec, function, callType, callData, wrapper, ArgList(exec));
+                return JSMainThreadExecState::call(exec, function, callType, callData, wrapper, ArgList(exec));
             }
         }
         return jsUndefined();
@@ -136,15 +136,15 @@ static inline void documentWrite(ExecState* exec, HTMLDocument* document, Newlin
 
     size_t size = exec->argumentCount();
 
-    UString firstString = exec->argument(0).toString(exec)->value(exec);
-    SegmentedString segmentedString = ustringToString(firstString);
+    String firstString = exec->argument(0).toString(exec)->value(exec);
+    SegmentedString segmentedString = firstString;
     if (size != 1) {
         if (!size)
             segmentedString.clear();
         else {
             for (size_t i = 1; i < size; ++i) {
-                UString subsequentString = exec->argument(i).toString(exec)->value(exec);
-                segmentedString.append(SegmentedString(ustringToString(subsequentString)));
+                String subsequentString = exec->argument(i).toString(exec)->value(exec);
+                segmentedString.append(SegmentedString(subsequentString));
             }
         }
     }

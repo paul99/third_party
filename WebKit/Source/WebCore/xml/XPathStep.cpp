@@ -31,7 +31,7 @@
 #include "Attr.h"
 #include "Document.h"
 #include "Element.h"
-#include "NamedNodeMap.h"
+#include "NodeTraversal.h"
 #include "XMLNSNames.h"
 #include "XPathParser.h"
 #include "XPathUtil.h"
@@ -247,7 +247,7 @@ void Step::nodesInAxis(Node* context, NodeSet& nodes) const
             if (context->isAttributeNode()) // In XPath model, attribute nodes do not have children.
                 return;
 
-            for (Node* n = context->firstChild(); n; n = n->traverseNextNode(context))
+            for (Node* n = context->firstChild(); n; n = NodeTraversal::next(n, context))
                 if (nodeMatches(n, DescendantAxis, m_nodeTest))
                     nodes.append(n);
             return;
@@ -298,7 +298,7 @@ void Step::nodesInAxis(Node* context, NodeSet& nodes) const
         case FollowingAxis:
             if (context->isAttributeNode()) {
                 Node* p = static_cast<Attr*>(context)->ownerElement();
-                while ((p = p->traverseNextNode()))
+                while ((p = NodeTraversal::next(p)))
                     if (nodeMatches(p, FollowingAxis, m_nodeTest))
                         nodes.append(p);
             } else {
@@ -306,7 +306,7 @@ void Step::nodesInAxis(Node* context, NodeSet& nodes) const
                     for (Node* n = p->nextSibling(); n; n = n->nextSibling()) {
                         if (nodeMatches(n, FollowingAxis, m_nodeTest))
                             nodes.append(n);
-                        for (Node* c = n->firstChild(); c; c = c->traverseNextNode(n))
+                        for (Node* c = n->firstChild(); c; c = NodeTraversal::next(c, n))
                             if (nodeMatches(c, FollowingAxis, m_nodeTest))
                                 nodes.append(c);
                     }
@@ -319,7 +319,7 @@ void Step::nodesInAxis(Node* context, NodeSet& nodes) const
 
             Node* n = context;
             while (ContainerNode* parent = n->parentNode()) {
-                for (n = n->traversePreviousNode(); n != parent; n = n->traversePreviousNode())
+                for (n = NodeTraversal::previous(n); n != parent; n = NodeTraversal::previous(n))
                     if (nodeMatches(n, PrecedingAxis, m_nodeTest))
                         nodes.append(n);
                 n = parent;
@@ -328,12 +328,14 @@ void Step::nodesInAxis(Node* context, NodeSet& nodes) const
             return;
         }
         case AttributeAxis: {
-            if (context->nodeType() != Node::ELEMENT_NODE)
+            if (!context->isElementNode())
                 return;
+
+            Element* contextElement = toElement(context);
 
             // Avoid lazily creating attribute nodes for attributes that we do not need anyway.
             if (m_nodeTest.kind() == NodeTest::NameTest && m_nodeTest.data() != starAtom) {
-                RefPtr<Node> n = static_cast<Element*>(context)->getAttributeNodeNS(m_nodeTest.namespaceURI(), m_nodeTest.data());
+                RefPtr<Node> n = contextElement->getAttributeNodeNS(m_nodeTest.namespaceURI(), m_nodeTest.data());
                 if (n && n->namespaceURI() != XMLNSNames::xmlnsNamespaceURI) { // In XPath land, namespace nodes are not accessible on the attribute axis.
                     if (nodeMatches(n.get(), AttributeAxis, m_nodeTest)) // Still need to check merged predicates.
                         nodes.append(n.release());
@@ -341,12 +343,11 @@ void Step::nodesInAxis(Node* context, NodeSet& nodes) const
                 return;
             }
             
-            NamedNodeMap* attrs = context->attributes();
-            if (!attrs)
+            if (!contextElement->hasAttributes())
                 return;
 
-            for (unsigned i = 0; i < attrs->length(); ++i) {
-                RefPtr<Attr> attr = attrs->attributeItem(i)->createAttrIfNeeded(static_cast<Element*>(context));
+            for (unsigned i = 0; i < contextElement->attributeCount(); ++i) {
+                RefPtr<Attr> attr = contextElement->ensureAttr(contextElement->attributeItem(i)->name());
                 if (nodeMatches(attr.get(), AttributeAxis, m_nodeTest))
                     nodes.append(attr.release());
             }
@@ -365,7 +366,7 @@ void Step::nodesInAxis(Node* context, NodeSet& nodes) const
             if (context->isAttributeNode()) // In XPath model, attribute nodes do not have children.
                 return;
 
-            for (Node* n = context->firstChild(); n; n = n->traverseNextNode(context))
+            for (Node* n = context->firstChild(); n; n = NodeTraversal::next(n, context))
             if (nodeMatches(n, DescendantOrSelfAxis, m_nodeTest))
                 nodes.append(n);
             return;

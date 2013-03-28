@@ -17,7 +17,10 @@
  */
 
 #include "config.h"
+#include "InitializeLogging.h"
 #include "Logging.h"
+
+#if !LOG_DISABLED
 
 #include <wtf/text/WTFString.h>
 
@@ -53,3 +56,5 @@ void initializeLoggingChannelsIfNecessary()
 }
 
 } // namespace WebCore
+
+#endif // !LOG_DISABLED

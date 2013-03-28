@@ -34,14 +34,17 @@ PassRefPtr<WebHitTestResult> WebHitTestResult::create(const WebHitTestResult::Da
     return adoptRef(new WebHitTestResult(hitTestResultData));
 }
 
-void WebHitTestResult::Data::encode(CoreIPC::ArgumentEncoder* encoder) const
+void WebHitTestResult::Data::encode(CoreIPC::ArgumentEncoder& encoder) const
 {
-    encoder->encode(absoluteImageURL);
-    encoder->encode(absolutePDFURL);
-    encoder->encode(absoluteLinkURL);
-    encoder->encode(absoluteMediaURL);
-    encoder->encode(linkLabel);
-    encoder->encode(linkTitle);
+    encoder << absoluteImageURL;
+    encoder << absolutePDFURL;
+    encoder << absoluteLinkURL;
+    encoder << absoluteMediaURL;
+    encoder << linkLabel;
+    encoder << linkTitle;
+    encoder << isContentEditable;
+    encoder << elementBoundingBox;
+    encoder << isScrollbar;
 }
 
 bool WebHitTestResult::Data::decode(CoreIPC::ArgumentDecoder* decoder, WebHitTestResult::Data& hitTestResultData)
@@ -51,7 +54,10 @@ bool WebHitTestResult::Data::decode(CoreIPC::ArgumentDecoder* decoder, WebHitTes
         || !decoder->decode(hitTestResultData.absoluteLinkURL)
         || !decoder->decode(hitTestResultData.absoluteMediaURL)
         || !decoder->decode(hitTestResultData.linkLabel)
-        || !decoder->decode(hitTestResultData.linkTitle))
+        || !decoder->decode(hitTestResultData.linkTitle)
+        || !decoder->decode(hitTestResultData.isContentEditable)
+        || !decoder->decode(hitTestResultData.elementBoundingBox)
+        || !decoder->decode(hitTestResultData.isScrollbar))
         return false;
 
     return true;

@@ -27,6 +27,7 @@
 #include "CachedPage.h"
 
 #include "CachedFramePlatformData.h"
+#include "DOMWindow.h"
 #include "Document.h"
 #include "DocumentLoader.h"
 #include "ExceptionCode.h"
@@ -133,7 +134,7 @@ void CachedFrameBase::restore()
     m_document->enqueuePopstateEvent(historyItem && historyItem->stateObject() ? historyItem->stateObject() : SerializedScriptValue::nullValue());
     
 #if ENABLE(TOUCH_EVENTS)
-    if (m_document->hasListenerType(Document::TOUCH_LISTENER))
+    if (m_document->hasTouchEventHandlers())
         m_document->page()->chrome()->client()->needTouchEvents(true);
 #endif
 
@@ -156,7 +157,6 @@ CachedFrame::CachedFrame(Frame* frame)
     // Custom scrollbar renderers will get reattached when the document comes out of the page cache
     m_view->detachCustomScrollbars();
 
-    frame->clearTimers();
     m_document->setInPageCache(true);
     frame->loader()->stopLoading(UnloadEventPolicyUnloadAndPageHide);
 
@@ -168,11 +168,12 @@ CachedFrame::CachedFrame(Frame* frame)
     // but after we've fired the pagehide event, in case that creates more objects.
     // Suspending must also happen after we've recursed over child frames, in case
     // those create more objects.
-    // FIXME: It's still possible to have objects created after suspending in some cases, see http://webkit.org/b/53733 for more details.
     m_document->documentWillSuspendForPageCache();
     m_document->suspendScriptedAnimationControllerCallbacks();
     m_document->suspendActiveDOMObjects(ActiveDOMObject::DocumentWillBecomeInactive);
     m_cachedFrameScriptData = adoptPtr(new ScriptCachedFrameData(frame));
+
+    m_document->domWindow()->suspendForPageCache();
 
     frame->loader()->client()->savePlatformDataToCachedFrame(this);
 
@@ -180,6 +181,9 @@ CachedFrame::CachedFrame(Frame* frame)
     if (m_isComposited && pageCache()->shouldClearBackingStores())
         frame->view()->clearBackingStores();
 #endif
+
+    // documentWillSuspendForPageCache() can set up a layout timer on the FrameView, so clear timers after that.
+    frame->clearTimers();
 
     // Deconstruct the FrameTree, to restore it later.
     // We do this for two reasons:
@@ -189,7 +193,7 @@ CachedFrame::CachedFrame(Frame* frame)
         frame->tree()->removeChild(m_childFrames[i]->view()->frame());
 
     if (!m_isMainFrame)
-        frame->page()->decrementFrameCount();
+        frame->page()->decrementSubframeCount();
 
     frame->loader()->client()->didSaveToPageCache();
 
@@ -208,7 +212,7 @@ void CachedFrame::open()
     m_view->frame()->loader()->open(*this);
 
     if (!m_isMainFrame)
-        m_view->frame()->page()->incrementFrameCount();
+        m_view->frame()->page()->incrementSubframeCount();
 }
 
 void CachedFrame::clear()
@@ -245,6 +249,8 @@ void CachedFrame::destroy()
     ASSERT(m_document->inPageCache());
     ASSERT(m_view);
     ASSERT(m_document->frame() == m_view->frame());
+
+    m_document->domWindow()->willDestroyCachedFrame();
 
     if (!m_isMainFrame) {
         m_view->frame()->detachFromPage();

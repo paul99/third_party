@@ -25,16 +25,17 @@
 #ifndef HTMLOptionElement_h
 #define HTMLOptionElement_h
 
-#include "HTMLFormControlElement.h"
+#include "HTMLElement.h"
 
 namespace WebCore {
 
+class HTMLDataListElement;
 class HTMLSelectElement;
 
-class HTMLOptionElement : public HTMLFormControlElement {
+class HTMLOptionElement : public HTMLElement {
 public:
-    static PassRefPtr<HTMLOptionElement> create(Document*, HTMLFormElement*);
-    static PassRefPtr<HTMLOptionElement> create(const QualifiedName&, Document*, HTMLFormElement*);
+    static PassRefPtr<HTMLOptionElement> create(Document*);
+    static PassRefPtr<HTMLOptionElement> create(const QualifiedName&, Document*);
     static PassRefPtr<HTMLOptionElement> createForJSConstructor(Document*, const String& data, const String& value,
        bool defaultSelected, bool selected, ExceptionCode&);
 
@@ -49,12 +50,16 @@ public:
     bool selected();
     void setSelected(bool);
 
+#if ENABLE(DATALIST_ELEMENT)
+    HTMLDataListElement* ownerDataListElement() const;
+#endif
     HTMLSelectElement* ownerSelectElement() const;
 
     String label() const;
     void setLabel(const String&);
 
-    bool ownElementDisabled() const { return HTMLFormControlElement::disabled(); }
+    virtual bool isEnabledFormControl() const OVERRIDE { return !disabled(); }
+    bool ownElementDisabled() const { return m_disabled; }
 
     virtual bool disabled() const;
 
@@ -63,30 +68,31 @@ public:
     void setSelectedState(bool);
 
 private:
-    HTMLOptionElement(const QualifiedName&, Document*, HTMLFormElement* = 0);
+    HTMLOptionElement(const QualifiedName&, Document*);
 
     virtual bool supportsFocus() const;
     virtual bool isFocusable() const;
     virtual bool rendererIsNeeded(const NodeRenderingContext&) { return false; }
     virtual void attach();
     virtual void detach();
-    virtual void setRenderStyle(PassRefPtr<RenderStyle>);
 
-    virtual const AtomicString& formControlType() const;
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
 
-    virtual void parseMappedAttribute(Attribute*);
-
-    virtual void insertedIntoTree(bool);
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
     virtual void accessKeyAction(bool);
 
     virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
 
-    virtual RenderStyle* nonRendererRenderStyle() const;
+    // <option> never has a renderer so we manually manage a cached style.
+    void updateNonRenderStyle();
+    virtual RenderStyle* nonRendererStyle() const OVERRIDE;
+    virtual PassRefPtr<RenderStyle> customStyleForRenderer() OVERRIDE;
+
+    void didRecalcStyle(StyleChange) OVERRIDE;
 
     String collectOptionInnerText() const;
 
-    String m_value;
-    String m_label;
+    bool m_disabled;
     bool m_isSelected;
     RefPtr<RenderStyle> m_style;
 };

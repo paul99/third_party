@@ -85,7 +85,7 @@ static String protectionSpaceMapKeyFromURL(const KURL& url)
 
 void CredentialStorage::set(const Credential& credential, const ProtectionSpace& protectionSpace, const KURL& url)
 {
-    ASSERT(protectionSpace.isProxy() || url.protocolInHTTPFamily());
+    ASSERT(protectionSpace.isProxy() || url.protocolIsInHTTPFamily());
     ASSERT(protectionSpace.isProxy() || url.isValid());
 
     protectionSpaceToCredentialMap().set(protectionSpace, credential);
@@ -112,7 +112,7 @@ void CredentialStorage::remove(const ProtectionSpace& protectionSpace)
 
 static PathToDefaultProtectionSpaceMap::iterator findDefaultProtectionSpaceForURL(const KURL& url)
 {
-    ASSERT(url.protocolInHTTPFamily());
+    ASSERT(url.protocolIsInHTTPFamily());
     ASSERT(url.isValid());
 
     PathToDefaultProtectionSpaceMap& map = pathToDefaultProtectionSpaceMap();
@@ -141,13 +141,13 @@ static PathToDefaultProtectionSpaceMap::iterator findDefaultProtectionSpaceForUR
 
 bool CredentialStorage::set(const Credential& credential, const KURL& url)
 {
-    ASSERT(url.protocolInHTTPFamily());
+    ASSERT(url.protocolIsInHTTPFamily());
     ASSERT(url.isValid());
     PathToDefaultProtectionSpaceMap::iterator iter = findDefaultProtectionSpaceForURL(url);
     if (iter == pathToDefaultProtectionSpaceMap().end())
         return false;
     ASSERT(originsWithCredentials().contains(originStringFromURL(url)));
-    protectionSpaceToCredentialMap().set(iter->second, credential);
+    protectionSpaceToCredentialMap().set(iter->value, credential);
     return true;
 }
 
@@ -156,7 +156,13 @@ Credential CredentialStorage::get(const KURL& url)
     PathToDefaultProtectionSpaceMap::iterator iter = findDefaultProtectionSpaceForURL(url);
     if (iter == pathToDefaultProtectionSpaceMap().end())
         return Credential();
-    return protectionSpaceToCredentialMap().get(iter->second);
+    return protectionSpaceToCredentialMap().get(iter->value);
+}
+
+void CredentialStorage::setPrivateMode(bool mode)
+{
+    if (!mode)
+        protectionSpaceToCredentialMap().clear();
 }
 
 } // namespace WebCore

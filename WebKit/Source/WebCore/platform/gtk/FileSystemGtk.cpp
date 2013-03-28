@@ -23,15 +23,16 @@
 #include "config.h"
 #include "FileSystem.h"
 
-#include "GOwnPtr.h"
-#include "PlatformString.h"
+#include "FileMetadata.h"
 #include "UUID.h"
 #include <gio/gio.h>
 #include <glib.h>
 #include <glib/gstdio.h>
-#include <wtf/gobject/GlibUtilities.h>
+#include <wtf/gobject/GOwnPtr.h>
 #include <wtf/gobject/GRefPtr.h>
+#include <wtf/gobject/GlibUtilities.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -116,7 +117,7 @@ bool getFileSize(const String& path, long long& resultSize)
     if (filename.isNull())
         return false;
 
-    struct stat statResult;
+    GStatBuf statResult;
     gint result = g_stat(filename.data(), &statResult);
     if (result != 0)
         return false;
@@ -131,12 +132,30 @@ bool getFileModificationTime(const String& path, time_t& modifiedTime)
     if (filename.isNull())
         return false;
 
-    struct stat statResult;
+    GStatBuf statResult;
     gint result = g_stat(filename.data(), &statResult);
     if (result != 0)
         return false;
 
     modifiedTime = statResult.st_mtime;
+    return true;
+
+}
+
+bool getFileMetadata(const String& path, FileMetadata& metadata)
+{
+    CString filename = fileSystemRepresentation(path);
+    if (filename.isNull())
+        return false;
+
+    struct stat statResult;
+    gint result = g_stat(filename.data(), &statResult);
+    if (result)
+        return false;
+
+    metadata.modificationTime = statResult.st_mtime;
+    metadata.length = statResult.st_size;
+    metadata.type = S_ISDIR(statResult.st_mode) ? FileMetadata::TypeDirectory : FileMetadata::TypeFile;
     return true;
 
 }
@@ -188,6 +207,26 @@ CString applicationDirectoryPath()
 
     GOwnPtr<char> dirname(g_path_get_dirname(currentExePath.get()));
     return dirname.get();
+}
+
+CString sharedResourcesPath()
+{
+    static CString cachedPath;
+    if (!cachedPath.isNull())
+        return cachedPath;
+
+#if OS(WINDOWS)
+    HMODULE hmodule = 0;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<char*>(sharedResourcesPath), &hmodule);
+
+    GOwnPtr<gchar> runtimeDir(g_win32_get_package_installation_directory_of_module(hmodule));
+    GOwnPtr<gchar> dataPath(g_build_filename(runtimeDir.get(), "share", "webkitgtk-"WEBKITGTK_API_VERSION_STRING, NULL));
+#else
+    GOwnPtr<gchar> dataPath(g_build_filename(DATA_DIR, "webkitgtk-"WEBKITGTK_API_VERSION_STRING, NULL));
+#endif
+
+    cachedPath = dataPath.get();
+    return cachedPath;
 }
 
 uint64_t getVolumeFreeSizeForPath(const char* path)
@@ -317,6 +356,10 @@ int readFromFile(PlatformFileHandle handle, char* data, int length)
 
 bool unloadModule(PlatformModule module)
 {
+#if OS(WINDOWS)
+    return ::FreeLibrary(module);
+#else
     return g_module_close(module);
+#endif
 }
 }

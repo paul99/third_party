@@ -46,22 +46,11 @@ public:
         MouseEventTypeMove,
     };
 
-    enum GestureEventType {
-        SCROLL_BEGIN = 0,
-        SCROLL_END,
-        SCROLL_UPDATE,
-        FLING_START,
-        FLING_CANCEL,
-        PINCH_BEGIN,
-        PINCH_END,
-        PINCH_UPDATE,
-    };
-
     enum MouseWheelDirectionType {
-        SCROLL_UP = 0,
-        SCROLL_DOWN,
-        SCROLL_LEFT,
-        SCROLL_RIGHT,
+        MouseWheelDirectionTypeUp = 0,
+        MouseWheelDirectionTypeDown,
+        MouseWheelDirectionTypeLeft,
+        MouseWheelDirectionTypeRight,
     };
 
     WEBKIT_EXPORT static WebKeyboardEvent keyboardEvent(WebInputEvent::Type,
@@ -71,34 +60,32 @@ public:
                                                         WebUChar unicodeCharacter,
                                                         bool isSystemKey);
 
-    WEBKIT_EXPORT static WebMouseEvent mouseEvent(int x,
-                                                  int y,
+    WEBKIT_EXPORT static WebMouseEvent mouseEvent(MouseEventType,
+                                                  WebMouseEvent::Button,
+                                                  double timeStampSeconds,
                                                   int windowX,
                                                   int windowY,
-                                                  MouseEventType,
-                                                  double timeStampSeconds,
-                                                  WebMouseEvent::Button = WebMouseEvent::ButtonLeft);
+                                                  int modifiers,
+                                                  int clickCount);
 
-    WEBKIT_EXPORT static WebGestureEvent gestureEvent(int x,
-                                                      int y,
-                                                      float delta_x,
-                                                      float delta_y,
-                                                      GestureEventType type,
-                                                      double timeStampSeconds);
-
-    WEBKIT_EXPORT static WebMouseWheelEvent mouseWheelEvent(int x, int y,
-                                                            int windowX, int windowY,
+    WEBKIT_EXPORT static WebMouseWheelEvent mouseWheelEvent(MouseWheelDirectionType,
                                                             double timeStampSeconds,
-                                                            MouseWheelDirectionType direction);
-#if defined(ANDROID)
-    WEBKIT_EXPORT static WebPageScaleAnimationGestureEvent pageScaleAnimationGestureEvent(
-        int x,
-        int y,
-        bool anchorPoint,
-        float pageScale,
-        double durationMs,
-        double timeStampSeconds);
-#endif
+                                                            int windowX,
+                                                            int windowY);
+
+    WEBKIT_EXPORT static WebGestureEvent gestureEvent(WebInputEvent::Type,
+                                                      double timeStampSeconds,
+                                                      int x,
+                                                      int y,
+                                                      float deltaX,
+                                                      float deltaY,
+                                                      int modifiers);
+
+    WEBKIT_EXPORT static WebGestureEvent gestureEvent(WebInputEvent::Type,
+                                                      double timeStampSeconds,
+                                                      int x,
+                                                      int y,
+                                                      int modifiers);
 };
 
 } // namespace WebKit

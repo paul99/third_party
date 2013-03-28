@@ -47,10 +47,10 @@ private:
     SVGGlyphElement(const QualifiedName&, Document*);
 
     // FIXME: svgAttributeChanged missing.
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
 
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
+    virtual void removedFrom(ContainerNode*) OVERRIDE;
 
     virtual bool rendererIsNeeded(const NodeRenderingContext&) { return false; }
 

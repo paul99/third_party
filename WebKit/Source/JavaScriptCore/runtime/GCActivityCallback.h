@@ -29,6 +29,7 @@
 #ifndef GCActivityCallback_h
 #define GCActivityCallback_h
 
+#include "HeapTimer.h"
 #include <wtf/OwnPtr.h>
 #include <wtf/PassOwnPtr.h>
 
@@ -40,41 +41,60 @@ namespace JSC {
 
 class Heap;
 
-class GCActivityCallback {
+class GCActivityCallback : public HeapTimer {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
-    virtual ~GCActivityCallback() {}
-    virtual void operator()() {}
-    virtual void synchronize() {}
+    virtual void didAllocate(size_t) { }
+    virtual void willCollect() { }
+    virtual void cancel() { }
+    bool isEnabled() const { return m_enabled; }
+    void setEnabled(bool enabled) { m_enabled = enabled; }
 
 protected:
-    GCActivityCallback() {}
-};
+#if USE(CF)
+    GCActivityCallback(JSGlobalData* globalData, CFRunLoopRef runLoop)
+        : HeapTimer(globalData, runLoop)
+        , m_enabled(true)
+    {
+    }
+# else
+    GCActivityCallback(JSGlobalData* globalData)
+        : HeapTimer(globalData)
+        , m_enabled(true)
+    {
+    }
+#endif
 
-struct DefaultGCActivityCallbackPlatformData;
+    bool m_enabled;
+};
 
 class DefaultGCActivityCallback : public GCActivityCallback {
 public:
-    static PassOwnPtr<DefaultGCActivityCallback> create(Heap*);
+    static DefaultGCActivityCallback* create(Heap*);
 
     DefaultGCActivityCallback(Heap*);
-    ~DefaultGCActivityCallback();
 
-    void operator()();
-    void synchronize();
+    virtual void didAllocate(size_t);
+    virtual void willCollect();
+    virtual void cancel();
+    
+    virtual void doWork();
 
 #if USE(CF)
 protected:
     DefaultGCActivityCallback(Heap*, CFRunLoopRef);
-    void commonConstructor(Heap*, CFRunLoopRef);
-#endif
-
+    
+    void cancelTimer();
+    void scheduleTimer(double);
+    
 private:
-    OwnPtr<DefaultGCActivityCallbackPlatformData> d;
+    double m_delay;
+#endif
 };
 
-inline PassOwnPtr<DefaultGCActivityCallback> DefaultGCActivityCallback::create(Heap* heap)
+inline DefaultGCActivityCallback* DefaultGCActivityCallback::create(Heap* heap)
 {
-    return adoptPtr(new DefaultGCActivityCallback(heap));
+    return new DefaultGCActivityCallback(heap);
 }
 
 }

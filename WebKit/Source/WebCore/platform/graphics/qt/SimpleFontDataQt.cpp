@@ -24,28 +24,15 @@
 #include "config.h"
 #include "SimpleFontData.h"
 
-#if HAVE(QRAWFONT)
 #include "NotImplemented.h"
-#else
-#include <QFontMetricsF>
-#endif
 
 namespace WebCore {
 
 void SimpleFontData::determinePitch()
 {
-#if HAVE(QRAWFONT)
     notImplemented();
     m_treatAsFixedPitch = false;
-#else
-    m_treatAsFixedPitch = m_platformData.font().fixedPitch();
-#endif
 }
-
-#if HAVE(QRAWFONT)
-
-static const float smallCapsFraction = 0.7;
-static const float emphasisMarkFraction = 0.5;
 
 bool SimpleFontData::containsCharacters(const UChar* characters, int length) const
 {
@@ -61,7 +48,7 @@ bool SimpleFontData::containsCharacters(const UChar* characters, int length) con
 
 float SimpleFontData::platformWidthForGlyph(Glyph glyph) const
 {
-    if (!platformData().size())
+    if (!glyph || !platformData().size())
         return 0;
 
     QVector<quint32> glyphIndexes;
@@ -71,30 +58,10 @@ float SimpleFontData::platformWidthForGlyph(Glyph glyph) const
     return advances.at(0).x();
 }
 
-PassOwnPtr<SimpleFontData> SimpleFontData::createScaledFontData(const FontDescription& fontDescription, float scaleFactor) const
+PassRefPtr<SimpleFontData> SimpleFontData::createScaledFontData(const FontDescription& fontDescription, float scaleFactor) const
 {
     const float scaledSize = lroundf(fontDescription.computedSize() * scaleFactor);
-    return adoptPtr(new SimpleFontData(FontPlatformData(m_platformData, scaledSize), isCustomFont(), false));
-}
-
-SimpleFontData* SimpleFontData::smallCapsFontData(const FontDescription& fontDescription) const
-{
-    if (!m_derivedFontData)
-        m_derivedFontData = DerivedFontData::create(isCustomFont());
-    if (!m_derivedFontData->smallCaps)
-        m_derivedFontData->smallCaps = createScaledFontData(fontDescription, smallCapsFraction);
-
-    return m_derivedFontData->smallCaps.get();
-}
-
-SimpleFontData* SimpleFontData::emphasisMarkFontData(const FontDescription& fontDescription) const
-{
-    if (!m_derivedFontData)
-        m_derivedFontData = DerivedFontData::create(isCustomFont());
-    if (!m_derivedFontData->emphasisMark)
-        m_derivedFontData->emphasisMark = createScaledFontData(fontDescription, emphasisMarkFraction);
-
-    return m_derivedFontData->emphasisMark.get();
+    return SimpleFontData::create(FontPlatformData(m_platformData, scaledSize), isCustomFont(), false);
 }
 
 FloatRect SimpleFontData::platformBoundsForGlyph(Glyph) const
@@ -102,23 +69,6 @@ FloatRect SimpleFontData::platformBoundsForGlyph(Glyph) const
     notImplemented();
     return FloatRect();
 }
-#else
-bool SimpleFontData::containsCharacters(const UChar*, int) const
-{
-    return true;
-}
-
-void SimpleFontData::platformGlyphInit()
-{
-    if (!m_platformData.size())
-        return;
-    m_spaceGlyph = 0;
-    m_adjustedSpaceWidth = m_spaceWidth;
-    determinePitch();
-    m_missingGlyphData.fontData = this;
-    m_missingGlyphData.glyph = 0;
-}
-#endif
 
 void SimpleFontData::platformInit()
 {
@@ -129,28 +79,15 @@ void SimpleFontData::platformInit()
          return;
     }
 
-#if HAVE(QRAWFONT)
     QRawFont rawFont(m_platformData.rawFont());
     float descent = rawFont.descent();
     float ascent = rawFont.ascent();
     float xHeight = rawFont.xHeight();
-    float lineSpacing = ascent + descent + rawFont.leading() + 1;
+    float lineSpacing = ascent + descent + rawFont.leading();
 
     QVector<quint32> indexes = rawFont.glyphIndexesForString(QLatin1String(" "));
     QVector<QPointF> advances = rawFont.advancesForGlyphIndexes(indexes);
     float spaceWidth = advances.at(0).x();
-#else
-    QFontMetricsF fm(m_platformData.font());
-    float descent = fm.descent();
-    float ascent = fm.ascent();
-    float xHeight = fm.xHeight();
-    float lineSpacing = fm.lineSpacing();
-    float spaceWidth = fm.width(QLatin1Char(' '));
-#endif
-
-    // Qt subtracts 1 from the descent to account for the baseline,
-    // we add it back here to get correct metrics for WebKit.
-    descent += 1;
 
     // The line spacing should always be >= (ascent + descent), but this
     // may be false in some cases due to misbehaving platform libraries.
@@ -163,7 +100,8 @@ void SimpleFontData::platformInit()
     float lineGap = lineSpacing - ascent - descent;
 
     m_fontMetrics.setAscent(ascent);
-    m_fontMetrics.setDescent(descent);
+    // WebKit expects the descent to be positive.
+    m_fontMetrics.setDescent(qAbs(descent));
     m_fontMetrics.setLineSpacing(lineSpacing);
     m_fontMetrics.setXHeight(xHeight);
     m_fontMetrics.setLineGap(lineGap);
@@ -174,15 +112,9 @@ void SimpleFontData::platformCharWidthInit()
 {
     if (!m_platformData.size())
         return;
-#if HAVE(QRAWFONT)
     QRawFont rawFont(m_platformData.rawFont());
     m_avgCharWidth = rawFont.averageCharWidth();
     m_maxCharWidth = rawFont.maxCharWidth();
-#else
-    QFontMetricsF fm(m_platformData.font());
-    m_avgCharWidth = fm.averageCharWidth();
-    m_maxCharWidth = fm.maxWidth();
-#endif
 }
 
 void SimpleFontData::platformDestroy()

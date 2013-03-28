@@ -28,6 +28,7 @@
 #include "ImageBuffer.h"
 
 #include "IntRect.h"
+#include "PlatformMemoryInstrumentation.h"
 #include <wtf/MathExtras.h>
 
 namespace WebCore {
@@ -35,6 +36,9 @@ namespace WebCore {
 #if !USE(CG)
 void ImageBuffer::transformColorSpace(ColorSpace srcColorSpace, ColorSpace dstColorSpace)
 {
+    DEFINE_STATIC_LOCAL(Vector<int>, deviceRgbLUT, ());
+    DEFINE_STATIC_LOCAL(Vector<int>, linearRgbLUT, ());
+
     if (srcColorSpace == dstColorSpace)
         return;
 
@@ -44,49 +48,49 @@ void ImageBuffer::transformColorSpace(ColorSpace srcColorSpace, ColorSpace dstCo
         return;
 
     if (dstColorSpace == ColorSpaceLinearRGB) {
-        if (m_linearRgbLUT.isEmpty()) {
+        if (linearRgbLUT.isEmpty()) {
             for (unsigned i = 0; i < 256; i++) {
                 float color = i  / 255.0f;
                 color = (color <= 0.04045f ? color / 12.92f : pow((color + 0.055f) / 1.055f, 2.4f));
                 color = std::max(0.0f, color);
                 color = std::min(1.0f, color);
-                m_linearRgbLUT.append(static_cast<int>(color * 255));
+                linearRgbLUT.append(static_cast<int>(round(color * 255)));
             }
         }
-        platformTransformColorSpace(m_linearRgbLUT);
+        platformTransformColorSpace(linearRgbLUT);
     } else if (dstColorSpace == ColorSpaceDeviceRGB) {
-        if (m_deviceRgbLUT.isEmpty()) {
+        if (deviceRgbLUT.isEmpty()) {
             for (unsigned i = 0; i < 256; i++) {
                 float color = i / 255.0f;
                 color = (powf(color, 1.0f / 2.4f) * 1.055f) - 0.055f;
                 color = std::max(0.0f, color);
                 color = std::min(1.0f, color);
-                m_deviceRgbLUT.append(static_cast<int>(color * 255));
+                deviceRgbLUT.append(static_cast<int>(round(color * 255)));
             }
         }
-        platformTransformColorSpace(m_deviceRgbLUT);
+        platformTransformColorSpace(deviceRgbLUT);
     }
 }
 #endif // USE(CG)
 
 inline void ImageBuffer::genericConvertToLuminanceMask()
 {
-    IntRect luminanceRect(IntPoint(), size());
-    RefPtr<ByteArray> srcPixelArray = getUnmultipliedImageData(luminanceRect);
+    IntRect luminanceRect(IntPoint(), internalSize());
+    RefPtr<Uint8ClampedArray> srcPixelArray = getUnmultipliedImageData(luminanceRect);
     
     unsigned pixelArrayLength = srcPixelArray->length();
     for (unsigned pixelOffset = 0; pixelOffset < pixelArrayLength; pixelOffset += 4) {
-        unsigned char a = srcPixelArray->get(pixelOffset + 3);
+        unsigned char a = srcPixelArray->item(pixelOffset + 3);
         if (!a)
             continue;
-        unsigned char r = srcPixelArray->get(pixelOffset);
-        unsigned char g = srcPixelArray->get(pixelOffset + 1);
-        unsigned char b = srcPixelArray->get(pixelOffset + 2);
+        unsigned char r = srcPixelArray->item(pixelOffset);
+        unsigned char g = srcPixelArray->item(pixelOffset + 1);
+        unsigned char b = srcPixelArray->item(pixelOffset + 2);
         
         double luma = (r * 0.2125 + g * 0.7154 + b * 0.0721) * ((double)a / 255.0);
         srcPixelArray->set(pixelOffset + 3, luma);
     }
-    putUnmultipliedImageData(srcPixelArray.get(), luminanceRect.size(), luminanceRect, IntPoint());
+    putByteArray(Unmultiplied, srcPixelArray.get(), luminanceRect.size(), luminanceRect, IntPoint());
 }
 
 void ImageBuffer::convertToLuminanceMask()
@@ -101,5 +105,24 @@ PlatformLayer* ImageBuffer::platformLayer() const
     return 0;
 }
 #endif
+
+#if !USE(SKIA)
+bool ImageBuffer::copyToPlatformTexture(GraphicsContext3D&, Platform3DObject, GC3Denum, bool, bool)
+{
+    return false;
+}
+
+PassOwnPtr<ImageBuffer> ImageBuffer::createCompatibleBuffer(const IntSize& size, float resolutionScale, ColorSpace colorSpace, const GraphicsContext* context, bool)
+{
+    return create(size, resolutionScale, colorSpace, context->isAcceleratedContext() ? Accelerated : Unaccelerated);
+}
+#endif
+
+void ImageBuffer::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, PlatformMemoryTypes::Image);
+    info.addMember(m_data);
+    info.addMember(m_context);
+}
 
 }

@@ -34,18 +34,26 @@
 #include "CSSPropertyNames.h"
 #include "Chrome.h"
 #include "Color.h"
+#include "ElementShadow.h"
+#include "HTMLDataListElement.h"
 #include "HTMLDivElement.h"
 #include "HTMLInputElement.h"
+#include "HTMLOptionElement.h"
+#include "InputTypeNames.h"
 #include "MouseEvent.h"
+#include "RenderObject.h"
+#include "RenderView.h"
 #include "ScriptController.h"
 #include "ShadowRoot.h"
 
 #include <wtf/PassOwnPtr.h>
 #include <wtf/text/WTFString.h>
 
-#if ENABLE(INPUT_COLOR)
+#if ENABLE(INPUT_TYPE_COLOR)
 
 namespace WebCore {
+
+using namespace HTMLNames;
 
 static bool isValidColorString(const String& value)
 {
@@ -106,23 +114,25 @@ Color ColorInputType::valueAsColor() const
 
 void ColorInputType::createShadowSubtree()
 {
+    ASSERT(element()->shadow());
+
     Document* document = element()->document();
     RefPtr<HTMLDivElement> wrapperElement = HTMLDivElement::create(document);
-    wrapperElement->setShadowPseudoId("-webkit-color-swatch-wrapper");
+    wrapperElement->setPseudo(AtomicString("-webkit-color-swatch-wrapper", AtomicString::ConstructFromLiteral));
     RefPtr<HTMLDivElement> colorSwatch = HTMLDivElement::create(document);
-    colorSwatch->setShadowPseudoId("-webkit-color-swatch");
+    colorSwatch->setPseudo(AtomicString("-webkit-color-swatch", AtomicString::ConstructFromLiteral));
     ExceptionCode ec = 0;
     wrapperElement->appendChild(colorSwatch.release(), ec);
     ASSERT(!ec);
-    element()->ensureShadowRoot()->appendChild(wrapperElement.release(), ec);
+    element()->userAgentShadowRoot()->appendChild(wrapperElement.release(), ec);
     ASSERT(!ec);
     
     updateColorSwatch();
 }
 
-void ColorInputType::setValue(const String& value, bool valueChanged, bool sendChangeEvent)
+void ColorInputType::setValue(const String& value, bool valueChanged, TextFieldEventBehavior eventBehavior)
 {
-    InputType::setValue(value, valueChanged, sendChangeEvent);
+    InputType::setValue(value, valueChanged, eventBehavior);
 
     if (!valueChanged)
         return;
@@ -134,7 +144,7 @@ void ColorInputType::setValue(const String& value, bool valueChanged, bool sendC
 
 void ColorInputType::handleDOMActivateEvent(Event* event)
 {
-    if (element()->disabled() || element()->readOnly() || !element()->renderer())
+    if (element()->isDisabledOrReadOnly() || !element()->renderer())
         return;
 
     if (!ScriptController::processingUserGesture())
@@ -152,9 +162,19 @@ void ColorInputType::detach()
     endColorChooser();
 }
 
+bool ColorInputType::shouldRespectListAttribute()
+{
+    return InputType::themeSupportsDataListUI(this);
+}
+
+bool ColorInputType::typeMismatchFor(const String& value) const
+{
+    return !isValidColorString(value);
+}
+
 void ColorInputType::didChooseColor(const Color& color)
 {
-    if (element()->disabled() || element()->readOnly() || color == valueAsColor())
+    if (element()->isDisabledOrReadOnly() || color == valueAsColor())
         return;
     element()->setValueFromRenderer(color.serialized());
     updateColorSwatch();
@@ -178,15 +198,54 @@ void ColorInputType::updateColorSwatch()
     if (!colorSwatch)
         return;
 
-    colorSwatch->style()->setProperty(CSSPropertyBackgroundColor, element()->value(), false, ASSERT_NO_EXCEPTION);
+    colorSwatch->setInlineStyleProperty(CSSPropertyBackgroundColor, element()->value(), false);
 }
 
 HTMLElement* ColorInputType::shadowColorSwatch() const
 {
-    ShadowRoot* shadow = element()->shadowRoot();
+    ShadowRoot* shadow = element()->userAgentShadowRoot();
     return shadow ? toHTMLElement(shadow->firstChild()->firstChild()) : 0;
+}
+
+IntRect ColorInputType::elementRectRelativeToRootView() const
+{
+    return element()->document()->view()->contentsToRootView(element()->pixelSnappedBoundingBox());
+}
+
+Color ColorInputType::currentColor()
+{
+    return valueAsColor();
+}
+
+bool ColorInputType::shouldShowSuggestions() const
+{
+#if ENABLE(DATALIST_ELEMENT)
+    return element()->fastHasAttribute(listAttr);
+#else
+    return false;
+#endif
+}
+
+Vector<Color> ColorInputType::suggestions() const
+{
+    Vector<Color> suggestions;
+#if ENABLE(DATALIST_ELEMENT)
+    HTMLDataListElement* dataList = element()->dataList();
+    if (dataList) {
+        RefPtr<HTMLCollection> options = dataList->options();
+        for (unsigned i = 0; HTMLOptionElement* option = static_cast<HTMLOptionElement*>(options->item(i)); i++) {
+            if (!element()->isValidValue(option->value()))
+                continue;
+            Color color(option->value());
+            if (!color.isValid())
+                continue;
+            suggestions.append(color);
+        }
+    }
+#endif
+    return suggestions;
 }
 
 } // namespace WebCore
 
-#endif // ENABLE(INPUT_COLOR)
+#endif // ENABLE(INPUT_TYPE_COLOR)

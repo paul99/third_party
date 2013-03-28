@@ -28,31 +28,25 @@
 
 #include "GeolocationClient.h"
 
+#include <QGeoPositionInfo>
 #include <QObject>
 #include <wtf/RefPtr.h>
 
-#if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
-#include <QGeoPositionInfo>
-namespace QtMobility {
+QT_BEGIN_NAMESPACE
 class QGeoPositionInfoSource;
-};
-using namespace QtMobility;
-#elif QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
-#include <QtLocation/QGeoPositionInfo>
-class QGeoPositionInfoSource;
-#endif
+QT_END_NAMESPACE
 
 
-class QWebPage;
+class QWebPageAdapter;
 
 namespace WebCore {
 
-// This class provides an implementation of a GeolocationService for QtWebkit.
+// This class provides an implementation of a GeolocationClient for QtWebkit.
 class GeolocationClientQt : public QObject, public GeolocationClient {
     Q_OBJECT
 
 public:
-    GeolocationClientQt(const QWebPage*);
+    GeolocationClientQt(const QWebPageAdapter*);
     virtual ~GeolocationClientQt();
 
     virtual void geolocationDestroyed();
@@ -69,7 +63,7 @@ private Q_SLOTS:
     void positionUpdated(const QGeoPositionInfo&);
 
 private:
-    const QWebPage* m_page;
+    const QWebPageAdapter* m_webPage;
     RefPtr<GeolocationPosition> m_lastPosition;
     QGeoPositionInfoSource* m_location;
 };

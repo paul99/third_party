@@ -42,6 +42,7 @@
 #include "RenderImage.h"
 #include "TextEncoding.h"
 #include "WebCoreInstanceHandle.h"
+#include "WindowsExtras.h"
 #include "markup.h"
 #include <wtf/text/CString.h>
 
@@ -88,11 +89,6 @@ Pasteboard* Pasteboard::generalPasteboard()
 
 Pasteboard::Pasteboard()
 {
-    HWND hWndParent = 0;
-#if !OS(WINCE)
-    hWndParent = HWND_MESSAGE;
-#endif
-
     WNDCLASS wc;
     memset(&wc, 0, sizeof(WNDCLASS));
     wc.lpfnWndProc    = PasteboardOwnerWndProc;
@@ -101,7 +97,7 @@ Pasteboard::Pasteboard()
     RegisterClass(&wc);
 
     m_owner = ::CreateWindow(L"PasteboardOwnerWindowClass", L"PasteboardOwnerWindow", 0, 0, 0, 0, 0,
-        hWndParent, 0, 0, 0);
+        HWND_MESSAGE, 0, 0, 0);
 
     HTMLClipboardFormat = ::RegisterClipboardFormat(L"HTML Format");
     BookmarkClipboardFormat = ::RegisterClipboardFormat(L"UniformResourceLocatorW");
@@ -153,7 +149,7 @@ void Pasteboard::writeSelection(Range* selectedRange, bool canSmartCopyOrDelete,
     }
 }
 
-void Pasteboard::writePlainText(const String& text)
+void Pasteboard::writePlainText(const String& text, SmartReplaceOption smartReplaceOption)
 {
     clear();
 
@@ -165,6 +161,14 @@ void Pasteboard::writePlainText(const String& text)
         if (!::SetClipboardData(CF_UNICODETEXT, cbData))
             ::GlobalFree(cbData);
         ::CloseClipboard();
+    }
+
+    // enable smart-replacing later on by putting dummy data on the pasteboard
+    if (smartReplaceOption == CanSmartReplace) {
+        if (::OpenClipboard(m_owner)) {
+            ::SetClipboardData(WebSmartPasteFormat, 0);
+            ::CloseClipboard();
+        }
     }
 }
 

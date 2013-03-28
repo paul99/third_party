@@ -47,7 +47,7 @@
 #include "npruntime_internal.h"
 #endif
 
-#if OS(WINDOWS) && (PLATFORM(QT) || PLATFORM(WX))
+#if OS(WINDOWS) && (PLATFORM(GTK) || PLATFORM(QT) || PLATFORM(WX))
 typedef struct HWND__* HWND;
 typedef HWND PlatformPluginWidget;
 #else
@@ -61,7 +61,6 @@ typedef PlatformWidget PlatformPluginWidget;
 #include "TextureMapperPlatformLayer.h"
 #endif
 
-#include <QGraphicsItem>
 #include <QImage>
 QT_BEGIN_NAMESPACE
 class QPainter;
@@ -85,9 +84,9 @@ namespace JSC {
 #endif
 
 namespace WebCore {
-    class Element;
     class Frame;
     class Image;
+    class HTMLPlugInElement;
     class KeyboardEvent;
     class MouseEvent;
     class KURL;
@@ -99,6 +98,7 @@ namespace WebCore {
     class PluginStream;
     class ResourceError;
     class ResourceResponse;
+    class WheelEvent;
 
     enum PluginStatus {
         PluginStatusCanNotFindPlugin,
@@ -142,7 +142,7 @@ namespace WebCore {
                      , public PluginManualLoader
                      , private MediaCanStartListener {
     public:
-        static PassRefPtr<PluginView> create(Frame* parentFrame, const IntSize&, Element*, const KURL&, const Vector<String>& paramNames, const Vector<String>& paramValues, const String& mimeType, bool loadManually);
+        static PassRefPtr<PluginView> create(Frame* parentFrame, const IntSize&, HTMLPlugInElement*, const KURL&, const Vector<String>& paramNames, const Vector<String>& paramValues, const String& mimeType, bool loadManually);
         virtual ~PluginView();
 
         PluginPackage* plugin() const { return m_plugin.get(); }
@@ -230,6 +230,10 @@ namespace WebCore {
         const String& mimeType() const { return m_mimeType; }
         const KURL& url() const { return m_url; }
 
+#if defined(XP_MACOSX) && ENABLE(NETSCAPE_PLUGIN_API)
+        bool popUpContextMenu(NPMenu*);
+#endif
+
 #if OS(WINDOWS) && ENABLE(NETSCAPE_PLUGIN_API)
         static LRESULT CALLBACK PluginViewWndProc(HWND, UINT, WPARAM, LPARAM);
         LRESULT wndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -266,7 +270,7 @@ namespace WebCore {
 #endif
 
     private:
-        PluginView(Frame* parentFrame, const IntSize&, PluginPackage*, Element*, const KURL&, const Vector<String>& paramNames, const Vector<String>& paramValues, const String& mimeType, bool loadManually);
+        PluginView(Frame* parentFrame, const IntSize&, PluginPackage*, HTMLPlugInElement*, const KURL&, const Vector<String>& paramNames, const Vector<String>& paramValues, const String& mimeType, bool loadManually);
 
         void setParameters(const Vector<String>& paramNames, const Vector<String>& paramValues);
         bool startOrAddToUnstartedList();
@@ -300,7 +304,7 @@ namespace WebCore {
 
         RefPtr<Frame> m_parentFrame;
         RefPtr<PluginPackage> m_plugin;
-        Element* m_element;
+        HTMLPlugInElement* m_element;
         bool m_isStarted;
         KURL m_url;
         PluginStatus m_status;
@@ -323,6 +327,17 @@ namespace WebCore {
 #if ENABLE(NETSCAPE_PLUGIN_API)
         bool dispatchNPEvent(NPEvent&);
 #endif // ENABLE(NETSCAPE_PLUGIN_API)
+#endif
+#if defined(XP_MACOSX) && ENABLE(NETSCAPE_PLUGIN_API)
+        int16_t dispatchNPCocoaEvent(NPCocoaEvent&);
+        bool m_updatedCocoaTextInputRequested;
+        bool m_keyDownSent;
+        bool m_usePixmap;
+        uint16_t m_disregardKeyUpCounter;
+#endif
+
+#if defined(XP_MACOSX)
+        void handleWheelEvent(WheelEvent*);
 #endif
         void updatePluginWidget();
         void paintMissingPluginIcon(GraphicsContext*, const IntRect&);
@@ -377,7 +392,7 @@ namespace WebCore {
         bool m_haveUpdatedPluginWidget;
 #endif
 
-#if ((PLATFORM(QT) || PLATFORM(WX)) && OS(WINDOWS)) || defined(XP_MACOSX) || PLATFORM(EFL)
+#if ((PLATFORM(GTK) || PLATFORM(QT) || PLATFORM(WX)) && OS(WINDOWS)) || defined(XP_MACOSX) || PLATFORM(EFL)
         // On Mac OSX and Qt/Windows the plugin does not have its own native widget,
         // but is using the containing window as its reference for positioning/painting.
         PlatformPluginWidget m_window;
@@ -427,6 +442,7 @@ private:
         static bool s_isRunningUnderDRT;
         static void setXKeyEventSpecificFields(XEvent*, KeyboardEvent*);
         void paintUsingXPixmap(QPainter* painter, const QRect &exposedRect);
+        QWebPageClient* platformPageClient() const;
 #endif
 #if USE(ACCELERATED_COMPOSITING_PLUGIN_LAYER)
         OwnPtr<PlatformLayer> m_platformLayer;

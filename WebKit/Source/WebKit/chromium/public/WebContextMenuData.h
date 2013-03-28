@@ -34,8 +34,8 @@
 #include "WebHistoryItem.h"
 #include "WebMenuItemInfo.h"
 #include "WebNode.h"
-#include "WebReferrerPolicy.h"
 #include "platform/WebPoint.h"
+#include "platform/WebReferrerPolicy.h"
 #include "platform/WebString.h"
 #include "platform/WebURL.h"
 #include "platform/WebVector.h"
@@ -100,7 +100,7 @@ struct WebContextMenuData {
         MediaCanSave = 0x10,
         MediaHasAudio = 0x20,
         MediaHasVideo = 0x40,
-        MediaControlRootElement = 0x80,
+        MediaControls = 0x80,
         MediaCanPrint = 0x100,
         MediaCanRotate = 0x200,
     };

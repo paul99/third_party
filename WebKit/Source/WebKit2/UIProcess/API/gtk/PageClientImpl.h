@@ -51,7 +51,7 @@ public:
     GtkWidget* viewWidget() { return m_viewWidget; }
 
 private:
-    PageClientImpl(GtkWidget*);
+    explicit PageClientImpl(GtkWidget*);
 
     virtual PassOwnPtr<DrawingAreaProxy> createDrawingAreaProxy();
     virtual void setViewNeedsDisplay(const WebCore::IntRect&);
@@ -69,7 +69,7 @@ private:
     virtual void toolTipChanged(const WTF::String&, const WTF::String&);
     virtual void setCursor(const WebCore::Cursor&);
     virtual void setCursorHiddenUntilMouseMoves(bool);
-    virtual void didChangeViewportProperties(const WebCore::ViewportArguments&);
+    virtual void didChangeViewportProperties(const WebCore::ViewportAttributes&);
     virtual void registerEditCommand(PassRefPtr<WebEditCommandProxy>, WebPageProxy::UndoOrRedo);
     virtual void clearAllEditCommands();
     virtual bool canUndoRedo(WebPageProxy::UndoOrRedo);
@@ -81,8 +81,10 @@ private:
     virtual void doneWithKeyEvent(const NativeWebKeyboardEvent&, bool wasEventHandled);
     virtual PassRefPtr<WebPopupMenuProxy> createPopupMenuProxy(WebPageProxy*);
     virtual PassRefPtr<WebContextMenuProxy> createContextMenuProxy(WebPageProxy*);
+#if ENABLE(INPUT_TYPE_COLOR)
+    virtual PassRefPtr<WebColorChooserProxy> createColorChooserProxy(WebPageProxy*, const WebCore::Color& intialColor, const WebCore::IntRect&);
+#endif
     virtual void setFindIndicator(PassRefPtr<FindIndicator>, bool fadeOut, bool animate);
-    virtual void didChangeScrollbarsForMainFrame() const;
     virtual void flashBackingStoreUpdates(const Vector<WebCore::IntRect>& updateRects);
     virtual void getEditorCommandsForKeyEvent(const NativeWebKeyboardEvent&, const AtomicString&, Vector<WTF::String>&);
     virtual void findStringInCustomRepresentation(const String&, FindOptions, unsigned);
@@ -92,12 +94,15 @@ private:
 #if USE(ACCELERATED_COMPOSITING)
     virtual void enterAcceleratedCompositingMode(const LayerTreeContext&);
     virtual void exitAcceleratedCompositingMode();
+    virtual void updateAcceleratedCompositingMode(const LayerTreeContext&);
 #endif
 
     virtual void didCommitLoadForMainFrame(bool useCustomRepresentation);
     virtual void didFinishLoadingDataForCustomRepresentation(const String& suggestedFilename, const CoreIPC::DataReference&);
     virtual double customRepresentationZoomFactor();
     virtual void setCustomRepresentationZoomFactor(double);
+
+    virtual void handleDownloadRequest(DownloadProxy*);
 
     // Members of PageClientImpl class
     GtkWidget* m_viewWidget;

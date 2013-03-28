@@ -25,8 +25,8 @@
 #if ENABLE(FILTERS)
 #include "FilterEffect.h"
 
-#include "PlatformString.h"
 #include "Filter.h"
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -59,6 +59,8 @@ public:
     float k4() const;
     bool setK4(float);
 
+    virtual void correctFilterResultIfNeeded() OVERRIDE;
+
     virtual void platformApplySoftware();
     virtual void dump();
     
@@ -66,11 +68,19 @@ public:
 
     virtual TextStream& externalRepresentation(TextStream&, int indention) const;
 
+protected:
+    virtual bool requiresValidPreMultipliedPixels() OVERRIDE { return m_type != FECOMPOSITE_OPERATOR_ARITHMETIC; }
+
 private:
     FEComposite(Filter*, const CompositeOperationType&, float, float, float, float);
 
-    inline void platformArithmeticSoftware(ByteArray* source, ByteArray* destination, float k1, float k2, float k3, float k4);
-    inline void platformArithmeticNeon(unsigned char* source, unsigned  char* destination, unsigned pixelArrayLength, float* kArray);
+    inline void platformArithmeticSoftware(Uint8ClampedArray* source, Uint8ClampedArray* destination,
+        float k1, float k2, float k3, float k4);
+    template <int b1, int b4>
+    static inline void computeArithmeticPixelsNeon(unsigned char* source, unsigned  char* destination,
+        unsigned pixelArrayLength, float k1, float k2, float k3, float k4);
+    static inline void platformArithmeticNeon(unsigned char* source, unsigned  char* destination,
+        unsigned pixelArrayLength, float k1, float k2, float k3, float k4);
 
     CompositeOperationType m_type;
     float m_k1;

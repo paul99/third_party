@@ -6,6 +6,7 @@
 #define GOOGLE_CACHEINVALIDATION_DEPS_CALLBACK_H_
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 
 #define INVALIDATION_CALLBACK1_TYPE(Arg1) ::base::Callback<void(Arg1)>
@@ -17,8 +18,6 @@
 namespace invalidation {
 
 typedef ::base::Closure Closure;
-
-static inline void DoNothing() {}
 
 template <class T>
 bool IsCallbackRepeatable(const T* callback) {
@@ -119,6 +118,16 @@ Closure* NewPermanentCallback(
     typename internal::Identity<Arg4>::type arg4) {
   return new ::base::Closure(::base::Bind(method, base::Unretained(object),
                                           arg1, arg2, arg3, arg4));
+}
+
+// Creates a Closure that runs |callback| on |arg|. The returned Closure owns
+// |callback|.
+template <typename ArgType>
+Closure* NewPermanentCallback(
+    INVALIDATION_CALLBACK1_TYPE(ArgType)* callback,
+    typename internal::Identity<ArgType>::type arg) {
+  return new ::base::Closure(::base::Bind(
+      &::base::Callback<void(ArgType)>::Run, base::Owned(callback), arg));
 }
 
 }  // namespace invalidation

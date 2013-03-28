@@ -26,19 +26,30 @@
 #include "config.h"
 #include "DFGOperations.h"
 
-#if ENABLE(DFG_JIT)
-
+#include "Arguments.h"
+#include "ButterflyInlines.h"
 #include "CodeBlock.h"
+#include "CopiedSpaceInlines.h"
 #include "DFGOSRExit.h"
 #include "DFGRepatch.h"
+#include "DFGThunks.h"
+#include "HostCallReturnValue.h"
 #include "GetterSetter.h"
-#include "InlineASM.h"
 #include "Interpreter.h"
-#include "JSByteArray.h"
+#include "JIT.h"
+#include "JITExceptions.h"
+#include "JSActivation.h"
 #include "JSGlobalData.h"
+#include "JSNameScope.h"
+#include "NameInstance.h"
 #include "Operations.h"
+#include <wtf/InlineASM.h>
 
-#if CPU(X86_64)
+#if ENABLE(JIT)
+
+#if ENABLE(DFG_JIT)
+
+#if COMPILER(GCC) && CPU(X86_64)
 
 #define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS(function, register) \
     asm( \
@@ -46,23 +57,24 @@
     HIDE_SYMBOL(function) "\n" \
     SYMBOL_STRING(function) ":" "\n" \
         "mov (%rsp), %" STRINGIZE(register) "\n" \
-        "jmp " SYMBOL_STRING_RELOCATION(function##WithReturnAddress) "\n" \
+        "jmp " LOCAL_REFERENCE(function##WithReturnAddress) "\n" \
     );
 #define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_E(function)    FUNCTION_WRAPPER_WITH_RETURN_ADDRESS(function, rsi)
 #define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_ECI(function)  FUNCTION_WRAPPER_WITH_RETURN_ADDRESS(function, rcx)
 #define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_EJI(function)  FUNCTION_WRAPPER_WITH_RETURN_ADDRESS(function, rcx)
 #define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_EJCI(function) FUNCTION_WRAPPER_WITH_RETURN_ADDRESS(function, r8)
 
-#elif CPU(X86)
+#elif COMPILER(GCC) && CPU(X86)
 
 #define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS(function, offset) \
     asm( \
+    ".text" "\n" \
     ".globl " SYMBOL_STRING(function) "\n" \
     HIDE_SYMBOL(function) "\n" \
     SYMBOL_STRING(function) ":" "\n" \
         "mov (%esp), %eax\n" \
         "mov %eax, " STRINGIZE(offset) "(%esp)\n" \
-        "jmp " SYMBOL_STRING_RELOCATION(function##WithReturnAddress) "\n" \
+        "jmp " LOCAL_REFERENCE(function##WithReturnAddress) "\n" \
     );
 #define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_E(function)    FUNCTION_WRAPPER_WITH_RETURN_ADDRESS(function, 8)
 #define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_ECI(function)  FUNCTION_WRAPPER_WITH_RETURN_ADDRESS(function, 16)
@@ -80,8 +92,8 @@
     ".thumb" "\n" \
     ".thumb_func " THUMB_FUNC_PARAM(function) "\n" \
     SYMBOL_STRING(function) ":" "\n" \
-        "cpy a2, lr" "\n" \
-        "b " SYMBOL_STRING_RELOCATION(function) "WithReturnAddress" "\n" \
+        "mov a2, lr" "\n" \
+        "b " LOCAL_REFERENCE(function) "WithReturnAddress" "\n" \
     );
 
 #define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_ECI(function) \
@@ -93,9 +105,19 @@
     ".thumb" "\n" \
     ".thumb_func " THUMB_FUNC_PARAM(function) "\n" \
     SYMBOL_STRING(function) ":" "\n" \
-        "cpy a4, lr" "\n" \
-        "b " SYMBOL_STRING_RELOCATION(function) "WithReturnAddress" "\n" \
+        "mov a4, lr" "\n" \
+        "b " LOCAL_REFERENCE(function) "WithReturnAddress" "\n" \
     );
+
+// EncodedJSValue in JSVALUE32_64 is a 64-bit integer. When being compiled in ARM EABI, it must be aligned even-numbered register (r0, r2 or [sp]).
+// As a result, return address will be at a 4-byte further location in the following cases.
+#if COMPILER_SUPPORTS(EABI) && CPU(ARM)
+#define INSTRUCTION_STORE_RETURN_ADDRESS_EJI "str lr, [sp, #4]"
+#define INSTRUCTION_STORE_RETURN_ADDRESS_EJCI "str lr, [sp, #8]"
+#else
+#define INSTRUCTION_STORE_RETURN_ADDRESS_EJI "str lr, [sp, #0]"
+#define INSTRUCTION_STORE_RETURN_ADDRESS_EJCI "str lr, [sp, #4]"
+#endif
 
 #define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_EJI(function) \
     asm ( \
@@ -106,8 +128,8 @@
     ".thumb" "\n" \
     ".thumb_func " THUMB_FUNC_PARAM(function) "\n" \
     SYMBOL_STRING(function) ":" "\n" \
-        "str lr, [sp, #0]" "\n" \
-        "b " SYMBOL_STRING_RELOCATION(function) "WithReturnAddress" "\n" \
+        INSTRUCTION_STORE_RETURN_ADDRESS_EJI "\n" \
+        "b " LOCAL_REFERENCE(function) "WithReturnAddress" "\n" \
     );
 
 #define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_EJCI(function) \
@@ -119,60 +141,104 @@
     ".thumb" "\n" \
     ".thumb_func " THUMB_FUNC_PARAM(function) "\n" \
     SYMBOL_STRING(function) ":" "\n" \
-        "str lr, [sp, #4]" "\n" \
-        "b " SYMBOL_STRING_RELOCATION(function) "WithReturnAddress" "\n" \
+        INSTRUCTION_STORE_RETURN_ADDRESS_EJCI "\n" \
+        "b " LOCAL_REFERENCE(function) "WithReturnAddress" "\n" \
+    );
+
+#elif COMPILER(GCC) && CPU(ARM_TRADITIONAL)
+
+#define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_E(function) \
+    asm ( \
+    ".text" "\n" \
+    ".globl " SYMBOL_STRING(function) "\n" \
+    HIDE_SYMBOL(function) "\n" \
+    INLINE_ARM_FUNCTION(function) \
+    SYMBOL_STRING(function) ":" "\n" \
+        "mov a2, lr" "\n" \
+        "b " LOCAL_REFERENCE(function) "WithReturnAddress" "\n" \
+    );
+
+#define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_ECI(function) \
+    asm ( \
+    ".text" "\n" \
+    ".globl " SYMBOL_STRING(function) "\n" \
+    HIDE_SYMBOL(function) "\n" \
+    INLINE_ARM_FUNCTION(function) \
+    SYMBOL_STRING(function) ":" "\n" \
+        "mov a4, lr" "\n" \
+        "b " LOCAL_REFERENCE(function) "WithReturnAddress" "\n" \
+    );
+
+// EncodedJSValue in JSVALUE32_64 is a 64-bit integer. When being compiled in ARM EABI, it must be aligned even-numbered register (r0, r2 or [sp]).
+// As a result, return address will be at a 4-byte further location in the following cases.
+#if COMPILER_SUPPORTS(EABI) && CPU(ARM)
+#define INSTRUCTION_STORE_RETURN_ADDRESS_EJI "str lr, [sp, #4]"
+#define INSTRUCTION_STORE_RETURN_ADDRESS_EJCI "str lr, [sp, #8]"
+#else
+#define INSTRUCTION_STORE_RETURN_ADDRESS_EJI "str lr, [sp, #0]"
+#define INSTRUCTION_STORE_RETURN_ADDRESS_EJCI "str lr, [sp, #4]"
+#endif
+
+#define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_EJI(function) \
+    asm ( \
+    ".text" "\n" \
+    ".globl " SYMBOL_STRING(function) "\n" \
+    HIDE_SYMBOL(function) "\n" \
+    INLINE_ARM_FUNCTION(function) \
+    SYMBOL_STRING(function) ":" "\n" \
+        INSTRUCTION_STORE_RETURN_ADDRESS_EJI "\n" \
+        "b " LOCAL_REFERENCE(function) "WithReturnAddress" "\n" \
+    );
+
+#define FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_EJCI(function) \
+    asm ( \
+    ".text" "\n" \
+    ".globl " SYMBOL_STRING(function) "\n" \
+    HIDE_SYMBOL(function) "\n" \
+    INLINE_ARM_FUNCTION(function) \
+    SYMBOL_STRING(function) ":" "\n" \
+        INSTRUCTION_STORE_RETURN_ADDRESS_EJCI "\n" \
+        "b " LOCAL_REFERENCE(function) "WithReturnAddress" "\n" \
     );
 
 #endif
 
 #define P_FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_E(function) \
-void* DFG_OPERATION function##WithReturnAddress(ExecState*, ReturnAddressPtr); \
+void* DFG_OPERATION function##WithReturnAddress(ExecState*, ReturnAddressPtr) REFERENCED_FROM_ASM WTF_INTERNAL; \
 FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_E(function)
 
 #define J_FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_ECI(function) \
-EncodedJSValue DFG_OPERATION function##WithReturnAddress(ExecState*, JSCell*, Identifier*, ReturnAddressPtr); \
+EncodedJSValue DFG_OPERATION function##WithReturnAddress(ExecState*, JSCell*, Identifier*, ReturnAddressPtr) REFERENCED_FROM_ASM WTF_INTERNAL; \
 FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_ECI(function)
 
 #define J_FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_EJI(function) \
-EncodedJSValue DFG_OPERATION function##WithReturnAddress(ExecState*, EncodedJSValue, Identifier*, ReturnAddressPtr); \
+EncodedJSValue DFG_OPERATION function##WithReturnAddress(ExecState*, EncodedJSValue, Identifier*, ReturnAddressPtr) REFERENCED_FROM_ASM WTF_INTERNAL; \
 FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_EJI(function)
 
 #define V_FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_EJCI(function) \
-void DFG_OPERATION function##WithReturnAddress(ExecState*, EncodedJSValue, JSCell*, Identifier*, ReturnAddressPtr); \
+void DFG_OPERATION function##WithReturnAddress(ExecState*, EncodedJSValue, JSCell*, Identifier*, ReturnAddressPtr) REFERENCED_FROM_ASM WTF_INTERNAL; \
 FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_EJCI(function)
 
 namespace JSC { namespace DFG {
 
+template<bool strict>
 static inline void putByVal(ExecState* exec, JSValue baseValue, uint32_t index, JSValue value)
 {
-    JSGlobalData* globalData = &exec->globalData();
-
-    if (isJSArray(baseValue)) {
-        JSArray* array = asArray(baseValue);
-        if (array->canSetIndex(index)) {
-            array->setIndex(*globalData, index, value);
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+    
+    if (baseValue.isObject()) {
+        JSObject* object = asObject(baseValue);
+        if (object->canSetIndexQuickly(index)) {
+            object->setIndexQuickly(globalData, index, value);
             return;
         }
 
-        JSArray::putByIndex(array, exec, index, value);
+        object->methodTable()->putByIndex(object, exec, index, value, strict);
         return;
     }
 
-    if (isJSByteArray(baseValue) && asByteArray(baseValue)->canAccessIndex(index)) {
-        JSByteArray* byteArray = asByteArray(baseValue);
-        // FIXME: the JITstub used to relink this to an optimized form!
-        if (value.isInt32()) {
-            byteArray->setIndex(index, value.asInt32());
-            return;
-        }
-
-        if (value.isNumber()) {
-            byteArray->setIndex(index, value.asNumber());
-            return;
-        }
-    }
-
-    baseValue.put(exec, index, value);
+    baseValue.putByIndex(exec, index, value, strict);
 }
 
 template<bool strict>
@@ -186,7 +252,7 @@ ALWAYS_INLINE static void DFG_OPERATION operationPutByValInternal(ExecState* exe
     JSValue value = JSValue::decode(encodedValue);
 
     if (LIKELY(property.isUInt32())) {
-        putByVal(exec, baseValue, property.asUInt32(), value);
+        putByVal<strict>(exec, baseValue, property.asUInt32(), value);
         return;
     }
 
@@ -194,11 +260,16 @@ ALWAYS_INLINE static void DFG_OPERATION operationPutByValInternal(ExecState* exe
         double propertyAsDouble = property.asDouble();
         uint32_t propertyAsUInt32 = static_cast<uint32_t>(propertyAsDouble);
         if (propertyAsDouble == propertyAsUInt32) {
-            putByVal(exec, baseValue, propertyAsUInt32, value);
+            putByVal<strict>(exec, baseValue, propertyAsUInt32, value);
             return;
         }
     }
 
+    if (isName(property)) {
+        PutPropertySlot slot(strict);
+        baseValue.put(exec, jsCast<NameInstance*>(property.asCell())->privateName(), value, slot);
+        return;
+    }
 
     // Don't put to an object if toString throws an exception.
     Identifier ident(exec, property.toString(exec)->value(exec));
@@ -218,46 +289,25 @@ EncodedJSValue DFG_OPERATION operationConvertThis(ExecState* exec, EncodedJSValu
     return JSValue::encode(JSValue::decode(encodedOp).toThisObject(exec));
 }
 
-inline JSCell* createThis(ExecState* exec, JSCell* prototype, JSFunction* constructor)
+JSCell* DFG_OPERATION operationCreateThis(ExecState* exec, JSCell* constructor)
 {
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
+
 #if !ASSERT_DISABLED
     ConstructData constructData;
-    ASSERT(constructor->methodTable()->getConstructData(constructor, constructData) == ConstructTypeJS);
+    ASSERT(jsCast<JSFunction*>(constructor)->methodTable()->getConstructData(jsCast<JSFunction*>(constructor), constructData) == ConstructTypeJS);
 #endif
     
-    JSGlobalData& globalData = exec->globalData();
-    
-    Structure* structure;
-    if (prototype->isObject())
-        structure = asObject(prototype)->inheritorID(globalData);
-    else
-        structure = constructor->scope()->globalObject->emptyObjectStructure();
+    return constructEmptyObject(exec, jsCast<JSFunction*>(constructor)->cachedInheritorID(exec));
+}
+
+JSCell* DFG_OPERATION operationNewObject(ExecState* exec, Structure* structure)
+{
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
     
     return constructEmptyObject(exec, structure);
-}
-
-JSCell* DFG_OPERATION operationCreateThis(ExecState* exec, JSCell* prototype)
-{
-    JSGlobalData* globalData = &exec->globalData();
-    NativeCallFrameTracer tracer(globalData, exec);
-
-    return createThis(exec, prototype, asFunction(exec->callee()));
-}
-
-JSCell* DFG_OPERATION operationCreateThisInlined(ExecState* exec, JSCell* prototype, JSCell* constructor)
-{
-    JSGlobalData* globalData = &exec->globalData();
-    NativeCallFrameTracer tracer(globalData, exec);
-    
-    return createThis(exec, prototype, static_cast<JSFunction*>(constructor));
-}
-
-JSCell* DFG_OPERATION operationNewObject(ExecState* exec)
-{
-    JSGlobalData* globalData = &exec->globalData();
-    NativeCallFrameTracer tracer(globalData, exec);
-    
-    return constructEmptyObject(exec);
 }
 
 EncodedJSValue DFG_OPERATION operationValueAdd(ExecState* exec, EncodedJSValue encodedOp1, EncodedJSValue encodedOp2)
@@ -289,17 +339,17 @@ EncodedJSValue DFG_OPERATION operationValueAddNotNumber(ExecState* exec, Encoded
 
 static inline EncodedJSValue getByVal(ExecState* exec, JSCell* base, uint32_t index)
 {
-    // FIXME: the JIT used to handle these in compiled code!
-    if (isJSArray(base) && asArray(base)->canGetIndex(index))
-        return JSValue::encode(asArray(base)->getIndex(index));
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+    
+    if (base->isObject()) {
+        JSObject* object = asObject(base);
+        if (object->canGetIndexQuickly(index))
+            return JSValue::encode(object->getIndexQuickly(index));
+    }
 
-    // FIXME: the JITstub used to relink this to an optimized form!
     if (isJSString(base) && asString(base)->canGetIndex(index))
         return JSValue::encode(asString(base)->getIndex(exec, index));
-
-    // FIXME: the JITstub used to relink this to an optimized form!
-    if (isJSByteArray(base) && asByteArray(base)->canAccessIndex(index))
-        return JSValue::encode(asByteArray(base)->getIndex(exec, index));
 
     return JSValue::encode(JSValue(base).get(exec, index));
 }
@@ -328,6 +378,9 @@ EncodedJSValue DFG_OPERATION operationGetByVal(ExecState* exec, EncodedJSValue e
         }
     }
 
+    if (isName(property))
+        return JSValue::encode(baseValue.get(exec, jsCast<NameInstance*>(property.asCell())->privateName()));
+
     Identifier ident(exec, property.toString(exec)->value(exec));
     return JSValue::encode(baseValue.get(exec, ident));
 }
@@ -351,8 +404,25 @@ EncodedJSValue DFG_OPERATION operationGetByValCell(ExecState* exec, JSCell* base
             return JSValue::encode(result);
     }
 
+    if (isName(property))
+        return JSValue::encode(JSValue(base).get(exec, jsCast<NameInstance*>(property.asCell())->privateName()));
+
     Identifier ident(exec, property.toString(exec)->value(exec));
     return JSValue::encode(JSValue(base).get(exec, ident));
+}
+
+EncodedJSValue DFG_OPERATION operationGetByValArrayInt(ExecState* exec, JSArray* base, int32_t index)
+{
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
+    
+    if (index < 0) {
+        // Go the slowest way possible becase negative indices don't use indexed storage.
+        return JSValue::encode(JSValue(base).get(exec, Identifier::from(exec, index)));
+    }
+
+    // Use this since we know that the value is out of bounds.
+    return JSValue::encode(JSValue(base).get(exec, index));
 }
 
 EncodedJSValue DFG_OPERATION operationGetById(ExecState* exec, EncodedJSValue base, Identifier* propertyName)
@@ -371,12 +441,15 @@ EncodedJSValue DFG_OPERATION operationGetByIdBuildListWithReturnAddress(ExecStat
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
     
+    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    AccessType accessType = static_cast<AccessType>(stubInfo.accessType);
+
     JSValue baseValue = JSValue::decode(base);
     PropertySlot slot(baseValue);
     JSValue result = baseValue.get(exec, *propertyName, slot);
 
-    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
-    dfgBuildGetByIDList(exec, baseValue, *propertyName, slot, stubInfo);
+    if (accessType == static_cast<AccessType>(stubInfo.accessType))
+        dfgBuildGetByIDList(exec, baseValue, *propertyName, slot, stubInfo);
 
     return JSValue::encode(result);
 }
@@ -387,12 +460,15 @@ EncodedJSValue DFG_OPERATION operationGetByIdProtoBuildListWithReturnAddress(Exe
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
     
+    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    AccessType accessType = static_cast<AccessType>(stubInfo.accessType);
+
     JSValue baseValue = JSValue::decode(base);
     PropertySlot slot(baseValue);
     JSValue result = baseValue.get(exec, *propertyName, slot);
-
-    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
-    dfgBuildGetByIDProtoList(exec, baseValue, *propertyName, slot, stubInfo);
+    
+    if (accessType == static_cast<AccessType>(stubInfo.accessType))
+        dfgBuildGetByIDProtoList(exec, baseValue, *propertyName, slot, stubInfo);
 
     return JSValue::encode(result);
 }
@@ -403,15 +479,19 @@ EncodedJSValue DFG_OPERATION operationGetByIdOptimizeWithReturnAddress(ExecState
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
     
+    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    AccessType accessType = static_cast<AccessType>(stubInfo.accessType);
+
     JSValue baseValue = JSValue::decode(base);
     PropertySlot slot(baseValue);
     JSValue result = baseValue.get(exec, *propertyName, slot);
     
-    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
-    if (stubInfo.seen)
-        dfgRepatchGetByID(exec, baseValue, *propertyName, slot, stubInfo);
-    else
-        stubInfo.seen = true;
+    if (accessType == static_cast<AccessType>(stubInfo.accessType)) {
+        if (stubInfo.seen)
+            dfgRepatchGetByID(exec, baseValue, *propertyName, slot, stubInfo);
+        else
+            stubInfo.seen = true;
+    }
 
     return JSValue::encode(result);
 }
@@ -470,14 +550,68 @@ void DFG_OPERATION operationPutByValCellNonStrict(ExecState* exec, JSCell* cell,
     operationPutByValInternal<false>(exec, JSValue::encode(cell), encodedProperty, encodedValue);
 }
 
-void DFG_OPERATION operationPutByValBeyondArrayBounds(ExecState* exec, JSArray* array, int32_t index, EncodedJSValue encodedValue)
+void DFG_OPERATION operationPutByValBeyondArrayBoundsStrict(ExecState* exec, JSObject* array, int32_t index, EncodedJSValue encodedValue)
 {
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
     
-    // We should only get here if index is outside the existing vector.
-    ASSERT(!array->canSetIndex(index));
-    JSArray::putByIndex(array, exec, index, JSValue::decode(encodedValue));
+    if (index >= 0) {
+        array->putByIndexInline(exec, index, JSValue::decode(encodedValue), true);
+        return;
+    }
+    
+    PutPropertySlot slot(true);
+    array->methodTable()->put(
+        array, exec, Identifier::from(exec, index), JSValue::decode(encodedValue), slot);
+}
+
+void DFG_OPERATION operationPutByValBeyondArrayBoundsNonStrict(ExecState* exec, JSObject* array, int32_t index, EncodedJSValue encodedValue)
+{
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
+    
+    if (index >= 0) {
+        array->putByIndexInline(exec, index, JSValue::decode(encodedValue), false);
+        return;
+    }
+    
+    PutPropertySlot slot(false);
+    array->methodTable()->put(
+        array, exec, Identifier::from(exec, index), JSValue::decode(encodedValue), slot);
+}
+
+void DFG_OPERATION operationPutDoubleByValBeyondArrayBoundsStrict(ExecState* exec, JSObject* array, int32_t index, double value)
+{
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
+    
+    JSValue jsValue = JSValue(JSValue::EncodeAsDouble, value);
+    
+    if (index >= 0) {
+        array->putByIndexInline(exec, index, jsValue, true);
+        return;
+    }
+    
+    PutPropertySlot slot(true);
+    array->methodTable()->put(
+        array, exec, Identifier::from(exec, index), jsValue, slot);
+}
+
+void DFG_OPERATION operationPutDoubleByValBeyondArrayBoundsNonStrict(ExecState* exec, JSObject* array, int32_t index, double value)
+{
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
+    
+    JSValue jsValue = JSValue(JSValue::EncodeAsDouble, value);
+    
+    if (index >= 0) {
+        array->putByIndexInline(exec, index, jsValue, false);
+        return;
+    }
+    
+    PutPropertySlot slot(false);
+    array->methodTable()->put(
+        array, exec, Identifier::from(exec, index), jsValue, slot);
 }
 
 EncodedJSValue DFG_OPERATION operationArrayPush(ExecState* exec, EncodedJSValue encodedValue, JSArray* array)
@@ -488,13 +622,60 @@ EncodedJSValue DFG_OPERATION operationArrayPush(ExecState* exec, EncodedJSValue 
     array->push(exec, JSValue::decode(encodedValue));
     return JSValue::encode(jsNumber(array->length()));
 }
-        
+
+EncodedJSValue DFG_OPERATION operationArrayPushDouble(ExecState* exec, double value, JSArray* array)
+{
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
+    
+    array->push(exec, JSValue(JSValue::EncodeAsDouble, value));
+    return JSValue::encode(jsNumber(array->length()));
+}
+
 EncodedJSValue DFG_OPERATION operationArrayPop(ExecState* exec, JSArray* array)
 {
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
     
     return JSValue::encode(array->pop(exec));
+}
+        
+EncodedJSValue DFG_OPERATION operationArrayPopAndRecoverLength(ExecState* exec, JSArray* array)
+{
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
+    
+    array->butterfly()->setPublicLength(array->butterfly()->publicLength() + 1);
+    
+    return JSValue::encode(array->pop(exec));
+}
+        
+EncodedJSValue DFG_OPERATION operationRegExpExec(ExecState* exec, JSCell* base, JSCell* argument)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+    
+    if (!base->inherits(&RegExpObject::s_info))
+        return throwVMTypeError(exec);
+
+    ASSERT(argument->isString() || argument->isObject());
+    JSString* input = argument->isString() ? asString(argument) : asObject(argument)->toString(exec);
+    return JSValue::encode(asRegExpObject(base)->exec(exec, input));
+}
+        
+size_t DFG_OPERATION operationRegExpTest(ExecState* exec, JSCell* base, JSCell* argument)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+
+    if (!base->inherits(&RegExpObject::s_info)) {
+        throwTypeError(exec);
+        return false;
+    }
+
+    ASSERT(argument->isString() || argument->isObject());
+    JSString* input = argument->isString() ? asString(argument) : asObject(argument)->toString(exec);
+    return asRegExpObject(base)->test(exec, input);
 }
         
 void DFG_OPERATION operationPutByIdStrict(ExecState* exec, EncodedJSValue encodedValue, JSCell* base, Identifier* propertyName)
@@ -541,13 +722,18 @@ void DFG_OPERATION operationPutByIdStrictOptimizeWithReturnAddress(ExecState* ex
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
     
+    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    AccessType accessType = static_cast<AccessType>(stubInfo.accessType);
+
     JSValue value = JSValue::decode(encodedValue);
     JSValue baseValue(base);
     PutPropertySlot slot(true);
     
     baseValue.put(exec, *propertyName, value, slot);
     
-    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    if (accessType != static_cast<AccessType>(stubInfo.accessType))
+        return;
+    
     if (stubInfo.seen)
         dfgRepatchPutByID(exec, baseValue, *propertyName, slot, stubInfo, NotDirect);
     else
@@ -560,13 +746,18 @@ void DFG_OPERATION operationPutByIdNonStrictOptimizeWithReturnAddress(ExecState*
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
     
+    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    AccessType accessType = static_cast<AccessType>(stubInfo.accessType);
+
     JSValue value = JSValue::decode(encodedValue);
     JSValue baseValue(base);
     PutPropertySlot slot(false);
     
     baseValue.put(exec, *propertyName, value, slot);
     
-    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    if (accessType != static_cast<AccessType>(stubInfo.accessType))
+        return;
+    
     if (stubInfo.seen)
         dfgRepatchPutByID(exec, baseValue, *propertyName, slot, stubInfo, NotDirect);
     else
@@ -579,13 +770,18 @@ void DFG_OPERATION operationPutByIdDirectStrictOptimizeWithReturnAddress(ExecSta
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
     
+    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    AccessType accessType = static_cast<AccessType>(stubInfo.accessType);
+
     JSValue value = JSValue::decode(encodedValue);
     PutPropertySlot slot(true);
     
     ASSERT(base->isObject());
     asObject(base)->putDirect(exec->globalData(), *propertyName, value, slot);
     
-    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    if (accessType != static_cast<AccessType>(stubInfo.accessType))
+        return;
+    
     if (stubInfo.seen)
         dfgRepatchPutByID(exec, base, *propertyName, slot, stubInfo, Direct);
     else
@@ -598,17 +794,106 @@ void DFG_OPERATION operationPutByIdDirectNonStrictOptimizeWithReturnAddress(Exec
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
     
+    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    AccessType accessType = static_cast<AccessType>(stubInfo.accessType);
+
     JSValue value = JSValue::decode(encodedValue);
     PutPropertySlot slot(false);
     
     ASSERT(base->isObject());
     asObject(base)->putDirect(exec->globalData(), *propertyName, value, slot);
     
-    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    if (accessType != static_cast<AccessType>(stubInfo.accessType))
+        return;
+    
     if (stubInfo.seen)
         dfgRepatchPutByID(exec, base, *propertyName, slot, stubInfo, Direct);
     else
         stubInfo.seen = true;
+}
+
+V_FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_EJCI(operationPutByIdStrictBuildList);
+void DFG_OPERATION operationPutByIdStrictBuildListWithReturnAddress(ExecState* exec, EncodedJSValue encodedValue, JSCell* base, Identifier* propertyName, ReturnAddressPtr returnAddress)
+{
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
+    
+    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    AccessType accessType = static_cast<AccessType>(stubInfo.accessType);
+
+    JSValue value = JSValue::decode(encodedValue);
+    JSValue baseValue(base);
+    PutPropertySlot slot(true);
+    
+    baseValue.put(exec, *propertyName, value, slot);
+    
+    if (accessType != static_cast<AccessType>(stubInfo.accessType))
+        return;
+    
+    dfgBuildPutByIdList(exec, baseValue, *propertyName, slot, stubInfo, NotDirect);
+}
+
+V_FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_EJCI(operationPutByIdNonStrictBuildList);
+void DFG_OPERATION operationPutByIdNonStrictBuildListWithReturnAddress(ExecState* exec, EncodedJSValue encodedValue, JSCell* base, Identifier* propertyName, ReturnAddressPtr returnAddress)
+{
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
+    
+    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    AccessType accessType = static_cast<AccessType>(stubInfo.accessType);
+
+    JSValue value = JSValue::decode(encodedValue);
+    JSValue baseValue(base);
+    PutPropertySlot slot(false);
+    
+    baseValue.put(exec, *propertyName, value, slot);
+    
+    if (accessType != static_cast<AccessType>(stubInfo.accessType))
+        return;
+    
+    dfgBuildPutByIdList(exec, baseValue, *propertyName, slot, stubInfo, NotDirect);
+}
+
+V_FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_EJCI(operationPutByIdDirectStrictBuildList);
+void DFG_OPERATION operationPutByIdDirectStrictBuildListWithReturnAddress(ExecState* exec, EncodedJSValue encodedValue, JSCell* base, Identifier* propertyName, ReturnAddressPtr returnAddress)
+{
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
+    
+    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    AccessType accessType = static_cast<AccessType>(stubInfo.accessType);
+    
+    JSValue value = JSValue::decode(encodedValue);
+    PutPropertySlot slot(true);
+    
+    ASSERT(base->isObject());
+    asObject(base)->putDirect(exec->globalData(), *propertyName, value, slot);
+    
+    if (accessType != static_cast<AccessType>(stubInfo.accessType))
+        return;
+    
+    dfgBuildPutByIdList(exec, base, *propertyName, slot, stubInfo, Direct);
+}
+
+V_FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_EJCI(operationPutByIdDirectNonStrictBuildList);
+void DFG_OPERATION operationPutByIdDirectNonStrictBuildListWithReturnAddress(ExecState* exec, EncodedJSValue encodedValue, JSCell* base, Identifier* propertyName, ReturnAddressPtr returnAddress)
+{
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
+    
+    StructureStubInfo& stubInfo = exec->codeBlock()->getStubInfo(returnAddress);
+    AccessType accessType = static_cast<AccessType>(stubInfo.accessType);
+
+    JSValue value = JSValue::decode(encodedValue);
+    PutPropertySlot slot(false);
+    
+    ASSERT(base->isObject());
+    asObject(base)->putDirect(exec->globalData(), *propertyName, value, slot);
+    
+    if (accessType != static_cast<AccessType>(stubInfo.accessType))
+        return;
+    
+    dfgBuildPutByIdList(exec, base, *propertyName, slot, stubInfo, Direct);
 }
 
 size_t DFG_OPERATION operationCompareLess(ExecState* exec, EncodedJSValue encodedOp1, EncodedJSValue encodedOp2)
@@ -669,52 +954,11 @@ size_t DFG_OPERATION operationCompareStrictEq(ExecState* exec, EncodedJSValue en
 {
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
+
+    JSValue src1 = JSValue::decode(encodedOp1);
+    JSValue src2 = JSValue::decode(encodedOp2);
     
-    return JSValue::strictEqual(exec, JSValue::decode(encodedOp1), JSValue::decode(encodedOp2));
-}
-
-EncodedJSValue DFG_OPERATION getHostCallReturnValue();
-EncodedJSValue DFG_OPERATION getHostCallReturnValueWithExecState(ExecState*);
-
-#if CPU(X86_64)
-asm (
-".globl " SYMBOL_STRING(getHostCallReturnValue) "\n"
-HIDE_SYMBOL(getHostCallReturnValue) "\n"
-SYMBOL_STRING(getHostCallReturnValue) ":" "\n"
-    "mov -40(%r13), %r13\n"
-    "mov %r13, %rdi\n"
-    "jmp " SYMBOL_STRING_RELOCATION(getHostCallReturnValueWithExecState) "\n"
-);
-#elif CPU(X86)
-asm (
-".globl " SYMBOL_STRING(getHostCallReturnValue) "\n"
-HIDE_SYMBOL(getHostCallReturnValue) "\n"
-SYMBOL_STRING(getHostCallReturnValue) ":" "\n"
-    "mov -40(%edi), %edi\n"
-    "mov %edi, 4(%esp)\n"
-    "jmp " SYMBOL_STRING_RELOCATION(getHostCallReturnValueWithExecState) "\n"
-);
-#elif CPU(ARM_THUMB2)
-asm (
-".text" "\n"
-".align 2" "\n"
-".globl " SYMBOL_STRING(getHostCallReturnValue) "\n"
-HIDE_SYMBOL(getHostCallReturnValue) "\n"
-".thumb" "\n"
-".thumb_func " THUMB_FUNC_PARAM(getHostCallReturnValue) "\n"
-SYMBOL_STRING(getHostCallReturnValue) ":" "\n"
-    "ldr r5, [r5, #-40]" "\n"
-    "cpy r0, r5" "\n"
-    "b " SYMBOL_STRING_RELOCATION(getHostCallReturnValueWithExecState) "\n"
-);
-#endif
-
-EncodedJSValue DFG_OPERATION getHostCallReturnValueWithExecState(ExecState* exec)
-{
-    JSGlobalData* globalData = &exec->globalData();
-    NativeCallFrameTracer tracer(globalData, exec);
-    
-    return JSValue::encode(exec->globalData().hostCallReturnValue);
+    return JSValue::strictEqual(exec, src1, src2);
 }
 
 static void* handleHostCall(ExecState* execCallee, JSValue callee, CodeSpecializationKind kind)
@@ -722,7 +966,7 @@ static void* handleHostCall(ExecState* execCallee, JSValue callee, CodeSpecializ
     ExecState* exec = execCallee->callerFrame();
     JSGlobalData* globalData = &exec->globalData();
 
-    execCallee->setScopeChain(exec->scopeChain());
+    execCallee->setScope(exec->scope());
     execCallee->setCodeBlock(0);
 
     if (kind == CodeForCall) {
@@ -732,16 +976,18 @@ static void* handleHostCall(ExecState* execCallee, JSValue callee, CodeSpecializ
         ASSERT(callType != CallTypeJS);
     
         if (callType == CallTypeHost) {
+            NativeCallFrameTracer tracer(globalData, execCallee);
+            execCallee->setCallee(asObject(callee));
             globalData->hostCallReturnValue = JSValue::decode(callData.native.function(execCallee));
             if (globalData->exception)
-                return 0;
+                return globalData->getCTIStub(throwExceptionFromCallSlowPathGenerator).code().executableAddress();
 
             return reinterpret_cast<void*>(getHostCallReturnValue);
         }
     
         ASSERT(callType == CallTypeNone);
         exec->globalData().exception = createNotAFunctionError(exec, callee);
-        return 0;
+        return globalData->getCTIStub(throwExceptionFromCallSlowPathGenerator).code().executableAddress();
     }
 
     ASSERT(kind == CodeForConstruct);
@@ -752,19 +998,21 @@ static void* handleHostCall(ExecState* execCallee, JSValue callee, CodeSpecializ
     ASSERT(constructType != ConstructTypeJS);
     
     if (constructType == ConstructTypeHost) {
+        NativeCallFrameTracer tracer(globalData, execCallee);
+        execCallee->setCallee(asObject(callee));
         globalData->hostCallReturnValue = JSValue::decode(constructData.native.function(execCallee));
         if (globalData->exception)
-            return 0;
+            return globalData->getCTIStub(throwExceptionFromCallSlowPathGenerator).code().executableAddress();
 
         return reinterpret_cast<void*>(getHostCallReturnValue);
     }
     
     ASSERT(constructType == ConstructTypeNone);
     exec->globalData().exception = createNotAConstructorError(exec, callee);
-    return 0;
+    return globalData->getCTIStub(throwExceptionFromCallSlowPathGenerator).code().executableAddress();
 }
 
-inline void* linkFor(ExecState* execCallee, ReturnAddressPtr returnAddress, CodeSpecializationKind kind)
+inline char* linkFor(ExecState* execCallee, CodeSpecializationKind kind)
 {
     ExecState* exec = execCallee->callerFrame();
     JSGlobalData* globalData = &exec->globalData();
@@ -773,10 +1021,10 @@ inline void* linkFor(ExecState* execCallee, ReturnAddressPtr returnAddress, Code
     JSValue calleeAsValue = execCallee->calleeAsValue();
     JSCell* calleeAsFunctionCell = getJSFunction(calleeAsValue);
     if (!calleeAsFunctionCell)
-        return handleHostCall(execCallee, calleeAsValue, kind);
+        return reinterpret_cast<char*>(handleHostCall(execCallee, calleeAsValue, kind));
 
-    JSFunction* callee = asFunction(calleeAsFunctionCell);
-    execCallee->setScopeChain(callee->scopeUnchecked());
+    JSFunction* callee = jsCast<JSFunction*>(calleeAsFunctionCell);
+    execCallee->setScope(callee->scopeUnchecked());
     ExecutableBase* executable = callee->executable();
 
     MacroAssemblerCodePtr codePtr;
@@ -788,7 +1036,7 @@ inline void* linkFor(ExecState* execCallee, ReturnAddressPtr returnAddress, Code
         JSObject* error = functionExecutable->compileFor(execCallee, callee->scope(), kind);
         if (error) {
             globalData->exception = createStackOverflowError(exec);
-            return 0;
+            return reinterpret_cast<char*>(globalData->getCTIStub(throwExceptionFromCallSlowPathGenerator).code().executableAddress());
         }
         codeBlock = &functionExecutable->generatedBytecodeFor(kind);
         if (execCallee->argumentCountIncludingThis() < static_cast<size_t>(codeBlock->numParameters()))
@@ -796,120 +1044,146 @@ inline void* linkFor(ExecState* execCallee, ReturnAddressPtr returnAddress, Code
         else
             codePtr = functionExecutable->generatedJITCodeFor(kind).addressForCall();
     }
-    CallLinkInfo& callLinkInfo = exec->codeBlock()->getCallLinkInfo(returnAddress);
+    CallLinkInfo& callLinkInfo = exec->codeBlock()->getCallLinkInfo(execCallee->returnPC());
     if (!callLinkInfo.seenOnce())
         callLinkInfo.setSeen();
     else
         dfgLinkFor(execCallee, callLinkInfo, codeBlock, callee, codePtr, kind);
-    return codePtr.executableAddress();
+    return reinterpret_cast<char*>(codePtr.executableAddress());
 }
 
-P_FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_E(operationLinkCall);
-void* DFG_OPERATION operationLinkCallWithReturnAddress(ExecState* execCallee, ReturnAddressPtr returnAddress)
+char* DFG_OPERATION operationLinkCall(ExecState* execCallee)
 {
-    return linkFor(execCallee, returnAddress, CodeForCall);
+    return linkFor(execCallee, CodeForCall);
 }
 
-P_FUNCTION_WRAPPER_WITH_RETURN_ADDRESS_E(operationLinkConstruct);
-void* DFG_OPERATION operationLinkConstructWithReturnAddress(ExecState* execCallee, ReturnAddressPtr returnAddress)
+char* DFG_OPERATION operationLinkConstruct(ExecState* execCallee)
 {
-    return linkFor(execCallee, returnAddress, CodeForConstruct);
+    return linkFor(execCallee, CodeForConstruct);
 }
 
-inline void* virtualFor(ExecState* execCallee, CodeSpecializationKind kind)
+inline char* virtualForWithFunction(ExecState* execCallee, CodeSpecializationKind kind, JSCell*& calleeAsFunctionCell)
 {
     ExecState* exec = execCallee->callerFrame();
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
 
     JSValue calleeAsValue = execCallee->calleeAsValue();
-    JSCell* calleeAsFunctionCell = getJSFunction(calleeAsValue);
+    calleeAsFunctionCell = getJSFunction(calleeAsValue);
     if (UNLIKELY(!calleeAsFunctionCell))
-        return handleHostCall(execCallee, calleeAsValue, kind);
+        return reinterpret_cast<char*>(handleHostCall(execCallee, calleeAsValue, kind));
     
-    JSFunction* function = asFunction(calleeAsFunctionCell);
-    execCallee->setScopeChain(function->scopeUnchecked());
+    JSFunction* function = jsCast<JSFunction*>(calleeAsFunctionCell);
+    execCallee->setScope(function->scopeUnchecked());
     ExecutableBase* executable = function->executable();
     if (UNLIKELY(!executable->hasJITCodeFor(kind))) {
         FunctionExecutable* functionExecutable = static_cast<FunctionExecutable*>(executable);
         JSObject* error = functionExecutable->compileFor(execCallee, function->scope(), kind);
         if (error) {
             exec->globalData().exception = error;
-            return 0;
+            return reinterpret_cast<char*>(globalData->getCTIStub(throwExceptionFromCallSlowPathGenerator).code().executableAddress());
         }
     }
-    return executable->generatedJITCodeWithArityCheckFor(kind).executableAddress();
+    return reinterpret_cast<char*>(executable->generatedJITCodeWithArityCheckFor(kind).executableAddress());
 }
 
-void* DFG_OPERATION operationVirtualCall(ExecState* execCallee)
+inline char* virtualFor(ExecState* execCallee, CodeSpecializationKind kind)
+{
+    JSCell* calleeAsFunctionCellIgnored;
+    return virtualForWithFunction(execCallee, kind, calleeAsFunctionCellIgnored);
+}
+
+static bool attemptToOptimizeClosureCall(ExecState* execCallee, JSCell* calleeAsFunctionCell, CallLinkInfo& callLinkInfo)
+{
+    if (!calleeAsFunctionCell)
+        return false;
+    
+    JSFunction* callee = jsCast<JSFunction*>(calleeAsFunctionCell);
+    JSFunction* oldCallee = callLinkInfo.callee.get();
+    
+    if (!oldCallee
+        || oldCallee->structure() != callee->structure()
+        || oldCallee->executable() != callee->executable())
+        return false;
+    
+    ASSERT(callee->executable()->hasJITCodeForCall());
+    MacroAssemblerCodePtr codePtr = callee->executable()->generatedJITCodeForCall().addressForCall();
+    
+    CodeBlock* codeBlock;
+    if (callee->executable()->isHostFunction())
+        codeBlock = 0;
+    else {
+        codeBlock = &jsCast<FunctionExecutable*>(callee->executable())->generatedBytecodeForCall();
+        if (execCallee->argumentCountIncludingThis() < static_cast<size_t>(codeBlock->numParameters()))
+            return false;
+    }
+    
+    dfgLinkClosureCall(
+        execCallee, callLinkInfo, codeBlock,
+        callee->structure(), callee->executable(), codePtr);
+    
+    return true;
+}
+
+char* DFG_OPERATION operationLinkClosureCall(ExecState* execCallee)
+{
+    JSCell* calleeAsFunctionCell;
+    char* result = virtualForWithFunction(execCallee, CodeForCall, calleeAsFunctionCell);
+    CallLinkInfo& callLinkInfo = execCallee->callerFrame()->codeBlock()->getCallLinkInfo(execCallee->returnPC());
+
+    if (!attemptToOptimizeClosureCall(execCallee, calleeAsFunctionCell, callLinkInfo))
+        dfgLinkSlowFor(execCallee, callLinkInfo, CodeForCall);
+    
+    return result;
+}
+
+char* DFG_OPERATION operationVirtualCall(ExecState* execCallee)
 {    
     return virtualFor(execCallee, CodeForCall);
 }
 
-void* DFG_OPERATION operationVirtualConstruct(ExecState* execCallee)
+char* DFG_OPERATION operationVirtualConstruct(ExecState* execCallee)
 {
     return virtualFor(execCallee, CodeForConstruct);
 }
 
-EncodedJSValue DFG_OPERATION operationResolve(ExecState* exec, Identifier* propertyName)
+void DFG_OPERATION operationNotifyGlobalVarWrite(WatchpointSet* watchpointSet)
 {
-    JSGlobalData* globalData = &exec->globalData();
-    NativeCallFrameTracer tracer(globalData, exec);
-    
-    ScopeChainNode* scopeChain = exec->scopeChain();
-    ScopeChainIterator iter = scopeChain->begin();
-    ScopeChainIterator end = scopeChain->end();
-    ASSERT(iter != end);
-
-    do {
-        JSObject* record = iter->get();
-        PropertySlot slot(record);
-        if (record->getPropertySlot(exec, *propertyName, slot))
-            return JSValue::encode(slot.getValue(exec, *propertyName));
-    } while (++iter != end);
-
-    return throwVMError(exec, createUndefinedVariableError(exec, *propertyName));
+    watchpointSet->notifyWrite();
 }
 
-EncodedJSValue DFG_OPERATION operationResolveBase(ExecState* exec, Identifier* propertyName)
+EncodedJSValue DFG_OPERATION operationResolve(ExecState* exec, Identifier* propertyName, ResolveOperations* operations)
 {
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
-    
-    return JSValue::encode(resolveBase(exec, *propertyName, exec->scopeChain(), false));
+    return JSValue::encode(JSScope::resolve(exec, *propertyName, operations));
 }
 
-EncodedJSValue DFG_OPERATION operationResolveBaseStrictPut(ExecState* exec, Identifier* propertyName)
+EncodedJSValue DFG_OPERATION operationResolveBase(ExecState* exec, Identifier* propertyName, ResolveOperations* operations, PutToBaseOperation* putToBaseOperations)
 {
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
     
-    JSValue base = resolveBase(exec, *propertyName, exec->scopeChain(), true);
-    if (!base)
-        throwError(exec, createErrorForInvalidGlobalAssignment(exec, propertyName->ustring()));
-    return JSValue::encode(base);
+    return JSValue::encode(JSScope::resolveBase(exec, *propertyName, false, operations, putToBaseOperations));
 }
 
-EncodedJSValue DFG_OPERATION operationResolveGlobal(ExecState* exec, GlobalResolveInfo* resolveInfo, Identifier* propertyName)
+EncodedJSValue DFG_OPERATION operationResolveBaseStrictPut(ExecState* exec, Identifier* propertyName, ResolveOperations* operations, PutToBaseOperation* putToBaseOperations)
 {
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
     
-    JSGlobalObject* globalObject = exec->lexicalGlobalObject();
+    return JSValue::encode(JSScope::resolveBase(exec, *propertyName, true, operations, putToBaseOperations));
+}
 
-    PropertySlot slot(globalObject);
-    if (globalObject->getPropertySlot(exec, *propertyName, slot)) {
-        JSValue result = slot.getValue(exec, *propertyName);
-
-        if (slot.isCacheableValue() && !globalObject->structure()->isUncacheableDictionary() && slot.slotBase() == globalObject) {
-            resolveInfo->structure.set(exec->globalData(), exec->codeBlock()->ownerExecutable(), globalObject->structure());
-            resolveInfo->offset = slot.cachedOffset();
-        }
-
-        return JSValue::encode(result);
-    }
-
-    return throwVMError(exec, createUndefinedVariableError(exec, *propertyName));
+EncodedJSValue DFG_OPERATION operationResolveGlobal(ExecState* exec, ResolveOperation* resolveOperation, JSGlobalObject* globalObject, Identifier* propertyName)
+{
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
+    ASSERT(globalObject);
+    UNUSED_PARAM(resolveOperation);
+    UNUSED_PARAM(globalObject);
+    ASSERT(resolveOperation->m_operation == ResolveOperation::GetAndReturnGlobalProperty);
+    return JSValue::encode(JSScope::resolveGlobal(exec, *propertyName, globalObject, resolveOperation));
 }
 
 EncodedJSValue DFG_OPERATION operationToPrimitive(ExecState* exec, EncodedJSValue value)
@@ -920,29 +1194,49 @@ EncodedJSValue DFG_OPERATION operationToPrimitive(ExecState* exec, EncodedJSValu
     return JSValue::encode(JSValue::decode(value).toPrimitive(exec));
 }
 
-EncodedJSValue DFG_OPERATION operationStrCat(ExecState* exec, void* start, size_t size)
+EncodedJSValue DFG_OPERATION operationStrCat(ExecState* exec, void* buffer, size_t size)
+{
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
+
+    return JSValue::encode(jsString(exec, static_cast<Register*>(buffer), size));
+}
+
+char* DFG_OPERATION operationNewArray(ExecState* exec, Structure* arrayStructure, void* buffer, size_t size)
 {
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
     
-    return JSValue::encode(jsString(exec, static_cast<Register*>(start), size));
+    return bitwise_cast<char*>(constructArray(exec, arrayStructure, static_cast<JSValue*>(buffer), size));
 }
 
-EncodedJSValue DFG_OPERATION operationNewArray(ExecState* exec, void* start, size_t size)
+char* DFG_OPERATION operationNewEmptyArray(ExecState* exec, Structure* arrayStructure)
 {
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
     
-    return JSValue::encode(constructArray(exec, static_cast<JSValue*>(start), size));
+    return bitwise_cast<char*>(JSArray::create(*globalData, arrayStructure));
 }
 
-EncodedJSValue DFG_OPERATION operationNewArrayBuffer(ExecState* exec, size_t start, size_t size)
+char* DFG_OPERATION operationNewArrayWithSize(ExecState* exec, Structure* arrayStructure, int32_t size)
 {
-    return JSValue::encode(constructArray(exec, exec->codeBlock()->constantBuffer(start), size));
+    JSGlobalData* globalData = &exec->globalData();
+    NativeCallFrameTracer tracer(globalData, exec);
+    
+    return bitwise_cast<char*>(JSArray::create(*globalData, arrayStructure, size));
+}
+
+char* DFG_OPERATION operationNewArrayBuffer(ExecState* exec, Structure* arrayStructure, size_t start, size_t size)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+    return bitwise_cast<char*>(constructArray(exec, arrayStructure, exec->codeBlock()->constantBuffer(start), size));
 }
 
 EncodedJSValue DFG_OPERATION operationNewRegexp(ExecState* exec, void* regexpPtr)
 {
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
     RegExp* regexp = static_cast<RegExp*>(regexpPtr);
     if (!regexp->isValid()) {
         throwError(exec, createSyntaxError(exec, "Invalid flags supplied to RegExp constructor."));
@@ -952,39 +1246,262 @@ EncodedJSValue DFG_OPERATION operationNewRegexp(ExecState* exec, void* regexpPtr
     return JSValue::encode(RegExpObject::create(exec->globalData(), exec->lexicalGlobalObject(), exec->lexicalGlobalObject()->regExpStructure(), regexp));
 }
 
+JSCell* DFG_OPERATION operationCreateActivation(ExecState* exec)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+    JSActivation* activation = JSActivation::create(globalData, exec, exec->codeBlock());
+    exec->setScope(activation);
+    return activation;
+}
+
+JSCell* DFG_OPERATION operationCreateArguments(ExecState* exec)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+    // NB: This needs to be exceedingly careful with top call frame tracking, since it
+    // may be called from OSR exit, while the state of the call stack is bizarre.
+    Arguments* result = Arguments::create(globalData, exec);
+    ASSERT(!globalData.exception);
+    return result;
+}
+
+JSCell* DFG_OPERATION operationCreateInlinedArguments(
+    ExecState* exec, InlineCallFrame* inlineCallFrame)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+    // NB: This needs to be exceedingly careful with top call frame tracking, since it
+    // may be called from OSR exit, while the state of the call stack is bizarre.
+    Arguments* result = Arguments::create(globalData, exec, inlineCallFrame);
+    ASSERT(!globalData.exception);
+    return result;
+}
+
+void DFG_OPERATION operationTearOffArguments(ExecState* exec, JSCell* argumentsCell, JSCell* activationCell)
+{
+    ASSERT(exec->codeBlock()->usesArguments());
+    if (activationCell) {
+        jsCast<Arguments*>(argumentsCell)->didTearOffActivation(exec, jsCast<JSActivation*>(activationCell));
+        return;
+    }
+    jsCast<Arguments*>(argumentsCell)->tearOff(exec);
+}
+
+void DFG_OPERATION operationTearOffInlinedArguments(
+    ExecState* exec, JSCell* argumentsCell, JSCell* activationCell, InlineCallFrame* inlineCallFrame)
+{
+    ASSERT_UNUSED(activationCell, !activationCell); // Currently, we don't inline functions with activations.
+    jsCast<Arguments*>(argumentsCell)->tearOff(exec, inlineCallFrame);
+}
+
+EncodedJSValue DFG_OPERATION operationGetArgumentsLength(ExecState* exec, int32_t argumentsRegister)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+    // Here we can assume that the argumernts were created. Because otherwise the JIT code would
+    // have not made this call.
+    Identifier ident(&globalData, "length");
+    JSValue baseValue = exec->uncheckedR(argumentsRegister).jsValue();
+    PropertySlot slot(baseValue);
+    return JSValue::encode(baseValue.get(exec, ident, slot));
+}
+
+EncodedJSValue DFG_OPERATION operationGetArgumentByVal(ExecState* exec, int32_t argumentsRegister, int32_t index)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+
+    JSValue argumentsValue = exec->uncheckedR(argumentsRegister).jsValue();
+    
+    // If there are no arguments, and we're accessing out of bounds, then we have to create the
+    // arguments in case someone has installed a getter on a numeric property.
+    if (!argumentsValue)
+        exec->uncheckedR(argumentsRegister) = argumentsValue = Arguments::create(exec->globalData(), exec);
+    
+    return JSValue::encode(argumentsValue.get(exec, index));
+}
+
+EncodedJSValue DFG_OPERATION operationGetInlinedArgumentByVal(
+    ExecState* exec, int32_t argumentsRegister, InlineCallFrame* inlineCallFrame, int32_t index)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+
+    JSValue argumentsValue = exec->uncheckedR(argumentsRegister).jsValue();
+    
+    // If there are no arguments, and we're accessing out of bounds, then we have to create the
+    // arguments in case someone has installed a getter on a numeric property.
+    if (!argumentsValue) {
+        exec->uncheckedR(argumentsRegister) = argumentsValue =
+            Arguments::create(exec->globalData(), exec, inlineCallFrame);
+    }
+    
+    return JSValue::encode(argumentsValue.get(exec, index));
+}
+
+JSCell* DFG_OPERATION operationNewFunction(ExecState* exec, JSCell* functionExecutable)
+{
+    ASSERT(functionExecutable->inherits(&FunctionExecutable::s_info));
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+    return JSFunction::create(exec, static_cast<FunctionExecutable*>(functionExecutable), exec->scope());
+}
+
+JSCell* DFG_OPERATION operationNewFunctionExpression(ExecState* exec, JSCell* functionExecutableAsCell)
+{
+    ASSERT(functionExecutableAsCell->inherits(&FunctionExecutable::s_info));
+
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+
+    FunctionExecutable* functionExecutable =
+        static_cast<FunctionExecutable*>(functionExecutableAsCell);
+    return JSFunction::create(exec, functionExecutable, exec->scope());
+}
+
+size_t DFG_OPERATION operationIsObject(ExecState* exec, EncodedJSValue value)
+{
+    return jsIsObjectType(exec, JSValue::decode(value));
+}
+
+size_t DFG_OPERATION operationIsFunction(EncodedJSValue value)
+{
+    return jsIsFunctionType(JSValue::decode(value));
+}
+
+void DFG_OPERATION operationReallocateStorageAndFinishPut(ExecState* exec, JSObject* base, Structure* structure, PropertyOffset offset, EncodedJSValue value)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+
+    ASSERT(structure->outOfLineCapacity() > base->structure()->outOfLineCapacity());
+    ASSERT(!globalData.heap.storageAllocator().fastPathShouldSucceed(structure->outOfLineCapacity() * sizeof(JSValue)));
+    base->setStructureAndReallocateStorageIfNecessary(globalData, structure);
+    base->putDirectOffset(globalData, offset, JSValue::decode(value));
+}
+
+char* DFG_OPERATION operationAllocatePropertyStorageWithInitialCapacity(ExecState* exec)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+
+    return reinterpret_cast<char*>(
+        Butterfly::createUninitialized(globalData, 0, initialOutOfLineCapacity, false, 0));
+}
+
+char* DFG_OPERATION operationAllocatePropertyStorage(ExecState* exec, size_t newSize)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+
+    return reinterpret_cast<char*>(
+        Butterfly::createUninitialized(globalData, 0, newSize, false, 0));
+}
+
+char* DFG_OPERATION operationReallocateButterflyToHavePropertyStorageWithInitialCapacity(ExecState* exec, JSObject* object)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+
+    ASSERT(!object->structure()->outOfLineCapacity());
+    Butterfly* result = object->growOutOfLineStorage(globalData, 0, initialOutOfLineCapacity);
+    object->setButterflyWithoutChangingStructure(result);
+    return reinterpret_cast<char*>(result);
+}
+
+char* DFG_OPERATION operationReallocateButterflyToGrowPropertyStorage(ExecState* exec, JSObject* object, size_t newSize)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+
+    Butterfly* result = object->growOutOfLineStorage(globalData, object->structure()->outOfLineCapacity(), newSize);
+    object->setButterflyWithoutChangingStructure(result);
+    return reinterpret_cast<char*>(result);
+}
+
+char* DFG_OPERATION operationEnsureInt32(ExecState* exec, JSObject* object)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+    
+    return reinterpret_cast<char*>(object->ensureInt32(globalData));
+}
+
+char* DFG_OPERATION operationEnsureDouble(ExecState* exec, JSObject* object)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+    
+    return reinterpret_cast<char*>(object->ensureDouble(globalData));
+}
+
+char* DFG_OPERATION operationEnsureContiguous(ExecState* exec, JSObject* object)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+    
+    return reinterpret_cast<char*>(object->ensureContiguous(globalData));
+}
+
+char* DFG_OPERATION operationRageEnsureContiguous(ExecState* exec, JSObject* object)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+    
+    return reinterpret_cast<char*>(object->rageEnsureContiguous(globalData));
+}
+
+char* DFG_OPERATION operationEnsureArrayStorage(ExecState* exec, JSObject* object)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+
+    return reinterpret_cast<char*>(object->ensureArrayStorage(globalData));
+}
+
+StringImpl* DFG_OPERATION operationResolveRope(ExecState* exec, JSString* string)
+{
+    JSGlobalData& globalData = exec->globalData();
+    NativeCallFrameTracer tracer(&globalData, exec);
+
+    return string->value(exec).impl();
+}
+
+double DFG_OPERATION operationFModOnInts(int32_t a, int32_t b)
+{
+    return fmod(a, b);
+}
+
 DFGHandlerEncoded DFG_OPERATION lookupExceptionHandler(ExecState* exec, uint32_t callIndex)
 {
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
-    
+
     JSValue exceptionValue = exec->exception();
     ASSERT(exceptionValue);
-
+    
     unsigned vPCIndex = exec->codeBlock()->bytecodeOffsetForCallAtIndex(callIndex);
-    HandlerInfo* handler = exec->globalData().interpreter->throwException(exec, exceptionValue, vPCIndex);
-
-    void* catchRoutine = handler ? handler->nativeCode.executableAddress() : (void*)ctiOpThrowNotCaught;
-    ASSERT(catchRoutine);
-    return dfgHandlerEncoded(exec, catchRoutine);
+    ExceptionHandler handler = genericThrow(globalData, exec, exceptionValue, vPCIndex);
+    ASSERT(handler.catchRoutine);
+    return dfgHandlerEncoded(handler.callFrame, handler.catchRoutine);
 }
 
 DFGHandlerEncoded DFG_OPERATION lookupExceptionHandlerInStub(ExecState* exec, StructureStubInfo* stubInfo)
 {
     JSGlobalData* globalData = &exec->globalData();
     NativeCallFrameTracer tracer(globalData, exec);
-    
+
     JSValue exceptionValue = exec->exception();
     ASSERT(exceptionValue);
     
     CodeOrigin codeOrigin = stubInfo->codeOrigin;
     while (codeOrigin.inlineCallFrame)
         codeOrigin = codeOrigin.inlineCallFrame->caller;
-
-    HandlerInfo* handler = exec->globalData().interpreter->throwException(exec, exceptionValue, codeOrigin.bytecodeIndex);
-
-    void* catchRoutine = handler ? handler->nativeCode.executableAddress() : (void*)ctiOpThrowNotCaught;
-    ASSERT(catchRoutine);
-    return dfgHandlerEncoded(exec, catchRoutine);
+    
+    ExceptionHandler handler = genericThrow(globalData, exec, exceptionValue, codeOrigin.bytecodeIndex);
+    ASSERT(handler.catchRoutine);
+    return dfgHandlerEncoded(handler.callFrame, handler.catchRoutine);
 }
 
 double DFG_OPERATION dfgConvertJSValueToNumber(ExecState* exec, EncodedJSValue value)
@@ -1021,11 +1538,100 @@ void DFG_OPERATION debugOperationPrintSpeculationFailure(ExecState* exec, void* 
     SpeculationFailureDebugInfo* debugInfo = static_cast<SpeculationFailureDebugInfo*>(debugInfoRaw);
     CodeBlock* codeBlock = debugInfo->codeBlock;
     CodeBlock* alternative = codeBlock->alternative();
-    printf("Speculation failure in %p at @%u with executeCounter = %d, reoptimizationRetryCounter = %u, optimizationDelayCounter = %u, success/fail %u/%u\n", codeBlock, debugInfo->nodeIndex, alternative ? alternative->jitExecuteCounter() : 0, alternative ? alternative->reoptimizationRetryCounter() : 0, alternative ? alternative->optimizationDelayCounter() : 0, codeBlock->speculativeSuccessCounter(), codeBlock->speculativeFailCounter());
+    dataLog(
+        "Speculation failure in ", *codeBlock, " at @", debugInfo->nodeIndex,
+        " with ");
+    if (alternative) {
+        dataLog(
+            "executeCounter = ", alternative->jitExecuteCounter(),
+            ", reoptimizationRetryCounter = ", alternative->reoptimizationRetryCounter(),
+            ", optimizationDelayCounter = ", alternative->optimizationDelayCounter());
+    } else
+        dataLog("no alternative code block (i.e. we've been jettisoned)");
+    dataLog(", osrExitCounter = ", codeBlock->osrExitCounter(), "\n");
 }
 #endif
+
+extern "C" void DFG_OPERATION triggerReoptimizationNow(CodeBlock* codeBlock)
+{
+#if ENABLE(JIT_VERBOSE_OSR)
+    dataLog(*codeBlock, ": Entered reoptimize\n");
+#endif
+    // We must be called with the baseline code block.
+    ASSERT(JITCode::isBaselineCode(codeBlock->getJITType()));
+
+    // If I am my own replacement, then reoptimization has already been triggered.
+    // This can happen in recursive functions.
+    if (codeBlock->replacement() == codeBlock)
+        return;
+
+    // Otherwise, the replacement must be optimized code. Use this as an opportunity
+    // to check our logic.
+    ASSERT(codeBlock->hasOptimizedReplacement());
+    ASSERT(codeBlock->replacement()->getJITType() == JITCode::DFGJIT);
+
+    codeBlock->reoptimize();
+}
 
 } // extern "C"
 } } // namespace JSC::DFG
 
+#endif // ENABLE(DFG_JIT)
+
+namespace JSC {
+
+#if COMPILER(GCC) && CPU(X86_64)
+asm (
+".globl " SYMBOL_STRING(getHostCallReturnValue) "\n"
+HIDE_SYMBOL(getHostCallReturnValue) "\n"
+SYMBOL_STRING(getHostCallReturnValue) ":" "\n"
+    "mov -40(%r13), %r13\n"
+    "mov %r13, %rdi\n"
+    "jmp " LOCAL_REFERENCE(getHostCallReturnValueWithExecState) "\n"
+);
+#elif COMPILER(GCC) && CPU(X86)
+asm (
+".text" "\n" \
+".globl " SYMBOL_STRING(getHostCallReturnValue) "\n"
+HIDE_SYMBOL(getHostCallReturnValue) "\n"
+SYMBOL_STRING(getHostCallReturnValue) ":" "\n"
+    "mov -40(%edi), %edi\n"
+    "mov %edi, 4(%esp)\n"
+    "jmp " LOCAL_REFERENCE(getHostCallReturnValueWithExecState) "\n"
+);
+#elif COMPILER(GCC) && CPU(ARM_THUMB2)
+asm (
+".text" "\n"
+".align 2" "\n"
+".globl " SYMBOL_STRING(getHostCallReturnValue) "\n"
+HIDE_SYMBOL(getHostCallReturnValue) "\n"
+".thumb" "\n"
+".thumb_func " THUMB_FUNC_PARAM(getHostCallReturnValue) "\n"
+SYMBOL_STRING(getHostCallReturnValue) ":" "\n"
+    "ldr r5, [r5, #-40]" "\n"
+    "mov r0, r5" "\n"
+    "b " LOCAL_REFERENCE(getHostCallReturnValueWithExecState) "\n"
+);
+#elif COMPILER(GCC) && CPU(ARM_TRADITIONAL)
+asm (
+".text" "\n"
+".globl " SYMBOL_STRING(getHostCallReturnValue) "\n"
+HIDE_SYMBOL(getHostCallReturnValue) "\n"
+INLINE_ARM_FUNCTION(getHostCallReturnValue)
+SYMBOL_STRING(getHostCallReturnValue) ":" "\n"
+    "ldr r5, [r5, #-40]" "\n"
+    "mov r0, r5" "\n"
+    "b " LOCAL_REFERENCE(getHostCallReturnValueWithExecState) "\n"
+);
 #endif
+
+extern "C" EncodedJSValue HOST_CALL_RETURN_VALUE_OPTION getHostCallReturnValueWithExecState(ExecState* exec)
+{
+    if (!exec)
+        return JSValue::encode(JSValue());
+    return JSValue::encode(exec->globalData().hostCallReturnValue);
+}
+
+} // namespace JSC
+
+#endif // ENABLE(JIT)

@@ -31,11 +31,15 @@
 #include "TextEncoding.h"
 #include "markup.h"
 #include <shlobj.h>
-#include <shlwapi.h>
 #include <wininet.h> // for INTERNET_MAX_URL_LENGTH
 #include <wtf/StringExtras.h>
 #include <wtf/text/CString.h>
+#include <wtf/text/StringBuilder.h>
 #include <wtf/text/WTFString.h>
+
+#if !OS(WINCE)
+#include <shlwapi.h>
+#endif
 
 #if USE(CF)
 #include <CoreFoundation/CoreFoundation.h>
@@ -75,7 +79,7 @@ static bool getDataMapItem(const DragDataMap* dataObject, FORMATETC* format, Str
     DragDataMap::const_iterator found = dataObject->find(format->cfFormat);
     if (found == dataObject->end())
         return false;
-    item = found->second[0];
+    item = found->value[0];
     return true;
 }
 
@@ -208,7 +212,7 @@ HGLOBAL createGlobalData(const Vector<char>& vector)
     return globalData;
 }
 
-static String getFullCFHTML(IDataObject* data, bool& success)
+static String getFullCFHTML(IDataObject* data)
 {
     STGMEDIUM store;
     if (SUCCEEDED(data->GetData(htmlFormat(), &store))) {
@@ -218,10 +222,8 @@ static String getFullCFHTML(IDataObject* data, bool& success)
         String cfhtml(UTF8Encoding().decode(data, dataSize));
         GlobalUnlock(store.hGlobal);
         ReleaseStgMedium(&store);
-        success = true;
         return cfhtml;
     }
-    success = false;
     return String();
 }
 
@@ -300,9 +302,15 @@ void markupToCFHTML(const String& markup, const String& srcURL, Vector<char>& re
 
 void replaceNewlinesWithWindowsStyleNewlines(String& str)
 {
-    static const UChar Newline = '\n';
-    static const char* const WindowsNewline("\r\n");
-    str.replace(Newline, WindowsNewline);
+    DEFINE_STATIC_LOCAL(String, windowsNewline, (ASCIILiteral("\r\n")));
+    StringBuilder result;
+    for (unsigned index = 0; index < str.length(); ++index) {
+        if (str[index] != '\n' || (index > 0 && str[index - 1] == '\r'))
+            result.append(str[index]);
+        else
+            result.append(windowsNewline);
+    }
+    str = result.toString();
 }
 
 void replaceNBSPWithSpace(String& str)
@@ -425,7 +433,7 @@ void setFileDescriptorData(IDataObject* dataObject, int size, const String& pass
     fgd->fgd[0].dwFlags = FD_FILESIZE;
     fgd->fgd[0].nFileSizeLow = size;
 
-    int maxSize = std::min(pathname.length(), WTF_ARRAY_LENGTH(fgd->fgd[0].cFileName));
+    int maxSize = std::min<int>(pathname.length(), WTF_ARRAY_LENGTH(fgd->fgd[0].cFileName));
     CopyMemory(fgd->fgd[0].cFileName, pathname.charactersWithNullTermination(), maxSize * sizeof(UChar));
     GlobalUnlock(medium.hGlobal);
 
@@ -447,27 +455,25 @@ void setFileContentData(IDataObject* dataObject, int size, void* dataBlob)
     dataObject->SetData(fileContentFormatZero(), &medium, TRUE);
 }
 
-String getURL(IDataObject* dataObject, DragData::FilenameConversionPolicy filenamePolicy, bool& success, String* title)
+String getURL(IDataObject* dataObject, DragData::FilenameConversionPolicy filenamePolicy, String* title)
 {
     STGMEDIUM store;
     String url;
-    success = false;
     if (getWebLocData(dataObject, url, title))
-        success = true;
-    else if (SUCCEEDED(dataObject->GetData(urlWFormat(), &store))) {
+        return url;
+
+    if (SUCCEEDED(dataObject->GetData(urlWFormat(), &store))) {
         // URL using Unicode
         UChar* data = static_cast<UChar*>(GlobalLock(store.hGlobal));
         url = extractURL(String(data), title);
         GlobalUnlock(store.hGlobal);
         ReleaseStgMedium(&store);
-        success = true;
     } else if (SUCCEEDED(dataObject->GetData(urlFormat(), &store))) {
         // URL using ASCII
         char* data = static_cast<char*>(GlobalLock(store.hGlobal));
         url = extractURL(String(data), title);
         GlobalUnlock(store.hGlobal);
         ReleaseStgMedium(&store);
-        success = true;
     }
 #if USE(CF)
     else if (filenamePolicy == DragData::ConvertFilenames) {
@@ -476,11 +482,8 @@ String getURL(IDataObject* dataObject, DragData::FilenameConversionPolicy filena
             wchar_t* data = static_cast<wchar_t*>(GlobalLock(store.hGlobal));
             if (data && data[0] && (PathFileExists(data) || PathIsUNC(data))) {
                 RetainPtr<CFStringRef> pathAsCFString(AdoptCF, CFStringCreateWithCharacters(kCFAllocatorDefault, (const UniChar*)data, wcslen(data)));
-                if (urlFromPath(pathAsCFString.get(), url)) {
-                    if (title)
-                        *title = url;
-                    success = true;
-                }
+                if (urlFromPath(pathAsCFString.get(), url) && title)
+                    *title = url;
             }
             GlobalUnlock(store.hGlobal);
             ReleaseStgMedium(&store);
@@ -489,11 +492,8 @@ String getURL(IDataObject* dataObject, DragData::FilenameConversionPolicy filena
             char* data = static_cast<char*>(GlobalLock(store.hGlobal));
             if (data && data[0] && (PathFileExistsA(data) || PathIsUNCA(data))) {
                 RetainPtr<CFStringRef> pathAsCFString(AdoptCF, CFStringCreateWithCString(kCFAllocatorDefault, data, kCFStringEncodingASCII));
-                if (urlFromPath(pathAsCFString.get(), url)) {
-                    if (title)
-                        *title = url;
-                    success = true;
-                }
+                if (urlFromPath(pathAsCFString.get(), url) && title)
+                    *title = url;
             }
             GlobalUnlock(store.hGlobal);
             ReleaseStgMedium(&store);
@@ -530,31 +530,27 @@ String getURL(const DragDataMap* data, DragData::FilenameConversionPolicy filena
     return url;
 }
 
-String getPlainText(IDataObject* dataObject, bool& success)
+String getPlainText(IDataObject* dataObject)
 {
     STGMEDIUM store;
     String text;
-    success = false;
     if (SUCCEEDED(dataObject->GetData(plainTextWFormat(), &store))) {
         // Unicode text
         UChar* data = static_cast<UChar*>(GlobalLock(store.hGlobal));
         text = String(data);
         GlobalUnlock(store.hGlobal);
         ReleaseStgMedium(&store);
-        success = true;
     } else if (SUCCEEDED(dataObject->GetData(plainTextFormat(), &store))) {
         // ASCII text
         char* data = static_cast<char*>(GlobalLock(store.hGlobal));
         text = String(data);
         GlobalUnlock(store.hGlobal);
         ReleaseStgMedium(&store);
-        success = true;
     } else {
         // FIXME: Originally, we called getURL() here because dragging and dropping files doesn't
         // populate the drag with text data. Per https://bugs.webkit.org/show_bug.cgi?id=38826, this
         // is undesirable, so maybe this line can be removed.
-        text = getURL(dataObject, DragData::DoNotConvertFilenames, success);
-        success = true;
+        text = getURL(dataObject, DragData::DoNotConvertFilenames);
     }
     return text;
 }
@@ -570,17 +566,15 @@ String getPlainText(const DragDataMap* data)
     return getURL(data, DragData::DoNotConvertFilenames);
 }
 
-String getTextHTML(IDataObject* data, bool& success)
+String getTextHTML(IDataObject* data)
 {
     STGMEDIUM store;
     String html;
-    success = false;
     if (SUCCEEDED(data->GetData(texthtmlFormat(), &store))) {
         UChar* data = static_cast<UChar*>(GlobalLock(store.hGlobal));
         html = String(data);
         GlobalUnlock(store.hGlobal);
         ReleaseStgMedium(&store);
-        success = true;
     }
     return html;
 }
@@ -592,10 +586,10 @@ String getTextHTML(const DragDataMap* data)
     return text;
 }
 
-String getCFHTML(IDataObject* data, bool& success)
+String getCFHTML(IDataObject* data)
 {
-    String cfhtml = getFullCFHTML(data, success);
-    if (success)
+    String cfhtml = getFullCFHTML(data);
+    if (!cfhtml.isEmpty())
         return extractMarkupFromCFHTML(cfhtml);
     return String();
 }
@@ -647,7 +641,7 @@ PassRefPtr<DocumentFragment> fragmentFromCFHTML(Document* doc, const String& cfh
     }
 
     String markup = extractMarkupFromCFHTML(cfhtml);
-    return createFragmentFromMarkup(doc, markup, srcURL, FragmentScriptingNotAllowed);
+    return createFragmentFromMarkup(doc, markup, srcURL, DisallowScriptingContent);
 }
 
 PassRefPtr<DocumentFragment> fragmentFromHTML(Document* doc, IDataObject* data) 
@@ -655,17 +649,16 @@ PassRefPtr<DocumentFragment> fragmentFromHTML(Document* doc, IDataObject* data)
     if (!doc || !data)
         return 0;
 
-    bool success = false;
-    String cfhtml = getFullCFHTML(data, success);
-    if (success) {
+    String cfhtml = getFullCFHTML(data);
+    if (!cfhtml.isEmpty()) {
         if (RefPtr<DocumentFragment> fragment = fragmentFromCFHTML(doc, cfhtml))
             return fragment.release();
     }
 
-    String html = getTextHTML(data, success);
+    String html = getTextHTML(data);
     String srcURL;
-    if (success)
-        return createFragmentFromMarkup(doc, html, srcURL, FragmentScriptingNotAllowed);
+    if (!html.isEmpty())
+        return createFragmentFromMarkup(doc, html, srcURL, DisallowScriptingContent);
 
     return 0;
 }
@@ -683,7 +676,7 @@ PassRefPtr<DocumentFragment> fragmentFromHTML(Document* document, const DragData
 
     String srcURL;
     if (getDataMapItem(data, texthtmlFormat(), stringData))
-        return createFragmentFromMarkup(document, stringData, srcURL, FragmentScriptingNotAllowed);
+        return createFragmentFromMarkup(document, stringData, srcURL, DisallowScriptingContent);
 
     return 0;
 }
@@ -836,7 +829,7 @@ void getClipboardData(IDataObject* dataObject, FORMATETC* format, Vector<String>
     ClipboardFormatMap::const_iterator found = formatMap.find(format->cfFormat);
     if (found == formatMap.end())
         return;
-    found->second->getString(dataObject, found->second->format, dataStrings);
+    found->value->getString(dataObject, found->value->format, dataStrings);
 }
 
 void setClipboardData(IDataObject* dataObject, UINT format, const Vector<String>& dataStrings)
@@ -845,7 +838,7 @@ void setClipboardData(IDataObject* dataObject, UINT format, const Vector<String>
     ClipboardFormatMap::const_iterator found = formatMap.find(format);
     if (found == formatMap.end())
         return;
-    found->second->setString(dataObject, found->second->format, dataStrings);
+    found->value->setString(dataObject, found->value->format, dataStrings);
 }
 
 } // namespace WebCore

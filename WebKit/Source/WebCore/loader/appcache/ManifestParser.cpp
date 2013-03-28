@@ -47,7 +47,7 @@ bool parseManifest(const KURL& manifestURL, const char* data, int length, Manife
 
     RefPtr<TextResourceDecoder> decoder = TextResourceDecoder::create("text/cache-manifest", "UTF-8");
     String s = decoder->decode(data, length);
-    s += decoder->flush();
+    s.append(decoder->flush());
     
     // Look for the magic signature: "^\xFEFF?CACHE MANIFEST[ \t]?" (the BOM is removed by TextResourceDecoder).
     // Example: "CACHE MANIFEST #comment" is a valid signature.
@@ -96,7 +96,7 @@ bool parseManifest(const KURL& manifestURL, const char* data, int length, Manife
             mode = Fallback;
         else if (line == "NETWORK:")
             mode = OnlineWhitelist;
-        else if (line.endsWith(":"))
+        else if (line.endsWith(':'))
             mode = Unknown;
         else if (mode == Unknown)
             continue;

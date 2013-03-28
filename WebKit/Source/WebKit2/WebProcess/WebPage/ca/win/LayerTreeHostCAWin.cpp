@@ -36,6 +36,7 @@
 #include <WebCore/GraphicsLayerCA.h>
 #include <WebCore/LayerChangesFlusher.h>
 #include <WebCore/PlatformCALayer.h>
+#include <WebCore/SoftLinking.h>
 #include <WebCore/WebCoreInstanceHandle.h>
 #include <WebKitQuartzCoreAdditions/WKCACFImage.h>
 #include <WebKitQuartzCoreAdditions/WKCACFView.h>
@@ -43,9 +44,15 @@
 #include <wtf/MainThread.h>
 
 #ifdef DEBUG_ALL
-#pragma comment(lib, "WebKitQuartzCoreAdditions_debug")
+#define MODULE_NAME "WebKitQuartzCoreAdditions_debug"
 #else
-#pragma comment(lib, "WebKitQuartzCoreAdditions")
+#define MODULE_NAME "WebKitQuartzCoreAdditions"
+#endif
+
+#pragma comment(lib, MODULE_NAME)
+
+#if USE(AVFOUNDATION)
+SOFT_LINK_LOADED_LIBRARY(MODULE_NAME, WKCACFViewGetD3DDevice9, IDirect3DDevice9*, _cdecl, (WKCACFViewRef view))
 #endif
 
 using namespace WebCore;
@@ -89,7 +96,7 @@ LayerTreeHostCAWin::~LayerTreeHostCAWin()
 {
 }
 
-void LayerTreeHostCAWin::platformInitialize(LayerTreeContext& context)
+void LayerTreeHostCAWin::platformInitialize()
 {
     m_view.adoptCF(WKCACFViewCreate(kWKCACFViewDrawingDestinationWindow));
     WKCACFViewSetContextUserData(m_view.get(), static_cast<AbstractCACFLayerTreeHost*>(this));
@@ -106,7 +113,7 @@ void LayerTreeHostCAWin::platformInitialize(LayerTreeContext& context)
     CGRect bounds = m_webPage->bounds();
     WKCACFViewUpdate(m_view.get(), m_window->window(), &bounds);
 
-    context.window = m_window->window();
+    m_layerTreeContext.window = m_window->window();
 }
 
 void LayerTreeHostCAWin::invalidate()
@@ -258,6 +265,17 @@ void LayerTreeHostCAWin::setRootCompositingLayer(GraphicsLayer* graphicsLayer)
     LayerTreeHostCA::setRootCompositingLayer(graphicsLayer);
 }
 
+#if USE(AVFOUNDATION)
+WebCore::GraphicsDeviceAdapter* LayerTreeHostCAWin::graphicsDeviceAdapter() const
+{
+    if (!WKCACFViewGetD3DDevice9Ptr())
+        return 0;
+
+    return reinterpret_cast<GraphicsDeviceAdapter*>(WKCACFViewGetD3DDevice9Ptr()(m_view.get()));
+}
+#endif
+
 } // namespace WebKit
+
 
 #endif // HAVE(WKQCA)

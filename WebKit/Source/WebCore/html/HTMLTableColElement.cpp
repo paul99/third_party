@@ -47,26 +47,30 @@ PassRefPtr<HTMLTableColElement> HTMLTableColElement::create(const QualifiedName&
     return adoptRef(new HTMLTableColElement(tagName, document));
 }
 
-bool HTMLTableColElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+bool HTMLTableColElement::isPresentationAttribute(const QualifiedName& name) const
 {
-    if (attrName == widthAttr) {
-        result = eUniversal;
-        return false;
-    }
-
-    return HTMLTablePartElement::mapToEntry(attrName, result);
+    if (name == widthAttr)
+        return true;
+    return HTMLTablePartElement::isPresentationAttribute(name);
 }
 
-void HTMLTableColElement::parseMappedAttribute(Attribute* attr)
+void HTMLTableColElement::collectStyleForPresentationAttribute(const Attribute& attribute, StylePropertySet* style)
 {
-    if (attr->name() == spanAttr) {
-        m_span = !attr->isNull() ? attr->value().toInt() : 1;
-        if (renderer() && renderer()->isTableCol())
+    if (attribute.name() == widthAttr)
+        addHTMLLengthToStyle(style, CSSPropertyWidth, attribute.value());
+    else
+        HTMLTablePartElement::collectStyleForPresentationAttribute(attribute, style);
+}
+
+void HTMLTableColElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+{
+    if (name == spanAttr) {
+        m_span = !value.isNull() ? value.toInt() : 1;
+        if (renderer() && renderer()->isRenderTableCol())
             renderer()->updateFromElement();
-    } else if (attr->name() == widthAttr) {
-        if (!attr->value().isEmpty()) {
-            addCSSLength(attr, CSSPropertyWidth, attr->value());
-            if (renderer() && renderer()->isTableCol()) {
+    } else if (name == widthAttr) {
+        if (!value.isEmpty()) {
+            if (renderer() && renderer()->isRenderTableCol()) {
                 RenderTableCol* col = toRenderTableCol(renderer());
                 int newWidth = width().toInt();
                 if (newWidth != col->width())
@@ -74,19 +78,16 @@ void HTMLTableColElement::parseMappedAttribute(Attribute* attr)
             }
         }
     } else
-        HTMLTablePartElement::parseMappedAttribute(attr);
+        HTMLTablePartElement::parseAttribute(name, value);
 }
 
-PassRefPtr<CSSMutableStyleDeclaration> HTMLTableColElement::additionalAttributeStyle()
+const StylePropertySet* HTMLTableColElement::additionalPresentationAttributeStyle()
 {
     if (!hasLocalName(colgroupTag))
         return 0;
-    ContainerNode* p = parentNode();
-    while (p && !p->hasTagName(tableTag))
-        p = p->parentNode();
-    if (!p)
-        return 0;
-    return static_cast<HTMLTableElement*>(p)->additionalGroupStyle(false);
+    if (HTMLTableElement* table = findParentTable())
+        return table->additionalGroupStyle(false);
+    return 0;
 }
 
 void HTMLTableColElement::setSpan(int n)

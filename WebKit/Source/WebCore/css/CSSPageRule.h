@@ -1,7 +1,7 @@
 /*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2002, 2006, 2008, 2012 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -22,27 +22,36 @@
 #ifndef CSSPageRule_h
 #define CSSPageRule_h
 
-#include "CSSStyleRule.h"
-#include <wtf/PassRefPtr.h>
-#include <wtf/RefPtr.h>
+#include "CSSRule.h"
 
 namespace WebCore {
 
-class CSSMutableStyleDeclaration;
-class CSSSelector;
-class CSSSelectorList;
+class CSSStyleDeclaration;
+class CSSStyleSheet;
+class StyleRulePage;
+class StyleRuleCSSStyleDeclaration;
 
-class CSSPageRule : public CSSStyleRule {
+class CSSPageRule : public CSSRule {
 public:
-    static PassRefPtr<CSSPageRule> create(CSSStyleSheet* parent, int sourceLine)
-    {
-        return adoptRef(new CSSPageRule(parent, sourceLine));
-    }
+    static PassRefPtr<CSSPageRule> create(StyleRulePage* rule, CSSStyleSheet* sheet) { return adoptRef(new CSSPageRule(rule, sheet)); }
 
-    String pageSelectorText() const;
+    virtual ~CSSPageRule();
+
+    virtual CSSRule::Type type() const OVERRIDE { return PAGE_RULE; }
+    virtual String cssText() const OVERRIDE;
+    virtual void reattach(StyleRuleBase*) OVERRIDE;
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
+
+    CSSStyleDeclaration* style() const;
+
+    String selectorText() const;
+    void setSelectorText(const String&);
 
 private:
-    CSSPageRule(CSSStyleSheet* parent, int sourceLine);
+    CSSPageRule(StyleRulePage*, CSSStyleSheet*);
+    
+    RefPtr<StyleRulePage> m_pageRule;
+    mutable RefPtr<StyleRuleCSSStyleDeclaration> m_propertiesCSSOMWrapper;
 };
 
 } // namespace WebCore

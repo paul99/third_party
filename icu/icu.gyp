@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -37,7 +37,7 @@
           'source/common',
           'source/i18n',
         ],
-        'msvs_disabled_warnings': [4005, 4355, 4996],
+        'msvs_disabled_warnings': [4005, 4068, 4355, 4996],
       },
       'targets': [
         {
@@ -48,9 +48,9 @@
              # version is an identical copy of the (mac) icudt46l_dat.S file,
              # modulo removal of the .private_extern and .const directives and
              # with no leading underscore on the icudt46_dat symbol.
+             'android/icudt46l_dat.S',
              'linux/icudt46l_dat.S',
              'mac/icudt46l_dat.S',
-             'android/icudt46l_dat.S',
           ],
           'conditions': [
             [ 'OS == "win"', {
@@ -64,14 +64,14 @@
                 },
               ],
             }],
-            [ 'OS == "win" or OS == "mac" or OS == "android"', {
+            [ 'OS == "win" or OS == "mac" or OS == "ios" or OS == "android"', {
               'sources!': ['linux/icudt46l_dat.S'],
-            }],
-            [ 'OS != "mac"', {
-              'sources!': ['mac/icudt46l_dat.S'],
             }],
             [ 'OS != "android"', {
               'sources!': ['android/icudt46l_dat.S'],
+            }],
+            [ 'OS != "mac" and OS != "ios"', {
+              'sources!': ['mac/icudt46l_dat.S'],
             }],
             [ 'OS != "win" and icu_use_data_file_flag', {
               # Remove any assembly data file.
@@ -81,7 +81,7 @@
               # Make sure any binary depending on this gets the data file.
               'link_settings': {
                 'target_conditions': [
-                  ['OS == "mac" and _mac_bundle', {
+                  ['(OS == "mac" and _mac_bundle) or OS=="ios"', {
                     'mac_bundle_resources': [
                       'source/data/in/icudt46l.dat',
                     ],
@@ -274,7 +274,7 @@
             ],
           },
           'conditions': [
-            [ 'os_posix == 1 and OS != "mac"', {
+            [ 'os_posix == 1 and OS != "mac" and OS != "ios"', {
               # Since ICU wants to internally use its own deprecated APIs, don't
               # complain about it.
               'cflags': [
@@ -284,7 +284,7 @@
                 '-frtti',
               ],
             }],
-            ['OS == "mac"', {
+            ['OS == "mac" or OS == "ios"', {
               'xcode_settings': {
                 'GCC_ENABLE_CPP_RTTI': 'YES',       # -frtti
               },
@@ -309,6 +309,8 @@
                   # the header should use U_NAMESPACE_BEGIN instead.
                   # http://bugs.icu-project.org/trac/ticket/9054
                   '-Wno-header-hygiene',
+                  # Looks like a real issue, see http://crbug.com/114660
+                  '-Wno-return-type-c-linkage',
                 ],
               },
               'cflags': [
@@ -316,7 +318,20 @@
                 '-Wno-logical-op-parentheses',
                 '-Wno-tautological-compare',
                 '-Wno-header-hygiene',
+                '-Wno-return-type-c-linkage',
               ],
+            }],
+            ['OS == "android" and use_system_stlport == 1', {
+              # ICU requires RTTI, which is not present in the system's stlport,
+              # so we have to include gabi++.
+              'include_dirs': [
+                '<(android_src)/abi/cpp/include',
+              ],
+              'link_settings': {
+                'libraries': [
+                  '-lgabi++',
+                ],
+              },
             }],
           ],
         },
@@ -508,7 +523,7 @@
                 'source/stubdata/stubdata.c',
               ],
             }],
-            [ 'os_posix == 1 and OS != "mac"', {
+            [ 'os_posix == 1 and OS != "mac" and OS != "ios"', {
               'cflags': [
                 # Since ICU wants to internally use its own deprecated APIs,
                 # don't complain about it.
@@ -519,7 +534,7 @@
                 '-frtti',
               ],
             }],
-            ['OS == "mac"', {
+            ['OS == "mac" or OS == "ios"', {
               'xcode_settings': {
                 'GCC_ENABLE_CPP_RTTI': 'YES',       # -frtti
               },
@@ -529,7 +544,19 @@
                 'VCCLCompilerTool': {
                   'RuntimeTypeInfo': 'true',
                 },
-              }
+              },
+            }],
+            ['OS == "android" and use_system_stlport == 1', {
+              # ICU requires RTTI, which is not present in the system's stlport,
+              # so we have to include gabi++.
+              'include_dirs': [
+                '<(android_src)/abi/cpp/include',
+              ],
+              'link_settings': {
+                'libraries': [
+                  '-lgabi++',
+                ],
+              },
             }],
             ['clang==1', {
               'xcode_settings': {
@@ -569,7 +596,6 @@
             ],
           },
           'conditions': [
-            # Don't upstream: the following change is for building in Android.
             ['OS=="android"', {
               'direct_dependent_settings': {
                 'include_dirs': [
@@ -579,8 +605,8 @@
               },
               'link_settings': {
                 'libraries': [
-                  '<(android_lib)/libicui18n.so',
-                  '<(android_lib)/libicuuc.so',
+                  '-licui18n',
+                  '-licuuc',
                 ],
               },
             },{ # OS!="android"

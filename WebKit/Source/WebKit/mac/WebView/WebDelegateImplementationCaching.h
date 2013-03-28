@@ -73,6 +73,7 @@ struct WebFrameLoadDelegateImplementationCache {
     IMP didFinishLoadForFrameFunc;
     IMP didFirstLayoutInFrameFunc;
     IMP didFirstVisuallyNonEmptyLayoutInFrameFunc;
+    IMP didLayoutFunc;
     IMP didReceiveIconForFrameFunc;
     IMP didFinishDocumentLoadForFrameFunc;
     IMP didDisplayInsecureContentFunc;
@@ -123,11 +124,14 @@ BOOL CallUIDelegateReturningBoolean(BOOL, WebView *, SEL, id, BOOL);
 BOOL CallUIDelegateReturningBoolean(BOOL, WebView *, SEL, id, BOOL, id);
 
 id CallFrameLoadDelegate(IMP, WebView *, SEL);
+id CallFrameLoadDelegate(IMP, WebView *, SEL, NSUInteger);
 id CallFrameLoadDelegate(IMP, WebView *, SEL, id);
 id CallFrameLoadDelegate(IMP, WebView *, SEL, id, id);
 id CallFrameLoadDelegate(IMP, WebView *, SEL, id, id, id);
 id CallFrameLoadDelegate(IMP, WebView *, SEL, id, id, id, id);
 id CallFrameLoadDelegate(IMP, WebView *, SEL, id, NSTimeInterval, id, id);
+
+BOOL CallFrameLoadDelegateReturningBoolean(BOOL, IMP, WebView *, SEL);
 
 id CallResourceLoadDelegate(IMP, WebView *, SEL, id, id);
 id CallResourceLoadDelegate(IMP, WebView *, SEL, id, id, id);

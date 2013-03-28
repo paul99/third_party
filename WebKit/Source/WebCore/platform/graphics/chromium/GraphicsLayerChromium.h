@@ -33,23 +33,38 @@
 
 #if USE(ACCELERATED_COMPOSITING)
 
-#include "ContentLayerChromium.h"
-#include "LayerChromium.h"
 #include "GraphicsContext.h"
 #include "GraphicsLayer.h"
-#include "cc/CCLayerAnimationDelegate.h"
+#include "OpaqueRectTrackingContentLayerDelegate.h"
 
+#include <public/WebAnimationDelegate.h>
+#include <public/WebContentLayer.h>
+#include <public/WebImageLayer.h>
+#include <public/WebLayer.h>
+#include <public/WebLayerScrollClient.h>
 #include <wtf/HashMap.h>
 
 namespace WebCore {
 
-class LayerChromium;
+class Path;
 class ScrollableArea;
 
-class GraphicsLayerChromium : public GraphicsLayer, public ContentLayerDelegate, public CCLayerAnimationDelegate {
+class LinkHighlightClient {
+public:
+    virtual void invalidate() = 0;
+    virtual void clearCurrentGraphicsLayer() = 0;
+    virtual WebKit::WebLayer* layer() = 0;
+
+protected:
+    virtual ~LinkHighlightClient() { }
+};
+
+class GraphicsLayerChromium : public GraphicsLayer, public GraphicsContextPainter, public WebKit::WebAnimationDelegate, public WebKit::WebLayerScrollClient {
 public:
     GraphicsLayerChromium(GraphicsLayerClient*);
     virtual ~GraphicsLayerChromium();
+
+    virtual void willBeDestroyed() OVERRIDE;
 
     virtual void setName(const String&);
 
@@ -73,17 +88,10 @@ public:
     virtual void setPreserves3D(bool);
     virtual void setMasksToBounds(bool);
     virtual void setDrawsContent(bool);
-
-#if OS(ANDROID)
-    virtual void setIsContainerLayer(bool);
-    virtual void setFixedToContainerLayerVisibleRect(bool);
-#endif
-
     virtual void setContentsVisible(bool);
     virtual void setMaskLayer(GraphicsLayer*);
 
     virtual void setBackgroundColor(const Color&);
-    virtual void clearBackgroundColor();
 
     virtual void setContentsOpaque(bool);
     virtual void setBackfaceVisibility(bool);
@@ -92,15 +100,23 @@ public:
 
     virtual void setOpacity(float);
 
+    // Returns true if filter can be rendered by the compositor
+    virtual bool setFilters(const FilterOperations&);
+    void setBackgroundFilters(const FilterOperations&);
+
     virtual void setNeedsDisplay();
     virtual void setNeedsDisplayInRect(const FloatRect&);
     virtual void setContentsNeedsDisplay();
 
     virtual void setContentsRect(const IntRect&);
 
+    static void registerContentsLayer(WebKit::WebLayer*);
+    static void unregisterContentsLayer(WebKit::WebLayer*);
+
     virtual void setContentsToImage(Image*);
     virtual void setContentsToMedia(PlatformLayer*);
     virtual void setContentsToCanvas(PlatformLayer*);
+    virtual bool hasContentsLayer() const { return m_contentsLayer; }
 
     virtual bool addAnimation(const KeyframeValueList&, const IntSize& boxSize, const Animation*, const String&, double timeOffset);
     virtual void pauseAnimation(const String& animationName, double timeOffset);
@@ -108,32 +124,36 @@ public:
     virtual void suspendAnimations(double wallClockTime);
     virtual void resumeAnimations();
 
-    virtual PlatformLayer* platformLayer() const;
+    void setLinkHighlight(LinkHighlightClient*);
+    // Next function for testing purposes.
+    LinkHighlightClient* linkHighlight() { return m_linkHighlight; }
 
-    virtual void setDebugBackgroundColor(const Color&);
-    virtual void setDebugBorder(const Color&, float borderWidth);
-    virtual void deviceOrPageScaleFactorChanged();
+    virtual WebKit::WebLayer* platformLayer() const;
 
-    // ContentLayerDelegate implementation.
-    virtual void paintContents(GraphicsContext&, const IntRect& clip);
-    virtual void wasScrolled(const IntSize& scrollDelta);
+    virtual void setAppliesPageScale(bool appliesScale) OVERRIDE;
+    virtual bool appliesPageScale() const OVERRIDE;
 
-    ScrollableArea* scrollableArea() const { return m_scrollableArea; }
     void setScrollableArea(ScrollableArea* scrollableArea) { m_scrollableArea = scrollableArea; }
+    ScrollableArea* scrollableArea() const { return m_scrollableArea; }
 
-    // CCLayerAnimationDelegate implementation.
-    virtual void notifyAnimationStarted(double startTime);
+    // GraphicsContextPainter implementation.
+    virtual void paint(GraphicsContext&, const IntRect& clip) OVERRIDE;
+
+    // WebAnimationDelegate implementation.
+    virtual void notifyAnimationStarted(double startTime) OVERRIDE;
+    virtual void notifyAnimationFinished(double finishTime) OVERRIDE;
+
+    // WebLayerScrollClient implementation.
+    virtual void didScroll() OVERRIDE;
+
+    WebKit::WebContentLayer* contentLayer() const { return m_layer.get(); }
 
     // Exposed for tests.
-    LayerChromium* contentsLayer() const { return m_contentsLayer.get(); }
+    WebKit::WebLayer* contentsLayer() const { return m_contentsLayer; }
+
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
 
 private:
-    typedef HashMap<String, int> AnimationIdMap;
-
-    LayerChromium* primaryLayer() const  { return m_transformLayer.get() ? m_transformLayer.get() : m_layer.get(); }
-    LayerChromium* hostLayerForChildren() const;
-    LayerChromium* layerForParent() const;
-
     void updateNames();
     void updateChildList();
     void updateLayerPosition();
@@ -149,20 +169,6 @@ private:
     void updateContentsImage();
     void updateContentsVideo();
     void updateContentsRect();
-    void updateContentsScale();
-
-    void setupContentsLayer(LayerChromium*);
-    float contentsScale() const;
-
-    int mapAnimationNameToId(const String& animationName);
-
-    String m_nameBase;
-
-    RefPtr<ContentLayerChromium> m_layer;
-    RefPtr<LayerChromium> m_transformLayer;
-    RefPtr<LayerChromium> m_contentsLayer;
-
-    ScrollableArea* m_scrollableArea;
 
     enum ContentsLayerPurpose {
         NoContentsLayer = 0,
@@ -171,11 +177,34 @@ private:
         ContentsLayerForCanvas,
     };
 
+    void setContentsTo(ContentsLayerPurpose, WebKit::WebLayer*);
+    void setupContentsLayer(WebKit::WebLayer*);
+    void clearContentsLayerIfUnregistered();
+    WebKit::WebLayer* contentsLayerIfRegistered();
+
+    String m_nameBase;
+
+    OwnPtr<WebKit::WebContentLayer> m_layer;
+    OwnPtr<WebKit::WebLayer> m_transformLayer;
+    OwnPtr<WebKit::WebImageLayer> m_imageLayer;
+    WebKit::WebLayer* m_contentsLayer;
+    // We don't have ownership of m_contentsLayer, but we do want to know if a given layer is the
+    // same as our current layer in setContentsTo(). Since m_contentsLayer may be deleted at this point,
+    // we stash an ID away when we know m_contentsLayer is alive and use that for comparisons from that point
+    // on.
+    int m_contentsLayerId;
+
+    LinkHighlightClient* m_linkHighlight;
+
+    OwnPtr<OpaqueRectTrackingContentLayerDelegate> m_opaqueRectTrackingContentLayerDelegate;
+
     ContentsLayerPurpose m_contentsLayerPurpose;
-    bool m_contentsLayerHasBackgroundColor : 1;
     bool m_inSetChildren;
 
+    typedef HashMap<String, int> AnimationIdMap;
     AnimationIdMap m_animationIdMap;
+
+    ScrollableArea* m_scrollableArea;
 };
 
 } // namespace WebCore

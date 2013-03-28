@@ -514,6 +514,58 @@
 			Name="runtime"
 			>
 			<File
+				RelativePath="..\..\runtime\Reject.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\ArrayStorage.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\IndexingType.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\IndexingType.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\PropertyStorage.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\PutDirectIndexMode.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\ButterflyInlines.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\Butterfly.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\IndexingHeaderInlines.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\SparseArrayValueMap.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\ArrayConventions.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\IndexingHeader.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\SparseArrayValueMap.cpp"
+				>
+			</File>
+			<File
 				RelativePath="..\..\runtime\ArgList.cpp"
 				>
 			</File>
@@ -586,6 +638,22 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\runtime\CodeCache.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\CodeCache.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\CodeSpecializationKind.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\CodeSpecializationKind.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\runtime\CommonIdentifiers.cpp"
 				>
 			</File>
@@ -639,14 +707,6 @@
 			</File>
 			<File
 				RelativePath="..\..\runtime\DateInstanceCache.h"
-				>
-			</File>
-			<File
-				RelativePath="..\..\wtf\DateMath.cpp"
-				>
-			</File>
-			<File
-				RelativePath="..\..\wtf\DateMath.h"
 				>
 			</File>
 			<File
@@ -778,11 +838,11 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\runtime\JSByteArray.cpp"
+				RelativePath="..\..\runtime\JSBoundFunction.cpp"
 				>
 			</File>
 			<File
-				RelativePath="..\..\runtime\JSByteArray.h"
+				RelativePath="..\..\runtime\JSBoundFunction.h"
 				>
 			</File>
 			<File
@@ -802,19 +862,15 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\runtime\JSDestructibleObject.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\runtime\JSFunction.cpp"
 				>
 			</File>
 			<File
 				RelativePath="..\..\runtime\JSFunction.h"
-				>
-			</File>
-			<File
-				RelativePath="..\..\runtime\JSBoundFunction.cpp"
-				>
-			</File>
-			<File
-				RelativePath="..\..\runtime\JSBoundFunction.h"
 				>
 			</File>
 			<File
@@ -842,11 +898,11 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\runtime\JSGlobalThis.cpp"
+				RelativePath="..\..\runtime\JSProxy.cpp"
 				>
 			</File>
 			<File
-				RelativePath="..\..\runtime\JSGlobalThis.h"
+				RelativePath="..\..\runtime\JSProxy.h"
 				>
 			</File>
 			<File
@@ -890,11 +946,35 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\runtime\JSStaticScopeObject.cpp"
+				RelativePath="..\..\runtime\JSSegmentedVariableObject.cpp"
 				>
 			</File>
 			<File
-				RelativePath="..\..\runtime\JSStaticScopeObject.h"
+				RelativePath="..\..\runtime\JSSegmentedVariableObject.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\JSWithScope.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\JSWithScope.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\JSNameScope.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\JSNameScope.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\JSScope.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\JSScope.h"
 				>
 			</File>
 			<File
@@ -903,6 +983,22 @@
 			</File>
 			<File
 				RelativePath="..\..\runtime\JSString.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\JSStringJoiner.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\JSStringJoiner.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\JSSymbolTableObject.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\JSSymbolTableObject.h"
 				>
 			</File>
 			<File
@@ -922,7 +1018,7 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\runtime\JSValueInlineMethods.h"
+				RelativePath="..\..\runtime\JSValueInlines.h"
 				>
 			</File>
 			<File
@@ -963,6 +1059,30 @@
 			</File>
 			<File
 				RelativePath="..\..\runtime\MathObject.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\NameConstructor.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\NameConstructor.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\NameInstance.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\NameInstance.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\NamePrototype.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\NamePrototype.h"
 				>
 			</File>
 			<File
@@ -1062,6 +1182,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\runtime\PropertyOffset.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\runtime\PropertySlot.cpp"
 				>
 			</File>
@@ -1098,7 +1222,19 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\runtime\RegExpCachedResult.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\RegExpCachedResult.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\runtime\RegExpKey.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\runtime\RegExpMatchesArray.cpp"
 				>
 			</File>
 			<File
@@ -1122,25 +1258,13 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\runtime\ScopeChain.cpp"
+				RelativePath="..\..\runtime\SamplingCounter.cpp"
 				>
 			</File>
 			<File
-				RelativePath="..\..\runtime\ScopeChain.h"
+				RelativePath="..\..\runtime\SamplingCounter.h"
 				>
 			</File>
-			<File
-				RelativePath="..\..\runtime\ScopeChainMark.h"
-				>
-			</File>
-                        <File
-                                RelativePath="..\..\runtime\SamplingCounter.cpp"
-                                >
-                        </File>
-                        <File
-                                RelativePath="..\..\runtime\SamplingCounter.h"
-                                >
-                        </File>
 			<File
 				RelativePath="..\..\runtime\SmallStrings.cpp"
 				>
@@ -1210,6 +1334,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\runtime\SymbolTable.cpp"
+				>
+			</File>
+			<File
 				RelativePath="..\..\runtime\SymbolTable.h"
 				>
 			</File>
@@ -1226,23 +1354,7 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\runtime\UString.cpp"
-				>
-			</File>
-			<File
-				RelativePath="..\..\runtime\UString.h"
-				>
-			</File>
-			<File
-				RelativePath="..\..\runtime\UStringBuilder.h"
-				>
-			</File>
-			<File
-				RelativePath="..\..\runtime\UStringConcatenate.h"
-				>
-			</File>
-			<File
-				RelativePath="..\..\runtime\UStringImpl.h"
+				RelativePath="..\..\runtime\TypedArrayDescriptor.h"
 				>
 			</File>
 			<File
@@ -1414,6 +1526,106 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\profiler\ProfilerBytecode.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerBytecode.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerBytecodeSequence.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerBytecodeSequence.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerBytecodes.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerBytecodes.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerCompilation.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerCompilation.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerCompilationKind.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerCompilationKind.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerCompiledBytecode.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerCompiledBytecode.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerDatabase.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerDatabase.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerExecutionCounter.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerOrigin.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerOrigin.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerOriginStack.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerOriginStack.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerOSRExit.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerOSRExit.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerOSRExitSite.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerOSRExitSite.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerProfiledBytecodes.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\profiler\ProfilerProfiledBytecodes.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\profiler\Profile.cpp"
 				>
 			</File>
@@ -1438,11 +1650,11 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\profiler\Profiler.cpp"
+				RelativePath="..\..\profiler\LegacyProfiler.cpp"
 				>
 			</File>
 			<File
-				RelativePath="..\..\profiler\Profiler.h"
+				RelativePath="..\..\profiler\LegacyProfiler.h"
 				>
 			</File>
 		</Filter>
@@ -1478,39 +1690,23 @@
 			Name="bytecode"
 			>
 			<File
-				RelativePath="..\..\bytecode\GetByIdStatus.h"
+				RelativePath="..\..\bytecode\ArrayAllocationProfile.cpp"
 				>
 			</File>
 			<File
-				RelativePath="..\..\bytecode\PutByIdStatus.h"
+				RelativePath="..\..\bytecode\ArrayAllocationProfile.h"
 				>
 			</File>
 			<File
-				RelativePath="..\..\bytecode\CallLinkStatus.h"
+				RelativePath="..\..\bytecode\ArrayProfile.cpp"
 				>
 			</File>
 			<File
-				RelativePath="..\..\bytecode\MethodCallLinkStatus.h"
+				RelativePath="..\..\bytecode\ArrayProfile.h"
 				>
 			</File>
 			<File
-				RelativePath="..\..\bytecode\GetByIdStatus.cpp"
-				>
-			</File>
-			<File
-				RelativePath="..\..\bytecode\PutByIdStatus.cpp"
-				>
-			</File>
-			<File
-				RelativePath="..\..\bytecode\CallLinkStatus.cpp"
-				>
-			</File>
-			<File
-				RelativePath="..\..\bytecode\MethodCallLinkStatus.cpp"
-				>
-			</File>
-			<File
-				RelativePath="..\..\bytecode\HandlerInfo.h"
+				RelativePath="..\..\bytecode\ByValInfo.h"
 				>
 			</File>
 			<File
@@ -1518,35 +1714,19 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\bytecode\LineInfo.h"
-				>
-			</File>
-			<File
-				RelativePath="..\..\bytecode\MethodCallLinkInfo.h"
-				>
-			</File>
-			<File
-				RelativePath="..\..\bytecode\CallReturnOffsetToBytecodeOffset.h"
-				>
-			</File>
-			<File
-				RelativePath="..\..\bytecode\CodeType.h"
-				>
-			</File>
-			<File
-				RelativePath="..\..\bytecode\ExpressionRangeInfo.h"
-				>
-			</File>
-			<File
-				RelativePath="..\..\bytecode\MethodCallLinkInfo.cpp"
-				>
-			</File>
-			<File
 				RelativePath="..\..\bytecode\CallLinkInfo.h"
 				>
 			</File>
 			<File
-				RelativePath="..\..\bytecode\GlobalResolveInfo.h"
+				RelativePath="..\..\bytecode\CallLinkStatus.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\CallLinkStatus.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\CallReturnOffsetToBytecodeOffset.h"
 				>
 			</File>
 			<File
@@ -1558,11 +1738,71 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\bytecode\CodeBlockHash.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\CodeBlockHash.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\CodeBlockWithJITType.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\CodeOrigin.cpp"
+				>
+			</File>
+			<File
 				RelativePath="..\..\bytecode\CodeOrigin.h"
 				>
 			</File>
 			<File
+				RelativePath="..\..\bytecode\CodeType.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\CodeType.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\Comment.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\bytecode\EvalCodeCache.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\ExecutionCounter.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\ExpressionRangeInfo.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\ExitKind.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\ExitKind.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\GetByIdStatus.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\GetByIdStatus.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\GlobalResolveInfo.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\HandlerInfo.h"
 				>
 			</File>
 			<File
@@ -1578,6 +1818,26 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\bytecode\LazyOperandValueProfile.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\LazyOperandValueProfile.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\LineInfo.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\MethodOfGettingAValueProfile.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\MethodOfGettingAValueProfile.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\bytecode\Opcode.cpp"
 				>
 			</File>
@@ -1586,11 +1846,39 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\bytecode\PredictedType.cpp"
+				RelativePath="..\..\bytecode\PolymorphicPutByIdList.cpp"
 				>
 			</File>
 			<File
-				RelativePath="..\..\bytecode\PredictedType.h"
+				RelativePath="..\..\bytecode\ReduceWhitespace.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\ReduceWhitespace.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\SpecialPointer.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\SpecialPointer.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\SpeculatedType.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\SpeculatedType.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\PutByIdStatus.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\PutByIdStatus.h"
 				>
 			</File>
 			<File
@@ -1602,6 +1890,14 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\bytecode\StructureStubClearingWatchpoint.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\StructureStubClearingWatchpoint.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\bytecode\StructureStubInfo.cpp"
 				>
 			</File>
@@ -1610,11 +1906,23 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\bytecode\ValueProfile.cpp"
+				RelativePath="..\..\bytecode\UnlinkedCodeBlock.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\UnlinkedCodeBlock.h"
 				>
 			</File>
 			<File
 				RelativePath="..\..\bytecode\ValueProfile.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\Watchpoint.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\bytecode\Watchpoint.h"
 				>
 			</File>
 		</Filter>
@@ -1662,7 +1970,15 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\assembler\LinkBuffer.cpp"
+				>
+			</File>
+			<File
 				RelativePath="..\..\assembler\LinkBuffer.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\assembler\MacroAssembler.cpp"
 				>
 			</File>
 			<File
@@ -1686,27 +2002,35 @@
 				>
 			</File>
 		</Filter>
-                <Filter
-                        Name="dfg"
-                        >
-                        <File
-                                RelativePath="..\..\dfg\DFGDriver.h"
-                                >
-                        </File>
-                        <File
-                                RelativePath="..\..\dfg\DFGIntrinsic.h"
-                                >
-                        </File>
-                        <File
-                                RelativePath="..\..\dfg\DFGOSREntry.h"
-                                >
-                        </File>
-                </Filter>
+		<Filter
+			Name="dfg"
+			>
+			<File
+				RelativePath="..\..\dfg\DFGDriver.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\dfg\DFGIntrinsic.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\dfg\DFGOSREntry.h"
+				>
+			</File>
+		</Filter>
 		<Filter
 			Name="yarr"
 			>
 			<File
 				RelativePath="..\..\yarr\Yarr.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\yarr\YarrCanonicalizeUCS2.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\yarr\YarrCanonicalizeUCS2.h"
 				>
 			</File>
 			<File
@@ -1750,11 +2074,31 @@
 			Name="jit"
 			>
 			<File
+				RelativePath="..\..\jit\ClosureCallStubRoutine.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\jit\ClosureCallStubRoutine.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\jit\ExecutableAllocator.cpp"
 				>
 			</File>
 			<File
 				RelativePath="..\..\jit\ExecutableAllocator.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\jit\HostCallReturnValue.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\jit\GCAwareJITStubRoutine.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\jit\GCAwareJITStubRoutine.h"
 				>
 			</File>
 			<File
@@ -1782,11 +2126,31 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\jit\JITCode.cpp"
+				>
+			</File>
+			<File
 				RelativePath="..\..\jit\JITCode.h"
 				>
 			</File>
 			<File
-				RelativePath="..\..\jit\JITInlineMethods.h"
+				RelativePath="..\..\jit\JITDisassembler.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\jit\JITDisassembler.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\jit\JITExceptions.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\jit\JITExceptions.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\jit\JITInlines.h"
 				>
 			</File>
 			<File
@@ -1810,11 +2174,11 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\jit\JITExceptions.cpp"
+				RelativePath="..\..\jit\JITStubRoutine.cpp"
 				>
 			</File>
 			<File
-				RelativePath="..\..\jit\JITExceptions.h"
+				RelativePath="..\..\jit\JITStubRoutine.h"
 				>
 			</File>
 			<File
@@ -1823,6 +2187,14 @@
 			</File>
 			<File
 				RelativePath="..\..\jit\JITStubs.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\jit\JumpReplacementWatchpoint.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\jit\JumpReplacementWatchpoint.h"
 				>
 			</File>
 			<File
@@ -1839,6 +2211,90 @@
 			</File>
 			<File
 				RelativePath="..\..\jit\ThunkGenerators.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="llint"
+			>
+			<File
+				RelativePath="..\..\llint\LLIntCLoop.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LLIntCLoop.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LLIntCommon.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LLIntData.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LLIntData.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LLIntEntrypoints.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LLIntEntrypoints.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LLIntExceptions.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LLIntExceptions.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LLIntOfflineAsmConfig.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LLIntOpcode.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LLIntSlowPaths.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LLIntSlowPaths.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LLIntThunks.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LLIntThunks.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LowLevelInterpreter.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\llint\LowLevelInterpreter.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="disassembler"
+			>
+			<File
+				RelativePath="..\..\disassembler\Disassembler.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\disassembler\Disassembler.h"
 				>
 			</File>
 		</Filter>
@@ -1878,15 +2334,23 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\interpreter\JSStack.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\interpreter\JSStack.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\interpreter\Register.h"
 				>
 			</File>
 			<File
-				RelativePath="..\..\interpreter\RegisterFile.cpp"
+				RelativePath="..\..\interpreter\VMInspector.cpp"
 				>
 			</File>
 			<File
-				RelativePath="..\..\interpreter\RegisterFile.h"
+				RelativePath="..\..\interpreter\VMInspector.h"
 				>
 			</File>
 		</Filter>
@@ -1958,6 +2422,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\parser\ParserModes.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\parser\ParserArena.cpp"
 				>
 			</File>
@@ -2014,6 +2482,10 @@
 				>
 			</File>
 			<File
+				RelativePath="$(ConfigurationBuildDir)\obj\$(ProjectName)\DerivedSources\NamePrototype.lut.h"
+				>
+			</File>
+			<File
 				RelativePath="$(ConfigurationBuildDir)\obj\$(ProjectName)\DerivedSources\NumberConstructor.lut.h"
 				>
 			</File>
@@ -2033,142 +2505,266 @@
 		<Filter
 			Name="heap"
 			>
-                            <File
-                                    RelativePath="..\..\heap\BumpBlock.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\BumpSpace.cpp"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\BumpSpace.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\BumpSpaceInlineMethods.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\ConservativeRoots.cpp"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\ConservativeRoots.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\MachineStackMarker.cpp"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\MachineStackMarker.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\MarkedBlock.cpp"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\MarkedBlock.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\MarkedSpace.cpp"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\MarkedSpace.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\MarkStack.cpp"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\MarkStack.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\HeapRootVisitor.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\Heap.cpp"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\Heap.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\HeapBlock.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\Strong.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\StrongInlines.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\Handle.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\HandleHeap.cpp"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\HandleHeap.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\HandleStack.cpp"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\HandleStack.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\DFGCodeBlocks.cpp"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\DFGCodeBlocks.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\Local.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\LocalScope.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\VTableSpectrum.h"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\VTableSpectrum.cpp"
-                                    >
-                            </File>
-                            <File
-                                    RelativePath="..\..\heap\Weak.h"
-                                    >
-                            </File>
-			    <File
-				    RelativePath="..\..\heap\WriteBarrierSupport.cpp"
-				    >
-			    </File>
-			    <File
-				    RelativePath="..\..\heap\WriteBarrierSupport.h"
-				    >
-			    </File>
+			<File
+				RelativePath="..\..\heap\ConservativeRoots.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\ConservativeRoots.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\CopiedAllocator.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\CopiedBlock.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\CopiedSpace.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\CopiedSpace.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\CopiedSpaceInlines.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\CopyVisitor.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\CopyVisitor.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\CopyVisitorInlines.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\DFGCodeBlocks.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\DFGCodeBlocks.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\GCAssertions.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\Handle.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\HandleSet.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\HandleSet.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\HeapTimer.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\HeapTimer.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\JITStubRoutineSet.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\JITStubRoutineSet.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\IncrementalSweeper.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\IncrementalSweeper.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\WeakBlock.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\WeakBlock.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\WeakSet.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\WeakSet.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\WeakSetInlines.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\WeakImpl.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\WeakHandleOwner.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\WeakHandleOwner.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\HandleStack.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\HandleStack.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\BlockAllocator.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\BlockAllocator.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\GCThread.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\GCThread.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\GCThreadSharedData.cpp"
+				>
+			</File>
+			<File
+    			RelativePath="..\..\heap\GCThreadSharedData.h"
+    			>
+			</File>
+			<File
+				RelativePath="..\..\heap\Heap.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\Heap.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\HeapBlock.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\HeapRootVisitor.h"
+				>
+			</File>
+            <File
+                RelativePath="..\..\heap\HeapStatistics.cpp"
+            >
+            </File>
+            <File
+                RelativePath="..\..\heap\HeapStatistics.h"
+            >
+            </File>
+			<File
+				RelativePath="..\..\heap\Local.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\LocalScope.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\MachineStackMarker.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\MachineStackMarker.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\MarkedAllocator.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\MarkedAllocator.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\MarkedBlock.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\MarkedBlock.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\MarkedSpace.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\MarkedSpace.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\MarkStack.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\MarkStack.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\MarkStackInlines.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\SlotVisitor.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\Strong.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\StrongInlines.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\VTableSpectrum.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\VTableSpectrum.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\Weak.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\WriteBarrierSupport.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\..\heap\WriteBarrierSupport.h"
+				>
+			</File>
 		</Filter>
 		<File
 			RelativePath="..\..\config.h"

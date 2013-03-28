@@ -114,14 +114,18 @@ class NicMap : public std::map<NicId, NicInfo, NicIdComparator> {
 class TestHttpPortAllocatorSession : public HttpPortAllocatorSession {
  public:
   TestHttpPortAllocatorSession(
-      HttpPortAllocator* allocator, const std::string &name,
-      const std::string& session_type,
+      HttpPortAllocator* allocator,
+      const std::string& content_name,
+      int component,
+      const std::string& ice_ufrag,
+      const std::string& ice_pwd,
       const std::vector<talk_base::SocketAddress>& stun_hosts,
       const std::vector<std::string>& relay_hosts,
       const std::string& relay_token,
       const std::string& user_agent)
-      : HttpPortAllocatorSession(allocator, name, session_type, stun_hosts,
-                                 relay_hosts, relay_token, user_agent) {
+      : HttpPortAllocatorSession(
+          allocator, content_name, component, ice_ufrag, ice_pwd, stun_hosts,
+          relay_hosts, relay_token, user_agent) {
   }
   void set_proxy(const talk_base::ProxyInfo& proxy) {
     proxy_ = proxy;
@@ -131,7 +135,8 @@ class TestHttpPortAllocatorSession : public HttpPortAllocatorSession {
 
   void OnRequestDone(talk_base::SignalThread* data);
 
-  sigslot::signal2<const PortConfiguration*,
+  sigslot::signal4<const std::string&, const std::string&,
+                   const PortConfiguration*,
                    const talk_base::ProxyInfo&> SignalConfigReady;
   sigslot::signal1<talk_base::AsyncHttpRequest*> SignalRequestDone;
 
@@ -156,10 +161,15 @@ class ConnectivityChecker
   // Virtual for gMock.
   virtual bool Initialize();
   virtual void Start();
-  virtual void Stop();
 
   // MessageHandler implementation.
   virtual void OnMessage(talk_base::Message *msg);
+
+  // Instruct checker to stop and wait until that's done.
+  // Virtual for gMock.
+  virtual void Stop() {
+    worker_->Stop();
+  }
 
   const NicMap& GetResults() const {
     return nics_;
@@ -175,10 +185,6 @@ class ConnectivityChecker
 
   const std::string& connection() const {
     return connection_;
-  }
-
-  talk_base::Thread* worker() {
-    return worker_;
   }
 
   const std::string& jid() const {
@@ -205,13 +211,19 @@ class ConnectivityChecker
       talk_base::NetworkManager* network_manager,
       const std::string& user_agent,
       const std::string& relay_token);
-  virtual StunPort* CreateStunPort(const PortConfiguration* config,
-                                   talk_base::Network* network);
-  virtual RelayPort* CreateRelayPort(const PortConfiguration* config,
-                                     talk_base::Network* network);
+  virtual StunPort* CreateStunPort(
+      const std::string& username, const std::string& password,
+      const PortConfiguration* config, talk_base::Network* network);
+  virtual RelayPort* CreateRelayPort(
+      const std::string& username, const std::string& password,
+      const PortConfiguration* config, talk_base::Network* network);
   virtual void InitiateProxyDetection();
   virtual void SetProxyInfo(const talk_base::ProxyInfo& info);
   virtual talk_base::ProxyInfo GetProxyInfo() const;
+
+  talk_base::Thread* worker() {
+    return worker_;
+  }
 
  private:
   bool AddNic(const talk_base::IPAddress& ip,
@@ -219,13 +231,13 @@ class ConnectivityChecker
   void AllocatePorts();
   void AllocateRelayPorts();
   void CheckNetworks();
-  void CreateRelayPorts(const PortConfiguration* config,
-                        const talk_base::ProxyInfo& proxy_info);
+  void CreateRelayPorts(
+      const std::string& username, const std::string& password,
+      const PortConfiguration* config, const talk_base::ProxyInfo& proxy_info);
 
   // Must be called by the worker thread.
   void CleanUp();
 
-  void OnCheckDone(bool signal_results);
   void OnRequestDone(talk_base::AsyncHttpRequest* request);
   void OnRelayAddressReady(Port* port);
   void OnStunAddressReady(Port* port);
@@ -233,8 +245,9 @@ class ConnectivityChecker
   void OnStunAddressError(Port* port);
   void OnNetworksChanged();
   void OnProxyDetect(talk_base::SignalThread* thread);
-  void OnConfigReady(const PortConfiguration*,
-                     const talk_base::ProxyInfo& proxy);
+  void OnConfigReady(
+      const std::string& username, const std::string& password,
+      const PortConfiguration* config, const talk_base::ProxyInfo& proxy);
   void OnConfigWithProxyReady(const PortConfiguration*);
   void RegisterHttpStart(int port);
   talk_base::Thread* worker_;
@@ -253,6 +266,7 @@ class ConnectivityChecker
   uint32 timeout_ms_;
   talk_base::SocketAddress stun_address_;
   talk_base::Thread* main_;
+  bool started_;
 };
 
 }  // namespace cricket

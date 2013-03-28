@@ -32,15 +32,15 @@
 
 namespace WebCore {
 
-DocumentFragment::DocumentFragment(Document* document)
-    : ContainerNode(document)
+DocumentFragment::DocumentFragment(Document* document, ConstructionType constructionType)
+    : ContainerNode(document, constructionType)
 {
     ASSERT(document);
 }
 
 PassRefPtr<DocumentFragment> DocumentFragment::create(Document* document)
 {
-    return adoptRef(new DocumentFragment(document));
+    return adoptRef(new DocumentFragment(document, Node::CreateDocumentFragment));
 }
 
 String DocumentFragment::nodeName() const

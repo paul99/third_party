@@ -26,25 +26,30 @@
 #ifndef RenderThemeChromiumAndroid_h
 #define RenderThemeChromiumAndroid_h
 
-#include "RenderThemeChromiumLinux.h"
+#include "RenderThemeChromiumDefault.h"
 
 namespace WebCore {
 
-class RenderThemeChromiumAndroid : public RenderThemeChromiumLinux {
+class RenderThemeChromiumAndroid : public RenderThemeChromiumDefault {
 public:
     static PassRefPtr<RenderTheme> create();
-    virtual String extraDefaultStyleSheet();
+    virtual String extraDefaultStyleSheet() OVERRIDE;
 
-    virtual Color systemColor(int cssValidId) const;
+    virtual Color systemColor(int cssValidId) const OVERRIDE;
 
-    virtual void adjustInnerSpinButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+    virtual void adjustInnerSpinButtonStyle(StyleResolver*, RenderStyle*, Element*) const OVERRIDE;
 
-    virtual bool delegatesMenuListRendering() const { return true; }
+    virtual bool delegatesMenuListRendering() const OVERRIDE { return true; }
 
     virtual bool paintMediaOverlayPlayButton(RenderObject*, const PaintInfo&, const IntRect&) OVERRIDE;
 
+#if ENABLE(VIDEO)
+    virtual String extraMediaControlsStyleSheet() OVERRIDE;
+#endif
+
 #if ENABLE(TOUCH_EVENTS)
-    virtual Color platformTapHighlightColor() const {
+    virtual Color platformTapHighlightColor() const OVERRIDE
+    {
         return RenderThemeChromiumAndroid::defaultTapHighlightColor;
     }
 #endif
@@ -55,7 +60,7 @@ public:
     }
 
 protected:
-    virtual int menuListArrowPadding() const;
+    virtual int menuListArrowPadding() const OVERRIDE;
 
 private:
     virtual ~RenderThemeChromiumAndroid();

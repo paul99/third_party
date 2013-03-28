@@ -25,7 +25,7 @@
 #include "FontOrientation.h"
 #include "FontRenderingMode.h"
 #include "FontWidthVariant.h"
-#include "TextOrientation.h"
+#include <QRawFont>
 #include <wtf/FastAllocBase.h>
 #include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
@@ -39,15 +39,13 @@ struct FontCustomPlatformData {
     WTF_MAKE_NONCOPYABLE(FontCustomPlatformData); WTF_MAKE_FAST_ALLOCATED;
 public:
     FontCustomPlatformData() { }
-    ~FontCustomPlatformData();
 
-    // for use with QFontDatabase::addApplicationFont/removeApplicationFont
-    int m_handle;
-
-    FontPlatformData fontPlatformData(int size, bool bold, bool italic, FontOrientation = Horizontal, TextOrientation = TextOrientationVerticalRight,
+    FontPlatformData fontPlatformData(int size, bool bold, bool italic, FontOrientation = Horizontal,
                                       FontWidthVariant = RegularWidth, FontRenderingMode = NormalRenderingMode);
 
     static bool supportsFormat(const String&);
+
+    QRawFont m_rawFont;
 };
 
 FontCustomPlatformData* createFontCustomPlatformData(SharedBuffer* buffer);

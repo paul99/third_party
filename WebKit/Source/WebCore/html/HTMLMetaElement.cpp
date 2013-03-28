@@ -42,22 +42,24 @@ PassRefPtr<HTMLMetaElement> HTMLMetaElement::create(const QualifiedName& tagName
     return adoptRef(new HTMLMetaElement(tagName, document));
 }
 
-void HTMLMetaElement::parseMappedAttribute(Attribute* attr)
+void HTMLMetaElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
-    if (attr->name() == http_equivAttr)
+    if (name == http_equivAttr)
         process();
-    else if (attr->name() == contentAttr)
+    else if (name == contentAttr)
         process();
-    else if (attr->name() == nameAttr) {
+    else if (name == nameAttr) {
         // Do nothing
     } else
-        HTMLElement::parseMappedAttribute(attr);
+        HTMLElement::parseAttribute(name, value);
 }
 
-void HTMLMetaElement::insertedIntoDocument()
+Node::InsertionNotificationRequest HTMLMetaElement::insertedInto(ContainerNode* insertionPoint)
 {
-    HTMLElement::insertedIntoDocument();
-    process();
+    HTMLElement::insertedInto(insertionPoint);
+    if (insertionPoint->inDocument())
+        process();
+    return InsertionDone;
 }
 
 void HTMLMetaElement::process()
@@ -69,17 +71,16 @@ void HTMLMetaElement::process()
     if (contentValue.isNull())
         return;
 
-#if OS(ANDROID)
-    if ((equalIgnoringCase(name(), "HandheldFriendly") && equalIgnoringCase(content(), "true"))
-        || equalIgnoringCase(name(), "MobileOptimized"))
-        document()->setNeedsDeviceWidthMobileViewport();
-#endif
-
     if (equalIgnoringCase(name(), "viewport"))
-        document()->processViewport(contentValue);
-
-    if (equalIgnoringCase(name(), "referrer"))
+        document()->processViewport(contentValue, ViewportArguments::ViewportMeta);
+    else if (equalIgnoringCase(name(), "referrer"))
         document()->processReferrerPolicy(contentValue);
+#if ENABLE(LEGACY_VIEWPORT_ADAPTION)
+    else if (equalIgnoringCase(name(), "handheldfriendly") && equalIgnoringCase(contentValue, "true"))
+        document()->processViewport("width=device-width", ViewportArguments::HandheldFriendlyMeta);
+    else if (equalIgnoringCase(name(), "mobileoptimized"))
+        document()->processViewport("width=device-width, initial-scale=1", ViewportArguments::MobileOptimizedMeta);
+#endif
 
     // Get the document to process the tag, but only if we're actually part of DOM tree (changing a meta tag while
     // it's not in the tree shouldn't have any effect on the document)
@@ -100,7 +101,7 @@ String HTMLMetaElement::httpEquiv() const
 
 String HTMLMetaElement::name() const
 {
-    return getAttribute(nameAttr);
+    return getNameAttribute();
 }
 
 #if ENABLE(MICRODATA)

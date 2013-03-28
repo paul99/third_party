@@ -23,19 +23,20 @@
 #include "config.h"
 #include "ScrollbarEfl.h"
 
-#include "ChromeClient.h"
 #include "Frame.h"
 #include "FrameView.h"
 #include "GraphicsContext.h"
 #include "HostWindow.h"
 #include "IntRect.h"
-#include "NotImplemented.h"
 #include "Page.h"
+#include "RenderThemeEfl.h"
 #include "ScrollbarTheme.h"
+#include "Settings.h"
 
 #include <Ecore.h>
 #include <Edje.h>
 #include <Evas.h>
+#include <new>
 #include <string>
 #include <wtf/text/CString.h>
 
@@ -44,6 +45,9 @@ using namespace WebCore;
 
 PassRefPtr<Scrollbar> Scrollbar::createNativeScrollbar(ScrollableArea* scrollableArea, ScrollbarOrientation orientation, ScrollbarControlSize size)
 {
+    if (Settings::mockScrollbarsEnabled())
+        return adoptRef(new Scrollbar(scrollableArea, orientation, size));
+
     return adoptRef(new ScrollbarEfl(scrollableArea, orientation, size));
 }
 
@@ -63,7 +67,7 @@ ScrollbarEfl::~ScrollbarEfl()
     setEvasObject(0);
 }
 
-static void scrollbarEflEdjeMessage(void* data, Evas_Object* object, Edje_Message_Type messageType, int id, void* message)
+static void scrollbarEflEdjeMessage(void* data, Evas_Object*, Edje_Message_Type messageType, int id, void* message)
 {
     ScrollbarEfl* that = static_cast<ScrollbarEfl*>(data);
     Edje_Message_Float* messageFloat;
@@ -109,9 +113,17 @@ void ScrollbarEfl::setParent(ScrollView* view)
         return;
     }
 
+    Frame* frame = static_cast<FrameView*>(view)->frame();
+    if (!frame)
+        return;
+
+    Page* page = frame->page();
+    if (!page)
+        return;
+
     const char* group = (orientation() == HorizontalScrollbar)
         ? "scrollbar.horizontal" : "scrollbar.vertical";
-    String theme(edjeThemeRecursive());
+    String theme = static_cast<RenderThemeEfl*>(page->theme())->themePath();
 
     if (theme.isEmpty()) {
         EINA_LOG_ERR("Could not load theme '%s': no theme path set.", group);
@@ -160,8 +172,8 @@ void ScrollbarEfl::updateThumbPositionAndProportion()
     m_lastTotalSize = tSize;
     m_lastVisibleSize = vSize;
 
-    char buffer[sizeof(Edje_Message_Float_Set) + sizeof(double)];
-    Edje_Message_Float_Set* message = reinterpret_cast<Edje_Message_Float_Set*>(buffer);
+    OwnArrayPtr<char> buffer = adoptArrayPtr(new char[sizeof(Edje_Message_Float_Set) + sizeof(double)]);
+    Edje_Message_Float_Set* message = new(buffer.get()) Edje_Message_Float_Set;
     message->count = 2;
 
     if (tSize - vSize > 0)

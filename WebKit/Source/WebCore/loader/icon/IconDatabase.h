@@ -29,6 +29,7 @@
 
 #include "IconDatabaseBase.h"
 #include "Timer.h"
+#include <wtf/HashCountedSet.h>
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/Noncopyable.h>
@@ -63,7 +64,10 @@ class SQLTransaction;
 // For builds with IconDatabase disabled, they'll just use a default derivation of IconDatabaseBase. Which does nothing.
 class IconDatabase : public IconDatabaseBase {
 public:
+    static PassOwnPtr<IconDatabase> create() { return adoptPtr(new IconDatabase); }
     static void delayDatabaseCleanup() { }
+    static void allowDatabaseCleanup() { }
+    static void checkIntegrityBeforeOpening() { }
     static String defaultDatabaseFilename() { return "WebpageIcons.db"; }
 };
 #else 
@@ -93,6 +97,7 @@ public:
     virtual void setIconURLForPageURL(const String& iconURL, const String& pageURL);
 
     virtual Image* synchronousIconForPageURL(const String&, const IntSize&);
+    virtual NativeImagePtr synchronousNativeIconForPageURL(const String& pageURLOriginal, const IntSize&);
     virtual String synchronousIconURLForPageURL(const String&);
     virtual bool synchronousIconDataKnownForIconURL(const String&);
     virtual IconLoadDecision synchronousLoadDecisionForIconURL(const String&, DocumentLoader*);    
@@ -131,6 +136,11 @@ private:
     HashSet<RefPtr<DocumentLoader> > m_loadersPendingDecision;
 
     RefPtr<IconRecord> m_defaultIconRecord;
+
+    static void performScheduleOrDeferSyncTimerOnMainThread(void*);
+    void performScheduleOrDeferSyncTimer();
+
+    bool m_scheduleOrDeferSyncTimerRequested;
 
 // *** Any Thread ***
 public:
@@ -174,24 +184,26 @@ private:
     HashSet<String> m_pageURLsInterestedInIcons;
     HashSet<IconRecord*> m_iconsPendingReading;
 
+    Mutex m_urlsToRetainOrReleaseLock;
+    // Holding m_urlsToRetainOrReleaseLock is required when accessing any of the following data structures.
+    HashCountedSet<String> m_urlsToRetain;
+    HashCountedSet<String> m_urlsToRelease;
+    bool m_retainOrReleaseIconRequested;
+
 // *** Sync Thread Only ***
 public:
-    // Should be used only on the sync thread and only by the Safari 2 Icons import procedure
-    virtual void importIconURLForPageURL(const String& iconURL, const String& pageURL);
-    virtual void importIconDataForIconURL(PassRefPtr<SharedBuffer> data, const String& iconURL);
-    
     virtual bool shouldStopThreadActivity() const;
 
 private:    
-    static void* iconDatabaseSyncThreadStart(void *);
-    void* iconDatabaseSyncThread();
+    static void iconDatabaseSyncThreadStart(void *);
+    void iconDatabaseSyncThread();
     
     // The following block of methods are called exclusively by the sync thread to manage i/o to and from the database
     // Each method should periodically monitor m_threadTerminationRequested when it makes sense to return early on shutdown
     void performOpenInitialization();
     bool checkIntegrity();
     void performURLImport();
-    void* syncThreadMainLoop();
+    void syncThreadMainLoop();
     bool readFromDatabase();
     bool writeToDatabase();
     void pruneUnretainedIcons();
@@ -199,10 +211,8 @@ private:
     void removeAllIconsOnThread();
     void deleteAllPreparedStatements();
     void* cleanupSyncThread();
-
-    // Record (on disk) whether or not Safari 2-style icons were imported (once per dataabse)
-    bool imported();
-    void setImported(bool);
+    void performRetainIconForPageURL(const String&, int retainCount);
+    void performReleaseIconForPageURL(const String&, int releaseCount);
     
     bool wasExcludedFromBackup();
     void setWasExcludedFromBackup();
@@ -217,7 +227,9 @@ private:
     PassRefPtr<SharedBuffer> getImageDataForIconURLFromSQLDatabase(const String& iconURL);
     void removeIconFromSQLDatabase(const String& iconURL);
     void writeIconSnapshotToSQLDatabase(const IconSnapshot&);    
-    
+
+    void performPendingRetainAndReleaseOperations();
+
     // Methods to dispatch client callbacks on the main thread
     void dispatchDidImportIconURLForPageURLOnMainThread(const String&);
     void dispatchDidImportIconDataForPageURLOnMainThread(const String&);
@@ -228,10 +240,6 @@ private:
     IconDatabaseClient* m_client;
     
     SQLiteDatabase m_syncDB;
-    
-    // Track whether the "Safari 2" import is complete and/or set in the database
-    bool m_imported;
-    bool m_isImportedSet;
     
     OwnPtr<SQLiteStatement> m_setIconIDForPageURLStatement;
     OwnPtr<SQLiteStatement> m_removePageURLStatement;

@@ -53,6 +53,7 @@
 #define WebKitAllowFileAccessFromFileURLsPreferenceKey "WebKitAllowFileAccessFromFileURLs"
 #define WebKitJavaScriptCanOpenWindowsAutomaticallyPreferenceKey "WebKitJavaScriptCanOpenWindowsAutomatically"
 #define WebKitPluginsEnabledPreferenceKey "WebKitPluginsEnabled"
+#define WebKitCSSRegionsEnabledPreferenceKey "WebKitCSSRegionsEnabled"
 #define WebKitDatabasesEnabledPreferenceKey "WebKitDatabasesEnabled"
 #define WebKitLocalStorageEnabledPreferenceKey "WebKitLocalStorageEnabled"
 #define WebKitExperimentalNotificationsEnabledPreferenceKey "WebKitExperimentalNotificationsEnabled"
@@ -82,7 +83,7 @@
 #define WebKitPDFDisplayModePreferenceKey "WebKitPDFDisplayMode"
 #define WebKitPDFScaleFactorPreferenceKey "WebKitPDFScaleFactor"
 #define WebKitEditableLinkBehaviorPreferenceKey "WebKitEditableLinkBehavior"
-#define WebKitEditingBehaviorPreferenceKey "WebKitEditingBehavior"
+#define WebKitShouldInvertColorsPreferenceKey "WebKitShouldInvertColors"
 
 // Window display is throttled to 60 frames per second if WebKitThrottleWindowDisplayPreferenceKey
 // is set to YES.  The window display throttle is OFF by default for compatibility with Mac OS X
@@ -161,3 +162,6 @@
 #define WebKitMediaPlaybackAllowsInlinePreferenceKey "WebKitMediaPlaybackAllowsInline"
 
 #define WebKitAVFoundationEnabledPreferenceKey "WebKitAVFoundationEnabled"
+
+#define WebKitRequestAnimationFrameEnabledPreferenceKey "WebKitRequestAnimationFrameEnabled"
+

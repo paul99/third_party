@@ -52,6 +52,7 @@ static const char autoconnectToWorkers[] = "autoconnectToWorkers";
 };
 
 class InspectorWorkerAgent::WorkerFrontendChannel : public WorkerContextProxy::PageInspector {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit WorkerFrontendChannel(InspectorFrontend* frontend, WorkerContextProxy* proxy)
         : m_frontend(frontend)
@@ -62,6 +63,7 @@ public:
     }
     virtual ~WorkerFrontendChannel()
     {
+        disconnectFromWorkerContext();
     }
 
     int id() const { return m_id; }
@@ -135,20 +137,25 @@ void InspectorWorkerAgent::restore()
 
 void InspectorWorkerAgent::clearFrontend()
 {
-    m_inspectorFrontend = 0;
     m_state->setBoolean(WorkerAgentState::autoconnectToWorkers, false);
-    destroyWorkerFrontendChannels();
+    disable(0);
+    m_inspectorFrontend = 0;
 }
 
-void InspectorWorkerAgent::setWorkerInspectionEnabled(ErrorString*, bool value)
+void InspectorWorkerAgent::enable(ErrorString*)
 {
-    m_state->setBoolean(WorkerAgentState::workerInspectionEnabled, value);
+    m_state->setBoolean(WorkerAgentState::workerInspectionEnabled, true);
     if (!m_inspectorFrontend)
         return;
-    if (value)
-        createWorkerFrontendChannelsForExistingWorkers();
-    else
-        destroyWorkerFrontendChannels();
+    createWorkerFrontendChannelsForExistingWorkers();
+}
+
+void InspectorWorkerAgent::disable(ErrorString*)
+{
+    m_state->setBoolean(WorkerAgentState::workerInspectionEnabled, false);
+    if (!m_inspectorFrontend)
+        return;
+    destroyWorkerFrontendChannels();
 }
 
 void InspectorWorkerAgent::connectToWorker(ErrorString* error, int workerId)
@@ -169,7 +176,7 @@ void InspectorWorkerAgent::disconnectFromWorker(ErrorString* error, int workerId
         *error = "Worker is gone";
 }
 
-void InspectorWorkerAgent::sendMessageToWorker(ErrorString* error, int workerId, PassRefPtr<InspectorObject> message)
+void InspectorWorkerAgent::sendMessageToWorker(ErrorString* error, int workerId, const RefPtr<InspectorObject>& message)
 {
     WorkerFrontendChannel* channel = m_idToChannel.get(workerId);
     if (channel)
@@ -199,9 +206,9 @@ void InspectorWorkerAgent::workerContextTerminated(WorkerContextProxy* proxy)
 {
     m_dedicatedWorkers.remove(proxy);
     for (WorkerChannels::iterator it = m_idToChannel.begin(); it != m_idToChannel.end(); ++it) {
-        if (proxy == it->second->proxy()) {
-            m_inspectorFrontend->worker()->workerTerminated(it->first);
-            delete it->second;
+        if (proxy == it->value->proxy()) {
+            m_inspectorFrontend->worker()->workerTerminated(it->key);
+            delete it->value;
             m_idToChannel.remove(it);
             return;
         }
@@ -211,14 +218,14 @@ void InspectorWorkerAgent::workerContextTerminated(WorkerContextProxy* proxy)
 void InspectorWorkerAgent::createWorkerFrontendChannelsForExistingWorkers()
 {
     for (DedicatedWorkers::iterator it = m_dedicatedWorkers.begin(); it != m_dedicatedWorkers.end(); ++it)
-        createWorkerFrontendChannel(it->first, it->second);
+        createWorkerFrontendChannel(it->key, it->value);
 }
 
 void InspectorWorkerAgent::destroyWorkerFrontendChannels()
 {
     for (WorkerChannels::iterator it = m_idToChannel.begin(); it != m_idToChannel.end(); ++it) {
-        it->second->disconnectFromWorkerContext();
-        delete it->second;
+        it->value->disconnectFromWorkerContext();
+        delete it->value;
     }
     m_idToChannel.clear();
 }

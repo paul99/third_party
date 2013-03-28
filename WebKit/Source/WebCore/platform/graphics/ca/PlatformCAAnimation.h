@@ -29,6 +29,7 @@
 #if USE(ACCELERATED_COMPOSITING)
 
 #include "Color.h"
+#include "FilterOperation.h"
 #include "FloatPoint3D.h"
 #include "TransformationMatrix.h"
 #include <wtf/RefCounted.h>
@@ -92,7 +93,7 @@ public:
     FillModeType fillMode() const;
     void setFillMode(FillModeType);
     
-    void setTimingFunction(const TimingFunction*);
+    void setTimingFunction(const TimingFunction*, bool reverse = false);
     void copyTimingFunctionFrom(const PlatformCAAnimation*);
 
     bool isRemovedOnCompletion() const;
@@ -109,12 +110,18 @@ public:
     void setFromValue(const WebCore::TransformationMatrix&);
     void setFromValue(const FloatPoint3D&);
     void setFromValue(const WebCore::Color&);
+#if ENABLE(CSS_FILTERS)
+    void setFromValue(const FilterOperation*, int internalFilterPropertyIndex);
+#endif
     void copyFromValueFrom(const PlatformCAAnimation*);
 
     void setToValue(float);
     void setToValue(const WebCore::TransformationMatrix&);
     void setToValue(const FloatPoint3D&);
     void setToValue(const WebCore::Color&);
+#if ENABLE(CSS_FILTERS)
+    void setToValue(const FilterOperation*, int internalFilterPropertyIndex);
+#endif
     void copyToValueFrom(const PlatformCAAnimation*);
 
     // Keyframe-animation properties.
@@ -122,14 +129,22 @@ public:
     void setValues(const Vector<WebCore::TransformationMatrix>&);
     void setValues(const Vector<FloatPoint3D>&);
     void setValues(const Vector<WebCore::Color>&);
+#if ENABLE(CSS_FILTERS)
+    void setValues(const Vector<RefPtr<FilterOperation> >&, int internalFilterPropertyIndex);
+#endif
     void copyValuesFrom(const PlatformCAAnimation*);
 
     void setKeyTimes(const Vector<float>&);
     void copyKeyTimesFrom(const PlatformCAAnimation*);
 
-    void setTimingFunctions(const Vector<const TimingFunction*>&);
+    void setTimingFunctions(const Vector<const TimingFunction*>&, bool reverse = false);
     void copyTimingFunctionsFrom(const PlatformCAAnimation*);
     
+#if ENABLE(CSS_FILTERS)
+    static int numAnimatedFilterProperties(FilterOperation::OperationType);
+    static const char* animatedFilterPropertyName(FilterOperation::OperationType, int internalFilterPropertyIndex);
+#endif
+
 protected:
     PlatformCAAnimation(AnimationType, const String& keyPath);
     PlatformCAAnimation(PlatformAnimationRef);

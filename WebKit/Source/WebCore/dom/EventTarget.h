@@ -53,21 +53,23 @@ namespace WebCore {
     class IDBRequest;
     class IDBTransaction;
     class IDBVersionChangeRequest;
-    class JavaScriptAudioNode;
+    class ScriptProcessorNode;
     class LocalMediaStream;
     class MediaController;
+    class MediaSource;
     class MediaStream;
     class MessagePort;
     class Node;
     class Notification;
-    class PeerConnection;
     class SVGElementInstance;
     class ScriptExecutionContext;
     class SharedWorker;
     class SharedWorkerContext;
+    class SourceBufferList;
     class TextTrack;
     class TextTrackCue;
     class WebSocket;
+    class WebKitNamedFlow;
     class Worker;
     class XMLHttpRequest;
     class XMLHttpRequestUpload;
@@ -95,7 +97,7 @@ namespace WebCore {
         ~EventTargetData();
 
         EventListenerMap eventListenerMap;
-        FiringEventIteratorVector firingEventIterators;
+        OwnPtr<FiringEventIteratorVector> firingEventIterators;
     };
 
     class EventTarget {
@@ -174,15 +176,6 @@ namespace WebCore {
         EventListener* on##attribute() { return recipient ? recipient->getAttributeEventListener(eventNames().attribute##Event) : 0; } \
         void setOn##attribute(PassRefPtr<EventListener> listener) { if (recipient) recipient->setAttributeEventListener(eventNames().attribute##Event, listener); } \
 
-#ifndef NDEBUG
-    void forbidEventDispatch();
-    void allowEventDispatch();
-    bool eventDispatchForbidden();
-#else
-    inline void forbidEventDispatch() { }
-    inline void allowEventDispatch() { }
-#endif
-
 #if USE(JSC)
     inline void EventTarget::visitJSEventListeners(JSC::SlotVisitor& visitor)
     {
@@ -197,7 +190,7 @@ namespace WebCore {
         EventTargetData* d = eventTargetData();
         if (!d)
             return false;
-        return d->firingEventIterators.size() != 0;
+        return d->firingEventIterators && !d->firingEventIterators->isEmpty();
     }
 
     inline bool EventTarget::hasEventListeners()

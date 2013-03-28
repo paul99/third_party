@@ -34,18 +34,18 @@ class EditingStyle;
 
 class DeleteSelectionCommand : public CompositeEditCommand { 
 public:
-    static PassRefPtr<DeleteSelectionCommand> create(Document* document, bool smartDelete = false, bool mergeBlocksAfterDelete = true, bool replace = false, bool expandForSpecialElements = false)
+    static PassRefPtr<DeleteSelectionCommand> create(Document* document, bool smartDelete = false, bool mergeBlocksAfterDelete = true, bool replace = false, bool expandForSpecialElements = false, bool sanitizeMarkup = true)
     {
-        return adoptRef(new DeleteSelectionCommand(document, smartDelete, mergeBlocksAfterDelete, replace, expandForSpecialElements));
+        return adoptRef(new DeleteSelectionCommand(document, smartDelete, mergeBlocksAfterDelete, replace, expandForSpecialElements, sanitizeMarkup));
     }
-    static PassRefPtr<DeleteSelectionCommand> create(const VisibleSelection& selection, bool smartDelete = false, bool mergeBlocksAfterDelete = true, bool replace = false, bool expandForSpecialElements = false)
+    static PassRefPtr<DeleteSelectionCommand> create(const VisibleSelection& selection, bool smartDelete = false, bool mergeBlocksAfterDelete = true, bool replace = false, bool expandForSpecialElements = false, bool sanitizeMarkup = true)
     {
-        return adoptRef(new DeleteSelectionCommand(selection, smartDelete, mergeBlocksAfterDelete, replace, expandForSpecialElements));
+        return adoptRef(new DeleteSelectionCommand(selection, smartDelete, mergeBlocksAfterDelete, replace, expandForSpecialElements, sanitizeMarkup));
     }
 
 private:
-    DeleteSelectionCommand(Document*, bool smartDelete, bool mergeBlocksAfterDelete, bool replace, bool expandForSpecialElements);
-    DeleteSelectionCommand(const VisibleSelection&, bool smartDelete, bool mergeBlocksAfterDelete, bool replace, bool expandForSpecialElements);
+    DeleteSelectionCommand(Document*, bool smartDelete, bool mergeBlocksAfterDelete, bool replace, bool expandForSpecialElements, bool santizeMarkup);
+    DeleteSelectionCommand(const VisibleSelection&, bool smartDelete, bool mergeBlocksAfterDelete, bool replace, bool expandForSpecialElements, bool sanitizeMarkup);
 
     virtual void doApply();
     virtual EditAction editingAction() const;
@@ -65,7 +65,8 @@ private:
     void calculateEndingPosition();
     void calculateTypingStyleAfterDelete();
     void clearTransientState();
-    virtual void removeNode(PassRefPtr<Node>);
+    void makeStylingElementsDirectChildrenOfEditableRootToPreventStyleLoss();
+    virtual void removeNode(PassRefPtr<Node>, ShouldAssumeContentIsAlwaysEditable = DoNotAssumeContentIsAlwaysEditable);
     virtual void deleteTextFromNode(PassRefPtr<Text>, unsigned, unsigned);
     void removeRedundantBlocks();
 
@@ -80,6 +81,7 @@ private:
     bool m_expandForSpecialElements;
     bool m_pruneStartBlockIfNecessary;
     bool m_startsAtEmptyLine;
+    bool m_sanitizeMarkup;
 
     // This data is transient and should be cleared at the end of the doApply function.
     VisibleSelection m_selectionToDelete;

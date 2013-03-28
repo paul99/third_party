@@ -103,7 +103,7 @@ bool ApplicationCacheHost::maybeLoadFallbackForMainResponse(const ResourceReques
         if (isApplicationCacheEnabled()) {
             m_mainResourceApplicationCache = ApplicationCacheGroup::fallbackCacheForMainRequest(request, documentLoader());
 
-            if (scheduleLoadFallbackResourceFromApplicationCache(documentLoader()->mainResourceLoader(), m_mainResourceApplicationCache.get()))
+            if (scheduleLoadFallbackResourceFromApplicationCache(documentLoader()->mainResourceLoader()->loader(), m_mainResourceApplicationCache.get()))
                 return true;
         }
     }
@@ -117,7 +117,7 @@ bool ApplicationCacheHost::maybeLoadFallbackForMainError(const ResourceRequest& 
         if (isApplicationCacheEnabled()) {
             m_mainResourceApplicationCache = ApplicationCacheGroup::fallbackCacheForMainRequest(request, m_documentLoader);
 
-            if (scheduleLoadFallbackResourceFromApplicationCache(documentLoader()->mainResourceLoader(), m_mainResourceApplicationCache.get()))
+            if (scheduleLoadFallbackResourceFromApplicationCache(documentLoader()->mainResourceLoader()->loader(), m_mainResourceApplicationCache.get()))
                 return true;
         }
     }
@@ -228,7 +228,7 @@ void ApplicationCacheHost::maybeLoadFallbackSynchronously(const ResourceRequest&
     }
 }
 
-bool ApplicationCacheHost::canCacheInPageCache() const 
+bool ApplicationCacheHost::canCacheInPageCache()
 {
     return !applicationCache() && !candidateApplicationCacheGroup();
 }
@@ -282,7 +282,7 @@ void ApplicationCacheHost::fillResourceList(ResourceInfoList* resources)
      
     ApplicationCache::ResourceMap::const_iterator end = cache->end();
     for (ApplicationCache::ResourceMap::const_iterator it = cache->begin(); it != end; ++it) {
-        RefPtr<ApplicationCacheResource> resource = it->second;
+        RefPtr<ApplicationCacheResource> resource = it->value;
         unsigned type = resource->type();
         bool isMaster   = type & ApplicationCacheResource::Master;
         bool isManifest = type & ApplicationCacheResource::Manifest;

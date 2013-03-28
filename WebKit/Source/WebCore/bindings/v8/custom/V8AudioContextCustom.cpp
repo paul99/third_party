@@ -28,76 +28,54 @@
 
 #include "V8AudioContext.h"
 
-#include "ArrayBuffer.h"
 #include "AudioBuffer.h"
 #include "AudioContext.h"
+#include "BindingState.h"
 #include "Frame.h"
+#include "OfflineAudioContext.h"
 #include "V8ArrayBuffer.h"
 #include "V8AudioBuffer.h"
 #include "V8Binding.h"
-#include "V8Proxy.h"
+#include "V8OfflineAudioContext.h"
+#include <wtf/ArrayBuffer.h>
 
 namespace WebCore {
 
-v8::Handle<v8::Value> V8AudioContext::constructorCallback(const v8::Arguments& args)
+v8::Handle<v8::Value> V8AudioContext::constructorCallbackCustom(const v8::Arguments& args)
 {
-    INC_STATS("DOM.AudioContext.Contructor");
-
-    if (!args.IsConstructCall())
-        return throwError("AudioContext constructor cannot be called as a function.", V8Proxy::TypeError);
-
-    if (ConstructorMode::current() == ConstructorMode::WrapExistingObject)
-        return args.Holder();
-
-    Frame* frame = V8Proxy::retrieveFrameForCurrentContext();
-    if (!frame)
-        return throwError("AudioContext constructor associated frame is unavailable", V8Proxy::ReferenceError);
-
-    Document* document = frame->document();
-    if (!document)
-        return throwError("AudioContext constructor associated document is unavailable", V8Proxy::ReferenceError);
+    Document* document = currentDocument(BindingState::instance());
 
     RefPtr<AudioContext> audioContext;
     
     if (!args.Length()) {
         // Constructor for default AudioContext which talks to audio hardware.
-        audioContext = AudioContext::create(document);
+        ExceptionCode ec = 0;
+        audioContext = AudioContext::create(document, ec);
+        if (ec)
+            return setDOMException(ec, args.GetIsolate());
         if (!audioContext.get())
-            return throwError("audio resources unavailable for AudioContext construction", V8Proxy::SyntaxError);
+            return throwError(v8SyntaxError, "audio resources unavailable for AudioContext construction", args.GetIsolate());
     } else {
+#if ENABLE(LEGACY_WEB_AUDIO)
         // Constructor for offline (render-target) AudioContext which renders into an AudioBuffer.
         // new AudioContext(in unsigned long numberOfChannels, in unsigned long numberOfFrames, in float sampleRate);
-        if (args.Length() < 3)
-            return throwError("Not enough arguments", V8Proxy::SyntaxError);
+        document->addConsoleMessage(JSMessageSource, WarningMessageLevel,
+            "Deprecated AudioContext constructor: use OfflineAudioContext instead");
 
-        bool ok = false;
-
-        int32_t numberOfChannels = toInt32(args[0], ok);
-        if (!ok || numberOfChannels <= 0 || numberOfChannels > 10)
-            return throwError("Invalid number of channels", V8Proxy::SyntaxError);
-
-        int32_t numberOfFrames = toInt32(args[1], ok);
-        if (!ok || numberOfFrames <= 0)
-            return throwError("Invalid number of frames", V8Proxy::SyntaxError);
-
-        float sampleRate = toFloat(args[2]);
-        if (sampleRate <= 0)
-            return throwError("Invalid sample rate", V8Proxy::SyntaxError);
-
-        ExceptionCode ec = 0;
-        audioContext = AudioContext::createOfflineContext(document, numberOfChannels, numberOfFrames, sampleRate, ec);
-        if (ec)
-            return throwError(ec);
+        return V8OfflineAudioContext::constructorCallback(args);
+#else
+        return throwError(v8SyntaxError, "Illegal AudioContext constructor", args.GetIsolate());
+#endif
     }
 
     if (!audioContext.get())
-        return throwError("Error creating AudioContext", V8Proxy::SyntaxError);
+        return throwError(v8SyntaxError, "Error creating AudioContext", args.GetIsolate());
     
     // Transform the holder into a wrapper object for the audio context.
-    V8DOMWrapper::setDOMWrapper(args.Holder(), &info, audioContext.get());
-    audioContext->ref();
+    v8::Handle<v8::Object> wrapper = args.Holder();
+    V8DOMWrapper::associateObjectWithWrapper(audioContext.release(), &info, wrapper);
     
-    return args.Holder();
+    return wrapper;
 }
 
 } // namespace WebCore

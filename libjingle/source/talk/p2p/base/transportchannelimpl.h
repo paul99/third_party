@@ -29,13 +29,13 @@
 #define TALK_P2P_BASE_TRANSPORTCHANNELIMPL_H_
 
 #include <string>
+#include "talk/p2p/base/transport.h"
 #include "talk/p2p/base/transportchannel.h"
 
 namespace buzz { class XmlElement; }
 
 namespace cricket {
 
-class Transport;
 class Candidate;
 
 // Base class for real implementations of TransportChannel.  This includes some
@@ -43,11 +43,22 @@ class Candidate;
 // client.
 class TransportChannelImpl : public TransportChannel {
  public:
-  TransportChannelImpl(const std::string& name, const std::string& content_type)
-    : TransportChannel(name, content_type) {}
+  explicit TransportChannelImpl(const std::string& content_name, int component)
+      : TransportChannel(content_name, component) {}
 
   // Returns the transport that created this channel.
   virtual Transport* GetTransport() = 0;
+
+  // For ICE channels.
+  virtual void SetRole(TransportRole role) {}
+  virtual void SetTiebreaker(uint64 tiebreaker) {}
+  // To toggle G-ICE/ICE.
+  virtual void SetIceProtocolType(IceProtocolType type) {}
+  // SetIceUfrag and SetIcePwd only need to be implemented by the ICE
+  // transport channels. Non-ICE transport channels can just ignore.
+  // The ufrag and pwd should be set before the Connect() is called.
+  virtual void SetIceUfrag(const std::string& ice_ufrag) {}
+  virtual void SetIcePwd(const std::string& ice_pwd) {}
 
   // Begins the process of attempting to make a connection to the other client.
   virtual void Connect() = 0;
@@ -58,7 +69,7 @@ class TransportChannelImpl : public TransportChannel {
   // Allows an individual channel to request signaling and be notified when it
   // is ready.  This is useful if the individual named channels have need to
   // send their own transport-info stanzas.
-  sigslot::signal0<> SignalRequestSignaling;
+  sigslot::signal1<TransportChannelImpl*> SignalRequestSignaling;
   virtual void OnSignalingReady() = 0;
 
   // Handles sending and receiving of candidates.  The Transport
@@ -72,6 +83,27 @@ class TransportChannelImpl : public TransportChannel {
   sigslot::signal2<TransportChannelImpl*,
                    const Candidate&> SignalCandidateReady;
   virtual void OnCandidate(const Candidate& candidate) = 0;
+
+  // DTLS methods
+  // Set DTLS local identity.
+  virtual bool SetLocalIdentity(talk_base::SSLIdentity* identity) {
+    return false;
+  }
+
+  // Set DTLS Remote fingerprint. Must be after local identity set.
+  virtual bool SetRemoteFingerprint(const std::string& digest_alg,
+    const uint8* digest,
+    size_t digest_len) {
+    return false;
+  }
+
+  // TransportChannel is forwarding this signal from PortAllocatorSession.
+  sigslot::signal1<TransportChannelImpl*> SignalCandidatesAllocationDone;
+
+  // Invoked when there is conflict in the ICE role between local and remote
+  // agents.
+  sigslot::signal1<TransportChannelImpl*> SignalRoleConflict;
+
  private:
   DISALLOW_EVIL_CONSTRUCTORS(TransportChannelImpl);
 };

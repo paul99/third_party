@@ -57,7 +57,7 @@ following methods:
 
  - in all other cases, proxy certificate validation can be enabled
    before starting the application by setting the envirnoment variable
-   OPENSSL_ALLOW_PROXY with some non-empty value.
+   OPENSSL_ALLOW_PROXY_CERTS with some non-empty value.
 
 There are thoughts to allow proxy certificates with a line in the
 default openssl.cnf, but that's still in the future.
@@ -96,14 +96,14 @@ syntags are as follows:
   text	indicates that the string is simply the bytes, not
 	encoded in any kind of way:
 
-		policy=text:r�ksm�rg�s
+		policy=text:räksmörgås
 
 	Previous versions of this design had a specific tag
 	for UTF-8 text.  However, since the bytes are copied
 	as-is anyway, there's no need for it.  Instead, use
 	the text: tag, like this:
 
-		policy=text:räksmörgås
+		policy=text:rÃ¤ksmÃ¶rgÃ¥s
 
   hex	indicates the string is encoded in hex, with colons
 	between each byte (every second hex digit):
@@ -250,7 +250,7 @@ This is some cookbook code for you to fill in:
                    bit array and fill it with the rights granted by
                    the current proxy certificate, then use it as a
                    mask on the accumulated rights bit array, and
-                   voil�, you now have a new accumulated rights bit
+                   voilà, you now have a new accumulated rights bit
                    array.  */
                 {
                   int i;

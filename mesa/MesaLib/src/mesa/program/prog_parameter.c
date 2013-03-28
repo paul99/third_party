@@ -97,7 +97,7 @@ _mesa_free_parameter_list(struct gl_program_parameter_list *paramList)
  * store all the values (in blocks of 4).
  *
  * \param paramList  the list to add the parameter to
- * \param type  type of parameter, such as 
+ * \param type  type of parameter, such as
  * \param name  the parameter name, will be duplicated/copied!
  * \param size  number of elements in 'values' vector (1..4, or more)
  * \param datatype  GL_FLOAT, GL_FLOAT_VECx, GL_INT, GL_INT_VECx or GL_NONE.
@@ -105,6 +105,10 @@ _mesa_free_parameter_list(struct gl_program_parameter_list *paramList)
  * \param state  state indexes, or NULL
  * \return  index of new parameter in the list, or -1 if error (out of mem)
  */
+#if defined(__clang__ ) && defined(ADDRESS_SANITIZER)
+// See http://crbug.com/142316.
+__attribute__((no_address_safety_analysis))
+#endif
 GLint
 _mesa_add_parameter(struct gl_program_parameter_list *paramList,
                     gl_register_file type, const char *name,
@@ -188,7 +192,7 @@ _mesa_add_named_parameter(struct gl_program_parameter_list *paramList,
 {
    return _mesa_add_parameter(paramList, PROGRAM_NAMED_PARAM, name,
                               4, GL_NONE, values, NULL, 0x0);
-                              
+
 }
 
 
@@ -583,7 +587,7 @@ _mesa_clone_parameter_list(const struct gl_program_parameter_list *list)
       else {
          clone->Parameters[j].Size = p->Size;
       }
-      
+
    }
 
    clone->StateFlags = list->StateFlags;

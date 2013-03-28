@@ -34,11 +34,13 @@
 #include <string>
 #include "talk/base/basictypes.h"
 #include "talk/base/common.h"
+#include "talk/base/logging.h"
 #include "talk/base/messagequeue.h"
 #include "talk/base/stream.h"
 #include "talk/base/stringencode.h"
 #include "talk/base/stringutils.h"
 #include "talk/base/thread.h"
+#include "talk/base/timeutils.h"
 
 #ifdef WIN32
 #include "talk/base/win32.h"
@@ -52,11 +54,6 @@ namespace talk_base {
 ///////////////////////////////////////////////////////////////////////////////
 StreamInterface::~StreamInterface() {
 }
-
-struct PostEventData : public MessageData {
-  int events, error;
-  PostEventData(int ev, int er) : events(ev), error(er) { }
-};
 
 StreamResult StreamInterface::WriteAll(const void* data, size_t data_len,
                                        size_t* written, int* error) {
@@ -111,7 +108,7 @@ StreamResult StreamInterface::ReadLine(std::string* line) {
 }
 
 void StreamInterface::PostEvent(Thread* t, int events, int err) {
-  t->Post(this, MSG_POST_EVENT, new PostEventData(events, err));
+  t->Post(this, MSG_POST_EVENT, new StreamEventData(events, err));
 }
 
 void StreamInterface::PostEvent(int events, int err) {
@@ -123,7 +120,7 @@ StreamInterface::StreamInterface() {
 
 void StreamInterface::OnMessage(Message* msg) {
   if (MSG_POST_EVENT == msg->message_id) {
-    PostEventData* pe = static_cast<PostEventData*>(msg->pdata);
+    StreamEventData* pe = static_cast<StreamEventData*>(msg->pdata);
     SignalEvent(this, pe->events, pe->error);
     delete msg->pdata;
   }
@@ -437,7 +434,7 @@ void FileStream::Close() {
 bool FileStream::SetPosition(size_t position) {
   if (!file_)
     return false;
-  return (fseek(file_, position, SEEK_SET) == 0);
+  return (fseek(file_, static_cast<int>(position), SEEK_SET) == 0);
 }
 
 bool FileStream::GetPosition(size_t* position) const {
@@ -526,6 +523,94 @@ void FileStream::DoClose() {
   fclose(file_);
 }
 
+AsyncWriteStream::~AsyncWriteStream() {
+  write_thread_->Clear(this, 0, NULL);
+  ClearBufferAndWrite();
+
+  CritScope cs(&crit_stream_);
+  stream_.reset();
+}
+
+// This is needed by some stream writers, such as RtpDumpWriter.
+bool AsyncWriteStream::GetPosition(size_t* position) const {
+  CritScope cs(&crit_stream_);
+  return stream_->GetPosition(position);
+}
+
+// This is needed by some stream writers, such as the plugin log writers.
+StreamResult AsyncWriteStream::Read(void* buffer, size_t buffer_len,
+                                    size_t* read, int* error) {
+  CritScope cs(&crit_stream_);
+  return stream_->Read(buffer, buffer_len, read, error);
+}
+
+void AsyncWriteStream::Close() {
+  if (state_ == SS_CLOSED) {
+    return;
+  }
+
+  write_thread_->Clear(this, 0, NULL);
+  ClearBufferAndWrite();
+
+  CritScope cs(&crit_stream_);
+  stream_->Close();
+  state_ = SS_CLOSED;
+}
+
+StreamResult AsyncWriteStream::Write(const void* data, size_t data_len,
+                                     size_t* written, int* error) {
+  if (state_ == SS_CLOSED) {
+    return SR_ERROR;
+  }
+
+  size_t previous_buffer_length = 0;
+  {
+    CritScope cs(&crit_buffer_);
+    previous_buffer_length = buffer_.length();
+    buffer_.AppendData(data, data_len);
+  }
+
+  if (previous_buffer_length == 0) {
+    // If there's stuff already in the buffer, then we already called
+    // Post and the write_thread_ hasn't pulled it out yet, so we
+    // don't need to re-Post.
+    write_thread_->Post(this, 0, NULL);
+  }
+  // Return immediately, assuming that it works.
+  if (written) {
+    *written = data_len;
+  }
+  return SR_SUCCESS;
+}
+
+void AsyncWriteStream::OnMessage(talk_base::Message* pmsg) {
+  ClearBufferAndWrite();
+}
+
+bool AsyncWriteStream::Flush() {
+  if (state_ == SS_CLOSED) {
+    return false;
+  }
+
+  ClearBufferAndWrite();
+
+  CritScope cs(&crit_stream_);
+  return stream_->Flush();
+}
+
+void AsyncWriteStream::ClearBufferAndWrite() {
+  Buffer to_write;
+  {
+    CritScope cs_buffer(&crit_buffer_);
+    buffer_.TransferTo(&to_write);
+  }
+
+  if (to_write.length() > 0) {
+    CritScope cs(&crit_stream_);
+    stream_->WriteAll(to_write.data(), to_write.length(), NULL, NULL);
+  }
+}
+
 #ifdef POSIX
 
 // Have to identically rewrite the FileStream destructor or else it would call
@@ -536,7 +621,7 @@ POpenStream::~POpenStream() {
 
 bool POpenStream::Open(const std::string& subcommand,
                        const char* mode,
-                       int *error) {
+                       int* error) {
   Close();
   file_ = popen(subcommand.c_str(), mode);
   if (file_ == NULL) {
@@ -631,19 +716,19 @@ bool MemoryStreamBase::SetPosition(size_t position) {
   return true;
 }
 
-bool MemoryStreamBase::GetPosition(size_t *position) const {
+bool MemoryStreamBase::GetPosition(size_t* position) const {
   if (position)
     *position = seek_position_;
   return true;
 }
 
-bool MemoryStreamBase::GetSize(size_t *size) const {
+bool MemoryStreamBase::GetSize(size_t* size) const {
   if (size)
     *size = data_length_;
   return true;
 }
 
-bool MemoryStreamBase::GetAvailable(size_t *size) const {
+bool MemoryStreamBase::GetAvailable(size_t* size) const {
   if (size)
     *size = data_length_ - seek_position_;
   return true;
@@ -735,7 +820,7 @@ FifoBuffer::FifoBuffer(size_t size)
   // all events are done on the owner_ thread
 }
 
-FifoBuffer::FifoBuffer(size_t size, Thread *owner)
+FifoBuffer::FifoBuffer(size_t size, Thread* owner)
     : state_(SS_OPEN), buffer_(new char[size]), buffer_length_(size),
       data_length_(0), read_position_(0), owner_(owner) {
   // all events are done on the owner_ thread

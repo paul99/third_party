@@ -61,6 +61,9 @@ public:
     static void fillRegionWorker(void*);
 
     virtual void platformApplySoftware();
+#if ENABLE(OPENCL)
+    virtual bool platformApplyOpenCL();
+#endif
     virtual void dump();
     
     virtual void determineAbsolutePaintRect() { setAbsolutePaintRect(enclosingIntRect(maxEffectRect())); }
@@ -108,7 +111,7 @@ private:
 
     struct FillRegionParameters {
         FETurbulence* filter;
-        ByteArray* pixelArray;
+        Uint8ClampedArray* pixelArray;
         PaintingData* paintingData;
         int startY;
         int endY;
@@ -121,7 +124,7 @@ private:
     inline void initPaint(PaintingData&);
     float noise2D(int channel, PaintingData&, StitchData&, const FloatPoint&);
     unsigned char calculateTurbulenceValueForPoint(int channel, PaintingData&, StitchData&, const FloatPoint&);
-    inline void fillRegion(ByteArray*, PaintingData&, int, int);
+    inline void fillRegion(Uint8ClampedArray*, PaintingData&, int, int);
 
     TurbulenceType m_type;
     float m_baseFrequencyX;

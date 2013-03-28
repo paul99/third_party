@@ -28,16 +28,23 @@
 #ifndef RenderMediaControlsChromium_h
 #define RenderMediaControlsChromium_h
 
-#include "RenderObject.h"
 #include "MediaControlElements.h"
 
 namespace WebCore {
 
+struct PaintInfo;
+
 class HTMLMediaElement;
+class IntRect;
+class RenderObject;
+
 class RenderMediaControlsChromium {
 public:
     static bool paintMediaControlsPart(MediaControlElementType, RenderObject*, const PaintInfo&, const IntRect&);
     static void adjustMediaSliderThumbSize(RenderStyle*);
+    static String formatMediaControlsTime(float time);
+    static String formatMediaControlsCurrentTime(float currentTime, float duration);
+    static String formatMediaControlsRemainingTime(float currentTime, float duration);
 };
 
 } // namespace WebCore

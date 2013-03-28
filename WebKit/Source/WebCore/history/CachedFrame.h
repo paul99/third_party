@@ -26,6 +26,7 @@
 #ifndef CachedFrame_h
 #define CachedFrame_h
 
+#include "DOMWindow.h"
 #include "KURL.h"
 #include "ScriptCachedFrameData.h"
 #include <wtf/PassOwnPtr.h>
@@ -50,7 +51,6 @@ public:
     Document* document() const { return m_document.get(); }
     FrameView* view() const { return m_view.get(); }
     const KURL& url() const { return m_url; }
-    DOMWindow* domWindow() const { return m_cachedFrameScriptData->domWindow(); }
     bool isMainFrame() { return m_isMainFrame; }
 
 protected:
@@ -92,7 +92,7 @@ public:
     int descendantFrameCount() const;
 
 private:
-    CachedFrame(Frame*);
+    explicit CachedFrame(Frame*);
 };
 
 } // namespace WebCore

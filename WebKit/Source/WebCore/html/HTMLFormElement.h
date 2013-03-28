@@ -38,7 +38,6 @@ class FormData;
 class HTMLFormControlElement;
 class HTMLImageElement;
 class HTMLInputElement;
-class HTMLFormCollection;
 class TextEncoding;
 
 class HTMLFormElement : public HTMLElement {
@@ -47,7 +46,7 @@ public:
     static PassRefPtr<HTMLFormElement> create(const QualifiedName&, Document*);
     virtual ~HTMLFormElement();
 
-    HTMLCollection* elements();
+    PassRefPtr<HTMLCollection> elements();
     void getNamedElements(const AtomicString&, Vector<RefPtr<Node> >&);
 
     unsigned length() const;
@@ -72,11 +71,6 @@ public:
     void submit();
     void submitFromJavaScript();
     void reset();
-
-    // Used to indicate a malformed state to keep from applying the bottom margin of the form.
-    // FIXME: Would probably be better to call this wasUnclosed; that's more specific.
-    void setMalformed(bool malformed) { m_wasMalformed = malformed; }
-    bool isMalformed() const { return m_wasMalformed; }
 
     void setDemoted(bool demoted) { m_wasDemoted = demoted; }
 
@@ -104,25 +98,38 @@ public:
 
     bool checkValidity();
 
+#if ENABLE(REQUEST_AUTOCOMPLETE)
+    enum AutocompleteResult { AutocompleteResultSuccess, AutocompleteResultError };
+
+    void requestAutocomplete();
+    void finishRequestAutocomplete(AutocompleteResult);
+
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(autocomplete);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(autocompleteerror);
+#endif
+
     HTMLFormControlElement* elementForAlias(const AtomicString&);
     void addElementAlias(HTMLFormControlElement*, const AtomicString& alias);
 
     CheckedRadioButtons& checkedRadioButtons() { return m_checkedRadioButtons; }
 
     const Vector<FormAssociatedElement*>& associatedElements() const { return m_associatedElements; }
+    const Vector<HTMLImageElement*>& imageElements() const { return m_imageElements; }
+
+    void getTextFieldValues(StringPairVector& fieldNamesAndValues) const;
 
 private:
     HTMLFormElement(const QualifiedName&, Document*);
 
     virtual bool rendererIsNeeded(const NodeRenderingContext&);
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
+    virtual void removedFrom(ContainerNode*) OVERRIDE;
+    virtual void finishParsingChildren() OVERRIDE;
 
     virtual void handleLocalEvents(Event*);
 
-    virtual void parseMappedAttribute(Attribute*);
-
-    virtual bool isURLAttribute(Attribute*) const;
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
+    virtual bool isURLAttribute(const Attribute&) const OVERRIDE;
 
     virtual void documentDidResumeFromPageCache();
 
@@ -130,9 +137,11 @@ private:
 
     virtual bool shouldRegisterAsNamedItem() const OVERRIDE { return true; }
 
+    virtual void copyNonAttributePropertiesFromElement(const Element&) OVERRIDE;
+
     void submit(Event*, bool activateSubmitButton, bool processingUserGesture, FormSubmissionTrigger);
 
-    unsigned formElementIndexWithFormAttribute(Element*);
+    unsigned formElementIndexWithFormAttribute(Element*, unsigned rangeStart, unsigned rangeEnd);
     unsigned formElementIndex(FormAssociatedElement*);
 
     // Returns true if the submission should proceed.
@@ -143,13 +152,10 @@ private:
     // are any invalid controls in this form.
     bool checkInvalidControlsAndCollectUnhandled(Vector<RefPtr<FormAssociatedElement> >&);
 
-    friend class HTMLFormCollection;
-
     typedef HashMap<RefPtr<AtomicStringImpl>, RefPtr<HTMLFormControlElement> > AliasMap;
 
     FormSubmission::Attributes m_attributes;
     OwnPtr<AliasMap> m_elementAliases;
-    OwnPtr<HTMLFormCollection> m_elementsCollection;
 
     CheckedRadioButtons m_checkedRadioButtons;
 
@@ -164,8 +170,14 @@ private:
 
     bool m_isInResetFunction;
 
-    bool m_wasMalformed;
     bool m_wasDemoted;
+
+#if ENABLE(REQUEST_AUTOCOMPLETE)
+    void requestAutocompleteTimerFired(Timer<HTMLFormElement>*);
+
+    Vector<RefPtr<Event> > m_pendingAutocompleteEvents;
+    Timer<HTMLFormElement> m_requestAutocompleteTimer;
+#endif
 };
 
 } // namespace WebCore

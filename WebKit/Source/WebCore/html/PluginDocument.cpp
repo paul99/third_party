@@ -133,8 +133,6 @@ void PluginDocumentParser::appendBytes(DocumentWriter*, const char*, size_t)
             frame->loader()->activeDocumentLoader()->mainResourceLoader()->setShouldBufferData(DoNotBufferData);
         }
     }
-
-    finish();
 }
 
 PluginDocument::PluginDocument(Frame* frame, const KURL& url)
@@ -168,6 +166,8 @@ void PluginDocument::detach()
 {
     // Release the plugin node so that we don't have a circular reference.
     m_pluginNode = 0;
+    if (FrameLoader* loader = frame()->loader())
+        loader->client()->redirectDataToPlugin(0);
     HTMLDocument::detach();
 }
 

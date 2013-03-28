@@ -37,12 +37,13 @@ private:
     SVGStopElement(const QualifiedName&, Document*);
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
     virtual void svgAttributeChanged(const QualifiedName&);
 
     virtual bool isGradientStop() const { return true; }
 
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
+    virtual bool rendererIsNeeded(const NodeRenderingContext&) OVERRIDE;
 
     BEGIN_DECLARE_ANIMATED_PROPERTIES(SVGStopElement)
         DECLARE_ANIMATED_NUMBER(Offset, offset)

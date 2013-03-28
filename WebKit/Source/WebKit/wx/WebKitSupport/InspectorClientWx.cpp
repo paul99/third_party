@@ -28,7 +28,7 @@
 
 #include "NotImplemented.h"
 #include "Page.h"
-#include "PlatformString.h"
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -47,9 +47,10 @@ void InspectorClientWx::inspectorDestroyed()
     notImplemented();
 }
 
-void InspectorClientWx::openInspectorFrontend(WebCore::InspectorController*)
+InspectorFrontendChannel* InspectorClientWx::openInspectorFrontend(WebCore::InspectorController*)
 {
     notImplemented();
+    return 0;
 }
 
 void InspectorClientWx::closeInspectorFrontend()

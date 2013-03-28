@@ -62,9 +62,6 @@ HistoryItem::HistoryItem()
     : m_lastVisitedTime(0)
     , m_lastVisitWasHTTPNonGet(false)
     , m_pageScaleFactor(0)
-#if OS(ANDROID)
-    , m_loadComplete(false)
-#endif
     , m_lastVisitWasFailure(false)
     , m_isTargetItem(false)
     , m_visitCount(0)
@@ -82,9 +79,6 @@ HistoryItem::HistoryItem(const String& urlString, const String& title, double ti
     , m_lastVisitedTime(time)
     , m_lastVisitWasHTTPNonGet(false)
     , m_pageScaleFactor(0)
-#if OS(ANDROID)
-    , m_loadComplete(false)
-#endif
     , m_lastVisitWasFailure(false)
     , m_isTargetItem(false)
     , m_visitCount(0)
@@ -104,9 +98,6 @@ HistoryItem::HistoryItem(const String& urlString, const String& title, const Str
     , m_lastVisitedTime(time)
     , m_lastVisitWasHTTPNonGet(false)
     , m_pageScaleFactor(0)
-#if OS(ANDROID)
-    , m_loadComplete(false)
-#endif
     , m_lastVisitWasFailure(false)
     , m_isTargetItem(false)
     , m_visitCount(0)
@@ -127,9 +118,6 @@ HistoryItem::HistoryItem(const KURL& url, const String& target, const String& pa
     , m_lastVisitedTime(0)
     , m_lastVisitWasHTTPNonGet(false)
     , m_pageScaleFactor(0)
-#if OS(ANDROID)
-    , m_loadComplete(false)
-#endif
     , m_lastVisitWasFailure(false)
     , m_isTargetItem(false)
     , m_visitCount(0)
@@ -160,9 +148,6 @@ inline HistoryItem::HistoryItem(const HistoryItem& item)
     , m_lastVisitWasHTTPNonGet(item.m_lastVisitWasHTTPNonGet)
     , m_scrollPoint(item.m_scrollPoint)
     , m_pageScaleFactor(item.m_pageScaleFactor)
-#if OS(ANDROID)
-    , m_loadComplete(item.m_loadComplete)
-#endif
     , m_lastVisitWasFailure(item.m_lastVisitWasFailure)
     , m_isTargetItem(item.m_isTargetItem)
     , m_visitCount(item.m_visitCount)
@@ -203,11 +188,6 @@ void HistoryItem::reset()
 
     m_lastVisitedTime = 0;
     m_lastVisitWasHTTPNonGet = false;
-
-#if OS(ANDROID)
-    // FIXME: Don't understand why m_scrollPoint, m_pageScaleFactor and m_documentState
-    // aren't being cleared upstream. Should m_loadComplete be cleared here?
-#endif
 
     m_lastVisitWasFailure = false;
     m_isTargetItem = false;
@@ -448,18 +428,6 @@ void HistoryItem::setPageScaleFactor(float scaleFactor)
     m_pageScaleFactor = scaleFactor;
 }
 
-#if OS(ANDROID)
-bool HistoryItem::loadComplete() const
-{
-    return m_loadComplete;
-}
-
-void HistoryItem::setLoadComplete(bool loadComplete)
-{
-    m_loadComplete = loadComplete;
-}
-#endif
-
 void HistoryItem::setDocumentState(const Vector<String>& state)
 {
     m_documentState = state;
@@ -562,6 +530,18 @@ bool HistoryItem::hasChildren() const
 void HistoryItem::clearChildren()
 {
     m_children.clear();
+}
+
+bool HistoryItem::isAncestorOf(const HistoryItem* item) const
+{
+    for (size_t i = 0; i < m_children.size(); ++i) {
+        HistoryItem* child = m_children[i].get();
+        if (child == item)
+            return true;
+        if (child->isAncestorOf(item))
+            return true;
+    }
+    return false;
 }
 
 // We do same-document navigation if going to a different item and if either of the following is true:
@@ -723,7 +703,7 @@ void HistoryItem::encodeBackForwardTreeNode(Encoder& encoder) const
 
     encoder.encodeBool(m_formData);
     if (m_formData)
-        m_formData->encodeForBackForward(encoder);
+        m_formData->encode(encoder);
 
     encoder.encodeInt64(m_itemSequenceNumber);
 
@@ -733,10 +713,6 @@ void HistoryItem::encodeBackForwardTreeNode(Encoder& encoder) const
     encoder.encodeInt32(m_scrollPoint.y());
     
     encoder.encodeFloat(m_pageScaleFactor);
-
-#if OS(ANDROID)
-    encoder.encodeBool(m_loadComplete);
-#endif
 
     encoder.encodeBool(m_stateObject);
     if (m_stateObject) {
@@ -825,7 +801,7 @@ resume:
     if (!decoder.decodeBool(hasFormData))
         return 0;
     if (hasFormData) {
-        node->m_formData = FormData::decodeForBackForward(decoder);
+        node->m_formData = FormData::decode(decoder);
         if (!node->m_formData)
             return 0;
     }
@@ -846,11 +822,6 @@ resume:
     
     if (!decoder.decodeFloat(node->m_pageScaleFactor))
         return 0;
-
-#if OS(ANDROID)
-    if (!decoder.decodeBool(node->m_loadComplete))
-        return 0;
-#endif
 
     bool hasStateObject;
     if (!decoder.decodeBool(hasStateObject))
@@ -884,13 +855,6 @@ resume:
     }
 
     return node.release();
-}
-
-void HistoryItem::markForFullStyleRecalc()
-{
-    // Children are guaranteed not to have CachedPages.
-    if (m_cachedPage)
-        m_cachedPage->markForFullStyleRecalc();
 }
 
 #ifndef NDEBUG

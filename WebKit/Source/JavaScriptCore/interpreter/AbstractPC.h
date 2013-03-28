@@ -60,21 +60,6 @@ public:
     }
 #endif
 
-#if ENABLE(INTERPRETER)
-    AbstractPC(Instruction* vPC)
-        : m_pointer(vPC)
-        , m_mode(Interpreter)
-    {
-    }
-    
-    bool hasInterpreterReturnAddress() const { return m_mode == Interpreter; }
-    Instruction* interpreterReturnAddress() const
-    {
-        ASSERT(hasInterpreterReturnAddress());
-        return static_cast<Instruction*>(m_pointer);
-    }
-#endif
-    
     bool isSet() const { return m_mode != None; }
     bool operator!() const { return !isSet(); }
 

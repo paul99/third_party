@@ -24,6 +24,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QBasicTimer>
 
 #include "FormData.h"
 #include "QtMIMETypeSniffer.h"
@@ -136,7 +137,7 @@ public:
 
     static ResourceError errorForReply(QNetworkReply*);
 
-private slots:
+private Q_SLOTS:
     void uploadProgress(qint64 bytesSent, qint64 bytesTotal);
 
 private:
@@ -147,12 +148,15 @@ private:
     QNetworkReply* sendNetworkRequest(QNetworkAccessManager*, const ResourceRequest&);
     FormDataIODevice* getIODevice(const ResourceRequest&);
     void clearContentHeaders();
+    virtual void timerEvent(QTimerEvent*) OVERRIDE;
+    void timeout();
 
     OwnPtr<QNetworkReplyWrapper> m_replyWrapper;
     ResourceHandle* m_resourceHandle;
     LoadType m_loadType;
     QNetworkAccessManager::Operation m_method;
     QNetworkRequest m_request;
+    QBasicTimer m_timeoutTimer;
 
     // defer state holding
     int m_redirectionTries;
@@ -179,9 +183,11 @@ protected:
     qint64 writeData(const char*, qint64);
 
 private:
+    void prepareFormElements(FormData*);
     void moveToNextElement();
     qint64 computeSize();
     void openFileForCurrentElement();
+    void prepareCurrentElement();
 
 private:
     Vector<FormDataElement> m_formElements;

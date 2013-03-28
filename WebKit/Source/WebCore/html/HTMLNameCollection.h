@@ -33,15 +33,17 @@ class Document;
 
 class HTMLNameCollection : public HTMLCollection {
 public:
-    static PassOwnPtr<HTMLNameCollection> create(Document* document, CollectionType type, const AtomicString& name)
+    static PassRefPtr<HTMLNameCollection> create(Node* document, CollectionType type, const AtomicString& name)
     {
-        return adoptPtr(new HTMLNameCollection(document, type, name));
+        return adoptRef(new HTMLNameCollection(document, type, name));
     }
 
-private:
-    HTMLNameCollection(Document*, CollectionType, const AtomicString& name);
+    ~HTMLNameCollection();
 
-    virtual Element* itemAfter(Element*) const OVERRIDE;
+private:
+    HTMLNameCollection(Node*, CollectionType, const AtomicString& name);
+
+    virtual Element* virtualItemAfter(unsigned& offsetInArray, Element*) const OVERRIDE;
 
     AtomicString m_name;
 };

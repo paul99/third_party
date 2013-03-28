@@ -94,6 +94,8 @@ public:
 
     bool isLiveLink() const;
 
+    virtual bool willRespondToMouseClickEvents() OVERRIDE;
+
     bool hasRel(uint32_t relation) const;
     void setRel(const String&);
     
@@ -103,7 +105,7 @@ public:
 protected:
     HTMLAnchorElement(const QualifiedName&, Document*);
 
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
 
 private:
     virtual bool supportsFocus() const;
@@ -112,7 +114,7 @@ private:
     virtual void defaultEventHandler(Event*);
     virtual void setActive(bool active = true, bool pause = false);
     virtual void accessKeyAction(bool sendMouseEvents);
-    virtual bool isURLAttribute(Attribute*) const;
+    virtual bool isURLAttribute(const Attribute&) const OVERRIDE;
     virtual bool canStartSelection() const;
     virtual String target() const;
     virtual short tabIndex() const;
@@ -155,9 +157,7 @@ inline LinkHash HTMLAnchorElement::visitedLinkHash() const
 // Functions shared with the other anchor elements (i.e., SVG).
 
 bool isEnterKeyKeydownEvent(Event*);
-bool isMiddleMouseButtonEvent(Event*);
 bool isLinkClick(Event*);
-void handleLinkClick(Event*, Document*, const String& url, const String& target, bool hideReferrer = false);
 
 } // namespace WebCore
 

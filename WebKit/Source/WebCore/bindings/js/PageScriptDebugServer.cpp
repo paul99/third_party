@@ -34,6 +34,7 @@
 
 #include "PageScriptDebugServer.h"
 
+#include "EventLoop.h"
 #include "Frame.h"
 #include "FrameView.h"
 #include "JSDOMWindowCustom.h"
@@ -69,12 +70,12 @@ PageScriptDebugServer& PageScriptDebugServer::shared()
 
 PageScriptDebugServer::PageScriptDebugServer()
     : ScriptDebugServer()
+    , m_pausedPage(0)
 {
 }
 
 PageScriptDebugServer::~PageScriptDebugServer()
 {
-    deleteAllValues(m_pageListenersMap);
 }
 
 void PageScriptDebugServer::addListener(ScriptDebugListener* listener, Page* page)
@@ -82,11 +83,9 @@ void PageScriptDebugServer::addListener(ScriptDebugListener* listener, Page* pag
     ASSERT_ARG(listener, listener);
     ASSERT_ARG(page, page);
 
-    pair<PageListenersMap::iterator, bool> result = m_pageListenersMap.add(page, 0);
-    if (result.second)
-        result.first->second = new ListenerSet;
-
-    ListenerSet* listeners = result.first->second;
+    OwnPtr<ListenerSet>& listeners = m_pageListenersMap.add(page, nullptr).iterator->value;
+    if (!listeners)
+        listeners = adoptPtr(new ListenerSet);
     listeners->add(listener);
 
     recompileAllJSFunctionsSoon();
@@ -102,18 +101,17 @@ void PageScriptDebugServer::removeListener(ScriptDebugListener* listener, Page* 
     if (it == m_pageListenersMap.end())
         return;
 
-    ListenerSet* listeners = it->second;
+    ListenerSet* listeners = it->value.get();
     listeners->remove(listener);
     if (listeners->isEmpty()) {
         m_pageListenersMap.remove(it);
-        delete listeners;
         didRemoveLastListener(page);
     }
 }
 
 void PageScriptDebugServer::recompileAllJSFunctions(Timer<ScriptDebugServer>*)
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
     // If JavaScript stack is not empty postpone recompilation.
     if (JSDOMWindow::commonJSGlobalData()->dynamicGlobalObject)
         recompileAllJSFunctionsSoon();
@@ -131,25 +129,46 @@ ScriptDebugServer::ListenerSet* PageScriptDebugServer::getListenersForGlobalObje
 
 void PageScriptDebugServer::didPause(JSC::JSGlobalObject* globalObject)
 {
+    ASSERT(!m_pausedPage);
+
     Page* page = toPage(globalObject);
+    ASSERT(page);
+    if (!page)
+        return;
+
     m_pausedPage = page;
+
     setJavaScriptPaused(page->group(), true);
 }
 
 void PageScriptDebugServer::didContinue(JSC::JSGlobalObject* globalObject)
 {
+    // Page can be null if we are continuing because the Page closed.
     Page* page = toPage(globalObject);
+    ASSERT(!page || page == m_pausedPage);
+
     m_pausedPage = 0;
-    setJavaScriptPaused(page->group(), false);
+
+    if (page)
+        setJavaScriptPaused(page->group(), false);
 }
 
 void PageScriptDebugServer::didRemoveLastListener(Page* page)
 {
+    ASSERT(page);
+
     if (m_pausedPage == page)
         m_doneProcessingDebuggerEvents = true;
 
     recompileAllJSFunctionsSoon();
     page->setDebugger(0);
+}
+
+void PageScriptDebugServer::runEventLoopWhilePaused()
+{
+    EventLoop loop;
+    while (!m_doneProcessingDebuggerEvents && !loop.ended())
+        loop.cycle();
 }
 
 void PageScriptDebugServer::setJavaScriptPaused(const PageGroup& pageGroup, bool paused)

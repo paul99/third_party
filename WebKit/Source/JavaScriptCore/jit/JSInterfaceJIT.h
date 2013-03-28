@@ -26,13 +26,17 @@
 #ifndef JSInterfaceJIT_h
 #define JSInterfaceJIT_h
 
+#include "BytecodeConventions.h"
 #include "JITCode.h"
 #include "JITStubs.h"
+#include "JSStack.h"
+#include "JSString.h"
 #include "JSValue.h"
 #include "MacroAssembler.h"
-#include "RegisterFile.h"
 #include <wtf/AlwaysInline.h>
 #include <wtf/Vector.h>
+
+#if ENABLE(JIT)
 
 namespace JSC {
     class JSInterfaceJIT : public MacroAssembler {
@@ -73,6 +77,8 @@ namespace JSC {
         static const FPRegisterID fpRegT1 = X86Registers::xmm1;
         static const FPRegisterID fpRegT2 = X86Registers::xmm2;
         static const FPRegisterID fpRegT3 = X86Registers::xmm3;
+
+        static const RegisterID nonArgGPR1 = X86Registers::eax; // regT0
 #elif CPU(X86)
         static const RegisterID returnValueRegister = X86Registers::eax;
         static const RegisterID cachedResultRegister = X86Registers::eax;
@@ -92,7 +98,7 @@ namespace JSC {
         static const FPRegisterID fpRegT1 = X86Registers::xmm1;
         static const FPRegisterID fpRegT2 = X86Registers::xmm2;
         static const FPRegisterID fpRegT3 = X86Registers::xmm3;
-#elif CPU(ARM_THUMB2)
+#elif CPU(ARM)
         static const RegisterID returnValueRegister = ARMRegisters::r0;
         static const RegisterID cachedResultRegister = ARMRegisters::r0;
         static const RegisterID firstArgumentRegister = ARMRegisters::r0;
@@ -105,35 +111,11 @@ namespace JSC {
         static const RegisterID regT1 = ARMRegisters::r1;
         static const RegisterID regT2 = ARMRegisters::r2;
         static const RegisterID regT3 = ARMRegisters::r4;
-        
+
+        // Update ctiTrampoline in JITStubs.cpp if these values are changed!
         static const RegisterID callFrameRegister = ARMRegisters::r5;
         static const RegisterID timeoutCheckRegister = ARMRegisters::r6;
-        
-        static const FPRegisterID fpRegT0 = ARMRegisters::d0;
-        static const FPRegisterID fpRegT1 = ARMRegisters::d1;
-        static const FPRegisterID fpRegT2 = ARMRegisters::d2;
-        static const FPRegisterID fpRegT3 = ARMRegisters::d3;
-#elif CPU(ARM_TRADITIONAL)
-        static const RegisterID returnValueRegister = ARMRegisters::r0;
-        static const RegisterID cachedResultRegister = ARMRegisters::r0;
-        static const RegisterID firstArgumentRegister = ARMRegisters::r0;
-        
-        static const RegisterID timeoutCheckRegister = ARMRegisters::r5;
-        static const RegisterID callFrameRegister = ARMRegisters::r4;
-        
-        static const RegisterID regT0 = ARMRegisters::r0;
-        static const RegisterID regT1 = ARMRegisters::r1;
-        static const RegisterID regT2 = ARMRegisters::r2;
-        // Callee preserved
-        static const RegisterID regT3 = ARMRegisters::r7;
-        
-        static const RegisterID regS0 = ARMRegisters::S0;
-        // Callee preserved
-        static const RegisterID regS1 = ARMRegisters::S1;
-        
-        static const RegisterID regStackPtr = ARMRegisters::sp;
-        static const RegisterID regLink = ARMRegisters::lr;
-        
+
         static const FPRegisterID fpRegT0 = ARMRegisters::d0;
         static const FPRegisterID fpRegT1 = ARMRegisters::d1;
         static const FPRegisterID fpRegT2 = ARMRegisters::d2;
@@ -288,36 +270,36 @@ namespace JSC {
 #if USE(JSVALUE64)
     ALWAYS_INLINE JSInterfaceJIT::Jump JSInterfaceJIT::emitJumpIfImmediateNumber(RegisterID reg)
     {
-        return branchTestPtr(NonZero, reg, tagTypeNumberRegister);
+        return branchTest64(NonZero, reg, tagTypeNumberRegister);
     }
     ALWAYS_INLINE JSInterfaceJIT::Jump JSInterfaceJIT::emitJumpIfNotImmediateNumber(RegisterID reg)
     {
-        return branchTestPtr(Zero, reg, tagTypeNumberRegister);
+        return branchTest64(Zero, reg, tagTypeNumberRegister);
     }
     inline JSInterfaceJIT::Jump JSInterfaceJIT::emitLoadJSCell(unsigned virtualRegisterIndex, RegisterID dst)
     {
-        loadPtr(addressFor(virtualRegisterIndex), dst);
-        return branchTestPtr(NonZero, dst, tagMaskRegister);
+        load64(addressFor(virtualRegisterIndex), dst);
+        return branchTest64(NonZero, dst, tagMaskRegister);
     }
     
     inline JSInterfaceJIT::Jump JSInterfaceJIT::emitLoadInt32(unsigned virtualRegisterIndex, RegisterID dst)
     {
-        loadPtr(addressFor(virtualRegisterIndex), dst);
-        Jump result = branchPtr(Below, dst, tagTypeNumberRegister);
+        load64(addressFor(virtualRegisterIndex), dst);
+        Jump result = branch64(Below, dst, tagTypeNumberRegister);
         zeroExtend32ToPtr(dst, dst);
         return result;
     }
 
     inline JSInterfaceJIT::Jump JSInterfaceJIT::emitLoadDouble(unsigned virtualRegisterIndex, FPRegisterID dst, RegisterID scratch)
     {
-        loadPtr(addressFor(virtualRegisterIndex), scratch);
+        load64(addressFor(virtualRegisterIndex), scratch);
         Jump notNumber = emitJumpIfNotImmediateNumber(scratch);
-        Jump notInt = branchPtr(Below, scratch, tagTypeNumberRegister);
+        Jump notInt = branch64(Below, scratch, tagTypeNumberRegister);
         convertInt32ToDouble(scratch, dst);
         Jump done = jump();
         notInt.link(this);
-        addPtr(tagTypeNumberRegister, scratch);
-        movePtrToDouble(scratch, dst);
+        add64(tagTypeNumberRegister, scratch);
+        move64ToDouble(scratch, dst);
         done.link(this);
         return notNumber;
     }
@@ -353,6 +335,8 @@ namespace JSC {
         return Address(base, (static_cast<unsigned>(virtualRegisterIndex) * sizeof(Register)));
     }
 
-}
+} // namespace JSC
+
+#endif // ENABLE(JIT)
 
 #endif // JSInterfaceJIT_h

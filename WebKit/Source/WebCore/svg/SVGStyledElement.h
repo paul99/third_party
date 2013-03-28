@@ -22,6 +22,7 @@
 #define SVGStyledElement_h
 
 #if ENABLE(SVG)
+#include "CSSPropertyNames.h"
 #include "SVGAnimatedString.h"
 #include "SVGLocatable.h"
 #include "SVGStylable.h"
@@ -29,13 +30,11 @@
 
 namespace WebCore {
 
-void mapAttributeToCSSProperty(HashMap<AtomicStringImpl*, int>* propertyNameToIdMap, const QualifiedName& attrName);
+void mapAttributeToCSSProperty(HashMap<AtomicStringImpl*, CSSPropertyID>* propertyNameToIdMap, const QualifiedName& attrName);
 
 class SVGStyledElement : public SVGElement,
                          public SVGStylable {
 public:
-    virtual ~SVGStyledElement();
-
     virtual String title() const;
 
     bool hasRelativeLengths() const { return !m_elementsWithRelativeLengths.isEmpty(); }
@@ -49,10 +48,6 @@ public:
     bool instanceUpdatesBlocked() const;
     void setInstanceUpdatesBlocked(bool);
 
-    bool hasPendingResources() const;
-    void setHasPendingResources();
-    void clearHasPendingResourcesIfPossible();
-
     virtual void animatedPropertyTypeForAttribute(const QualifiedName&, Vector<AnimatedPropertyType>&);
     static bool isAnimatableCSSProperty(const QualifiedName&);
 
@@ -65,21 +60,20 @@ protected:
     SVGStyledElement(const QualifiedName&, Document*, ConstructionType = CreateSVGElement);
     virtual bool rendererIsNeeded(const NodeRenderingContext&);
 
-    virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
-    virtual void parseMappedAttribute(Attribute*);
-    virtual void svgAttributeChanged(const QualifiedName&);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForPresentationAttribute(const Attribute&, StylePropertySet*) OVERRIDE;
+    virtual void svgAttributeChanged(const QualifiedName&) OVERRIDE;
 
-    virtual void attach();
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
+    virtual void removedFrom(ContainerNode*) OVERRIDE;
     virtual void childrenChanged(bool changedByParser = false, Node* beforeChange = 0, Node* afterChange = 0, int childCountDelta = 0);
 
-    static int cssPropertyIdForSVGAttributeName(const QualifiedName&);
+    static CSSPropertyID cssPropertyIdForSVGAttributeName(const QualifiedName&);
     void updateRelativeLengthsInformation() { updateRelativeLengthsInformation(selfHasRelativeLengths(), this); }
     void updateRelativeLengthsInformation(bool hasRelativeLengths, SVGStyledElement*);
 
     virtual bool selfHasRelativeLengths() const { return false; }
-    virtual void buildPendingResource() { }
 
 private:
     virtual bool isStyled() const { return true; }

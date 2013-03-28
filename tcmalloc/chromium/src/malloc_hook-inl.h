@@ -41,7 +41,7 @@
 #include <sys/types.h>
 #include "base/atomicops.h"
 #include "base/basictypes.h"
-#include <google/malloc_hook.h>
+#include <gperftools/malloc_hook.h>
 
 namespace base { namespace internal {
 
@@ -104,7 +104,7 @@ static const int kHookListMaxValues = 7;
 // HookList: a class that provides synchronized insertions and removals and
 // lockless traversal.  Most of the implementation is in malloc_hook.cc.
 template <typename T>
-struct HookList {
+struct PERFTOOLS_DLL_DECL HookList {
   COMPILE_ASSERT(sizeof(T) <= sizeof(AtomicWord), T_should_fit_in_AtomicWord);
 
   // Adds value to the list.  Note that duplicates are allowed.  Thread-safe and
@@ -293,7 +293,7 @@ inline MallocHook::PreSbrkHook MallocHook::GetPreSbrkHook() {
   return base::internal::presbrk_hook_.Get();
 }
 
-inline void MallocHook::InvokePreSbrkHook(std::ptrdiff_t increment) {
+inline void MallocHook::InvokePreSbrkHook(ptrdiff_t increment) {
   if (!base::internal::presbrk_hooks_.empty() && increment != 0) {
     InvokePreSbrkHookSlow(increment);
   }
@@ -309,7 +309,7 @@ inline MallocHook::SbrkHook MallocHook::GetSbrkHook() {
 }
 
 inline void MallocHook::InvokeSbrkHook(const void* result,
-                                       std::ptrdiff_t increment) {
+                                       ptrdiff_t increment) {
   if (!base::internal::sbrk_hooks_.empty() && increment != 0) {
     InvokeSbrkHookSlow(result, increment);
   }

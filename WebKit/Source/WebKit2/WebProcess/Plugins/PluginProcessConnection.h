@@ -30,6 +30,7 @@
 
 #include "Connection.h"
 #include "Plugin.h"
+#include "PluginProcess.h"
 #include <wtf/RefCounted.h>
 #include <wtf/text/WTFString.h>
 
@@ -43,9 +44,9 @@ class PluginProxy;
     
 class PluginProcessConnection : public RefCounted<PluginProcessConnection>, CoreIPC::Connection::Client {
 public:
-    static PassRefPtr<PluginProcessConnection> create(PluginProcessConnectionManager* pluginProcessConnectionManager, const String& pluginPath, CoreIPC::Connection::Identifier connectionIdentifier)
+    static PassRefPtr<PluginProcessConnection> create(PluginProcessConnectionManager* pluginProcessConnectionManager, const String& pluginPath, PluginProcess::Type processType, CoreIPC::Connection::Identifier connectionIdentifier, bool supportsAsynchronousPluginInitialization)
     {
-        return adoptRef(new PluginProcessConnection(pluginProcessConnectionManager, pluginPath, connectionIdentifier));
+        return adoptRef(new PluginProcessConnection(pluginProcessConnectionManager, pluginPath, processType, connectionIdentifier, supportsAsynchronousPluginInitialization));
     }
     ~PluginProcessConnection();
 
@@ -58,18 +59,21 @@ public:
 
     NPRemoteObjectMap* npRemoteObjectMap() const { return m_npRemoteObjectMap.get(); }
 
+    bool supportsAsynchronousPluginInitialization() const { return m_supportsAsynchronousPluginInitialization; }
+
+    PluginProcess::Type processType() const { return m_processType; }
+
 private:
-    PluginProcessConnection(PluginProcessConnectionManager* pluginProcessConnectionManager, const String& pluginPath, CoreIPC::Connection::Identifier connectionIdentifier);
+    PluginProcessConnection(PluginProcessConnectionManager*, const String& pluginPath, PluginProcess::Type, CoreIPC::Connection::Identifier connectionIdentifier, bool supportsAsynchronousInitialization);
 
     // CoreIPC::Connection::Client
-    virtual void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
-    virtual void didReceiveSyncMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*, OwnPtr<CoreIPC::ArgumentEncoder>&);
+    virtual void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&) OVERRIDE;
+    virtual void didReceiveSyncMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&, OwnPtr<CoreIPC::MessageEncoder>&) OVERRIDE;
     virtual void didClose(CoreIPC::Connection*);
-    virtual void didReceiveInvalidMessage(CoreIPC::Connection*, CoreIPC::MessageID);
-    virtual void syncMessageSendTimedOut(CoreIPC::Connection*);
+    virtual void didReceiveInvalidMessage(CoreIPC::Connection*, CoreIPC::StringReference messageReceiverName, CoreIPC::StringReference messageName) OVERRIDE;
 
     // Message handlers.
-    void didReceiveSyncPluginProcessConnectionMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*, OwnPtr<CoreIPC::ArgumentEncoder>&);
+    void didReceiveSyncPluginProcessConnectionMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&, OwnPtr<CoreIPC::MessageEncoder>&);
     void setException(const String&);
 
     PluginProcessConnectionManager* m_pluginProcessConnectionManager;
@@ -82,6 +86,10 @@ private:
     HashMap<uint64_t, PluginProxy*> m_plugins;
 
     RefPtr<NPRemoteObjectMap> m_npRemoteObjectMap;
+    
+    bool m_supportsAsynchronousPluginInitialization;
+
+    PluginProcess::Type m_processType;
 };
 
 } // namespace WebKit

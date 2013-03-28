@@ -29,9 +29,7 @@
 
 #include "NP_jsobject.h"
 
-#include "PlatformString.h"
 #include "PluginView.h"
-#include "StringSourceProvider.h"
 #include "c_utility.h"
 #include "c_instance.h"
 #include "IdentifierRep.h"
@@ -45,7 +43,7 @@
 #include <runtime/PropertyNameArray.h>
 #include <parser/SourceCode.h>
 #include <runtime/Completion.h>
-#include <runtime/Completion.h>
+#include <wtf/text/WTFString.h>
 
 using namespace JSC;
 using namespace JSC::Bindings;
@@ -63,11 +61,11 @@ public:
         HashMap<RootObject*, JSToNPObjectMap>::iterator iter = m_map.find(rootObject);
         if (iter == m_map.end()) {
             rootObject->addInvalidationCallback(&m_invalidationCallback);
-            iter = m_map.add(rootObject, JSToNPObjectMap()).first;
+            iter = m_map.add(rootObject, JSToNPObjectMap()).iterator;
         }
 
-        ASSERT(iter->second.find(jsObject) == iter->second.end());
-        iter->second.add(jsObject, npObject);
+        ASSERT(iter->value.find(jsObject) == iter->value.end());
+        iter->value.add(jsObject, npObject);
     }
 
     void remove(RootObject* rootObject)
@@ -81,9 +79,9 @@ public:
     {
         HashMap<RootObject*, JSToNPObjectMap>::iterator iter = m_map.find(rootObject);
         ASSERT(iter != m_map.end());
-        ASSERT(iter->second.find(jsObject) != iter->second.end());
+        ASSERT(iter->value.find(jsObject) != iter->value.end());
 
-        iter->second.remove(jsObject);
+        iter->value.remove(jsObject);
     }
 
 private:
@@ -178,7 +176,7 @@ bool _NPN_InvokeDefault(NPP, NPObject* o, const NPVariant* args, uint32_t argCou
             return false;
         
         ExecState* exec = rootObject->globalObject()->globalExec();
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         
         // Call the function object.
         JSValue function = obj->imp;
@@ -189,10 +187,7 @@ bool _NPN_InvokeDefault(NPP, NPObject* o, const NPVariant* args, uint32_t argCou
         
         MarkedArgumentBuffer argList;
         getListFromVariantArgs(exec, args, argCount, rootObject, argList);
-        RefPtr<JSGlobalData> globalData(&exec->globalData());
-        globalData->timeoutChecker.start();
         JSValue resultV = JSC::call(exec, function, callType, callData, function, argList);
-        globalData->timeoutChecker.stop();
 
         // Convert and return the result of the function call.
         convertValueToNPVariant(exec, resultV, result);
@@ -229,7 +224,7 @@ bool _NPN_Invoke(NPP npp, NPObject* o, NPIdentifier methodName, const NPVariant*
         if (!rootObject || !rootObject->isValid())
             return false;
         ExecState* exec = rootObject->globalObject()->globalExec();
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         JSValue function = obj->imp->get(exec, identifierFromNPIdentifier(exec, i->string()));
         CallData callData;
         CallType callType = getCallData(function, callData);
@@ -239,10 +234,7 @@ bool _NPN_Invoke(NPP npp, NPObject* o, NPIdentifier methodName, const NPVariant*
         // Call the function object.
         MarkedArgumentBuffer argList;
         getListFromVariantArgs(exec, args, argCount, rootObject, argList);
-        RefPtr<JSGlobalData> globalData(&exec->globalData());
-        globalData->timeoutChecker.start();
         JSValue resultV = JSC::call(exec, function, callType, callData, obj->imp->methodTable()->toThisObject(obj->imp, exec), argList);
-        globalData->timeoutChecker.stop();
 
         // Convert and return the result of the function call.
         convertValueToNPVariant(exec, resultV, result);
@@ -271,13 +263,10 @@ bool _NPN_Evaluate(NPP instance, NPObject* o, NPString* s, NPVariant* variant)
         PluginView::keepAlive(instance);
 
         ExecState* exec = rootObject->globalObject()->globalExec();
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         String scriptString = convertNPStringToUTF16(s);
-        RefPtr<JSGlobalData> globalData(&exec->globalData());
         
-        globalData->timeoutChecker.start();
-        JSValue returnValue = JSC::evaluate(rootObject->globalObject()->globalExec(), rootObject->globalObject()->globalScopeChain(), makeSource(scriptString), JSC::JSValue());
-        globalData->timeoutChecker.stop();
+        JSValue returnValue = JSC::evaluate(rootObject->globalObject()->globalExec(), makeSource(scriptString), JSC::JSValue());
 
         convertValueToNPVariant(exec, returnValue, variant);
         exec->clearException();
@@ -300,7 +289,7 @@ bool _NPN_GetProperty(NPP, NPObject* o, NPIdentifier propertyName, NPVariant* va
         ExecState* exec = rootObject->globalObject()->globalExec();
         IdentifierRep* i = static_cast<IdentifierRep*>(propertyName);
         
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         JSValue result;
         if (i->isString())
             result = obj->imp->get(exec, identifierFromNPIdentifier(exec, i->string()));
@@ -332,14 +321,14 @@ bool _NPN_SetProperty(NPP, NPObject* o, NPIdentifier propertyName, const NPVaria
             return false;
 
         ExecState* exec = rootObject->globalObject()->globalExec();
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         IdentifierRep* i = static_cast<IdentifierRep*>(propertyName);
 
         if (i->isString()) {
             PutPropertySlot slot;
             obj->imp->methodTable()->put(obj->imp, exec, identifierFromNPIdentifier(exec, i->string()), convertNPVariantToValue(exec, variant, rootObject), slot);
         } else
-            obj->imp->methodTable()->putByIndex(obj->imp, exec, i->number(), convertNPVariantToValue(exec, variant, rootObject));
+            obj->imp->methodTable()->putByIndex(obj->imp, exec, i->number(), convertNPVariantToValue(exec, variant, rootObject), false);
         exec->clearException();
         return true;
     }
@@ -373,7 +362,7 @@ bool _NPN_RemoveProperty(NPP, NPObject* o, NPIdentifier propertyName)
             }
         }
 
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         if (i->isString())
             obj->imp->methodTable()->deleteProperty(obj->imp, exec, identifierFromNPIdentifier(exec, i->string()));
         else
@@ -396,7 +385,7 @@ bool _NPN_HasProperty(NPP, NPObject* o, NPIdentifier propertyName)
 
         ExecState* exec = rootObject->globalObject()->globalExec();
         IdentifierRep* i = static_cast<IdentifierRep*>(propertyName);
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         if (i->isString()) {
             bool result = obj->imp->hasProperty(exec, identifierFromNPIdentifier(exec, i->string()));
             exec->clearException();
@@ -428,7 +417,7 @@ bool _NPN_HasMethod(NPP, NPObject* o, NPIdentifier methodName)
             return false;
 
         ExecState* exec = rootObject->globalObject()->globalExec();
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         JSValue func = obj->imp->get(exec, identifierFromNPIdentifier(exec, i->string()));
         exec->clearException();
         return !func.isUndefined();
@@ -443,7 +432,7 @@ bool _NPN_HasMethod(NPP, NPObject* o, NPIdentifier methodName)
 void _NPN_SetException(NPObject*, const NPUTF8* message)
 {
     // Ignoring the NPObject param is consistent with the Mozilla implementation.
-    UString exception(message);
+    String exception(message);
     CInstance::setGlobalException(exception);
 }
 
@@ -457,7 +446,7 @@ bool _NPN_Enumerate(NPP, NPObject* o, NPIdentifier** identifier, uint32_t* count
             return false;
         
         ExecState* exec = rootObject->globalObject()->globalExec();
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         PropertyNameArray propertyNames(exec);
 
         obj->imp->methodTable()->getPropertyNames(obj->imp, exec, propertyNames, ExcludeDontEnumProperties);
@@ -466,7 +455,7 @@ bool _NPN_Enumerate(NPP, NPObject* o, NPIdentifier** identifier, uint32_t* count
         NPIdentifier* identifiers = static_cast<NPIdentifier*>(malloc(sizeof(NPIdentifier) * size));
         
         for (unsigned i = 0; i < size; ++i)
-            identifiers[i] = _NPN_GetStringIdentifier(propertyNames[i].ustring().utf8().data());
+            identifiers[i] = _NPN_GetStringIdentifier(propertyNames[i].string().utf8().data());
 
         *identifier = identifiers;
         *count = size;
@@ -494,7 +483,7 @@ bool _NPN_Construct(NPP, NPObject* o, const NPVariant* args, uint32_t argCount, 
             return false;
         
         ExecState* exec = rootObject->globalObject()->globalExec();
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         
         // Call the constructor object.
         JSValue constructor = obj->imp;
@@ -505,10 +494,7 @@ bool _NPN_Construct(NPP, NPObject* o, const NPVariant* args, uint32_t argCount, 
         
         MarkedArgumentBuffer argList;
         getListFromVariantArgs(exec, args, argCount, rootObject, argList);
-        RefPtr<JSGlobalData> globalData(&exec->globalData());
-        globalData->timeoutChecker.start();
         JSValue resultV = JSC::construct(exec, constructor, constructType, constructData, argList);
-        globalData->timeoutChecker.stop();
         
         // Convert and return the result.
         convertValueToNPVariant(exec, resultV, result);

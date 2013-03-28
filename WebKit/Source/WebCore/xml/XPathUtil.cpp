@@ -28,6 +28,7 @@
 #include "XPathUtil.h"
 
 #include "ContainerNode.h"
+#include "NodeTraversal.h"
 #include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
@@ -53,7 +54,7 @@ String stringValue(Node* node)
                 StringBuilder result;
                 result.reserveCapacity(1024);
 
-                for (Node* n = node->firstChild(); n; n = n->traverseNextNode(node)) {
+                for (Node* n = node->firstChild(); n; n = NodeTraversal::next(n, node)) {
                     if (n->isTextNode()) {
                         const String& nodeValue = n->nodeValue();
                         result.append(nodeValue);
@@ -85,7 +86,6 @@ bool isValidContextNode(Node* node)
         case Node::ENTITY_NODE:
         case Node::ENTITY_REFERENCE_NODE:
         case Node::NOTATION_NODE:
-        case Node::SHADOW_ROOT_NODE:
             return false;
         case Node::TEXT_NODE:
             return !(node->parentNode() && node->parentNode()->isAttributeNode());

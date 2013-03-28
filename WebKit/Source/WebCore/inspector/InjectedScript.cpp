@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, 2011 Google Inc. All rights reserved.
+ * Copyright (C) 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -29,68 +29,96 @@
  */
 
 #include "config.h"
-#include "InjectedScript.h"
 
 #if ENABLE(INSPECTOR)
 
-#include "DOMWindow.h"
-#include "Frame.h"
+#include "InjectedScript.h"
+
 #include "InjectedScriptHost.h"
-#include "InjectedScriptManager.h"
-#include "InspectorInstrumentation.h"
+#include "InjectedScriptModule.h"
 #include "InspectorValues.h"
 #include "Node.h"
-#include "PlatformString.h"
 #include "ScriptFunctionCall.h"
+#include "SerializedScriptValue.h"
+#include <wtf/text/WTFString.h>
+
+using WebCore::TypeBuilder::Array;
+using WebCore::TypeBuilder::Debugger::CallFrame;
+using WebCore::TypeBuilder::Runtime::PropertyDescriptor;
+using WebCore::TypeBuilder::Runtime::InternalPropertyDescriptor;
+using WebCore::TypeBuilder::Debugger::FunctionDetails;
+using WebCore::TypeBuilder::Runtime::RemoteObject;
 
 namespace WebCore {
 
 InjectedScript::InjectedScript()
-    : m_inspectedStateAccessCheck(0)
+    : InjectedScriptBase("InjectedScript")
 {
 }
 
 InjectedScript::InjectedScript(ScriptObject injectedScriptObject, InspectedStateAccessCheck accessCheck)
-    : m_injectedScriptObject(injectedScriptObject)
-    , m_inspectedStateAccessCheck(accessCheck)
+    : InjectedScriptBase("InjectedScript", injectedScriptObject, accessCheck)
 {
 }
 
-void InjectedScript::evaluate(ErrorString* errorString, const String& expression, const String& objectGroup, bool includeCommandLineAPI, bool returnByValue, RefPtr<InspectorObject>* result, bool* wasThrown)
+void InjectedScript::evaluate(ErrorString* errorString, const String& expression, const String& objectGroup, bool includeCommandLineAPI, bool returnByValue, bool generatePreview, RefPtr<TypeBuilder::Runtime::RemoteObject>* result, TypeBuilder::OptOutput<bool>* wasThrown)
 {
-    ScriptFunctionCall function(m_injectedScriptObject, "evaluate");
+    ScriptFunctionCall function(injectedScriptObject(), "evaluate");
     function.appendArgument(expression);
     function.appendArgument(objectGroup);
     function.appendArgument(includeCommandLineAPI);
     function.appendArgument(returnByValue);
+    function.appendArgument(generatePreview);
     makeEvalCall(errorString, function, result, wasThrown);
 }
 
-void InjectedScript::callFunctionOn(ErrorString* errorString, const String& objectId, const String& expression, const String& arguments, bool returnByValue, RefPtr<InspectorObject>* result, bool* wasThrown)
+void InjectedScript::callFunctionOn(ErrorString* errorString, const String& objectId, const String& expression, const String& arguments, bool returnByValue, bool generatePreview, RefPtr<TypeBuilder::Runtime::RemoteObject>* result, TypeBuilder::OptOutput<bool>* wasThrown)
 {
-    ScriptFunctionCall function(m_injectedScriptObject, "callFunctionOn");
+    ScriptFunctionCall function(injectedScriptObject(), "callFunctionOn");
     function.appendArgument(objectId);
     function.appendArgument(expression);
     function.appendArgument(arguments);
     function.appendArgument(returnByValue);
+    function.appendArgument(generatePreview);
     makeEvalCall(errorString, function, result, wasThrown);
 }
 
-void InjectedScript::evaluateOnCallFrame(ErrorString* errorString, const ScriptValue& callFrames, const String& callFrameId, const String& expression, const String& objectGroup, bool includeCommandLineAPI, bool returnByValue, RefPtr<InspectorObject>* result, bool* wasThrown)
+void InjectedScript::evaluateOnCallFrame(ErrorString* errorString, const ScriptValue& callFrames, const String& callFrameId, const String& expression, const String& objectGroup, bool includeCommandLineAPI, bool returnByValue, bool generatePreview, RefPtr<RemoteObject>* result, TypeBuilder::OptOutput<bool>* wasThrown)
 {
-    ScriptFunctionCall function(m_injectedScriptObject, "evaluateOnCallFrame");
+    ScriptFunctionCall function(injectedScriptObject(), "evaluateOnCallFrame");
     function.appendArgument(callFrames);
     function.appendArgument(callFrameId);
     function.appendArgument(expression);
     function.appendArgument(objectGroup);
     function.appendArgument(includeCommandLineAPI);
     function.appendArgument(returnByValue);
+    function.appendArgument(generatePreview);
     makeEvalCall(errorString, function, result, wasThrown);
 }
 
-void InjectedScript::getFunctionDetails(ErrorString* errorString, const String& functionId, RefPtr<InspectorObject>* result)
+void InjectedScript::restartFrame(ErrorString* errorString, const ScriptValue& callFrames, const String& callFrameId, RefPtr<InspectorObject>* result)
 {
-    ScriptFunctionCall function(m_injectedScriptObject, "getFunctionDetails");
+    ScriptFunctionCall function(injectedScriptObject(), "restartFrame");
+    function.appendArgument(callFrames);
+    function.appendArgument(callFrameId);
+    RefPtr<InspectorValue> resultValue;
+    makeCall(function, &resultValue);
+    if (resultValue) {
+        if (resultValue->type() == InspectorValue::TypeString) {
+            resultValue->asString(errorString);
+            return;
+        }
+        if (resultValue->type() == InspectorValue::TypeObject) {
+            *result = resultValue->asObject();
+            return;
+        }
+    }
+    *errorString = "Internal error";
+}
+
+void InjectedScript::getFunctionDetails(ErrorString* errorString, const String& functionId, RefPtr<FunctionDetails>* result)
+{
+    ScriptFunctionCall function(injectedScriptObject(), "getFunctionDetails");
     function.appendArgument(functionId);
     RefPtr<InspectorValue> resultValue;
     makeCall(function, &resultValue);
@@ -99,12 +127,12 @@ void InjectedScript::getFunctionDetails(ErrorString* errorString, const String& 
             *errorString = "Internal error";
         return;
     }
-    *result = resultValue->asObject();
+    *result = FunctionDetails::runtimeCast(resultValue);
 }
 
-void InjectedScript::getProperties(ErrorString* errorString, const String& objectId, bool ownProperties, RefPtr<InspectorArray>* properties)
+void InjectedScript::getProperties(ErrorString* errorString, const String& objectId, bool ownProperties, RefPtr<Array<PropertyDescriptor> >* properties)
 {
-    ScriptFunctionCall function(m_injectedScriptObject, "getProperties");
+    ScriptFunctionCall function(injectedScriptObject(), "getProperties");
     function.appendArgument(objectId);
     function.appendArgument(ownProperties);
 
@@ -114,7 +142,23 @@ void InjectedScript::getProperties(ErrorString* errorString, const String& objec
         *errorString = "Internal error";
         return;
     }
-    *properties = result->asArray();
+    *properties = Array<PropertyDescriptor>::runtimeCast(result);
+}
+
+void InjectedScript::getInternalProperties(ErrorString* errorString, const String& objectId, RefPtr<Array<InternalPropertyDescriptor> >* properties)
+{
+    ScriptFunctionCall function(injectedScriptObject(), "getInternalProperties");
+    function.appendArgument(objectId);
+
+    RefPtr<InspectorValue> result;
+    makeCall(function, &result);
+    if (!result || result->type() != InspectorValue::TypeArray) {
+        *errorString = "Internal error";
+        return;
+    }
+    RefPtr<Array<InternalPropertyDescriptor> > array = Array<InternalPropertyDescriptor>::runtimeCast(result);
+    if (array->length() > 0)
+        *properties = array;
 }
 
 Node* InjectedScript::nodeForObjectId(const String& objectId)
@@ -122,11 +166,11 @@ Node* InjectedScript::nodeForObjectId(const String& objectId)
     if (hasNoValue() || !canAccessInspectedWindow())
         return 0;
 
-    ScriptFunctionCall function(m_injectedScriptObject, "nodeForObjectId");
+    ScriptFunctionCall function(injectedScriptObject(), "nodeForObjectId");
     function.appendArgument(objectId);
 
     bool hadException = false;
-    ScriptValue resultValue = function.call(hadException);
+    ScriptValue resultValue = callFunctionWithEvalEnabled(function, hadException);
     ASSERT(!hadException);
 
     return InjectedScriptHost::scriptValueAsNode(resultValue);
@@ -134,52 +178,72 @@ Node* InjectedScript::nodeForObjectId(const String& objectId)
 
 void InjectedScript::releaseObject(const String& objectId)
 {
-    ScriptFunctionCall function(m_injectedScriptObject, "releaseObject");
+    ScriptFunctionCall function(injectedScriptObject(), "releaseObject");
     function.appendArgument(objectId);
     RefPtr<InspectorValue> result;
     makeCall(function, &result);
 }
 
 #if ENABLE(JAVASCRIPT_DEBUGGER)
-PassRefPtr<InspectorArray> InjectedScript::wrapCallFrames(const ScriptValue& callFrames)
+PassRefPtr<Array<CallFrame> > InjectedScript::wrapCallFrames(const ScriptValue& callFrames)
 {
     ASSERT(!hasNoValue());
-    ScriptFunctionCall function(m_injectedScriptObject, "wrapCallFrames");
+    ScriptFunctionCall function(injectedScriptObject(), "wrapCallFrames");
     function.appendArgument(callFrames);
-    ScriptValue callFramesValue = function.call();
-    RefPtr<InspectorValue> result = callFramesValue.toInspectorValue(m_injectedScriptObject.scriptState());
+    bool hadException = false;
+    ScriptValue callFramesValue = callFunctionWithEvalEnabled(function, hadException);
+    ASSERT(!hadException);
+    RefPtr<InspectorValue> result = callFramesValue.toInspectorValue(scriptState());
     if (result->type() == InspectorValue::TypeArray)
-        return result->asArray();
-    return InspectorArray::create();
+        return Array<CallFrame>::runtimeCast(result);
+    return Array<CallFrame>::create();
 }
 #endif
 
-PassRefPtr<InspectorObject> InjectedScript::wrapObject(ScriptValue value, const String& groupName)
+PassRefPtr<TypeBuilder::Runtime::RemoteObject> InjectedScript::wrapObject(const ScriptValue& value, const String& groupName, bool generatePreview) const
 {
     ASSERT(!hasNoValue());
-    ScriptFunctionCall wrapFunction(m_injectedScriptObject, "wrapObject");
+    ScriptFunctionCall wrapFunction(injectedScriptObject(), "wrapObject");
     wrapFunction.appendArgument(value);
     wrapFunction.appendArgument(groupName);
     wrapFunction.appendArgument(canAccessInspectedWindow());
+    wrapFunction.appendArgument(generatePreview);
     bool hadException = false;
-    ScriptValue r = wrapFunction.call(hadException);
+    ScriptValue r = callFunctionWithEvalEnabled(wrapFunction, hadException);
     if (hadException) {
-        RefPtr<InspectorObject> result = InspectorObject::create();
-        result->setString("description", "<exception>");
-        return result;
+        return 0;
     }
-    return r.toInspectorValue(m_injectedScriptObject.scriptState())->asObject();
+    RefPtr<InspectorObject> rawResult = r.toInspectorValue(scriptState())->asObject();
+    return TypeBuilder::Runtime::RemoteObject::runtimeCast(rawResult);
 }
 
-PassRefPtr<InspectorObject> InjectedScript::wrapNode(Node* node, const String& groupName)
+PassRefPtr<TypeBuilder::Runtime::RemoteObject> InjectedScript::wrapNode(Node* node, const String& groupName)
 {
     return wrapObject(nodeAsScriptValue(node), groupName);
+}
+
+PassRefPtr<TypeBuilder::Runtime::RemoteObject> InjectedScript::wrapSerializedObject(SerializedScriptValue* serializedScriptValue, const String& groupName) const
+{
+    ScriptValue scriptValue = serializedScriptValue->deserializeForInspector(scriptState());
+    return scriptValue.hasNoValue() ? 0 : wrapObject(scriptValue, groupName);
+}
+
+ScriptValue InjectedScript::findObjectById(const String& objectId) const
+{
+    ASSERT(!hasNoValue());
+    ScriptFunctionCall function(injectedScriptObject(), "findObjectById");
+    function.appendArgument(objectId);
+
+    bool hadException = false;
+    ScriptValue resultValue = callFunctionWithEvalEnabled(function, hadException);
+    ASSERT(!hadException);
+    return resultValue;
 }
 
 void InjectedScript::inspectNode(Node* node)
 {
     ASSERT(!hasNoValue());
-    ScriptFunctionCall function(m_injectedScriptObject, "inspectNode");
+    ScriptFunctionCall function(injectedScriptObject(), "inspectNode");
     function.appendArgument(nodeAsScriptValue(node));
     RefPtr<InspectorValue> result;
     makeCall(function, &result);
@@ -188,68 +252,16 @@ void InjectedScript::inspectNode(Node* node)
 void InjectedScript::releaseObjectGroup(const String& objectGroup)
 {
     ASSERT(!hasNoValue());
-    ScriptFunctionCall releaseFunction(m_injectedScriptObject, "releaseObjectGroup");
+    ScriptFunctionCall releaseFunction(injectedScriptObject(), "releaseObjectGroup");
     releaseFunction.appendArgument(objectGroup);
-    releaseFunction.call();
-}
-
-bool InjectedScript::canAccessInspectedWindow()
-{
-    return m_inspectedStateAccessCheck(m_injectedScriptObject.scriptState());
-}
-
-void InjectedScript::makeCall(ScriptFunctionCall& function, RefPtr<InspectorValue>* result)
-{
-    if (hasNoValue() || !canAccessInspectedWindow()) {
-        *result = InspectorValue::null();
-        return;
-    }
-
-    DOMWindow* domWindow = domWindowFromScriptState(m_injectedScriptObject.scriptState());
-    InspectorInstrumentationCookie cookie = domWindow && domWindow->frame() ? InspectorInstrumentation::willCallFunction(domWindow->frame()->page(), "InjectedScript", 1) : InspectorInstrumentationCookie();
     bool hadException = false;
-    ScriptValue resultValue = function.call(hadException);
-    InspectorInstrumentation::didCallFunction(cookie);
-
+    callFunctionWithEvalEnabled(releaseFunction, hadException);
     ASSERT(!hadException);
-    if (!hadException) {
-        *result = resultValue.toInspectorValue(m_injectedScriptObject.scriptState());
-        if (!*result)
-            *result = InspectorString::create(String::format("Object has too long reference chain(must not be longer than %d)", InspectorValue::maxDepth));
-    } else
-        *result = InspectorString::create("Exception while making a call.");
-}
-
-void InjectedScript::makeEvalCall(ErrorString* errorString, ScriptFunctionCall& function, RefPtr<InspectorObject>* objectResult, bool* wasThrown)
-{
-    RefPtr<InspectorValue> result;
-    makeCall(function, &result);
-    if (!result) {
-        *errorString = "Internal error: result value is empty";
-        return;
-    }
-    if (result->type() == InspectorValue::TypeString) {
-        result->asString(errorString);
-        return;
-    }
-    RefPtr<InspectorObject> resultPair = result->asObject();
-    if (!resultPair) {
-        *errorString = "Internal error: result is not an Object";
-        return;
-    }
-    RefPtr<InspectorObject> resultObj = resultPair->getObject("result");
-    bool wasThrownVal = false;
-    if (!resultObj || !resultPair->getBoolean("wasThrown", &wasThrownVal)) {
-        *errorString = "Internal error: result is not a pair of value and wasThrown flag";
-        return;
-    }
-    *objectResult = resultObj;
-    *wasThrown = wasThrownVal;
 }
 
 ScriptValue InjectedScript::nodeAsScriptValue(Node* node)
 {
-    return InjectedScriptHost::nodeAsScriptValue(m_injectedScriptObject.scriptState(), node);
+    return InjectedScriptHost::nodeAsScriptValue(scriptState(), node);
 }
 
 } // namespace WebCore

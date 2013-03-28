@@ -48,16 +48,22 @@
 
 namespace talk_base {
 
-static const unsigned char kMappedPrefix[] = {0x00, 0x00, 0x00, 0x00,
-                                              0x00, 0x00, 0x00, 0x00,
-                                              0x00, 0x00, 0xFF, 0xFF};
+// Prefixes used for categorizing IPv6 addresses.
+static const in6_addr kULAPrefix = {{{0xfc, 0}}};
+static const in6_addr kV4MappedPrefix = {{{0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                           0xFF, 0xFF, 0}}};
+static const in6_addr k6To4Prefix = {{{0x20, 0x02, 0}}};
+static const in6_addr kTeredoPrefix = {{{0x20, 0x01, 0x00, 0x00}}};
+static const in6_addr kV4CompatibilityPrefix = {{{0}}};
+static const in6_addr kSiteLocalPrefix = {{{0xfe, 0xc0, 0}}};
+static const in6_addr k6BonePrefix = {{{0x3f, 0xfe, 0}}};
+
 static bool IsPrivateV4(uint32 ip);
-static bool IsMappedAddress(const in6_addr& addr);
 static in_addr ExtractMappedAddress(const in6_addr& addr);
 
 uint32 IPAddress::v4AddressAsHostOrderInteger() const {
   if (family_ == AF_INET) {
-    return ntohl(u_.ip4.s_addr);
+    return NetworkToHost32(u_.ip4.s_addr);
   } else {
     return 0;
   }
@@ -109,7 +115,8 @@ bool IPAddress::operator <(const IPAddress &other) const {
   // Comparing addresses of the same family.
   switch (family_) {
     case AF_INET: {
-      return ntohl(u_.ip4.s_addr) < ntohl(other.u_.ip4.s_addr);
+      return NetworkToHost32(u_.ip4.s_addr) <
+          NetworkToHost32(other.u_.ip4.s_addr);
     }
     case AF_INET6: {
       return memcmp(&u_.ip6.s6_addr, &other.u_.ip6.s6_addr, 16) < 0;
@@ -151,7 +158,7 @@ IPAddress IPAddress::Normalized() const {
   if (family_ != AF_INET6) {
     return *this;
   }
-  if (!IsMappedAddress(u_.ip6)) {
+  if (!IPIsV4Mapped(*this)) {
     return *this;
   }
   in_addr addr = ExtractMappedAddress(u_.ip6);
@@ -162,9 +169,7 @@ IPAddress IPAddress::AsIPv6Address() const {
   if (family_ != AF_INET) {
     return *this;
   }
-  //  uint32 v4 = (u_.ip4.s_addr);
-  in6_addr v6addr;
-  ::memcpy(&v6addr.s6_addr, kMappedPrefix, sizeof(kMappedPrefix));
+  in6_addr v6addr = kV4MappedPrefix;
   ::memcpy(&v6addr.s6_addr[12], &u_.ip4.s_addr, sizeof(u_.ip4.s_addr));
   return IPAddress(v6addr);
 }
@@ -177,44 +182,23 @@ bool IsPrivateV4(uint32 ip_in_host_order) {
       ((ip_in_host_order >> 16) == ((169 << 8) | 254));
 }
 
-bool IsMappedAddress(const in6_addr& addr) {
-  return memcmp(&(addr.s6_addr), kMappedPrefix, sizeof(kMappedPrefix)) == 0;
-}
-
 in_addr ExtractMappedAddress(const in6_addr& in6) {
   in_addr ipv4;
   ::memcpy(&ipv4.s_addr, &in6.s6_addr[12], sizeof(ipv4.s_addr));
   return ipv4;
 }
 
-bool IPFromHostEnt(hostent* host_ent, IPAddress* out) {
-  return IPFromHostEnt(host_ent, 0, out);
-}
-
-bool IPFromHostEnt(hostent* host_ent, int idx, IPAddress* out) {
-  if (!out || (idx < 0)) {
+bool IPFromAddrInfo(struct addrinfo* info, IPAddress* out) {
+  if (!info || !info->ai_addr) {
     return false;
   }
-  char** requested_address = host_ent->h_addr_list;
-  // Find the idx-th element (while checking for null, which terminates the
-  // list of addresses).
-  while (*requested_address && idx) {
-    idx--;
-    requested_address++;
-  }
-  if (!(*requested_address)) {
-    return false;
-  }
-
-  if (host_ent->h_addrtype == AF_INET) {
-    in_addr ip;
-    ip.s_addr = *reinterpret_cast<uint32*>(*requested_address);
-    *out = IPAddress(ip);
+  if (info->ai_addr->sa_family == AF_INET) {
+    sockaddr_in* addr = reinterpret_cast<sockaddr_in*>(info->ai_addr);
+    *out = IPAddress(addr->sin_addr);
     return true;
-  } else if (host_ent->h_addrtype == AF_INET6) {
-    in6_addr ip;
-    ::memcpy(&ip.s6_addr, *requested_address, host_ent->h_length);
-    *out = IPAddress(ip);
+  } else if (info->ai_addr->sa_family == AF_INET6) {
+    sockaddr_in6* addr = reinterpret_cast<sockaddr_in6*>(info->ai_addr);
+    *out = IPAddress(addr->sin6_addr);
     return true;
   }
   return false;
@@ -239,13 +223,11 @@ bool IPFromString(const std::string& str, IPAddress* out) {
 }
 
 bool IPIsAny(const IPAddress& ip) {
-  static const IPAddress kIPv4Any(INADDR_ANY);
-  static const IPAddress kIPv6Any(in6addr_any);
   switch (ip.family()) {
     case AF_INET:
-      return ip == kIPv4Any;
+      return ip == IPAddress(INADDR_ANY);
     case AF_INET6:
-      return ip == kIPv6Any;
+      return ip == IPAddress(in6addr_any);
     case AF_UNSPEC:
       return false;
   }
@@ -253,14 +235,12 @@ bool IPIsAny(const IPAddress& ip) {
 }
 
 bool IPIsLoopback(const IPAddress& ip) {
-  static const IPAddress kIPv4Loopback(INADDR_LOOPBACK);
-  static const IPAddress kIPv6Loopback(in6addr_loopback);
   switch (ip.family()) {
     case AF_INET: {
-      return ip == kIPv4Loopback;
+      return ip == IPAddress(INADDR_LOOPBACK);
     }
     case AF_INET6: {
-      return ip == kIPv6Loopback;
+      return ip == IPAddress(in6addr_loopback);
     }
   }
   return false;
@@ -278,6 +258,10 @@ bool IPIsPrivate(const IPAddress& ip) {
     }
   }
   return false;
+}
+
+bool IPIsUnspec(const IPAddress& ip) {
+  return ip.family() == AF_UNSPEC;
 }
 
 size_t HashIP(const IPAddress& ip) {
@@ -320,11 +304,11 @@ IPAddress TruncateIP(const IPAddress& ip, int length) {
     }
     in6_addr v6addr = ip.ipv6_address();
     int position = length / 32;
-    int inner_length = (length - (position * 32));
-    int inner_mask = (0xFFFFFFFF  << (32 - inner_length));
+    int inner_length = 32 - (length - (position * 32));
+    // Note: 64bit mask constant needed to allow possible 32-bit left shift.
+    uint32 inner_mask = 0xFFFFFFFFLL  << inner_length;
     uint32* v6_as_ints =
         reinterpret_cast<uint32*>(&v6addr.s6_addr);
-    in6_addr ip_addr = ip.ipv6_address();
     for (int i = 0; i < 4; ++i) {
       if (i == position) {
         uint32 host_order_inner = NetworkToHost32(v6_as_ints[i]);
@@ -339,8 +323,6 @@ IPAddress TruncateIP(const IPAddress& ip, int length) {
 }
 
 int CountIPMaskBits(IPAddress mask) {
-  // Doing this the lazy/simple way.
-  // Clever bit tricks welcome but please be careful re: byte order.
   uint32 word_to_count = 0;
   int bits = 0;
   switch (mask.family()) {
@@ -368,21 +350,86 @@ int CountIPMaskBits(IPAddress mask) {
       return 0;
     }
   }
-  // Check for byte boundaries before scanning.
   if (word_to_count == 0) {
     return bits;
-  } else if (word_to_count == 0xFF000000) {
-    return bits + 8;
-  } else if (word_to_count == 0xFFFF0000) {
-    return bits + 16;
-  } else if (word_to_count == 0xFFFFFF00) {
-    return bits + 24;
   }
 
-  while (word_to_count & 0x80000000) {
-    word_to_count <<= 1;
-    ++bits;
+  // Public domain bit-twiddling hack from:
+  // http://graphics.stanford.edu/~seander/bithacks.html
+  // Counts the trailing 0s in the word.
+  unsigned int zeroes = 32;
+  word_to_count &= -static_cast<int32>(word_to_count);
+  if (word_to_count) zeroes--;
+  if (word_to_count & 0x0000FFFF) zeroes -= 16;
+  if (word_to_count & 0x00FF00FF) zeroes -= 8;
+  if (word_to_count & 0x0F0F0F0F) zeroes -= 4;
+  if (word_to_count & 0x33333333) zeroes -= 2;
+  if (word_to_count & 0x55555555) zeroes -= 1;
+
+  return bits + (32 - zeroes);
+}
+
+bool IPIsHelper(const IPAddress& ip, const in6_addr& tomatch, int length) {
+  // Helper method for checking IP prefix matches (but only on whole byte
+  // lengths). Length is in bits.
+  in6_addr addr = ip.ipv6_address();
+  return ::memcmp(&addr, &tomatch, (length >> 3)) == 0;
+}
+
+bool IPIs6Bone(const IPAddress& ip) {
+  return IPIsHelper(ip, k6BonePrefix, 16);
+}
+
+bool IPIs6To4(const IPAddress& ip) {
+  return IPIsHelper(ip, k6To4Prefix, 16);
+}
+
+bool IPIsSiteLocal(const IPAddress& ip) {
+  // Can't use the helper because the prefix is 10 bits.
+  in6_addr addr = ip.ipv6_address();
+  return addr.s6_addr[0] == 0xFE && (addr.s6_addr[1] & 0xC0) == 0xC0;
+}
+
+bool IPIsULA(const IPAddress& ip) {
+  // Can't use the helper because the prefix is 7 bits.
+  in6_addr addr = ip.ipv6_address();
+  return (addr.s6_addr[0] & 0xFE) == 0xFC;
+}
+
+bool IPIsTeredo(const IPAddress& ip) {
+  return IPIsHelper(ip, kTeredoPrefix, 32);
+}
+
+bool IPIsV4Compatibility(const IPAddress& ip) {
+  return IPIsHelper(ip, kV4CompatibilityPrefix, 96);
+}
+
+bool IPIsV4Mapped(const IPAddress& ip) {
+  return IPIsHelper(ip, kV4MappedPrefix, 96);
+}
+
+int IPAddressPrecedence(const IPAddress& ip) {
+  // Precedence values from RFC 3484-bis. Prefers native v4 over 6to4/Teredo.
+  if (ip.family() == AF_INET) {
+    return 30;
+  } else if (ip.family() == AF_INET6) {
+    if (IPIsLoopback(ip)) {
+      return 60;
+    } else if (IPIsULA(ip)) {
+      return 50;
+    } else if (IPIsV4Mapped(ip)) {
+      return 30;
+    } else if (IPIs6To4(ip)) {
+      return 20;
+    } else if (IPIsTeredo(ip)) {
+      return 10;
+    } else if (IPIsV4Compatibility(ip) || IPIsSiteLocal(ip) || IPIs6Bone(ip)) {
+      return 1;
+    } else {
+      // A 'normal' IPv6 address.
+      return 40;
+    }
   }
-  return bits;
+  return 0;
 }
 }  // Namespace talk base

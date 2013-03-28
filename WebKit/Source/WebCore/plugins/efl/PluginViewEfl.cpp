@@ -55,7 +55,7 @@ bool PluginView::dispatchNPEvent(NPEvent& event)
         return false;
 
     PluginView::setCurrentPluginView(this);
-    JSC::JSLock::DropAllLocks dropAllLocks(false);
+    JSC::JSLock::DropAllLocks dropAllLocks(JSDOMWindowBase::commonJSGlobalData());
     setCallingPlugin(true);
 
     bool accepted = m_plugin->pluginFuncs()->event(m_instance, &event);
@@ -155,7 +155,7 @@ void PluginView::setParent(ScrollView* parent)
         init();
 }
 
-void PluginView::setNPWindowRect(const IntRect& rect)
+void PluginView::setNPWindowRect(const IntRect&)
 {
     notImplemented();
 }
@@ -282,8 +282,10 @@ bool PluginView::platformGetValue(NPNVariable variable, void* value, NPError* re
     }
 
     case NPNVnetscapeWindow: {
-        Evas_Object* widget = m_parentFrame->view()->hostWindow()->platformPageClient();
-        Evas* evas = evas_object_evas_get(widget);
+        Evas* evas = m_parentFrame->view()->evas();
+        if (!evas)
+            return false;
+
         Ecore_Evas* ecoreEvas = ecore_evas_ecore_evas_get(evas);
         *static_cast<XID*>(value) = static_cast<Window>(ecore_evas_window_get(ecoreEvas));
         *result = NPERR_NO_ERROR;
@@ -317,7 +319,7 @@ void PluginView::invalidateRect(NPRect* rect)
     invalidateRect(IntRect(rect->left, rect->top, rect->right - rect->left, rect->bottom - rect->top));
 }
 
-void PluginView::invalidateRegion(NPRegion region)
+void PluginView::invalidateRegion(NPRegion)
 {
     notImplemented();
 }

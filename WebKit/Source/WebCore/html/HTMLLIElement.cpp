@@ -26,6 +26,7 @@
 #include "Attribute.h"
 #include "CSSPropertyNames.h"
 #include "CSSValueKeywords.h"
+#include "ComposedShadowTreeWalker.h"
 #include "HTMLNames.h"
 #include "RenderListItem.h"
 
@@ -49,36 +50,39 @@ PassRefPtr<HTMLLIElement> HTMLLIElement::create(const QualifiedName& tagName, Do
     return adoptRef(new HTMLLIElement(tagName, document));
 }
 
-bool HTMLLIElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+bool HTMLLIElement::isPresentationAttribute(const QualifiedName& name) const
 {
-    if (attrName == typeAttr) {
-        result = eListItem; // Share with <ol> since all the values are the same
-        return false;
-    }
-    
-    return HTMLElement::mapToEntry(attrName, result);
+    if (name == typeAttr)
+        return true;
+    return HTMLElement::isPresentationAttribute(name);
 }
 
-void HTMLLIElement::parseMappedAttribute(Attribute* attr)
+void HTMLLIElement::collectStyleForPresentationAttribute(const Attribute& attribute, StylePropertySet* style)
 {
-    if (attr->name() == valueAttr) {
-        if (renderer() && renderer()->isListItem())
-            parseValue(attr->value());
-    } else if (attr->name() == typeAttr) {
-        if (attr->value() == "a")
-            addCSSProperty(attr, CSSPropertyListStyleType, CSSValueLowerAlpha);
-        else if (attr->value() == "A")
-            addCSSProperty(attr, CSSPropertyListStyleType, CSSValueUpperAlpha);
-        else if (attr->value() == "i")
-            addCSSProperty(attr, CSSPropertyListStyleType, CSSValueLowerRoman);
-        else if (attr->value() == "I")
-            addCSSProperty(attr, CSSPropertyListStyleType, CSSValueUpperRoman);
-        else if (attr->value() == "1")
-            addCSSProperty(attr, CSSPropertyListStyleType, CSSValueDecimal);
+    if (attribute.name() == typeAttr) {
+        if (attribute.value() == "a")
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType, CSSValueLowerAlpha);
+        else if (attribute.value() == "A")
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType, CSSValueUpperAlpha);
+        else if (attribute.value() == "i")
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType, CSSValueLowerRoman);
+        else if (attribute.value() == "I")
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType, CSSValueUpperRoman);
+        else if (attribute.value() == "1")
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType, CSSValueDecimal);
         else
-            addCSSProperty(attr, CSSPropertyListStyleType, attr->value());
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyListStyleType, attribute.value());
     } else
-        HTMLElement::parseMappedAttribute(attr);
+        HTMLElement::collectStyleForPresentationAttribute(attribute, style);
+}
+
+void HTMLLIElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+{
+    if (name == valueAttr) {
+        if (renderer() && renderer()->isListItem())
+            parseValue(value);
+    } else
+        HTMLElement::parseAttribute(name, value);
 }
 
 void HTMLLIElement::attach()
@@ -92,10 +96,13 @@ void HTMLLIElement::attach()
 
         // Find the enclosing list node.
         Node* listNode = 0;
-        Node* n = this;
-        while (!listNode && (n = n->parentNode())) {
-            if (n->hasTagName(ulTag) || n->hasTagName(olTag))
-                listNode = n;
+        ComposedShadowTreeWalker walker(this);
+        while (!listNode) {
+            walker.parent();
+            if (!walker.get())
+                break;
+            if (walker.get()->hasTagName(ulTag) || walker.get()->hasTagName(olTag))
+                listNode = walker.get();
         }
 
         // If we are not in a list, tell the renderer so it can position us inside.

@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2010 Alex Milowski (alex@milowski.com). All rights reserved.
+ * Copyright (C) 2012 David Barton (dbarton@mathscribe.com). All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,13 +29,17 @@
 
 #if ENABLE(MATHML)
 
-#include "RenderBlock.h"
+#include "RenderFlexibleBox.h"
+#include "RenderTable.h"
+#include "StyleInheritedData.h"
 
 #define ENABLE_DEBUG_MATH_LAYOUT 0
 
 namespace WebCore {
     
-class RenderMathMLBlock : public RenderBlock {
+class RenderMathMLOperator;
+
+class RenderMathMLBlock : public RenderFlexibleBox {
 public:
     RenderMathMLBlock(Node* container);
     virtual bool isChildAllowed(RenderObject*, RenderStyle*) const;
@@ -43,55 +48,71 @@ public:
     virtual bool isRenderMathMLOperator() const { return false; }
     virtual bool isRenderMathMLRow() const { return false; }
     virtual bool isRenderMathMLMath() const { return false; }
-    virtual bool hasBase() const { return false; }
-    virtual int nonOperatorHeight() const;
-    virtual void stretchToHeight(int height);
+    virtual bool isRenderMathMLFenced() const { return false; }
+    virtual bool isRenderMathMLFraction() const { return false; }
+    virtual bool isRenderMathMLRoot() const { return false; }
+    virtual bool isRenderMathMLSquareRoot() const { return false; }
+    virtual bool isRenderMathMLSubSup() const { return false; }
+    virtual bool isRenderMathMLUnderOver() const { return false; }
+    
+    // MathML defines an "embellished operator" as roughly an <mo> that may have subscripts,
+    // superscripts, underscripts, overscripts, or a denominator (as in d/dx, where "d" is some
+    // differential operator). The padding, precedence, and stretchiness of the base <mo> should
+    // apply to the embellished operator as a whole. unembellishedOperator() checks for being an
+    // embellished operator, and omits any embellishments.
+    // FIXME: We don't yet handle all the cases in the MathML spec. See
+    // https://bugs.webkit.org/show_bug.cgi?id=78617.
+    virtual RenderMathMLOperator* unembellishedOperator() { return 0; }
 
+    virtual LayoutUnit paddingTop() const OVERRIDE;
+    virtual LayoutUnit paddingBottom() const OVERRIDE;
+    virtual LayoutUnit paddingLeft() const OVERRIDE;
+    virtual LayoutUnit paddingRight() const OVERRIDE;
+    virtual LayoutUnit paddingBefore() const OVERRIDE;
+    virtual LayoutUnit paddingAfter() const OVERRIDE;
+    virtual LayoutUnit paddingStart() const OVERRIDE;
+    virtual LayoutUnit paddingEnd() const OVERRIDE;
+    
+    // A MathML element's preferred logical widths often depend on its children's preferred heights, not just their widths.
+    // This is due to operator stretching and other layout fine tuning. We define an element's preferred height to be its
+    // actual height after layout inside a very wide parent.
+    bool isPreferredLogicalHeightDirty() const { return preferredLogicalWidthsDirty() || m_preferredLogicalHeight < 0; }
+    // The caller must ensure !isPreferredLogicalHeightDirty().
+    LayoutUnit preferredLogicalHeight() const { ASSERT(!isPreferredLogicalHeightDirty()); return m_preferredLogicalHeight; }
+    static const int preferredLogicalHeightUnset = -1;
+    void setPreferredLogicalHeight(LayoutUnit logicalHeight) { m_preferredLogicalHeight = logicalHeight; }
+    // computePreferredLogicalWidths() in derived classes must ensure m_preferredLogicalHeight is set to < 0 or its correct value.
+    virtual void computePreferredLogicalWidths() OVERRIDE;
+    
+    virtual int baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const OVERRIDE;
+    
 #if ENABLE(DEBUG_MATH_LAYOUT)
     virtual void paint(PaintInfo&, const LayoutPoint&);
 #endif
     
-protected:
-    int getBoxModelObjectHeight(RenderObject* object) 
-    {
-        if (object && object->isBoxModelObject()) {
-            RenderBoxModelObject* box = toRenderBoxModelObject(object);
-            return box->offsetHeight();
-        }
-        
-        return 0;
-    }
-    int getBoxModelObjectHeight(const RenderObject* object) 
-    {
-        if (object && object->isBoxModelObject()) {
-            const RenderBoxModelObject* box = toRenderBoxModelObject(object);
-            return box->offsetHeight();
-        }
-        
-        return 0;
-    }
-    int getBoxModelObjectWidth(RenderObject* object) 
-    {
-        if (object && object->isBoxModelObject()) {
-            RenderBoxModelObject* box = toRenderBoxModelObject(object);
-            return box->offsetWidth();
-        }
-        
-        return 0;
-    }
-    int getBoxModelObjectWidth(const RenderObject* object) 
-    {
-        if (object && object->isBoxModelObject()) {
-            const RenderBoxModelObject* box = toRenderBoxModelObject(object);
-            return box->offsetWidth();
-        }
-        
-        return 0;
-    }
-    virtual PassRefPtr<RenderStyle> makeBlockStyle();
-
+    // Create a new RenderMathMLBlock, with a new style inheriting from this->style().
+    RenderMathMLBlock* createAnonymousMathMLBlock(EDisplay = FLEX);
+    
+    void setIgnoreInAccessibilityTree(bool flag) { m_ignoreInAccessibilityTree = flag; }
+    bool ignoreInAccessibilityTree() const { return m_ignoreInAccessibilityTree; }
+    
 private:
-    virtual const char* renderName() const { return isAnonymous() ? "RenderMathMLBlock (anonymous)" : "RenderMathMLBlock"; }
+    virtual const char* renderName() const OVERRIDE;
+    bool m_ignoreInAccessibilityTree;
+    
+protected:
+    // Set our logical width to a large value, and compute our children's preferred logical heights.
+    void computeChildrenPreferredLogicalHeights();
+    // This can only be called after children have been sized by computeChildrenPreferredLogicalHeights().
+    static LayoutUnit preferredLogicalHeightAfterSizing(RenderObject* child);
+    
+    int m_intrinsicPaddingBefore;
+    int m_intrinsicPaddingAfter;
+    int m_intrinsicPaddingStart;
+    int m_intrinsicPaddingEnd;
+    
+    // m_preferredLogicalHeight is dirty if it's < 0 or preferredLogicalWidthsDirty().
+    LayoutUnit m_preferredLogicalHeight;
 };
 
 inline RenderMathMLBlock* toRenderMathMLBlock(RenderObject* object)
@@ -106,8 +127,20 @@ inline const RenderMathMLBlock* toRenderMathMLBlock(const RenderObject* object)
     return static_cast<const RenderMathMLBlock*>(object);
 }
 
-}
+// This will catch anyone doing an unnecessary cast.
+void toRenderMathMLBlock(const RenderMathMLBlock*);
 
+class RenderMathMLTable : public RenderTable {
+public:
+    explicit RenderMathMLTable(Node* node) : RenderTable(node) { }
+    
+    virtual int firstLineBoxBaseline() const OVERRIDE;
+    
+private:
+    virtual const char* renderName() const OVERRIDE { return "RenderMathMLTable"; }
+};
+
+}
 
 #endif // ENABLE(MATHML)
 #endif // RenderMathMLBlock_h

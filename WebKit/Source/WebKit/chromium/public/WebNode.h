@@ -45,6 +45,7 @@ class WebDocument;
 class WebElement;
 class WebFrame;
 class WebNodeList;
+class WebPluginContainer;
 
 // Provides access to some properties of a DOM node.
 class WebNode {
@@ -98,6 +99,7 @@ public:
     WEBKIT_EXPORT WebNode nextSibling() const;
     WEBKIT_EXPORT bool hasChildNodes() const;
     WEBKIT_EXPORT WebNodeList childNodes();
+    WEBKIT_EXPORT bool appendChild(const WebNode& child);
     WEBKIT_EXPORT WebString createMarkup() const;
     WEBKIT_EXPORT bool isLink() const;
     WEBKIT_EXPORT bool isTextNode() const;
@@ -112,11 +114,13 @@ public:
     WEBKIT_EXPORT WebNodeList getElementsByTagName(const WebString&) const;
     WEBKIT_EXPORT WebElement rootEditableElement() const;
     WEBKIT_EXPORT bool focused() const;
+    WEBKIT_EXPORT bool remove();
 
     // Returns true if the node has a non-empty bounding box in layout.
     // This does not 100% guarantee the user can see it, but is pretty close.
     // Note: This method only works properly after layout has occurred.
     WEBKIT_EXPORT bool hasNonEmptyBoundingBox() const;
+    WEBKIT_EXPORT WebPluginContainer* pluginContainer() const;
 
     template<typename T> T to()
     {

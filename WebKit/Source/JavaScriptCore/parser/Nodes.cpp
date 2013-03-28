@@ -33,7 +33,7 @@
 #include "JIT.h"
 #include "JSFunction.h"
 #include "JSGlobalObject.h"
-#include "JSStaticScopeObject.h"
+#include "JSNameScope.h"
 #include "LabelScope.h"
 #include "Lexer.h"
 #include "Operations.h"
@@ -52,10 +52,18 @@ namespace JSC {
 
 // ------------------------------ StatementNode --------------------------------
 
+void StatementNode::setLoc(int firstLine, int lastLine, int column)
+{
+    m_lineNumber = firstLine;
+    m_lastLine = lastLine;
+    m_columnNumber = column;
+}
+
 void StatementNode::setLoc(int firstLine, int lastLine)
 {
     m_lineNumber = firstLine;
     m_lastLine = lastLine;
+    m_columnNumber = 0;
 }
 
 // ------------------------------ SourceElements --------------------------------
@@ -73,13 +81,26 @@ StatementNode* SourceElements::singleStatement() const
     return size == 1 ? m_statements[0] : 0;
 }
 
-// -----------------------------ScopeNodeData ---------------------------
+// ------------------------------ ScopeNode -----------------------------
 
-ScopeNodeData::ScopeNodeData(ParserArena& arena, SourceElements* statements, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, int numConstants)
-    : m_numConstants(numConstants)
-    , m_statements(statements)
+ScopeNode::ScopeNode(JSGlobalData* globalData, const JSTokenLocation& location, bool inStrictContext)
+    : StatementNode(location)
+    , ParserArenaRefCounted(globalData)
+    , m_features(inStrictContext ? StrictModeFeature : NoFeatures)
+    , m_numConstants(0)
+    , m_statements(0)
 {
-    m_arena.swap(arena);
+}
+
+ScopeNode::ScopeNode(JSGlobalData* globalData, const JSTokenLocation& location, const SourceCode& source, SourceElements* children, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, CodeFeatures features, int numConstants)
+    : StatementNode(location)
+    , ParserArenaRefCounted(globalData)
+    , m_features(features)
+    , m_source(source)
+    , m_numConstants(numConstants)
+    , m_statements(children)
+{
+    m_arena.swap(*globalData->parserArena);
     if (varStack)
         m_varStack.swap(*varStack);
     if (funcStack)
@@ -87,61 +108,43 @@ ScopeNodeData::ScopeNodeData(ParserArena& arena, SourceElements* statements, Var
     m_capturedVariables.swap(capturedVariables);
 }
 
-// ------------------------------ ScopeNode -----------------------------
-
-ScopeNode::ScopeNode(JSGlobalData* globalData, int lineNumber, bool inStrictContext)
-    : StatementNode(lineNumber)
-    , ParserArenaRefCounted(globalData)
-    , m_features(inStrictContext ? StrictModeFeature : NoFeatures)
-{
-}
-
-ScopeNode::ScopeNode(JSGlobalData* globalData, int lineNumber, const SourceCode& source, SourceElements* children, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, CodeFeatures features, int numConstants)
-    : StatementNode(lineNumber)
-    , ParserArenaRefCounted(globalData)
-    , m_data(adoptPtr(new ScopeNodeData(*globalData->parserArena, children, varStack, funcStack, capturedVariables, numConstants)))
-    , m_features(features)
-    , m_source(source)
-{
-}
-
 StatementNode* ScopeNode::singleStatement() const
 {
-    return m_data->m_statements ? m_data->m_statements->singleStatement() : 0;
+    return m_statements ? m_statements->singleStatement() : 0;
 }
 
 // ------------------------------ ProgramNode -----------------------------
 
-inline ProgramNode::ProgramNode(JSGlobalData* globalData, int lineNumber, SourceElements* children, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, const SourceCode& source, CodeFeatures features, int numConstants)
-    : ScopeNode(globalData, lineNumber, source, children, varStack, funcStack, capturedVariables, features, numConstants)
+inline ProgramNode::ProgramNode(JSGlobalData* globalData, const JSTokenLocation& location, SourceElements* children, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, const SourceCode& source, CodeFeatures features, int numConstants)
+    : ScopeNode(globalData, location, source, children, varStack, funcStack, capturedVariables, features, numConstants)
 {
 }
 
-PassRefPtr<ProgramNode> ProgramNode::create(JSGlobalData* globalData, int lineNumber, SourceElements* children, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, const SourceCode& source, CodeFeatures features, int numConstants)
+PassRefPtr<ProgramNode> ProgramNode::create(JSGlobalData* globalData, const JSTokenLocation& location, SourceElements* children, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, const SourceCode& source, CodeFeatures features, int numConstants)
 {
-    RefPtr<ProgramNode> node = new ProgramNode(globalData, lineNumber, children, varStack, funcStack,  capturedVariables, source, features, numConstants);
+    RefPtr<ProgramNode> node = new ProgramNode(globalData, location, children, varStack, funcStack,  capturedVariables, source, features, numConstants);
 
-    ASSERT(node->data()->m_arena.last() == node);
-    node->data()->m_arena.removeLast();
-    ASSERT(!node->data()->m_arena.contains(node.get()));
+    ASSERT(node->m_arena.last() == node);
+    node->m_arena.removeLast();
+    ASSERT(!node->m_arena.contains(node.get()));
 
     return node.release();
 }
 
 // ------------------------------ EvalNode -----------------------------
 
-inline EvalNode::EvalNode(JSGlobalData* globalData, int lineNumber, SourceElements* children, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, const SourceCode& source, CodeFeatures features, int numConstants)
-    : ScopeNode(globalData, lineNumber, source, children, varStack, funcStack, capturedVariables, features, numConstants)
+inline EvalNode::EvalNode(JSGlobalData* globalData, const JSTokenLocation& location, SourceElements* children, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, const SourceCode& source, CodeFeatures features, int numConstants)
+    : ScopeNode(globalData, location, source, children, varStack, funcStack, capturedVariables, features, numConstants)
 {
 }
 
-PassRefPtr<EvalNode> EvalNode::create(JSGlobalData* globalData, int lineNumber, SourceElements* children, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, const SourceCode& source, CodeFeatures features, int numConstants)
+PassRefPtr<EvalNode> EvalNode::create(JSGlobalData* globalData, const JSTokenLocation& location, SourceElements* children, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, const SourceCode& source, CodeFeatures features, int numConstants)
 {
-    RefPtr<EvalNode> node = new EvalNode(globalData, lineNumber, children, varStack, funcStack, capturedVariables, source, features, numConstants);
+    RefPtr<EvalNode> node = new EvalNode(globalData, location, children, varStack, funcStack, capturedVariables, source, features, numConstants);
 
-    ASSERT(node->data()->m_arena.last() == node);
-    node->data()->m_arena.removeLast();
-    ASSERT(!node->data()->m_arena.contains(node.get()));
+    ASSERT(node->m_arena.last() == node);
+    node->m_arena.removeLast();
+    ASSERT(!node->m_arena.contains(node.get()));
 
     return node.release();
 }
@@ -150,45 +153,52 @@ PassRefPtr<EvalNode> EvalNode::create(JSGlobalData* globalData, int lineNumber, 
 
 FunctionParameters::FunctionParameters(ParameterNode* firstParameter)
 {
+    unsigned parameterCount = 0;
     for (ParameterNode* parameter = firstParameter; parameter; parameter = parameter->nextParam())
-        append(parameter->ident());
+        ++parameterCount;
+
+    reserveInitialCapacity(parameterCount);
+
+    for (ParameterNode* parameter = firstParameter; parameter; parameter = parameter->nextParam())
+        uncheckedAppend(parameter->ident());
 }
 
-inline FunctionBodyNode::FunctionBodyNode(JSGlobalData* globalData, int lineNumber, bool inStrictContext)
-    : ScopeNode(globalData, lineNumber, inStrictContext)
+inline FunctionBodyNode::FunctionBodyNode(JSGlobalData* globalData, const JSTokenLocation& location, bool inStrictContext)
+    : ScopeNode(globalData, location, inStrictContext)
 {
 }
 
-inline FunctionBodyNode::FunctionBodyNode(JSGlobalData* globalData, int lineNumber, SourceElements* children, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, const SourceCode& sourceCode, CodeFeatures features, int numConstants)
-    : ScopeNode(globalData, lineNumber, sourceCode, children, varStack, funcStack, capturedVariables, features, numConstants)
+inline FunctionBodyNode::FunctionBodyNode(JSGlobalData* globalData, const JSTokenLocation& location, SourceElements* children, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, const SourceCode& sourceCode, CodeFeatures features, int numConstants)
+    : ScopeNode(globalData, location, sourceCode, children, varStack, funcStack, capturedVariables, features, numConstants)
 {
 }
 
-void FunctionBodyNode::finishParsing(const SourceCode& source, ParameterNode* firstParameter, const Identifier& ident)
+void FunctionBodyNode::finishParsing(const SourceCode& source, ParameterNode* firstParameter, const Identifier& ident, FunctionNameIsInScopeToggle functionNameIsInScopeToggle)
 {
     setSource(source);
-    finishParsing(FunctionParameters::create(firstParameter), ident);
+    finishParsing(FunctionParameters::create(firstParameter), ident, functionNameIsInScopeToggle);
 }
 
-void FunctionBodyNode::finishParsing(PassRefPtr<FunctionParameters> parameters, const Identifier& ident)
+void FunctionBodyNode::finishParsing(PassRefPtr<FunctionParameters> parameters, const Identifier& ident, FunctionNameIsInScopeToggle functionNameIsInScopeToggle)
 {
     ASSERT(!source().isNull());
     m_parameters = parameters;
     m_ident = ident;
+    m_functionNameIsInScopeToggle = functionNameIsInScopeToggle;
 }
 
-FunctionBodyNode* FunctionBodyNode::create(JSGlobalData* globalData, int lineNumber, bool inStrictContext)
+FunctionBodyNode* FunctionBodyNode::create(JSGlobalData* globalData, const JSTokenLocation& location, bool inStrictContext)
 {
-    return new FunctionBodyNode(globalData, lineNumber, inStrictContext);
+    return new FunctionBodyNode(globalData, location, inStrictContext);
 }
 
-PassRefPtr<FunctionBodyNode> FunctionBodyNode::create(JSGlobalData* globalData, int lineNumber, SourceElements* children, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, const SourceCode& sourceCode, CodeFeatures features, int numConstants)
+PassRefPtr<FunctionBodyNode> FunctionBodyNode::create(JSGlobalData* globalData, const JSTokenLocation& location, SourceElements* children, VarStack* varStack, FunctionStack* funcStack, IdentifierSet& capturedVariables, const SourceCode& sourceCode, CodeFeatures features, int numConstants)
 {
-    RefPtr<FunctionBodyNode> node = new FunctionBodyNode(globalData, lineNumber, children, varStack, funcStack, capturedVariables, sourceCode, features, numConstants);
+    RefPtr<FunctionBodyNode> node = new FunctionBodyNode(globalData, location, children, varStack, funcStack, capturedVariables, sourceCode, features, numConstants);
 
-    ASSERT(node->data()->m_arena.last() == node);
-    node->data()->m_arena.removeLast();
-    ASSERT(!node->data()->m_arena.contains(node.get()));
+    ASSERT(node->m_arena.last() == node);
+    node->m_arena.removeLast();
+    ASSERT(!node->m_arena.contains(node.get()));
 
     return node.release();
 }

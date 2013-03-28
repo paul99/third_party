@@ -27,26 +27,44 @@
 #define WebConnection_h
 
 #include "APIObject.h"
+#include "MessageReceiver.h"
+#include "MessageSender.h"
 #include "WebConnectionClient.h"
-#include <wtf/Forward.h>
+#include <wtf/RefPtr.h>
 
 namespace WebKit {
 
-class WebConnection : public APIObject {
+class WebConnection : public APIObject, public CoreIPC::MessageReceiver, public CoreIPC::MessageSender<WebConnection> {
 public:
     static const Type APIType = TypeConnection;
-
     virtual ~WebConnection();
 
-    // Initialize the connection client.
     void initializeConnectionClient(const WKConnectionClient*);
+    void postMessage(const String&, APIObject*);
+    void didClose();
 
-    virtual void postMessage(const String&, APIObject*) = 0;
+    // Used by CoreIPC::MessageSender
+    virtual CoreIPC::Connection* connection() const = 0;
+    virtual uint64_t destinationID() const = 0;
 
 protected:
+    explicit WebConnection();
+
     virtual Type type() const { return APIType; }
 
-    void forwardDidReceiveMessageToClient(const String&, APIObject*);
+    virtual void encodeMessageBody(CoreIPC::ArgumentEncoder&, APIObject*) = 0;
+    virtual bool decodeMessageBody(CoreIPC::ArgumentDecoder&, RefPtr<APIObject>&) = 0;
+
+    // CoreIPC::MessageReceiver
+    void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&) OVERRIDE;
+
+    // Implemented in generated WebConnectionMessageReceiver.cpp
+    void didReceiveWebConnectionMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
+
+    // Mesage handling implementation functions.
+    void handleMessage(CoreIPC::MessageDecoder&);
+
+    virtual bool hasValidConnection() const = 0;
 
     WebConnectionClient m_client;
 };

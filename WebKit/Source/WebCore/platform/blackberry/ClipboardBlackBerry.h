@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Research In Motion Limited. All rights reserved.
+ * Copyright (C) 2010, 2012 Research In Motion Limited. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -27,16 +27,19 @@ namespace WebCore {
 class ClipboardBlackBerry : public Clipboard, public CachedResourceClient {
 WTF_MAKE_FAST_ALLOCATED;
 public:
-    static PassRefPtr<ClipboardBlackBerry> create(ClipboardAccessPolicy, ClipboardType = CopyAndPaste);
+    static PassRefPtr<ClipboardBlackBerry> create(ClipboardAccessPolicy policy, ClipboardType clipboardType = CopyAndPaste)
+    {
+        return adoptRef(new ClipboardBlackBerry(policy, clipboardType));
+    }
     virtual ~ClipboardBlackBerry();
 
     void clearData(const String& type);
     void clearAllData();
-    String getData(const String& type, bool& success) const;
+    String getData(const String& type) const;
     bool setData(const String& type, const String& data);
 
     // extensions beyond IE's API
-    virtual HashSet<String> types() const;
+    virtual ListHashSet<String> types() const;
     virtual PassRefPtr<FileList> files() const;
     virtual DragImageRef createDragImage(IntPoint&) const;
     virtual void declareAndWriteDragImage(Element*, const KURL&, const String& title, Frame*);

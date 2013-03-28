@@ -28,7 +28,10 @@
 
 #if ENABLE(GAMEPAD)
 
+#include "GamepadList.h"
+#include "Gamepads.h"
 #include "Navigator.h"
+#include <wtf/PassOwnPtr.h>
 
 namespace WebCore {
 
@@ -40,10 +43,28 @@ NavigatorGamepad::~NavigatorGamepad()
 {
 }
 
-GamepadList* NavigatorGamepad::webkitGamepads(Navigator* navigator)
+NavigatorGamepad* NavigatorGamepad::from(Navigator* navigator)
 {
-    // FIXME: We shouldn't need to direct this call to Navigator.
-    return navigator->gamepads();
+    DEFINE_STATIC_LOCAL(AtomicString, name, ("NavigatorGamepad", AtomicString::ConstructFromLiteral));
+    NavigatorGamepad* supplement = static_cast<NavigatorGamepad*>(Supplement<Navigator>::from(navigator, name));
+    if (!supplement) {
+        supplement = new NavigatorGamepad();
+        provideTo(navigator, name, adoptPtr(supplement));
+    }
+    return supplement;
+}
+
+GamepadList* NavigatorGamepad::webkitGetGamepads(Navigator* navigator)
+{
+    return NavigatorGamepad::from(navigator)->gamepads();
+}
+
+GamepadList* NavigatorGamepad::gamepads()
+{
+    if (!m_gamepads)
+        m_gamepads = GamepadList::create();
+    sampleGamepads(m_gamepads.get());
+    return m_gamepads.get();
 }
 
 } // namespace WebCore

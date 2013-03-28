@@ -76,7 +76,7 @@ public:
 
     virtual void setResizable(bool);
 
-    virtual void addMessageToConsole(WebCore::MessageSource, WebCore::MessageType, WebCore::MessageLevel, const WTF::String& message, unsigned int lineNumber, const WTF::String& sourceID);
+    virtual void addMessageToConsole(WebCore::MessageSource, WebCore::MessageLevel, const WTF::String& message, unsigned lineNumber, const WTF::String& sourceID);
 
     virtual bool canRunBeforeUnloadConfirmPanel();
     virtual bool runBeforeUnloadConfirmPanel(const WTF::String& message, WebCore::Frame* frame);
@@ -131,18 +131,9 @@ public:
     // for this origin.
     virtual void reachedApplicationCacheOriginQuota(WebCore::SecurityOrigin*, int64_t totalSpaceNeeded);
 
-#if ENABLE(CONTEXT_MENUS)
-    virtual void showContextMenu() { }
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
+    virtual WebCore::NotificationClient* notificationPresenter() const;
 #endif
-
-#if ENABLE(NOTIFICATIONS)
-    virtual WebCore::NotificationPresenter* notificationPresenter() const;
-#endif
-
-    // This can be either a synchronous or asynchronous call. The ChromeClient can display UI asking the user for permission
-    // to use Geolocation.
-    virtual void requestGeolocationPermissionForFrame(WebCore::Frame*, WebCore::Geolocation*);
-    virtual void cancelGeolocationPermissionRequestForFrame(WebCore::Frame*, WebCore::Geolocation*);
 
     virtual void runOpenPanel(WebCore::Frame*, PassRefPtr<WebCore::FileChooser>);
     // Asynchronous request to load an icon for specified filenames.
@@ -160,7 +151,7 @@ public:
     virtual void setNeedsOneShotDrawingSynchronization();
     // Sets a flag to specify that the view needs to be updated, so we need
     // to do an eager layout before the drawing.
-    virtual void scheduleCompositingLayerSync();
+    virtual void scheduleCompositingLayerFlush();
 #endif
 
     virtual void setLastSetCursorToCurrentCursor();

@@ -1,0 +1,22 @@
+Name: Android Tools (SDK/NDK)
+URL: http://developer.android.com/sdk/index.html
+Version: NDK r7, SDK API level 16
+Security Critical: no
+License: Apache Version 2.0
+
+Description:
+The Android SDK/NDK provide API libraries and developer tools necessary to
+build, test and debug for Android.
+
+Local Modifications:
+Removed .gitignore files in ndk folder so all files would be checked in.
+Overwrite linker with 64-bit linker in the NDK:
+We use the 64-bit linker from $ROOT/src/third_party/aosp/.  The linkers in the
+following two directories have been overwritten with the 64-bit linker and the
+old linker has been copied as <old_linker_name>.orig:
+  1) ndk/toolchains/arm-linux-androideabi-4.4.3/prebuilt/linux-x86/
+         arm-linux-androideabi/bin/ld.orig
+  2) ndk/toolchains/arm-linux-androideabi-4.4.3/prebuilt/linux-x86/bin/
+         arm-linux-androideabi-ld.orig
+  3) sdk/extras added gcm library (revision 3)
+No other modifications has been made to the public Android SDK.

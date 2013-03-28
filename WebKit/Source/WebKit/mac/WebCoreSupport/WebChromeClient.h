@@ -74,7 +74,7 @@ public:
     
     virtual void setResizable(bool) OVERRIDE;
     
-    virtual void addMessageToConsole(WebCore::MessageSource, WebCore::MessageType, WebCore::MessageLevel, const WTF::String& message, unsigned int lineNumber, const WTF::String& sourceURL) OVERRIDE;
+    virtual void addMessageToConsole(WebCore::MessageSource, WebCore::MessageLevel, const WTF::String& message, unsigned lineNumber, const WTF::String& sourceURL) OVERRIDE;
 
     virtual bool canRunBeforeUnloadConfirmPanel() OVERRIDE;
     virtual bool runBeforeUnloadConfirmPanel(const WTF::String& message, WebCore::Frame*) OVERRIDE;
@@ -102,8 +102,8 @@ public:
     virtual void setStatusbarText(const WTF::String&) OVERRIDE;
 
     virtual void scrollbarsModeDidChange() const OVERRIDE { }
-    virtual bool shouldMissingPluginMessageBeButton() const OVERRIDE;
-    virtual void missingPluginButtonClicked(WebCore::Element*) const OVERRIDE;
+    virtual bool shouldUnavailablePluginMessageBeButton(WebCore::RenderEmbeddedObject::PluginUnavailabilityReason) const OVERRIDE;
+    virtual void unavailablePluginButtonClicked(WebCore::Element*, WebCore::RenderEmbeddedObject::PluginUnavailabilityReason) const OVERRIDE;
     virtual void mouseDidMoveOverElement(const WebCore::HitTestResult&, unsigned modifierFlags) OVERRIDE;
 
     virtual void setToolTip(const WTF::String&, WebCore::TextDirection) OVERRIDE;
@@ -117,7 +117,7 @@ public:
     virtual void populateVisitedLinks() OVERRIDE;
 
 #if ENABLE(DASHBOARD_SUPPORT)
-    virtual void dashboardRegionsChanged() OVERRIDE;
+    virtual void annotatedRegionsChanged() OVERRIDE;
 #endif
 
     virtual void runOpenPanel(WebCore::Frame*, PassRefPtr<WebCore::FileChooser>) OVERRIDE;
@@ -147,7 +147,7 @@ public:
 #if USE(ACCELERATED_COMPOSITING)
     virtual void attachRootGraphicsLayer(WebCore::Frame*, WebCore::GraphicsLayer*) OVERRIDE;
     virtual void setNeedsOneShotDrawingSynchronization() OVERRIDE;
-    virtual void scheduleCompositingLayerSync() OVERRIDE;
+    virtual void scheduleCompositingLayerFlush() OVERRIDE;
 
     virtual CompositingTriggerFlags allowedCompositingTriggers() const
     {
@@ -173,21 +173,12 @@ public:
     virtual void fullScreenRendererChanged(WebCore::RenderBox*) OVERRIDE;
 #endif
 
-    // FIXME: Remove once all ports are using client-based geolocation. https://bugs.webkit.org/show_bug.cgi?id=40373
-    // For client-based geolocation, these two methods have moved to WebGeolocationClient. https://bugs.webkit.org/show_bug.cgi?id=50061
-    virtual void requestGeolocationPermissionForFrame(WebCore::Frame*, WebCore::Geolocation*) OVERRIDE { }
-    virtual void cancelGeolocationPermissionRequestForFrame(WebCore::Frame*, WebCore::Geolocation*) OVERRIDE { }
-
     virtual bool selectItemWritingDirectionIsNatural() OVERRIDE;
     virtual bool selectItemAlignmentFollowsMenuWritingDirection() OVERRIDE;
     virtual bool hasOpenedPopup() const OVERRIDE;
     virtual PassRefPtr<WebCore::PopupMenu> createPopupMenu(WebCore::PopupMenuClient*) const OVERRIDE;
     virtual PassRefPtr<WebCore::SearchPopupMenu> createSearchPopupMenu(WebCore::PopupMenuClient*) const OVERRIDE;
 
-#if ENABLE(CONTEXT_MENUS)
-    virtual void showContextMenu() OVERRIDE;
-#endif
-    
     virtual void numWheelEventHandlersChanged(unsigned) OVERRIDE { }
     virtual bool shouldRubberBandInDirection(WebCore::ScrollDirection) const OVERRIDE { return false; }
 private:

@@ -65,6 +65,8 @@ public:
     void startScrollbarPaintTimer();
     void stopScrollbarPaintTimer();
 
+    void sendContentAreaScrolledSoon();
+
     void setVisibleScrollerThumbRect(const IntRect&);
 
 private:
@@ -79,12 +81,17 @@ private:
     void initialScrollbarPaintTimerFired(Timer<ScrollAnimatorMac>*);
     Timer<ScrollAnimatorMac> m_initialScrollbarPaintTimer;
 
+    void sendContentAreaScrolledTimerFired(Timer<ScrollAnimatorMac>*);
+    Timer<ScrollAnimatorMac> m_sendContentAreaScrolledTimer;
+
     virtual bool scroll(ScrollbarOrientation, ScrollGranularity, float step, float multiplier);
     virtual void scrollToOffsetWithoutAnimation(const FloatPoint&);
 
 #if ENABLE(RUBBER_BANDING)
     virtual bool handleWheelEvent(const PlatformWheelEvent&) OVERRIDE;
 #endif
+
+    virtual void handleWheelEventPhase(PlatformWheelEventPhase) OVERRIDE;
 
     virtual void cancelAnimations();
     virtual void setIsActive();
@@ -103,6 +110,9 @@ private:
     virtual void contentAreaDidHide() const;
     void didBeginScrollGesture() const;
     void didEndScrollGesture() const;
+    void mayBeginScrollGesture() const;
+
+    virtual void finishCurrentScrollAnimations();
 
     virtual void didAddVerticalScrollbar(Scrollbar*);
     virtual void willRemoveVerticalScrollbar(Scrollbar*);
@@ -111,11 +121,13 @@ private:
 
     virtual bool shouldScrollbarParticipateInHitTesting(Scrollbar*);
 
-    float adjustScrollXPositionIfNecessary(float) const;
-    float adjustScrollYPositionIfNecessary(float) const;
+    virtual void notifyContentAreaScrolled() OVERRIDE;
+
     FloatPoint adjustScrollPositionIfNecessary(const FloatPoint&) const;
 
     void immediateScrollTo(const FloatPoint&);
+
+    virtual bool isRubberBandInProgress() const OVERRIDE;
 
 #if ENABLE(RUBBER_BANDING)
     /// ScrollElasticityControllerClient member functions.

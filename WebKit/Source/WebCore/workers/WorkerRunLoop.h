@@ -52,13 +52,16 @@ namespace WebCore {
         // Blocking call. Waits for tasks and timers, invokes the callbacks.
         void run(WorkerContext*);
 
+        enum WaitMode { WaitForMessage, DontWaitForMessage };
+
         // Waits for a single task and returns.
-        MessageQueueWaitResult runInMode(WorkerContext*, const String& mode);
+        MessageQueueWaitResult runInMode(WorkerContext*, const String& mode, WaitMode = WaitForMessage);
 
         void terminate();
         bool terminated() const { return m_messageQueue.killed(); }
 
         void postTask(PassOwnPtr<ScriptExecutionContext::Task>);
+        void postTaskAndTerminate(PassOwnPtr<ScriptExecutionContext::Task>);
         void postTaskForMode(PassOwnPtr<ScriptExecutionContext::Task>, const String& mode);
 
         unsigned long createUniqueId() { return ++m_uniqueId; }
@@ -82,7 +85,7 @@ namespace WebCore {
 
     private:
         friend class RunLoopSetup;
-        MessageQueueWaitResult runInMode(WorkerContext*, const ModePredicate&);
+        MessageQueueWaitResult runInMode(WorkerContext*, const ModePredicate&, WaitMode);
 
         // Runs any clean up tasks that are currently in the queue and returns.
         // This should only be called when the context is closed or loop has been terminated.

@@ -25,10 +25,6 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if defined(_MSC_VER) && _MSC_VER < 1300
-#pragma warning(disable:4786)
-#endif
-
 #ifdef POSIX
 #include <sys/time.h>
 #endif
@@ -84,13 +80,13 @@ void MessageQueueManager::Remove(MessageQueue *message_queue) {
     iter = std::find(message_queues_.begin(), message_queues_.end(),
                      message_queue);
     if (iter != message_queues_.end()) {
-      message_queues_.erase(iter);      
+      message_queues_.erase(iter);
     }
     destroy = message_queues_.empty();
   }
   if (destroy) {
     instance_ = NULL;
-    delete this;    
+    delete this;
   }
 }
 

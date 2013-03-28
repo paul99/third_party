@@ -20,7 +20,7 @@
 #include "PlatformScreen.h"
 
 #include "FloatRect.h"
-#include "FrameView.h"
+#include "NotImplemented.h"
 #include "Widget.h"
 
 #include <BlackBerryPlatformScreen.h>
@@ -42,14 +42,19 @@ int screenDepth(Widget*)
     return 24;
 }
 
-FloatRect screenAvailableRect(FrameView* frameView)
+FloatRect screenAvailableRect(Widget* widget)
 {
-    return FloatRect(FloatPoint(), FloatSize(IntSize(BlackBerry::Platform::Graphics::Screen::size())));
+    return FloatRect(FloatPoint(), FloatSize(IntSize(BlackBerry::Platform::Graphics::Screen::primaryScreen()->size())));
 }
 
-FloatRect screenRect(FrameView* frameView)
+FloatRect screenRect(Widget* widget)
 {
-    return FloatRect(FloatPoint(), FloatSize(IntSize(BlackBerry::Platform::Graphics::Screen::size())));
+    return FloatRect(FloatPoint(), FloatSize(IntSize(BlackBerry::Platform::Graphics::Screen::primaryScreen()->size())));
+}
+
+void screenColorProfile(ColorProfile&)
+{
+    notImplemented();
 }
 
 } // namespace WebCore

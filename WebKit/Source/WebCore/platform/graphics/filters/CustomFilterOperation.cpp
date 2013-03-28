@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 Adobe Systems Incorporated. All Rights Reserved.
+ * Copyright (C) 2012 Adobe Systems Incorporated. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,38 +36,43 @@
 #include "CustomFilterProgram.h"
 #include "FilterOperation.h"
 
-#include <wtf/text/StringHash.h>
-
 namespace WebCore {
 
-CustomFilterOperation::CustomFilterOperation(PassRefPtr<CustomFilterProgram> program, const CustomFilterParameterList& sortedParameters, unsigned meshRows, unsigned meshColumns, MeshBoxType meshBoxType, MeshType meshType)
+CustomFilterOperation::CustomFilterOperation(PassRefPtr<CustomFilterProgram> program, const CustomFilterParameterList& sortedParameters, unsigned meshRows, unsigned meshColumns, CustomFilterMeshType meshType)
     : FilterOperation(CUSTOM)
     , m_program(program)
     , m_parameters(sortedParameters)
     , m_meshRows(meshRows)
     , m_meshColumns(meshColumns)
-    , m_meshBoxType(meshBoxType)
     , m_meshType(meshType)
 {
     // Make sure that the parameters are alwyas sorted by name. We use that to merge two CustomFilterOperations in animations.
-    ASSERT(hasSortedParameterList());
+    ASSERT(m_parameters.checkAlphabeticalOrder());
 }
     
 CustomFilterOperation::~CustomFilterOperation()
 {
 }
 
-#ifndef NDEBUG
-bool CustomFilterOperation::hasSortedParameterList()
+PassRefPtr<FilterOperation> CustomFilterOperation::blend(const FilterOperation* from, double progress, const LayoutSize& size, bool blendToPassthrough)
 {
-    for (unsigned i = 1; i < m_parameters.size(); ++i) {
-        // Break for equal or not-sorted parameters.
-        if (!codePointCompareLessThan(m_parameters.at(i - i)->name(), m_parameters.at(i)->name()))
-            return false;
-    }
-    return true;
+    // FIXME: There's no way to decide what is the "passthrough filter" for shaders using the current CSS Syntax.
+    // https://bugs.webkit.org/show_bug.cgi?id=84903
+    // https://www.w3.org/Bugs/Public/show_bug.cgi?id=16861
+    if (blendToPassthrough || !from || !from->isSameType(*this))
+        return this;
+    
+    const CustomFilterOperation* fromOp = static_cast<const CustomFilterOperation*>(from);
+    if (*m_program.get() != *fromOp->m_program.get()
+        || m_meshRows != fromOp->m_meshRows
+        || m_meshColumns != fromOp->m_meshColumns
+        || m_meshType != fromOp->m_meshType)
+        return this;
+    
+    CustomFilterParameterList animatedParameters;
+    m_parameters.blend(fromOp->m_parameters, progress, size, animatedParameters);
+    return CustomFilterOperation::create(m_program, animatedParameters, m_meshRows, m_meshColumns, m_meshType);
 }
-#endif
 
 } // namespace WebCore
 

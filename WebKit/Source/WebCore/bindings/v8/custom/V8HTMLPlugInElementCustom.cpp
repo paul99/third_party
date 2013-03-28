@@ -37,7 +37,6 @@
 #include "V8HTMLEmbedElement.h"
 #include "V8HTMLObjectElement.h"
 #include "V8NPObject.h"
-#include "V8Proxy.h"
 
 namespace WebCore {
 
@@ -50,13 +49,13 @@ static v8::Handle<v8::Value> npObjectNamedGetter(v8::Local<v8::String> name, con
     HTMLPlugInElement* imp = C::toNative(info.Holder());
     ScriptInstance scriptInstance = imp->getInstance();
     if (!scriptInstance)
-        return notHandledByInterceptor();
+        return v8Undefined();
 
     v8::Local<v8::Object> instance = v8::Local<v8::Object>::New(scriptInstance->instance());
     if (instance.IsEmpty())
-        return notHandledByInterceptor();
+        return v8Undefined();
 
-    return npObjectGetNamedProperty(instance, name);
+    return npObjectGetNamedProperty(instance, name, info);
 }
 
 template <class C>
@@ -65,13 +64,13 @@ static v8::Handle<v8::Value> npObjectNamedSetter(v8::Local<v8::String> name, v8:
     HTMLPlugInElement* imp = C::toNative(info.Holder());
     ScriptInstance scriptInstance = imp->getInstance();
     if (!scriptInstance)
-        return notHandledByInterceptor();
+        return v8Undefined();
 
     v8::Local<v8::Object> instance = v8::Local<v8::Object>::New(scriptInstance->instance());
     if (instance.IsEmpty())
-        return notHandledByInterceptor();
+        return v8Undefined();
 
-    return npObjectSetNamedProperty(instance, name, value);
+    return npObjectSetNamedProperty(instance, name, value, info);
 }
 
 v8::Handle<v8::Value> V8HTMLAppletElement::namedPropertyGetter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
@@ -135,13 +134,13 @@ v8::Handle<v8::Value> npObjectIndexedGetter(uint32_t index, const v8::AccessorIn
     HTMLPlugInElement* imp = C::toNative(info.Holder());
     ScriptInstance scriptInstance = imp->getInstance();
     if (!scriptInstance)
-        return notHandledByInterceptor();
+        return v8Undefined();
 
     v8::Local<v8::Object> instance = v8::Local<v8::Object>::New(scriptInstance->instance());
     if (instance.IsEmpty())
-        return notHandledByInterceptor();
+        return v8Undefined();
 
-    return npObjectGetIndexedProperty(instance, index);
+    return npObjectGetIndexedProperty(instance, index, info);
 }
 
 template <class C>
@@ -151,13 +150,13 @@ v8::Handle<v8::Value> npObjectIndexedSetter(uint32_t index, v8::Local<v8::Value>
     HTMLPlugInElement* imp = C::toNative(info.Holder());
     ScriptInstance scriptInstance = imp->getInstance();
     if (!scriptInstance)
-        return notHandledByInterceptor();
+        return v8Undefined();
 
     v8::Local<v8::Object> instance = v8::Local<v8::Object>::New(scriptInstance->instance());
     if (instance.IsEmpty())
-        return notHandledByInterceptor();
+        return v8Undefined();
 
-    return npObjectSetIndexedProperty(instance, index, value);
+    return npObjectSetIndexedProperty(instance, index, value, info);
 }
 
 v8::Handle<v8::Value> V8HTMLAppletElement::indexedPropertyGetter(uint32_t index, const v8::AccessorInfo& info)

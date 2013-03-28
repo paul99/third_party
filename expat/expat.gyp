@@ -1,8 +1,19 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 {
+  'variables': {
+    'conditions': [
+      # On Linux, we implicitly already depend on expat via fontconfig;
+      # let's not pull it in twice.
+      ['os_posix == 1 and OS != "mac" and OS != "android"', {
+        'use_system_expat%': 1,
+      }, {
+        'use_system_expat%': 0,
+      }],
+    ],
+  },
   'target_defaults': {
     'defines': [
       '_LIB',
@@ -11,47 +22,30 @@
     'include_dirs': [
       'files/lib',
     ],
-    'dependencies': [
-    ]
   },
   'conditions': [
-    ['(os_posix == 1 and OS != "mac" and OS != "android") or use_system_libexpat==1', {
-      # On Linux, we implicitly already depend on expat via fontconfig;
-      # let's not pull it in twice.
+    ['use_system_expat == 1', {
       'targets': [
         {
           'target_name': 'expat',
           'type': 'none',
-          'conditions': [
-            ['OS=="android"', {
-              'include_dirs': [
-                '<(android_src)/external/expat',
-                '<(android_src)/external/expat/lib',
-              ],
-            }],
-          ],
-          'direct_dependent_settings': {
-            'conditions': [
-              ['OS=="android"', {
-                'include_dirs': [
-                  '<(android_src)/external/expat',
-                  '<(android_src)/external/expat/lib',
-                ],
-              }, {
-                'include_dirs': [
-                  'files',
-                ],
-              }],
-            ],
-          },
           'link_settings': {
             'libraries': [
               '-lexpat',
             ],
           },
+          'conditions': [
+            ['OS=="android"', {
+              'direct_dependent_settings': {
+                'include_dirs': [
+                  '<(android_src)/external/expat/lib',
+                ],
+              },
+            }],
+          ],
         },
       ],
-    }, {  # os_posix == 0 or OS == "mac" or use_system_expat==0
+    }, {  # else: use_system_expat != 1
       'targets': [
         {
           'target_name': 'expat',
@@ -69,7 +63,6 @@
           # #include these files to pick up the #defines as well.
           'direct_dependent_settings': {
             'include_dirs': [
-              'files',
               'files/lib'
             ],
             'defines': [
@@ -82,7 +75,7 @@
                 'COMPILED_FROM_DSP',
               ],
             }],
-            ['OS=="mac" or OS=="android" or os_bsd==1', {
+            ['OS=="mac" or OS=="ios" or OS=="android" or os_bsd==1', {
               'defines': [
                 'HAVE_EXPAT_CONFIG_H',
               ],

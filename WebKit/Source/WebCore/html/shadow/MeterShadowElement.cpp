@@ -29,15 +29,16 @@
  */
 
 #include "config.h"
-#if ENABLE(METER_TAG)
 #include "MeterShadowElement.h"
 
-#include "CSSMutableStyleDeclaration.h"
+#if ENABLE(METER_ELEMENT)
 #include "CSSPropertyNames.h"
 #include "HTMLMeterElement.h"
 #include "HTMLNames.h"
 #include "RenderMeter.h"
 #include "RenderTheme.h"
+#include "ShadowRoot.h"
+#include "StylePropertySet.h"
 
 namespace WebCore {
 
@@ -50,52 +51,63 @@ MeterShadowElement::MeterShadowElement(Document* document)
 
 HTMLMeterElement* MeterShadowElement::meterElement() const
 {
-    Node* node = const_cast<MeterShadowElement*>(this)->shadowAncestorNode();
-    ASSERT(!node || meterTag == toElement(node)->tagQName());
-    return static_cast<HTMLMeterElement*>(node);
+    return toHTMLMeterElement(shadowHost());
 }
 
 bool MeterShadowElement::rendererIsNeeded(const NodeRenderingContext& context)
 {
-    RenderMeter* meterRenderer = toRenderMeter(meterElement()->renderer());
-    return meterRenderer && !meterRenderer->theme()->supportsMeter(meterRenderer->style()->appearance()) && HTMLDivElement::rendererIsNeeded(context);
+    RenderObject* render = meterElement()->renderer();
+    return render && !render->theme()->supportsMeter(render->style()->appearance()) && HTMLDivElement::rendererIsNeeded(context);
 }
 
-const AtomicString& MeterBarElement::shadowPseudoId() const
+MeterInnerElement::MeterInnerElement(Document* document)
+    : MeterShadowElement(document)
 {
-    DEFINE_STATIC_LOCAL(AtomicString, pseudId, ("-webkit-meter-bar"));
-    return pseudId;
+    DEFINE_STATIC_LOCAL(AtomicString, pseudoId, ("-webkit-meter-inner-element", AtomicString::ConstructFromLiteral));
+    setPseudo(pseudoId);
 }
 
-
-const AtomicString& MeterValueElement::shadowPseudoId() const
+bool MeterInnerElement::rendererIsNeeded(const NodeRenderingContext& context)
 {
-    DEFINE_STATIC_LOCAL(AtomicString, optimumPseudId, ("-webkit-meter-optimum-value"));
-    DEFINE_STATIC_LOCAL(AtomicString, suboptimumPseudId, ("-webkit-meter-suboptimum-value"));
-    DEFINE_STATIC_LOCAL(AtomicString, evenLessGoodPseudId, ("-webkit-meter-even-less-good-value"));
+    if (meterElement()->hasAuthorShadowRoot())
+        return HTMLDivElement::rendererIsNeeded(context);
+
+    RenderObject* render = meterElement()->renderer();
+    return render && !render->theme()->supportsMeter(render->style()->appearance()) && HTMLDivElement::rendererIsNeeded(context);
+}
+
+RenderObject* MeterInnerElement::createRenderer(RenderArena* arena, RenderStyle*)
+{
+    return new (arena) RenderMeter(this);
+}
+
+const AtomicString& MeterValueElement::valuePseudoId() const
+{
+    DEFINE_STATIC_LOCAL(AtomicString, optimumPseudoId, ("-webkit-meter-optimum-value", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, suboptimumPseudoId, ("-webkit-meter-suboptimum-value", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, evenLessGoodPseudoId, ("-webkit-meter-even-less-good-value", AtomicString::ConstructFromLiteral));
 
     HTMLMeterElement* meter = meterElement();
     if (!meter)
-        return optimumPseudId;
+        return optimumPseudoId;
 
     switch (meter->gaugeRegion()) {
     case HTMLMeterElement::GaugeRegionOptimum:
-        return optimumPseudId;
+        return optimumPseudoId;
     case HTMLMeterElement::GaugeRegionSuboptimal:
-        return suboptimumPseudId;
+        return suboptimumPseudoId;
     case HTMLMeterElement::GaugeRegionEvenLessGood:
-        return evenLessGoodPseudId;
+        return evenLessGoodPseudoId;
     default:
         ASSERT_NOT_REACHED();
-        return optimumPseudId;
+        return optimumPseudoId;
     }
 }
 
 void MeterValueElement::setWidthPercentage(double width)
 {
-    ensureInlineStyleDecl()->setProperty(CSSPropertyWidth, width, CSSPrimitiveValue::CSS_PERCENTAGE);
+    setInlineStyleProperty(CSSPropertyWidth, width, CSSPrimitiveValue::CSS_PERCENTAGE);
 }
-
 
 }
 

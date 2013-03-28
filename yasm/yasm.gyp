@@ -27,24 +27,13 @@
 # be a rule. The problem is that the correct invocation cannot be inferred
 # purely from the file name, or extension.  Nor is it obvious whether the
 # output should be processed as a source or not.  Thus, we are left with a
-# large amount of repetative code.
+# large amount of repetitive code.
 
 {
   'variables': {
-    'conditions': [
-      ['OS=="android"', { # android uses the host os config
-        'os_config%': '<(host_os)',
-        'yasm_include_dirs': [
-          'source/config/<(host_os)',
-          'source/patched-yasm',
-        ],
-      }, {
-        'os_config%': '<(OS)',
-        'yasm_include_dirs': [
-          'source/config/<(OS)',
-          'source/patched-yasm',
-        ],
-      }],
+    'yasm_include_dirs': [
+      'source/config/<(OS)',
+      'source/patched-yasm',
     ],
 
     # The cflags used by any target that will be directly linked into yasm.
@@ -353,7 +342,7 @@
         {
           'action_name': 'generate_module',
           'variables': {
-            'makefile': 'source/config/<(os_config)/Makefile',
+            'makefile': 'source/config/<(OS)/Makefile',
             'module_in': 'source/patched-yasm/libyasm/module.in',
             'outfile': '<(generated_dir)/module.c',
           },
@@ -379,9 +368,9 @@
       'type': 'none',
       'toolsets': ['host'],
       'sources': [
-        'source/config/<(os_config)/Makefile',
-        'source/config/<(os_config)/config.h',
-        'source/config/<(os_config)/libyasm-stdint.h',
+        'source/config/<(OS)/Makefile',
+        'source/config/<(OS)/config.h',
+        'source/config/<(OS)/libyasm-stdint.h',
       ],
     },
     {
@@ -556,11 +545,11 @@
           'xcode_settings': {
             'WARNING_CFLAGS': [
               # re2c is missing CLOSEVOP from one switch.
-              '-Wno-switch-enum',
+              '-Wno-switch',
             ],
           },
           'cflags': [
-            '-Wno-switch-enum',
+            '-Wno-switch',
           ],
         }],
       ],

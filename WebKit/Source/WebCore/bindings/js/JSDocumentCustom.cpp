@@ -34,6 +34,7 @@
 #include "JSTouch.h"
 #include "JSTouchList.h"
 #include "Location.h"
+#include "NodeTraversal.h"
 #include "ScriptController.h"
 #include "TouchList.h"
 
@@ -54,7 +55,7 @@ JSValue JSDocument::location(ExecState* exec) const
     if (!frame)
         return jsNull();
 
-    Location* location = frame->domWindow()->location();
+    Location* location = frame->document()->domWindow()->location();
     if (JSDOMWrapper* wrapper = getCachedWrapper(currentWorld(exec), location))
         return wrapper;
 
@@ -69,18 +70,12 @@ void JSDocument::setLocation(ExecState* exec, JSValue value)
     if (!frame)
         return;
 
-    String str = ustringToString(value.toString(exec)->value(exec));
+    String locationString = value.toString(exec)->value(exec);
+    if (exec->hadException())
+        return;
 
-    Frame* lexicalFrame = asJSDOMWindow(exec->lexicalGlobalObject())->impl()->frame();
-
-    // IE and Mozilla both resolve the URL relative to the source frame,
-    // not the target frame.
-    Frame* activeFrame = asJSDOMWindow(exec->dynamicGlobalObject())->impl()->frame();
-    str = activeFrame->document()->completeURL(str).string();
-
-    bool lockHistory = !ScriptController::processingUserGesture();
-    frame->navigationScheduler()->scheduleLocationChange(lexicalFrame->document()->securityOrigin(),
-        str, activeFrame->loader()->outgoingReferrer(), lockHistory, false);
+    if (Location* location = frame->document()->domWindow()->location())
+        location->setHref(locationString, activeDOMWindow(exec), firstDOMWindow(exec));
 }
 
 JSValue toJS(ExecState* exec, JSDOMGlobalObject* globalObject, Document* document)
@@ -91,6 +86,14 @@ JSValue toJS(ExecState* exec, JSDOMGlobalObject* globalObject, Document* documen
     JSDOMWrapper* wrapper = getCachedWrapper(currentWorld(exec), document);
     if (wrapper)
         return wrapper;
+
+    if (DOMWindow* domWindow = document->domWindow()) {
+        globalObject = toJSDOMWindow(toJS(exec, domWindow));
+        // Creating a wrapper for domWindow might have created a wrapper for document as well.
+        wrapper = getCachedWrapper(currentWorld(exec), document);
+        if (wrapper)
+            return wrapper;
+    }
 
     if (document->isHTMLDocument())
         wrapper = CREATE_DOM_WRAPPER(exec, globalObject, HTMLDocument, document);
@@ -105,7 +108,7 @@ JSValue toJS(ExecState* exec, JSDOMGlobalObject* globalObject, Document* documen
     // back/forward cache.
     if (!document->frame()) {
         size_t nodeCount = 0;
-        for (Node* n = document; n; n = n->traverseNextNode())
+        for (Node* n = document; n; n = NodeTraversal::next(n))
             nodeCount++;
         
         exec->heap()->reportExtraMemoryCost(nodeCount * sizeof(Node));
@@ -119,7 +122,7 @@ JSValue JSDocument::createTouchList(ExecState* exec)
 {
     RefPtr<TouchList> touchList = TouchList::create();
 
-    for (int i = 0; i < exec->argumentCount(); i++)
+    for (size_t i = 0; i < exec->argumentCount(); i++)
         touchList->append(toTouch(exec->argument(i)));
 
     return toJS(exec, globalObject(), touchList.release());

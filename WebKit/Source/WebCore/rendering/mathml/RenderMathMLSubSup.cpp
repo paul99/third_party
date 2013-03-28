@@ -29,191 +29,154 @@
 
 #include "RenderMathMLSubSup.h"
 
-#include "FontSelector.h"
 #include "MathMLNames.h"
-#include "RenderInline.h"
-#include "RenderTable.h"
-#include "RenderTableCell.h"
-#include "RenderTableRow.h"
-#include "RenderTableSection.h"
-#include "RenderText.h"
 
 namespace WebCore {
     
 using namespace MathMLNames;
 
-static const int gTopAdjustDivisor = 3;
-static const int gSubsupScriptMargin = 1;
-static const float gSubSupStretch = 1.2f;
-
 RenderMathMLSubSup::RenderMathMLSubSup(Element* element) 
     : RenderMathMLBlock(element)
     , m_scripts(0)
 {
-    // Determine what kind of under/over expression we have by element name
+    // Determine what kind of sub/sup expression we have by element name
     if (element->hasLocalName(MathMLNames::msubTag))
         m_kind = Sub;
     else if (element->hasLocalName(MathMLNames::msupTag))
-        m_kind = Sup;
-    else if (element->hasLocalName(MathMLNames::msubsupTag))
+        m_kind = Super;
+    else {
+        ASSERT(element->hasLocalName(MathMLNames::msubsupTag));
         m_kind = SubSup;
-    else 
-        m_kind = SubSup;
+    }
 }
 
+RenderBoxModelObject* RenderMathMLSubSup::base() const
+{
+    RenderObject* baseWrapper = firstChild();
+    if (!baseWrapper)
+        return 0;
+    RenderObject* base = baseWrapper->firstChild();
+    if (!base || !base->isBoxModelObject())
+        return 0;
+    return toRenderBoxModelObject(base);
+}
+
+void RenderMathMLSubSup::fixAnonymousStyles()
+{
+    // Set the base wrapper's style so that baseHeight in layout() will be an unstretched height.
+    ASSERT(firstChild() && firstChild()->style()->refCount() == 1);
+    firstChild()->style()->setAlignSelf(AlignFlexStart);
+    
+    ASSERT(m_scripts && m_scripts->style()->refCount() == 1);
+    RenderStyle* scriptsStyle = m_scripts->style();
+    scriptsStyle->setFlexDirection(FlowColumn);
+    scriptsStyle->setJustifyContent(m_kind == Sub ? JustifyFlexEnd : m_kind == Super ? JustifyFlexStart : JustifySpaceBetween);
+    // Set this wrapper's font-size for its line-height & baseline position, for its children.
+    scriptsStyle->setFontSize(static_cast<int>(0.75 * style()->fontSize()));
+}
+
+// FIXME: Handle arbitrary addChild/removeChild correctly throughout MathML.
 void RenderMathMLSubSup::addChild(RenderObject* child, RenderObject* beforeChild)
 {
-    
-    // Note: The RenderMathMLBlock only allows element children to be added.
-    Element* childElement = toElement(child->node());
-
-    if (!childElement->previousElementSibling()) {
-        // Position 1 is always the base of the msub/msup/msubsup.
-        RenderMathMLBlock* wrapper = new (renderArena()) RenderMathMLBlock(node());
-        RefPtr<RenderStyle> wrapperStyle = RenderStyle::create();
-        wrapperStyle->inheritFrom(style());
-        wrapperStyle->setDisplay(INLINE_BLOCK);
-        wrapperStyle->setVerticalAlign(BASELINE);
-        wrapper->setStyle(wrapperStyle.release());
-        RenderMathMLBlock::addChild(wrapper, firstChild());
-        wrapper->addChild(child);
-            
-        // Make sure we have a script block for rendering.
-        if (m_kind == SubSup && !m_scripts) {
-            m_scripts = new (renderArena()) RenderMathMLBlock(node());
-            RefPtr<RenderStyle> scriptsStyle = RenderStyle::create();
-            scriptsStyle->inheritFrom(style());
-            scriptsStyle->setDisplay(INLINE_BLOCK);
-            scriptsStyle->setVerticalAlign(TOP);
-            scriptsStyle->setMarginLeft(Length(gSubsupScriptMargin, Fixed));
-            scriptsStyle->setTextAlign(LEFT);
-            m_scripts->setStyle(scriptsStyle.release());
-            RenderMathMLBlock::addChild(m_scripts, beforeChild);
-        }
-    } else {
-        if (m_kind == SubSup) {
-            RenderBlock* script = new (renderArena()) RenderMathMLBlock(node());
-            RefPtr<RenderStyle> scriptStyle = RenderStyle::create();
-            scriptStyle->inheritFrom(m_scripts->style());
-            scriptStyle->setDisplay(BLOCK);
-            script->setStyle(scriptStyle.release());
-
-            // The order is always backwards so the first script is the subscript and the superscript 
-            // is last. That means the superscript is the first to render vertically.
-            Element* previousSibling = childElement->previousElementSibling();
-            if (previousSibling && !previousSibling->previousElementSibling()) 
-                m_scripts->addChild(script);
-            else                 
-                m_scripts->addChild(script, m_scripts->firstChild());
-            
-            script->addChild(child);
-        } else
-            RenderMathMLBlock::addChild(child, beforeChild);
+    if (isEmpty()) {
+        RenderMathMLBlock* baseWrapper = createAnonymousMathMLBlock();
+        RenderMathMLBlock::addChild(baseWrapper);
+        
+        m_scripts = createAnonymousMathMLBlock();
+        RenderMathMLBlock::addChild(m_scripts);
+        
+        fixAnonymousStyles();
     }
+    
+    if (firstChild()->isEmpty())
+        firstChild()->addChild(child);
+    else
+        m_scripts->addChild(child, beforeChild && beforeChild->parent() == m_scripts ? beforeChild : 0);
 }
 
-void RenderMathMLSubSup::stretchToHeight(int height)
+void RenderMathMLSubSup::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
 {
-    RenderObject* base = firstChild();
-    if (!base || !base->firstChild())
+    RenderMathMLBlock::styleDidChange(diff, oldStyle);
+    
+    if (!isEmpty())
+        fixAnonymousStyles();
+}
+
+RenderMathMLOperator* RenderMathMLSubSup::unembellishedOperator()
+{
+    RenderBoxModelObject* base = this->base();
+    if (!base || !base->isRenderMathMLBlock())
+        return 0;
+    return toRenderMathMLBlock(base)->unembellishedOperator();
+}
+
+void RenderMathMLSubSup::layout()
+{
+    RenderMathMLBlock::layout();
+
+    RenderMathMLBlock* baseWrapper = toRenderMathMLBlock(firstChild());
+    if (!baseWrapper || !m_scripts)
         return;
-    
-    if (base->firstChild() && base->firstChild()->isRenderMathMLBlock()) {
-        RenderMathMLBlock* block = toRenderMathMLBlock(base->firstChild());
-        block->stretchToHeight(static_cast<int>(gSubSupStretch * height));
-        
-        // Adjust the script placement after we stretch
-        if (height > 0 && m_kind == SubSup && m_scripts) {
-            RenderObject* script = m_scripts->firstChild();
-            if (script) {
-                // Calculate the script height without the container margins.
-                RenderObject* top = script;
-                int topHeight = getBoxModelObjectHeight(top->firstChild());
-                int topAdjust = topHeight / gTopAdjustDivisor;
-                top->style()->setMarginTop(Length(-topAdjust, Fixed));
-                top->style()->setMarginBottom(Length(height - topHeight + topAdjust, Fixed));
-                if (top->isBoxModelObject()) {
-                    RenderBoxModelObject* topBox = toRenderBoxModelObject(top);
-                    topBox->updateBoxModelInfoFromStyle();
-                }
-                m_scripts->setNeedsLayout(true);
-                setNeedsLayout(true);
-            }
+    RenderBox* base = baseWrapper->firstChildBox();
+    if (!base)
+        return;
+
+    // Our layout rules include: Don't let the superscript go below the "axis" (half x-height above the
+    // baseline), or the subscript above the axis. Also, don't let the superscript's top edge be
+    // below the base's top edge, or the subscript's bottom edge above the base's bottom edge.
+    //
+    // FIXME: Check any subscriptshift or superscriptshift attributes, and maybe use more sophisticated
+    // heuristics from TeX or elsewhere. See https://bugs.webkit.org/show_bug.cgi?id=79274#c5.
+
+    LayoutUnit baseHeight = base->logicalHeight();
+    LayoutUnit baseBaseline = base->firstLineBoxBaseline();
+    if (baseBaseline == -1)
+        baseBaseline = baseHeight;
+    LayoutUnit axis = style()->fontMetrics().xHeight() / 2;
+    int fontSize = style()->fontSize();
+
+    ASSERT(baseWrapper->style()->hasOneRef());
+    bool needsSecondLayout = false;
+
+    if (RenderBox* superscript = m_kind == Sub ? 0 : m_scripts->lastChildBox()) {
+        LayoutUnit superscriptHeight = superscript->logicalHeight();
+        LayoutUnit superscriptBaseline = superscript->firstLineBoxBaseline();
+        if (superscriptBaseline == -1)
+            superscriptBaseline = superscriptHeight;
+        LayoutUnit minBaseline = max<LayoutUnit>(fontSize / 3 + 1 + superscriptBaseline, superscriptHeight + axis);
+
+        Length newPadding = Length(max<LayoutUnit>(minBaseline - baseBaseline, 0), Fixed);
+        if (newPadding != baseWrapper->style()->paddingTop()) {
+            baseWrapper->style()->setPaddingTop(newPadding);
+            needsSecondLayout = true;
         }
-        
     }
-}
 
-int RenderMathMLSubSup::nonOperatorHeight() const 
-{
-    if (m_kind == SubSup) 
-       return static_cast<int>(style()->fontSize()*gSubSupStretch);
-    return static_cast<int>(style()->fontSize());
-}
+    if (RenderBox* subscript = m_kind == Super ? 0 : m_scripts->firstChildBox()) {
+        LayoutUnit subscriptHeight = subscript->logicalHeight();
+        LayoutUnit subscriptBaseline = subscript->firstLineBoxBaseline();
+        if (subscriptBaseline == -1)
+            subscriptBaseline = subscriptHeight;
+        LayoutUnit baseExtendUnderBaseline = baseHeight - baseBaseline;
+        LayoutUnit subscriptUnderItsBaseline = subscriptHeight - subscriptBaseline;
+        LayoutUnit minExtendUnderBaseline = max<LayoutUnit>(fontSize / 5 + 1 + subscriptUnderItsBaseline, subscriptHeight - axis);
 
-void RenderMathMLSubSup::layout() 
-{
-    if (firstChild())
-        firstChild()->setNeedsLayout(true);
-    if (m_scripts) 
-        m_scripts->setNeedsLayout(true);
-    
-    RenderBlock::layout();
-    
-    if (m_kind == SubSup) {
-        if (RenderObject* base = firstChild()) {
-            LayoutUnit maxHeight = 0;
-            RenderObject* current = base->firstChild();
-            while (current) {
-                LayoutUnit height = getBoxModelObjectHeight(current);
-                if (height > maxHeight)
-                    maxHeight = height;
-                current = current->nextSibling();
-            }
-            LayoutUnit heightDiff = m_scripts ? (m_scripts->offsetHeight() - maxHeight) / 2 : 0;
-            if (heightDiff < 0) 
-                heightDiff = 0;
-            base->style()->setPaddingTop(Length(heightDiff, Fixed));
-            base->setNeedsLayout(true);
+        Length newPadding = Length(max<LayoutUnit>(minExtendUnderBaseline - baseExtendUnderBaseline, 0), Fixed);
+        if (newPadding != baseWrapper->style()->paddingBottom()) {
+            baseWrapper->style()->setPaddingBottom(newPadding);
+            needsSecondLayout = true;
         }
-        setNeedsLayout(true);
-        RenderBlock::layout();
-    }    
-}
-
-int RenderMathMLSubSup::baselinePosition(FontBaseline, bool firstLine, LineDirectionMode direction, LinePositionMode linePositionMode) const
-{
-    RenderObject* base = firstChild();
-    if (!base) 
-        return offsetHeight();
-    
-    int baseline = offsetHeight();
-    if (!base || !base->isBoxModelObject()) 
-        return baseline;
-
-    switch (m_kind) {
-    case SubSup:
-        base = base->firstChild();
-        if (m_scripts && base && base->isBoxModelObject()) {
-            RenderBoxModelObject* box = toRenderBoxModelObject(base);
-            
-            int topAdjust = (m_scripts->offsetHeight() - box->offsetHeight()) / 2;
-        
-            // FIXME: The last bit of this calculation should be more exact. Why is the 2-3px scaled for zoom necessary?
-            // The baseline is top spacing of the base + the baseline of the base + adjusted space for zoom
-            float zoomFactor = style()->effectiveZoom();
-            return topAdjust + box->baselinePosition(AlphabeticBaseline, firstLine, direction, linePositionMode) + static_cast<int>((zoomFactor > 1.25 ? 2 : 3) * zoomFactor);
-        }
-        break;
-    case Sup: 
-    case Sub:
-        return RenderMathMLBlock::baselinePosition(AlphabeticBaseline, firstLine, direction, linePositionMode);
     }
-    
-    return baseline;
-    
+
+    if (!needsSecondLayout)
+        return;
+
+    setNeedsLayout(true, MarkOnlyThis);
+    baseWrapper->setChildNeedsLayout(true, MarkOnlyThis);
+
+    RenderMathMLBlock::layout();
 }
-    
+
 }    
 
 #endif // ENABLE(MATHML)

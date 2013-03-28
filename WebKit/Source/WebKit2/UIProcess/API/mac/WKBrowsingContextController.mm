@@ -36,6 +36,8 @@
 #import "WKURLCF.h"
 #import "WKURLRequest.h"
 #import "WKURLRequestNS.h"
+#import "WebContext.h"
+#import "WebPageProxy.h"
 #import <wtf/RetainPtr.h>
 
 #import "WKBrowsingContextLoadDelegate.h"
@@ -52,7 +54,6 @@ static inline NSURL *autoreleased(WKURLRef url)
     return [(NSURL *)WKURLCopyCFURL(kCFAllocatorDefault, wkURL.get()) autorelease];
 }
 
-
 @interface WKBrowsingContextControllerData : NSObject {
 @public
     // Underlying WKPageRef.
@@ -64,13 +65,6 @@ static inline NSURL *autoreleased(WKURLRef url)
 @end
 
 @implementation WKBrowsingContextControllerData
-@end
-
-
-@interface WKBrowsingContextController ()
-
-@property(readonly) WKPageRef _pageRef;
-
 @end
 
 
@@ -103,6 +97,20 @@ static inline NSURL *autoreleased(WKURLRef url)
 
 #pragma mark Loading
 
++ (void)registerSchemeForCustomProtocol:(NSString *)scheme
+{
+    NSString *lowercaseScheme = [scheme lowercaseString];
+    [[WKBrowsingContextController customSchemes] addObject:lowercaseScheme];
+    [[NSNotificationCenter defaultCenter] postNotificationName:WebKit::SchemeForCustomProtocolRegisteredNotificationName object:lowercaseScheme];
+}
+
++ (void)unregisterSchemeForCustomProtocol:(NSString *)scheme
+{
+    NSString *lowercaseScheme = [scheme lowercaseString];
+    [[WKBrowsingContextController customSchemes] removeObject:lowercaseScheme];
+    [[NSNotificationCenter defaultCenter] postNotificationName:WebKit::SchemeForCustomProtocolUnregisteredNotificationName object:lowercaseScheme];
+}
+
 - (void)loadRequest:(NSURLRequest *)request
 {
     WKRetainPtr<WKURLRequestRef> wkRequest = adoptWK(WKURLRequestCreateWithNSURLRequest(request));
@@ -118,6 +126,19 @@ static inline NSURL *autoreleased(WKURLRef url)
 
     WKRetainPtr<WKURLRef> wkURL = adoptWK(WKURLCreateWithCFURL((CFURLRef)URL));
     WKPageLoadURL(self._pageRef, wkURL.get());
+}
+
+- (void)loadHTMLString:(NSString *)HTMLString baseURL:(NSURL *)baseURL
+{
+    WKRetainPtr<WKStringRef> wkHTMLString;
+    if (HTMLString)
+        wkHTMLString = adoptWK(WKStringCreateWithCFString((CFStringRef)HTMLString));
+
+    WKRetainPtr<WKURLRef> wkBaseURL;
+    if (baseURL)
+        wkBaseURL = adoptWK(WKURLCreateWithCFURL((CFURLRef)baseURL));
+
+    WKPageLoadHTMLString(self._pageRef, wkHTMLString.get(), wkBaseURL.get());
 }
 
 - (void)stopLoading
@@ -215,11 +236,17 @@ static inline NSURL *autoreleased(WKURLRef url)
     case WKPaginationModeUnpaginated:
         mode = kWKPaginationModeUnpaginated;
         break;
-    case WKPaginationModeHorizontal:
-        mode = kWKPaginationModeHorizontal;
+    case WKPaginationModeLeftToRight:
+        mode = kWKPaginationModeLeftToRight;
         break;
-    case WKPaginationModeVertical:
-        mode = kWKPaginationModeVertical;
+    case WKPaginationModeRightToLeft:
+        mode = kWKPaginationModeRightToLeft;
+        break;
+    case WKPaginationModeTopToBottom:
+        mode = kWKPaginationModeTopToBottom;
+        break;
+    case WKPaginationModeBottomToTop:
+        mode = kWKPaginationModeBottomToTop;
         break;
     default:
         return;
@@ -233,14 +260,28 @@ static inline NSURL *autoreleased(WKURLRef url)
     switch (WKPageGetPaginationMode(self._pageRef)) {
     case kWKPaginationModeUnpaginated:
         return WKPaginationModeUnpaginated;
-    case kWKPaginationModeHorizontal:
-        return WKPaginationModeHorizontal;
-    case kWKPaginationModeVertical:
-        return WKPaginationModeVertical;
+    case kWKPaginationModeLeftToRight:
+        return WKPaginationModeLeftToRight;
+    case kWKPaginationModeRightToLeft:
+        return WKPaginationModeRightToLeft;
+    case kWKPaginationModeTopToBottom:
+        return WKPaginationModeTopToBottom;
+    case kWKPaginationModeBottomToTop:
+        return WKPaginationModeBottomToTop;
     }
 
     ASSERT_NOT_REACHED();
     return WKPaginationModeUnpaginated;
+}
+
+- (void)setPaginationBehavesLikeColumns:(BOOL)behavesLikeColumns
+{
+    WKPageSetPaginationBehavesLikeColumns(self._pageRef, behavesLikeColumns);
+}
+
+- (BOOL)paginationBehavesLikeColumns
+{
+    return WKPageGetPaginationBehavesLikeColumns(self._pageRef);
 }
 
 - (void)setPageLength:(CGFloat)pageLength
@@ -370,4 +411,15 @@ static void setUpPageLoaderClient(WKBrowsingContextController *browsingContext, 
     return self;
 }
 
++ (WKBrowsingContextController *)_browsingContextControllerForPageRef:(WKPageRef)pageRef
+{
+    return (WKBrowsingContextController *)WebKit::toImpl(pageRef)->loaderClient().client().clientInfo;
+}
+
++ (NSMutableSet *)customSchemes
+{
+    static NSMutableSet *customSchemes = [[NSMutableSet alloc] init];
+    return customSchemes;
+}
+ 
 @end

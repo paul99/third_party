@@ -39,33 +39,51 @@
  *     were changed due new layout, script actions or any other events.
  *  - "editorclient,contents,changed", void: reports that editor client's
  *    contents were changed
+ *  - "icon,changed", void: frame favicon changed.
+ *  - "intent,new", Ewk_Intent_Request*: reports new intent.
+ *  - "intent,service,register", Ewk_Intent_Service_Info*: reports new intent service registration.
+ *  - "load,committed", void: reports load committed.
  *  - "load,document,finished", void: frame finished loading the document.
  *  - "load,error", const Ewk_Frame_Load_Error*: reports load failed
  *    and it gives a pointer to structure defining the error as an argument.
  *  - "load,finished", const Ewk_Frame_Load_Error*: reports load
  *    finished and it gives @c NULL on success or pointer to
  *    structure defining the error.
+ *  - "load,resource,finished", unsigned long*: reports resource load finished and it gives
+ *    a pointer to its identifier.
+ *  - "load,resource,failed", Ewk_Frame_Load_Error*: reports resource load failure and it
+ *    gives a pointer to structure defining the error as an argument.
  *  - "load,firstlayout,finished", void: frame finished first layout.
  *  - "load,nonemptylayout,finished", void: frame finished first
  *    non-empty layout.
  *  - "load,progress", double*: load progress is changed (overall value
  *    from 0.0 to 1.0, connect to individual frames for fine grained).
  *  - "load,provisional", void: frame started provisional load.
+ *  - "load,provisional,failed", Ewk_Frame_Load_Error*: frame provisional load failed.
  *  - "load,started", void: frame started loading the document.
  *  - "mixedcontent,displayed", void: frame has loaded and displayed mixed content.
  *  - "mixedcontent,run", void: frame has loaded and run mixed content.
  *  - "navigation,first", void: first navigation was occurred.
+ *  - "redirect,cancelled", void: client redirect was cancelled.
+ *  - "redirect,load,provisional", void: received server redirect for provisional load.
+ *  - "redirect,requested", const char*: url of the client redirect that will be performed.
  *  - "resource,request,new", Ewk_Frame_Resource_Request*: reports that
  *    there's a new resource request.
- *  - "resource,request,willsend", Ewk_Frame_Resource_Request*: a resource will
- *    be requested.
+ *  - "resource,request,willsend", Ewk_Frame_Resource_Messages*: a resource will be requested.
+ *    and the possible redirect response.
+ *  - "resource,response,received", Ewk_Frame_Resource_Response*: reports that a response
+ *    to a resource request was received.
  *  - "state,save", void: frame's state will be saved as a history item.
- *  - "title,changed", const char*: title of the main frame was changed.
+ *  - "title,changed", Ewk_Text_With_Direction*: title of the main frame was changed.
  *  - "uri,changed", const char*: uri of the main frame was changed.
+ *  - "xss,detected", Ewk_Frame_Xss_Notification*: reflected XSS is encountered in the page and suppressed.
  */
 
 #ifndef ewk_frame_h
 #define ewk_frame_h
+
+#include "ewk_intent.h"
+#include "ewk_security_origin.h"
 
 #include <Evas.h>
 
@@ -91,21 +109,90 @@ struct _Ewk_Frame_Load_Error {
     const char *domain; /**< error domain name */
     const char *description; /**< error description already localized */
     const char *failing_url; /**< the url that failed to load */
+    unsigned long resource_identifier; /**< identifier of resource */
     Evas_Object *frame; /**< frame where the failure happened */
 };
 
 /// Creates a type name for _Ewk_Frame_Resource_Request.
 typedef struct _Ewk_Frame_Resource_Request Ewk_Frame_Resource_Request;
 /**
- * @brief   Structure used to report resource request.
+ * @brief   Structure containing details about a resource request.
  *
- * Details given before a resource is loaded on a given frame. It's used by
- * ewk_frame_request_will_send() to inform the details of a to-be-loaded
- * resource, allowing them to be overridden.
+ * Details given before a resource is loaded on a given frame. It's used in
+ * Ewk_Frame_Resource_Messages to inform about the details of a resource request.
  */
 struct _Ewk_Frame_Resource_Request {
     const char *url; /**< url of the resource */
+    const char *first_party; /**< first party for cookies, can not be changed */
+    const char *http_method; /**< http method, can not be changed */
     const unsigned long identifier; /**< identifier of resource, can not be changed */
+    Evas_Object *frame; /**< frame where the resource is requested */
+    Eina_Bool is_main_frame_request; /** < indicates if the request is for the main frame */
+};
+
+/// Creates a type name for _Ewk_Frame_Resource_Response.
+typedef struct _Ewk_Frame_Resource_Response Ewk_Frame_Resource_Response;
+
+/**
+ * @brief Structure containing details about a response to a resource request.
+ *
+ * Details given in the response to a resource request. It's used by
+ * ewk_frame_response_received() to inform about the details of a response.
+ */
+struct _Ewk_Frame_Resource_Response {
+    const char *url; /**< url of the resource */
+    int status_code; /**< http status code */
+    unsigned long identifier; /**< identifier of resource */
+    const char *mime_type; /**< MIME type of the resource */
+};
+
+/// Creates a type name for _Ewk_Frame_Resource_Messages.
+typedef struct _Ewk_Frame_Resource_Messages Ewk_Frame_Resource_Messages;
+
+struct _Ewk_Frame_Resource_Messages {
+    Ewk_Frame_Resource_Request *request; /**< resource request */
+    Ewk_Frame_Resource_Response *redirect_response; /**< redirect response, can not be changed */
+};
+
+/// Enum containing text directionality values.
+typedef enum {
+    EWK_TEXT_DIRECTION_DEFAULT, /**< Natural writing direction ("inherit") */
+    EWK_TEXT_DIRECTION_LEFT_TO_RIGHT,
+    EWK_TEXT_DIRECTION_RIGHT_TO_LEFT
+} Ewk_Text_Direction;
+
+/// Creates a type name for Ewk_Text_With_Direction.
+typedef struct _Ewk_Text_With_Direction Ewk_Text_With_Direction;
+
+struct _Ewk_Text_With_Direction {
+    const char *string;
+    Ewk_Text_Direction direction;
+};
+
+/// Creates a type name for Ewk_Frame_Xss_Notification.
+typedef struct _Ewk_Frame_Xss_Notification Ewk_Frame_Xss_Notification;
+
+/**
+ * @brief   Structure used to report reflected XSS is encountered in the page.
+ *
+ * This structure contains information received from the XSSAuditor when reflected XSS 
+ * is encountered in the page. The string is temporary reference and should @b not 
+ * be used after the signal callback returns. If it's required, make a copy of it.
+ */
+struct _Ewk_Frame_Xss_Notification {
+    const char *insecure_url; /**< insecure url of the document */
+    Eina_Bool is_entire_page_blocked; /** < indicates if the entire page was blocked by XSSAuditor */
+};
+
+/// Creates a type name for Ewk_Intent_Service_Info.
+typedef struct _Ewk_Intent_Service_Info Ewk_Intent_Service_Info;
+
+struct _Ewk_Intent_Service_Info {
+    const char *action; /**< an opaque string indicating the behavior class the service supports. */
+    const char *type; /**< a string specifying the type of payload data the service can accept. */
+    const char *href; /**< service URI. */
+    const char *title; /**< A human-readable title for the service. */
+    const char *disposition; /**< A hint about whether the service can be run "inline" or in a new "window". */
 };
 
 /// Enum containing hit test data types
@@ -118,6 +205,16 @@ typedef enum {
     EWK_HIT_TEST_RESULT_CONTEXT_EDITABLE = 1 << 6
 } Ewk_Hit_Test_Result_Context;
 
+/// Enum containing navigation types
+typedef enum  {
+    EWK_NAVIGATION_TYPE_LINK_CLICKED,
+    EWK_NAVIGATION_TYPE_FORM_SUBMITTED,
+    EWK_NAVIGATION_TYPE_BACK_FORWARD,
+    EWK_NAVIGATION_TYPE_RELOAD,
+    EWK_NAVIGATION_TYPE_FORM_RESUBMITTED,
+    EWK_NAVIGATION_TYPE_OTHER
+} Ewk_Navigation_Type;
+
 /// Creates a type name for _Ewk_Hit_Test.
 typedef struct _Ewk_Hit_Test Ewk_Hit_Test;
 /// Structure used to report hit test result.
@@ -127,7 +224,7 @@ struct _Ewk_Hit_Test {
     struct {
         int x, y, w, h;
     } bounding_box; /**< DEPRECATED, see ewk_frame_hit_test_new() */
-    const char *title; /**< title of the element */
+    Ewk_Text_With_Direction title; /**< title of the element */
     const char *alternate_text; /**< the alternate text for image, area, input and applet */
     Evas_Object *frame; /**< the pointer to frame where hit test was requested */
     struct {
@@ -196,9 +293,20 @@ typedef enum {
  *
  * @param o frame object to get view object
  *
- * @return view object or @c 0 on failure
+ * @return view object or @c NULL on failure
  */
 EAPI Evas_Object *ewk_frame_view_get(const Evas_Object *o);
+
+/**
+ * Retrieves the Ewk_Security_Origin of this frame.
+ *
+ * The returned object should be freed by ewk_security_origin_free().
+ *
+ * @param o frame object to get the security origin
+ *
+ * @return security origin object
+ */
+EAPI Ewk_Security_Origin *ewk_frame_security_origin_get(const Evas_Object *o);
 
 /**
  * Returns a new iterator over all direct children frames.
@@ -213,7 +321,7 @@ EAPI Evas_Object *ewk_frame_view_get(const Evas_Object *o);
  *
  * @param o frame object to create the iterator
  *
- * @return a newly allocated iterator on sucess, or @c 0 if not possible to
+ * @return a newly allocated iterator on sucess, or @c NULL if not possible to
  *      create the iterator
  */
 EAPI Eina_Iterator *ewk_frame_children_iterator_new(Evas_Object *o);
@@ -235,7 +343,7 @@ EAPI Eina_Iterator *ewk_frame_children_iterator_new(Evas_Object *o);
  * @param o frame object to find a child frame
  * @param name child frame name
  *
- * @return child frame of the given frame, or @c 0 if the the child wasn't found
+ * @return child frame of the given frame, or @c NULL if the the child wasn't found
  */
 EAPI Evas_Object   *ewk_frame_child_find(Evas_Object *o, const char *name);
 
@@ -257,7 +365,7 @@ EAPI Eina_Bool    ewk_frame_uri_set(Evas_Object *o, const char *uri);
  *
  * @param o frame object to get uri
  *
- * @return frame uri on success or @c 0 on failure
+ * @return frame uri on success or @c NULL on failure
  */
 EAPI const char  *ewk_frame_uri_get(const Evas_Object *o);
 
@@ -269,9 +377,9 @@ EAPI const char  *ewk_frame_uri_get(const Evas_Object *o);
  *
  * @param o frame object to get title
  *
- * @return frame title on success or @c 0 on failure
+ * @return frame title on success or @c NULL on failure
  */
-EAPI const char  *ewk_frame_title_get(const Evas_Object *o);
+EAPI const Ewk_Text_With_Direction  *ewk_frame_title_get(const Evas_Object *o);
 
 /**
  * Gets the name of this frame.
@@ -281,7 +389,7 @@ EAPI const char  *ewk_frame_title_get(const Evas_Object *o);
  *
  * @param o frame object to get name
  *
- * @return frame name on success or @c 0 on failure
+ * @return frame name on success or @c NULL on failure
  */
 EAPI const char  *ewk_frame_name_get(const Evas_Object *o);
 
@@ -289,8 +397,8 @@ EAPI const char  *ewk_frame_name_get(const Evas_Object *o);
  * Gets last known contents size.
  *
  * @param o frame object to get contents size
- * @param w pointer to store contents size width, may be @c 0
- * @param h pointer to store contents size height, may be @c 0
+ * @param w pointer to store contents size width, may be @c NULL
+ * @param h pointer to store contents size height, may be @c NULL
  *
  * @return @c EINA_TRUE on success or @c EINA_FALSE on failure and
  *         @a w and @a h will be zeroed
@@ -304,9 +412,9 @@ EAPI Eina_Bool    ewk_frame_contents_size_get(const Evas_Object *o, Evas_Coord *
  * @param contents what to load into frame
  * @param contents_size size of @a contents (in bytes),
  *        if @c 0 is given, length of @a contents is used
- * @param mime_type type of @a contents data, if @c 0 is given "text/html" is assumed
- * @param encoding encoding for @a contents data, if @c 0 is given "UTF-8" is assumed
- * @param base_uri base uri to use for relative resources, may be @c 0,
+ * @param mime_type type of @a contents data, if @c NULL is given "text/html" is assumed
+ * @param encoding encoding for @a contents data, if @c NULL is given "UTF-8" is assumed
+ * @param base_uri base uri to use for relative resources, may be @c NULL,
  *        if provided @b must be an absolute uri
  *
  * @return @c EINA_TRUE on successful request, @c EINA_FALSE on errors
@@ -321,15 +429,15 @@ EAPI Eina_Bool    ewk_frame_contents_set(Evas_Object *o, const char *contents, s
  * difference is that back-forward navigation list is not changed.
  *
  * @param o frame object to load alternative content
- * @param contents what to load into frame, must @b not be @c 0
+ * @param contents what to load into frame, must @b not be @c NULL
  * @param contents_size size of @a contents (in bytes),
  *        if @c 0 is given, length of @a contents is used
- * @param mime_type type of @a contents data, if @c 0 is given "text/html" is assumed
- * @param encoding encoding used for @a contents data, if @c 0 is given "UTF-8" is assumed
- * @param base_uri base URI to use for relative resources, may be @c 0,
+ * @param mime_type type of @a contents data, if @c NULL is given "text/html" is assumed
+ * @param encoding encoding used for @a contents data, if @c NULL is given "UTF-8" is assumed
+ * @param base_uri base URI to use for relative resources, may be @c NULL,
  *        if provided must be an absolute uri
  * @param unreachable_uri the URI that failed to load and is getting the
- *        alternative representation
+ *        alternative representation, must @b not be @c NULL
  *
  * @return @c EINA_TRUE on successful request, @c EINA_FALSE on errors
  */
@@ -338,14 +446,14 @@ EAPI Eina_Bool    ewk_frame_contents_alternate_set(Evas_Object *o, const char *c
 /**
  * Requests execution of the given script.
  *
- * The returned string @b should be freed after use.
+ * The returned string @b should be freed by eina_stringshare_del() after use.
  *
  * @param o frame object to execute script
  * @param script Java Script to execute
  *
- * @return newly allocated string for result or @c 0 if the result cannot be converted to string or failure
+ * @return newly allocated string for result or @c NULL if the result cannot be converted to string or failure
  */
-EAPI char        *ewk_frame_script_execute(Evas_Object *o, const char *script);
+EAPI const char        *ewk_frame_script_execute(Evas_Object *o, const char *script);
 
 /**
  * Queries if the frame is editable.
@@ -369,13 +477,13 @@ EAPI Eina_Bool    ewk_frame_editable_set(Evas_Object *o, Eina_Bool editable);
 /**
  * Gets the copy of the selected text.
  *
- * The returned string @b should be freed after use.
+ * The returned string @b should be freed by eina_stringshare_del() after use.
  *
  * @param o the frame object to get selected text
  *
- * @return a newly allocated string or @c 0 if nothing is selected or on failure
+ * @return a newly allocated string or @c NULL if nothing is selected or on failure
  */
-EAPI char        *ewk_frame_selection_get(const Evas_Object *o);
+EAPI const char        *ewk_frame_selection_get(const Evas_Object *o);
 
 /**
  * Searches the given string in a document.
@@ -437,8 +545,8 @@ EAPI Eina_Bool    ewk_frame_text_matches_highlight_get(const Evas_Object *o);
  *
  * @param o frame object where matches are marked
  * @param n index of element 
- * @param x the pointer to store the horizontal position of @a n matched text, may be @c 0
- * @param y the pointer to store the vertical position of @a n matched text, may be @c 0
+ * @param x the pointer to store the horizontal position of @a n matched text, may be @c NULL
+ * @param y the pointer to store the vertical position of @a n matched text, may be @c NULL
  *
  * @return @c EINA_TRUE on success, @c EINA_FALSE when no matches were found or
  *         @a n is bigger than search results or on failure
@@ -602,9 +710,17 @@ EAPI void          ewk_frame_hit_test_free(Ewk_Hit_Test *hit_test);
  * @param x the horizontal position to query
  * @param y the vertical position to query
  *
- * @return a newly allocated hit test on success, @c 0 otherwise
+ * @return a newly allocated hit test on success, @c NULL otherwise
  */
 EAPI Ewk_Hit_Test *ewk_frame_hit_test_new(const Evas_Object *o, int x, int y);
+
+/**
+ * Delivers an intent to a target service page in the frame.
+ *
+ * @param o frame object to deliver the intent to.
+ * @param ewkIntent intent object to deliver.
+ */
+EAPI void ewk_frame_intent_deliver(const Evas_Object *o, Ewk_Intent *ewk_intent);
 
 /**
  * Sets a relative scroll of the given frame.
@@ -642,9 +758,9 @@ EAPI Eina_Bool    ewk_frame_scroll_set(Evas_Object *o, int x, int y);
  *
  * @param o frame object to get scroll size
  * @param w the pointer to store the horizontal size that is possible to scroll,
- *        may be @c 0
+ *        may be @c NULL
  * @param h the pointer to store the vertical size that is possible to scroll,
- *        may be @c 0
+ *        may be @c NULL
  *
  * @return @c EINA_TRUE on success, @c EINA_FALSE otherwise and
  *         values are zeroed
@@ -655,8 +771,8 @@ EAPI Eina_Bool    ewk_frame_scroll_size_get(const Evas_Object *o, int *w, int *h
  * Gets the current scroll position of given frame.
  *
  * @param o frame object to get the current scroll position
- * @param x the pointer to store the horizontal position, may be @c 0
- * @param y the pointer to store the vertical position. may be @c 0
+ * @param x the pointer to store the horizontal position, may be @c NULL
+ * @param y the pointer to store the vertical position. may be @c NULL
  *
  * @return @c EINA_TRUE on success, @c EINA_FALSE otherwise and
  *         values are zeroed.
@@ -668,10 +784,10 @@ EAPI Eina_Bool    ewk_frame_scroll_pos_get(const Evas_Object *o, int *x, int *y)
  *
  * @param o frame object to query visible content geometry
  * @param include_scrollbars whenever to include scrollbars size
- * @param x the pointer to store the horizontal position, may be @c 0
- * @param y the pointer to store the vertical position, may be @c 0
- * @param w the pointer to store width, may be @c 0
- * @param h the pointer to store height, may be @c 0
+ * @param x the pointer to store the horizontal position, may be @c NULL
+ * @param y the pointer to store the vertical position, may be @c NULL
+ * @param w the pointer to store width, may be @c NULL
+ * @param h the pointer to store height, may be @c NULL
  *
  * @return @c EINA_TRUE on success, @c EINA_FALSE otherwise and
  *         values are zeroed
@@ -726,10 +842,10 @@ EAPI Eina_Bool    ewk_frame_feed_focus_out(Evas_Object *o);
  * document.
  *
  * @param o frame object containing the focused element
- * @param x pointer where to store the X value of the geometry, may be @c 0
- * @param x pointer where to store the Y value of the geometry, may be @c 0
- * @param x pointer where to store width of the geometry, may be @c 0
- * @param x pointer where to store height of the geometry, may be @c 0
+ * @param x pointer where to store the X value of the geometry, may be @c NULL
+ * @param x pointer where to store the Y value of the geometry, may be @c NULL
+ * @param x pointer where to store width of the geometry, may be @c NULL
+ * @param x pointer where to store height of the geometry, may be @c NULL
  *
  * @return @c EINA_TRUE if the frame contains the currently focused element and
  * its geometry was correctly fetched, @c EINA_FALSE in any other case
@@ -782,11 +898,11 @@ EAPI Eina_Bool    ewk_frame_feed_mouse_move(Evas_Object *o, const Evas_Event_Mou
  * @param o frame object to feed touch event
  * @param action the action of touch event
  * @param points a list of points (Ewk_Touch_Point) to process
- * @param metaState DEPRECTAED, not supported for now
+ * @param metaState modifiers state of touch event. Users are expected to pass ORed values of the ECORE_EVENT_MODIFIER macros in Ecore_Input.h, such as ECORE_EVENT_MODIFIER_ALT or ECORE_EVENT_MODIFIER_SHIFT
  *
  * @return @c EINA_TRUE if touch event was handled, @c EINA_FALSE otherwise
  */
-EAPI Eina_Bool    ewk_frame_feed_touch_event(Evas_Object *o, Ewk_Touch_Event_Type action, Eina_List *points, int metaState);
+EAPI Eina_Bool    ewk_frame_feed_touch_event(Evas_Object *o, Ewk_Touch_Event_Type action, Eina_List *points, unsigned modifiers);
 
 /**
  * Feeds the keyboard key down event to the frame.
@@ -823,7 +939,7 @@ EAPI Ewk_Text_Selection_Type ewk_frame_text_selection_type_get(const Evas_Object
  *
  * @param o frame smart object to get the frame source
  * @param frame_source a pointer to store the source of frame,
- *        must @b not be @c 0, this value @b should be freed after use
+ *        must @b not be @c NULL, this value @b should be freed after use
  *
  * @return @c length of @a frame_source on success, or @c -1 on failure
  *
@@ -839,7 +955,7 @@ EAPI ssize_t ewk_frame_source_get(const Evas_Object *o, char **frame_source);
  * replace them to the local paths. Values are not duplicated and they are decoded.
  *
  * @param o frame smart object to get the resources list
- * @return @c Eina_List with location of resources on success, or @c 0 on failure,
+ * @return @c Eina_List with location of resources on success, or @c NULL on failure,
  *         the Eina_List should be freed after use
  *
  * @see ewk_frame_source_get()
@@ -852,12 +968,14 @@ EAPI Eina_List *ewk_frame_resources_location_get(const Evas_Object *o);
  * This function returns the contents of the given frame converted to plain text,
  * removing all the HTML formatting.
  *
+ * The returned string @b should be freed by eina_stringshare_del() after use.
+ *
  * @param ewkFrame Frame object whose contents to retrieve.
  *
  * @return A newly allocated string (which must be freed by the caller with @c free())
- *         or @c 0 in case of failure.
+ *         or @c NULL in case of failure.
  */
-EAPI char* ewk_frame_plain_text_get(const Evas_Object* o);
+EAPI const char *ewk_frame_plain_text_get(const Evas_Object *o);
 
 /**
  * Returns whether the frame has displayed mixed content.

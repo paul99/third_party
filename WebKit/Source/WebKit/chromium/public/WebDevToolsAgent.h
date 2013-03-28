@@ -66,9 +66,8 @@ public:
     virtual void inspectElementAt(const WebPoint&) = 0;
     virtual void setProcessId(long) = 0;
 
-    // Exposed for LayoutTestController.
+    // Exposed for TestRunner.
     virtual void evaluateInWebInspector(long callId, const WebString& script) = 0;
-    virtual void setJavaScriptProfilingEnabled(bool) = 0;
 
     class MessageDescriptor {
     public:
@@ -81,8 +80,14 @@ public:
     WEBKIT_EXPORT static bool shouldInterruptForMessage(const WebString&);
     WEBKIT_EXPORT static void processPendingMessages();
 
-    // Returns a disconnect event that can be dispatched on the front-end
+    // Returns an Inspector.detached event that can be dispatched on the front-end by the embedder.
+    WEBKIT_EXPORT static WebString inspectorDetachedEvent(const WebString& reason);
+
+    // Returns a Worker.disconnectedFromWorker event that can be dispatched on the front-end
     // in order to let it know that it has disconnected from the agent.
+    WEBKIT_EXPORT static WebString workerDisconnectedFromWorkerEvent();
+
+    // FIXME: remove once migrated to workerDisconnectedFromWorkerEvent().
     WEBKIT_EXPORT static WebString disconnectEventAsText();
 };
 

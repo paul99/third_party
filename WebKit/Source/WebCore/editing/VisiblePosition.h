@@ -27,7 +27,6 @@
 #define VisiblePosition_h
 
 #include "EditingBoundary.h"
-#include "Node.h"
 #include "Position.h"
 #include "TextDirection.h"
 
@@ -47,6 +46,7 @@ namespace WebCore {
 #define VP_UPSTREAM_IF_POSSIBLE UPSTREAM
 
 class InlineBox;
+class Node;
 
 class VisiblePosition {
 public:
@@ -93,7 +93,7 @@ public:
     }
 
     // Rect is local to the returned renderer
-    IntRect localCaretRect(RenderObject*&) const;
+    LayoutRect localCaretRect(RenderObject*&) const;
     // Bounds of (possibly transformed) caret in absolute coords
     IntRect absoluteCaretBounds() const;
     // Abs x/y position of the caret ignoring transforms.

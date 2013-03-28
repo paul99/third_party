@@ -30,7 +30,6 @@
 
 namespace WebKit {
 
-class WebCompositor;
 class WebCompositorInputHandlerClient;
 class WebInputEvent;
 class WebThread;
@@ -41,12 +40,10 @@ class WebCompositorInputHandler {
 public:
     // The return value is temporarily WebCompositor until all downstream code
     // is switched to use WebCompositorInputHandler.
-    WEBKIT_EXPORT static WebCompositor* fromIdentifier(int);
+    WEBKIT_EXPORT static WebCompositorInputHandler* fromIdentifier(int);
 
     virtual void setClient(WebCompositorInputHandlerClient*) = 0;
     virtual void handleInputEvent(const WebInputEvent&) = 0;
-    virtual void didVSync(double frameBeginMonotonic,
-                          double currentFrameIntervalInSec) = 0;
 
 protected:
     virtual ~WebCompositorInputHandler() { }

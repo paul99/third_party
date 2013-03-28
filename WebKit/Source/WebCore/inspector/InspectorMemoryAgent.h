@@ -38,33 +38,36 @@
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
-class InspectorDOMAgent;
-class InspectorFrontend;
+
+class InspectorClient;
+class InspectorDOMStorageAgent;
 class InspectorState;
-class InspectorArray;
 class InstrumentingAgents;
 class Page;
 
 typedef String ErrorString;
 
-class InspectorMemoryAgent : public InspectorBaseAgent<InspectorMemoryAgent> {
+class InspectorMemoryAgent : public InspectorBaseAgent<InspectorMemoryAgent>, public InspectorBackendDispatcher::MemoryCommandHandler {
     WTF_MAKE_NONCOPYABLE(InspectorMemoryAgent);
 public:
     typedef Vector<OwnPtr<InspectorBaseAgentInterface> > InspectorAgents;
 
-    static PassOwnPtr<InspectorMemoryAgent> create(InstrumentingAgents* instrumentingAgents, InspectorState* state, Page* page, InspectorDOMAgent* domAgent)
+    static PassOwnPtr<InspectorMemoryAgent> create(InstrumentingAgents* instrumentingAgents, InspectorClient* client, InspectorState* state, Page* page)
     {
-        return adoptPtr(new InspectorMemoryAgent(instrumentingAgents, state, page, domAgent));
+        return adoptPtr(new InspectorMemoryAgent(instrumentingAgents, client, state, page));
     }
+    virtual ~InspectorMemoryAgent();
 
-    void getDOMNodeCount(ErrorString*, RefPtr<InspectorArray>& domGroups, RefPtr<InspectorObject>& strings);
+    virtual void getDOMNodeCount(ErrorString*, RefPtr<TypeBuilder::Array<TypeBuilder::Memory::DOMGroup> >& domGroups, RefPtr<TypeBuilder::Memory::StringStatistics>& strings);
+    virtual void getProcessMemoryDistribution(ErrorString*, const bool* reportGraph, RefPtr<TypeBuilder::Memory::MemoryBlock>& processMemory, RefPtr<InspectorObject>& graph);
 
-    ~InspectorMemoryAgent();
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const;
 
 private:
-    InspectorMemoryAgent(InstrumentingAgents*, InspectorState*, Page*, InspectorDOMAgent* domAgent);
+    InspectorMemoryAgent(InstrumentingAgents*, InspectorClient*, InspectorState*, Page*);
+
+    InspectorClient* m_inspectorClient;
     Page* m_page;
-    InspectorDOMAgent* m_domAgent;
 };
 
 } // namespace WebCore

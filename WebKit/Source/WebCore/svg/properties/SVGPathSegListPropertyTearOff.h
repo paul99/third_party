@@ -35,41 +35,37 @@ public:
     typedef SVGPropertyTraits<SVGPathSegList>::ListItemType ListItemType;
     typedef PassRefPtr<SVGPathSeg> PassListItemType;
 
-    static PassRefPtr<SVGPathSegListPropertyTearOff> create(AnimatedListPropertyTearOff* animatedProperty, SVGPropertyRole role, SVGPathSegRole pathSegRole)
+    static PassRefPtr<SVGPathSegListPropertyTearOff> create(AnimatedListPropertyTearOff* animatedProperty, SVGPropertyRole role, SVGPathSegRole pathSegRole, SVGPathSegList& values, ListWrapperCache& wrappers)
     {
         ASSERT(animatedProperty);
-        return adoptRef(new SVGPathSegListPropertyTearOff(animatedProperty, role, pathSegRole));
+        return adoptRef(new SVGPathSegListPropertyTearOff(animatedProperty, role, pathSegRole, values, wrappers));
     }
 
-    int removeItemFromList(const ListItemType& removeItem, bool shouldSynchronizeWrappers)
+    int findItem(const ListItemType& item) const
     {
-        SVGPathSegList& values = m_animatedProperty->values();
+        ASSERT(m_values);
 
-        unsigned size = values.size();
-        for (unsigned i = 0; i < size; ++i) {
-            ListItemType& item = values.at(i);
-            if (item != removeItem)
-                continue;
-
-            values.remove(i);
-
-            if (shouldSynchronizeWrappers)
-                commitChange();
-
-            return i;
+        unsigned size = m_values->size();
+        for (size_t i = 0; i < size; ++i) {
+            if (item == m_values->at(i))
+                return i;
         }
 
         return -1;
     }
 
+    void removeItemFromList(size_t itemIndex, bool shouldSynchronizeWrappers)
+    {
+        ASSERT(m_values);
+
+        m_values->remove(itemIndex);
+
+        if (shouldSynchronizeWrappers)
+            commitChange();
+    }
+
     // SVGList API
     void clear(ExceptionCode&);
-
-    unsigned numberOfItems() const
-    {
-        SVGPathSegList& values = m_animatedProperty->values();
-        return Base::numberOfItemsValues(values);
-    }
 
     PassListItemType initialize(PassListItemType passNewItem, ExceptionCode& ec)
     {
@@ -79,9 +75,9 @@ public:
             return 0;
         }
 
+        clearContextAndRoles();
         ListItemType newItem = passNewItem;
-        SVGPathSegList& values = m_animatedProperty->values();
-        return Base::initializeValues(values, newItem, ec);
+        return Base::initializeValues(newItem, ec);
     }
 
     PassListItemType getItem(unsigned index, ExceptionCode&);
@@ -95,22 +91,10 @@ public:
         }
 
         ListItemType newItem = passNewItem;
-        SVGPathSegList& values = m_animatedProperty->values();
-        return Base::insertItemBeforeValues(values, newItem, index, ec);
+        return Base::insertItemBeforeValues(newItem, index, ec);
     }
 
-    PassListItemType replaceItem(PassListItemType passNewItem, unsigned index, ExceptionCode& ec)
-    {
-        // Not specified, but FF/Opera do it this way, and it's just sane.
-        if (!passNewItem) {
-            ec = SVGException::SVG_WRONG_TYPE_ERR;
-            return 0;
-        }
-
-        ListItemType newItem = passNewItem;
-        SVGPathSegList& values = m_animatedProperty->values();
-        return Base::replaceItemValues(values, newItem, index, ec);
-    }
+    PassListItemType replaceItem(PassListItemType, unsigned index, ExceptionCode&);
 
     PassListItemType removeItem(unsigned index, ExceptionCode&);
 
@@ -123,13 +107,12 @@ public:
         }
 
         ListItemType newItem = passNewItem;
-        SVGPathSegList& values = m_animatedProperty->values();
-        return Base::appendItemValues(values, newItem, ec);
+        return Base::appendItemValues(newItem, ec);
     }
 
 private:
-    SVGPathSegListPropertyTearOff(AnimatedListPropertyTearOff* animatedProperty, SVGPropertyRole role, SVGPathSegRole pathSegRole)
-        : SVGListProperty<SVGPathSegList>(role)
+    SVGPathSegListPropertyTearOff(AnimatedListPropertyTearOff* animatedProperty, SVGPropertyRole role, SVGPathSegRole pathSegRole, SVGPathSegList& values, ListWrapperCache& wrappers)
+        : SVGListProperty<SVGPathSegList>(role, values, &wrappers)
         , m_animatedProperty(animatedProperty)
         , m_pathSegRole(pathSegRole)
     {
@@ -137,16 +120,36 @@ private:
 
     SVGPathElement* contextElement() const;
 
-    virtual void commitChange()
+    void clearContextAndRoles();
+
+    using Base::m_role;
+
+    virtual bool isReadOnly() const
     {
-        SVGPathSegList& values = m_animatedProperty->values();
-        values.commitChange(m_animatedProperty->contextElement());
+        if (m_role == AnimValRole)
+            return true;
+        if (m_animatedProperty && m_animatedProperty->isReadOnly())
+            return true;
+        return false;
     }
 
-    virtual void processIncomingListItemValue(const ListItemType& newItem, unsigned* indexToModify);
-    virtual void processIncomingListItemWrapper(RefPtr<ListItemTearOff>&, unsigned*)
+    virtual void commitChange()
+    {
+        ASSERT(m_values);
+        m_values->commitChange(m_animatedProperty->contextElement(), ListModificationUnknown);
+    }
+
+    virtual void commitChange(ListModification listModification)
+    {
+        ASSERT(m_values);
+        m_values->commitChange(m_animatedProperty->contextElement(), listModification);
+    }
+
+    virtual bool processIncomingListItemValue(const ListItemType& newItem, unsigned* indexToModify) OVERRIDE;
+    virtual bool processIncomingListItemWrapper(RefPtr<ListItemTearOff>&, unsigned*)
     {
         ASSERT_NOT_REACHED();
+        return true;
     }
 
 private:

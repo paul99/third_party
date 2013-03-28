@@ -32,14 +32,7 @@
 #define WebView_h
 
 #include "WebDragOperation.h"
-#if defined(ANDROID)
-#include "platform/WebFloatQuad.h"
-#endif
 #include "WebPageVisibilityState.h"
-#if defined(ANDROID)
-#include "platform/WebRect.h"
-#include "WebScrollableRect.h"
-#endif
 #include "WebWidget.h"
 #include "platform/WebString.h"
 #include "platform/WebVector.h"
@@ -48,41 +41,29 @@ namespace WebKit {
 
 class WebAccessibilityObject;
 class WebAutofillClient;
+class WebBatteryStatus;
 class WebDevToolsAgent;
 class WebDevToolsAgentClient;
 class WebDragData;
 class WebFrame;
 class WebFrameClient;
 class WebGraphicsContext3D;
+class WebHitTestResult;
 class WebNode;
 class WebPageOverlay;
 class WebPermissionClient;
+class WebPrerendererClient;
 class WebRange;
 class WebSettings;
 class WebSpellCheckClient;
 class WebString;
+class WebTextFieldDecoratorClient;
+class WebViewBenchmarkSupport;
 class WebViewClient;
+struct WebActiveWheelFlingParameters;
 struct WebMediaPlayerAction;
 struct WebPluginAction;
 struct WebPoint;
-
-#if defined(ANDROID)
-struct WebTouchCandidatesInfo {
-  // The number of possible touch receivers from the last touch.  This is used
-  // in OnSingleTap in order to know whether or not the tap should go through.
-  // If it is more than 1, the tap should not go through, as the on-demand zoom
-  // should be used instead, allowing the user to clarify.
-  int number_of_candidates;
-  // The bounds of the possible touch candidates.  This will encompass the
-  // totality of any possible touch candidates for a press.
-  WebKit::WebRect united_bounds;
-  // The smallest dimension (either width or height) of any of the
-  // available touch targets.  This is used with On-Demand zoom to
-  // determine the minimum amount needed to scale to get it up to a
-  // touchable size.
-  int smallest_dimension;
-};
-#endif
 
 class WebView : public WebWidget {
 public:
@@ -124,11 +105,15 @@ public:
     // child frames.  It is valid to pass a null WebFrameClient pointer.
     virtual void initializeMainFrame(WebFrameClient*) = 0;
 
+    virtual void initializeHelperPluginFrame(WebFrameClient*) = 0;
+
     // Initializes the various client interfaces.
     virtual void setAutofillClient(WebAutofillClient*) = 0;
     virtual void setDevToolsAgentClient(WebDevToolsAgentClient*) = 0;
     virtual void setPermissionClient(WebPermissionClient*) = 0;
+    virtual void setPrerendererClient(WebPrerendererClient*) = 0;
     virtual void setSpellCheckClient(WebSpellCheckClient*) = 0;
+    virtual void addTextFieldDecoratorClient(WebTextFieldDecoratorClient*) = 0;
 
 
     // Options -------------------------------------------------------------
@@ -208,10 +193,13 @@ public:
     // window space.
     virtual void scrollFocusedNodeIntoRect(const WebRect&) { }
 
-#if defined(ANDROID)
-    // Gets the bounding rect of the focused node.
-    virtual WebRect focusedNodeBounds() = 0;
-#endif
+    // Advance the focus of the WebView forward to the next element or to the
+    // previous element in the tab sequence (if reverse is true).
+    virtual void advanceFocus(bool reverse) { }
+
+    // Animate a scale into the specified find-in-page rect.
+    virtual void zoomToFindInPageRect(const WebRect&) = 0;
+
 
     // Zoom ----------------------------------------------------------------
 
@@ -266,6 +254,22 @@ public:
     virtual float minimumPageScaleFactor() const = 0;
     virtual float maximumPageScaleFactor() const = 0;
 
+    // Save the WebView's current scroll and scale state. Each call to this function
+    // overwrites the previously saved scroll and scale state.
+    virtual void saveScrollAndScaleState() = 0;
+
+    // Restore the previously saved scroll and scale state. After restoring the
+    // state, this function deletes any saved scroll and scale state.
+    virtual void restoreScrollAndScaleState() = 0;
+
+    // Reset any saved values for the scroll and scale state.
+    virtual void resetScrollAndScaleState() = 0;
+
+    // Prevent the web page from setting a maximum scale via the viewport meta
+    // tag. This is an accessibility feature that lets folks zoom in to web
+    // pages even if the web page tries to block scaling.
+    virtual void setIgnoreViewportTagMaximumScale(bool) = 0;
+
     // The ratio of the current device's screen DPI to the target device's screen DPI.
     virtual float deviceScaleFactor() const = 0;
 
@@ -284,15 +288,17 @@ public:
     virtual WebSize fixedLayoutSize() const = 0;
     virtual void setFixedLayoutSize(const WebSize&) = 0;
 
+
     // Auto-Resize -----------------------------------------------------------
 
     // In auto-resize mode, the view is automatically adjusted to fit the html
     // content within the given bounds.
     virtual void enableAutoResizeMode(
-        bool enable,
         const WebSize& minSize,
         const WebSize& maxSize) = 0;
 
+    // Turn off auto-resize.
+    virtual void disableAutoResizeMode() = 0;
 
     // Media ---------------------------------------------------------------
 
@@ -306,6 +312,9 @@ public:
 
 
     // Data exchange -------------------------------------------------------
+
+    // Do a hit test at given point and return the HitTestResult.
+    virtual WebHitTestResult hitTestResultAt(const WebPoint&) = 0;
 
     // Copy to the clipboard the image located at a particular point in the
     // WebView (if there is such an image)
@@ -329,13 +338,16 @@ public:
     virtual WebDragOperation dragTargetDragEnter(
         const WebDragData&,
         const WebPoint& clientPoint, const WebPoint& screenPoint,
-        WebDragOperationsMask operationsAllowed) = 0;
+        WebDragOperationsMask operationsAllowed,
+        int keyModifiers) = 0;
     virtual WebDragOperation dragTargetDragOver(
         const WebPoint& clientPoint, const WebPoint& screenPoint,
-        WebDragOperationsMask operationsAllowed) = 0;
+        WebDragOperationsMask operationsAllowed,
+        int keyModifiers) = 0;
     virtual void dragTargetDragLeave() = 0;
     virtual void dragTargetDrop(
-        const WebPoint& clientPoint, const WebPoint& screenPoint) = 0;
+        const WebPoint& clientPoint, const WebPoint& screenPoint,
+        int keyModifiers) = 0;
 
 
     // Support for resource loading initiated by plugins -------------------
@@ -364,10 +376,6 @@ public:
     // be set once per WebView.
     virtual WebDevToolsAgent* devToolsAgent() = 0;
 
-    // Sets the string returned when overriding the user agent.
-    // Setting this to "" will clear out the override.
-    virtual WebString userAgentOverride() const = 0;
-    virtual void setUserAgentOverride(const WebString&) = 0;
 
     // Accessibility -------------------------------------------------------
 
@@ -378,22 +386,21 @@ public:
     // Autofill  -----------------------------------------------------------
 
     // Notifies the WebView that Autofill suggestions are available for a node.
-    // |uniqueIDs| is a vector of IDs that represent the unique ID of each
-    // Autofill profile in the suggestions popup. If a unique ID is 0, then the
-    // corresponding suggestion comes from Autocomplete rather than Autofill.
-    // If a unique ID is negative, then the corresponding "suggestion" is
-    // actually a user-facing warning, e.g. explaining why Autofill is
-    // unavailable for the current form.
+    // |itemIDs| is a vector of IDs for the menu items. A positive itemID is a
+    // unique ID for the Autofill entries. Other MenuItemIDs are defined in
+    // WebAutofillClient.h
     virtual void applyAutofillSuggestions(
         const WebNode&,
         const WebVector<WebString>& names,
         const WebVector<WebString>& labels,
         const WebVector<WebString>& icons,
-        const WebVector<int>& uniqueIDs,
-        int separatorIndex) = 0;
+        const WebVector<int>& itemIDs,
+        int separatorIndex = -1) = 0;
 
     // Hides any popup (suggestions, selects...) that might be showing.
     virtual void hidePopups() = 0;
+
+    virtual void selectAutofillSuggestionAtIndex(unsigned listIndex) = 0;
 
 
     // Context menu --------------------------------------------------------
@@ -449,60 +456,26 @@ public:
 
     // GPU acceleration support --------------------------------------------
 
-    // Returns the (on-screen) WebGraphicsContext3D associated with
-    // this WebView. One will be created if it doesn't already exist.
-    // This is used to set up sharing between this context (which is
-    // that used by the compositor) and contexts for WebGL and other
-    // APIs.
-    virtual WebGraphicsContext3D* graphicsContext3D() = 0;
+    // Context that's in the compositor's share group, but is not the compositor context itself.
+    // Can be used for allocating resources that the compositor will later access.
+    virtual WebGraphicsContext3D* sharedGraphicsContext3D() = 0;
 
-#if defined(ANDROID)
+    // Called to inform the WebView that a wheel fling animation was started externally (for instance
+    // by the compositor) but must be completed by the WebView.
+    virtual void transferActiveWheelFlingAnimation(const WebActiveWheelFlingParameters&) = 0;
 
-    // Scroll ---------------------------------------------------------------
-
-    // Return a list of rects in window coordinate that are possible scroll
-    // targets. This is used in browser-scrolling mode so the a scroll gesture
-    // can skip the renderer process for better responsiveness.
-    // The returned rects may contain false positive due to clipping, but
-    // should never allow false negative.
-    virtual WebVector<WebScrollableRect> getScrollableRects() = 0;
-
-    // Touch ---------------------------------------------------------------
-
-    // Returns a list of layout bounding box of the event target node touched by
-    // the input point with the padding. If no target node is found, an empty
-    // list is returned. If the node is inline type, each line box is returned
-    // separately. Otherwise, one bounding box is returned.
-    // Also returns the number of touch touch nodes that may have been
-    // candidates for this point.  This number is used by RenderView to show
-    // the on-demand zooming popup.
-    // Also returns the bounds of all the touch nodes that may have been
-    // candidates, to allow for accurate zooming containing each node.
-    virtual WebVector<WebFloatQuad> getTouchHighlightQuads(const WebPoint& point,
-                                                           int padding,
-                                                           WebTouchCandidatesInfo* outTouchInfo,
-                                                           WebColor& outTapHighlightColor
-                                                           ) = 0;
-
-    // Returns the list of quads required to highlight a given text range.
-    virtual WebVector<WebFloatQuad> getTouchHighlightQuads(const WebRange& range,
-                                                           WebColor& outTapHighlightColor) = 0;
-
-    virtual void showTouchHighlightQuads(const WebVector<WebFloatQuad>& highlight, WebColor highlightColor) = 0;
-
-    // Returns the bounding box of the block type node touched by the input
-    // point with the padding, and sets a flag if the text within that block is
-    // unboosted (in which case the client should probably zoom in further).
-    virtual WebRect getBlockBounds(const WebPoint& point, int padding, bool ignoreClipping, bool* isUnboostedText) = 0;
-
-    // External autofill
-    virtual void selectAutofillSuggestionAtIndex(int listIndex) = 0;
+    virtual bool setEditableSelectionOffsets(int start, int end) = 0;
+    virtual bool setCompositionFromExistingText(int compositionStart, int compositionEnd, const WebVector<WebCompositionUnderline>& underlines) = 0;
+    virtual void extendSelectionAndDelete(int before, int after) = 0;
 
     virtual bool isSelectionEditable() const = 0;
 
-    virtual void setEditableSelectionOffsets(int start, int end) = 0;
+    virtual void setShowPaintRects(bool) = 0;
+    virtual void setShowFPSCounter(bool) = 0;
 
-#endif
+    // Benchmarking support -------------------------------------------------
+
+    virtual WebViewBenchmarkSupport* benchmarkSupport() { return 0; }
 
     // Visibility -----------------------------------------------------------
 
@@ -523,11 +496,17 @@ public:
     virtual void addPageOverlay(WebPageOverlay*, int /*z-order*/) = 0;
     virtual void removePageOverlay(WebPageOverlay*) = 0;
 
-    // Testing functionality for LayoutTestController -----------------------
+    // Battery status API support -------------------------------------------
+
+    // Updates the battery status in the BatteryClient. This also triggers the
+    // appropriate JS events (e.g. sends a 'levelchange' event to JS if the
+    // level is changed in this update from the previous update).
+    virtual void updateBatteryStatus(const WebBatteryStatus&) { }
+
+    // Testing functionality for TestRunner ---------------------------------
 
     // Simulates a compositor lost context.
     virtual void loseCompositorContext(int numTimes) = 0;
-
 
 protected:
     ~WebView() {}

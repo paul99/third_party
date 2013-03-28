@@ -26,8 +26,7 @@
 #ifndef StorageNamespace_h
 #define StorageNamespace_h
 
-#include "PlatformString.h"
-
+#include <wtf/Forward.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 
@@ -50,6 +49,7 @@ public:
     virtual void clearOriginForDeletion(SecurityOrigin*) = 0;
     virtual void clearAllOriginsForDeletion() = 0;
     virtual void sync() = 0;
+    virtual void closeIdleLocalStorageDatabases()  { }
 };
 
 } // namespace WebCore

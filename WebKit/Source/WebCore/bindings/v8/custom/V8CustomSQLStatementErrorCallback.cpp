@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, Google Inc. All rights reserved.
+ * Copyright (c) 2009, 2012 Google Inc. All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -35,8 +35,7 @@
 #include "V8SQLStatementErrorCallback.h"
 
 #include "ScriptExecutionContext.h"
-#include "V8CustomVoidCallback.h"
-#include "V8Proxy.h"
+#include "V8Callback.h"
 #include "V8SQLError.h"
 #include "V8SQLTransaction.h"
 #include <wtf/Assertions.h>
@@ -59,7 +58,8 @@ bool V8SQLStatementErrorCallback::handleEvent(SQLTransaction* transaction, SQLEr
     v8::Handle<v8::Value> transactionHandle = toV8(transaction);
     v8::Handle<v8::Value> errorHandle = toV8(error);
     if (transactionHandle.IsEmpty() || errorHandle.IsEmpty()) {
-        CRASH();
+        if (!isScriptControllerTerminating())
+            CRASH();
         return true;
     }
 
@@ -73,7 +73,7 @@ bool V8SQLStatementErrorCallback::handleEvent(SQLTransaction* transaction, SQLEr
     // statement, if any, or onto the next overall step otherwise. Otherwise,
     // the error callback did not return false, or there was no error callback.
     // Jump to the last step in the overall steps.
-    return invokeCallback(m_callback, 2, argv, callbackReturnValue, scriptExecutionContext()) || callbackReturnValue;
+    return invokeCallback(m_callback.get(), 2, argv, callbackReturnValue, scriptExecutionContext()) || callbackReturnValue;
 }
 
 } // namespace WebCore

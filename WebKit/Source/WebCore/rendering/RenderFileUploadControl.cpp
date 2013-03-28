@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2012 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -21,7 +21,9 @@
 #include "config.h"
 #include "RenderFileUploadControl.h"
 
+#include "ElementShadow.h"
 #include "FileList.h"
+#include "Font.h"
 #include "GraphicsContext.h"
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
@@ -51,11 +53,17 @@ const int buttonShadowHeight = 2;
 
 RenderFileUploadControl::RenderFileUploadControl(HTMLInputElement* input)
     : RenderBlock(input)
+    , m_canReceiveDroppedFiles(input->canReceiveDroppedFiles())
 {
 }
 
 RenderFileUploadControl::~RenderFileUploadControl()
 {
+}
+
+bool RenderFileUploadControl::canBeReplacedWithInlineRunIn() const
+{
+    return false;
 }
 
 void RenderFileUploadControl::updateFromElement()
@@ -64,15 +72,11 @@ void RenderFileUploadControl::updateFromElement()
     ASSERT(input->isFileUpload());
 
     if (HTMLInputElement* button = uploadButton()) {
-        bool newDisabled = !theme()->isEnabled(this);
-        // We should avoid to call HTMLFormControlElement::setDisabled() as
-        // possible because setAttribute() in setDisabled() can cause style
-        // recalculation, and HTMLFormControlElement::recalcStyle() calls
-        // updateFromElement() eventually.
-        if (button->disabled() != newDisabled)
-            button->setDisabled(newDisabled);
-        
-        button->setActive(input->canReceiveDroppedFiles());
+        bool newCanReceiveDroppedFilesState = input->canReceiveDroppedFiles();
+        if (m_canReceiveDroppedFiles != newCanReceiveDroppedFilesState) {
+            m_canReceiveDroppedFiles = newCanReceiveDroppedFilesState;
+            button->setActive(newCanReceiveDroppedFilesState);
+        }
     }
 
     // This only supports clearing out the files, but that's OK because for
@@ -85,13 +89,13 @@ void RenderFileUploadControl::updateFromElement()
 
 static int nodeWidth(Node* node)
 {
-    return node ? node->renderBox()->width() : 0;
+    return node ? node->renderBox()->pixelSnappedWidth() : 0;
 }
 
 int RenderFileUploadControl::maxFilenameWidth() const
 {
     HTMLInputElement* input = static_cast<HTMLInputElement*>(node());
-    return max(0, contentWidth() - nodeWidth(uploadButton()) - afterButtonSpacing
+    return max(0, contentBoxRect().pixelSnappedWidth() - nodeWidth(uploadButton()) - afterButtonSpacing
         - (input->icon() ? iconWidth + iconFilenameSpacing : 0));
 }
 
@@ -103,8 +107,8 @@ void RenderFileUploadControl::paintObject(PaintInfo& paintInfo, const LayoutPoin
     // Push a clip.
     GraphicsContextStateSaver stateSaver(*paintInfo.context, false);
     if (paintInfo.phase == PaintPhaseForeground || paintInfo.phase == PaintPhaseChildBlockBackgrounds) {
-        LayoutRect clipRect(paintOffset.x() + borderLeft(), paintOffset.y() + borderTop(),
-                         width() - borderLeft() - borderRight(), height() - borderBottom() - borderTop() + buttonShadowHeight);
+        IntRect clipRect = enclosingIntRect(LayoutRect(paintOffset.x() + borderLeft(), paintOffset.y() + borderTop(),
+                         width() - borderLeft() - borderRight(), height() - borderBottom() - borderTop() + buttonShadowHeight));
         if (clipRect.isEmpty())
             return;
         stateSaver.save();
@@ -135,13 +139,12 @@ void RenderFileUploadControl::paintObject(PaintInfo& paintInfo, const LayoutPoin
         // We want to match the button's baseline
         RenderButton* buttonRenderer = toRenderButton(button->renderer());
         // FIXME: Make this work with transforms.
-        LayoutUnit textY = buttonRenderer->absoluteBoundingBoxRectIgnoringTransforms().y()
-            + buttonRenderer->baselinePosition(AlphabeticBaseline, true, HorizontalLine, PositionOnContainingLine);
+        LayoutUnit textY = paintOffset.y() + buttonRenderer->baselinePosition(AlphabeticBaseline, true, HorizontalLine, PositionOnContainingLine);
 
         paintInfo.context->setFillColor(style()->visitedDependentColor(CSSPropertyColor), style()->colorSpace());
         
         // Draw the filename
-        paintInfo.context->drawBidiText(font, textRun, LayoutPoint(textX, textY));
+        paintInfo.context->drawBidiText(font, textRun, IntPoint(roundToInt(textX), roundToInt(textY)));
         
         if (input->icon()) {
             // Determine where the icon should be placed
@@ -153,7 +156,7 @@ void RenderFileUploadControl::paintObject(PaintInfo& paintInfo, const LayoutPoin
                 iconX = contentLeft + contentWidth() - buttonWidth - afterButtonSpacing - iconWidth;
 
             // Draw the file icon
-            input->icon()->paint(paintInfo.context, LayoutRect(iconX, iconY, iconWidth, iconHeight));
+            input->icon()->paint(paintInfo.context, IntRect(roundToInt(iconX), roundToInt(iconY), iconWidth, iconHeight));
         }
     }
 
@@ -173,27 +176,33 @@ void RenderFileUploadControl::computePreferredLogicalWidths()
 
     const Font& font = style->font();
     if (style->width().isFixed() && style->width().value() > 0)
-        m_minPreferredLogicalWidth = m_maxPreferredLogicalWidth = computeContentBoxLogicalWidth(style->width().value());
+        m_minPreferredLogicalWidth = m_maxPreferredLogicalWidth = adjustContentBoxLogicalWidthForBoxSizing(style->width().value());
     else {
         // Figure out how big the filename space needs to be for a given number of characters
         // (using "0" as the nominal character).
-        const UChar ch = '0';
-        const String str = String(&ch, 1);
-        float charWidth = font.width(constructTextRun(this, font, str, style, TextRun::AllowTrailingExpansion));
-        m_maxPreferredLogicalWidth = (int)ceilf(charWidth * defaultWidthNumChars);
+        const UChar character = '0';
+        const String characterAsString = String(&character, 1);
+        float minDefaultLabelWidth = defaultWidthNumChars * font.width(constructTextRun(this, font, characterAsString, style, TextRun::AllowTrailingExpansion));
+
+        const String label = theme()->fileListDefaultLabel(node()->toInputElement()->multiple());
+        float defaultLabelWidth = font.width(constructTextRun(this, font, label, style, TextRun::AllowTrailingExpansion));
+        if (HTMLInputElement* button = uploadButton())
+            if (RenderObject* buttonRenderer = button->renderer())
+                defaultLabelWidth += buttonRenderer->maxPreferredLogicalWidth() + afterButtonSpacing;
+        m_maxPreferredLogicalWidth = static_cast<int>(ceilf(max(minDefaultLabelWidth, defaultLabelWidth)));
     }
 
     if (style->minWidth().isFixed() && style->minWidth().value() > 0) {
-        m_maxPreferredLogicalWidth = max(m_maxPreferredLogicalWidth, computeContentBoxLogicalWidth(style->minWidth().value()));
-        m_minPreferredLogicalWidth = max(m_minPreferredLogicalWidth, computeContentBoxLogicalWidth(style->minWidth().value()));
+        m_maxPreferredLogicalWidth = max(m_maxPreferredLogicalWidth, adjustContentBoxLogicalWidthForBoxSizing(style->minWidth().value()));
+        m_minPreferredLogicalWidth = max(m_minPreferredLogicalWidth, adjustContentBoxLogicalWidthForBoxSizing(style->minWidth().value()));
     } else if (style->width().isPercent() || (style->width().isAuto() && style->height().isPercent()))
         m_minPreferredLogicalWidth = 0;
     else
         m_minPreferredLogicalWidth = m_maxPreferredLogicalWidth;
 
     if (style->maxWidth().isFixed()) {
-        m_maxPreferredLogicalWidth = min(m_maxPreferredLogicalWidth, computeContentBoxLogicalWidth(style->maxWidth().value()));
-        m_minPreferredLogicalWidth = min(m_minPreferredLogicalWidth, computeContentBoxLogicalWidth(style->maxWidth().value()));
+        m_maxPreferredLogicalWidth = min(m_maxPreferredLogicalWidth, adjustContentBoxLogicalWidthForBoxSizing(style->maxWidth().value()));
+        m_minPreferredLogicalWidth = min(m_minPreferredLogicalWidth, adjustContentBoxLogicalWidthForBoxSizing(style->maxWidth().value()));
     }
 
     int toAdd = borderAndPaddingWidth();
@@ -212,9 +221,9 @@ HTMLInputElement* RenderFileUploadControl::uploadButton() const
 {
     HTMLInputElement* input = static_cast<HTMLInputElement*>(node());
 
-    ASSERT(input->shadowRoot());
+    ASSERT(input->shadow());
 
-    Node* buttonNode = input->shadowRoot()->firstChild();
+    Node* buttonNode = input->shadow()->oldestShadowRoot()->firstChild();
     return buttonNode && buttonNode->isHTMLElement() && buttonNode->hasTagName(inputTag) ? static_cast<HTMLInputElement*>(buttonNode) : 0;
 }
 
@@ -230,7 +239,7 @@ String RenderFileUploadControl::fileTextValue() const
 {
     HTMLInputElement* input = static_cast<HTMLInputElement*>(node());
     ASSERT(input->files());
-    return theme()->fileListNameForWidth(input->files()->paths(), style()->font(), maxFilenameWidth(), input->multiple());
+    return theme()->fileListNameForWidth(input->files(), style()->font(), maxFilenameWidth(), input->multiple());
 }
     
 } // namespace WebCore

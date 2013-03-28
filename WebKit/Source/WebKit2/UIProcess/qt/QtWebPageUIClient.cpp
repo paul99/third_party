@@ -30,6 +30,9 @@
 #include <WKHitTestResult.h>
 #include <WKOpenPanelParameters.h>
 #include <WKOpenPanelResultListener.h>
+#include <WKRetainPtr.h>
+
+namespace WebKit {
 
 QtWebPageUIClient::QtWebPageUIClient(WKPageRef pageRef, QQuickWebView* webView)
     : m_webView(webView)
@@ -43,8 +46,15 @@ QtWebPageUIClient::QtWebPageUIClient(WKPageRef pageRef, QQuickWebView* webView)
     uiClient.runJavaScriptPrompt = runJavaScriptPrompt;
     uiClient.runOpenPanel = runOpenPanel;
     uiClient.mouseDidMoveOverElement = mouseDidMoveOverElement;
+    uiClient.exceededDatabaseQuota = exceededDatabaseQuota;
     uiClient.decidePolicyForGeolocationPermissionRequest = policyForGeolocationPermissionRequest;
+    uiClient.decidePolicyForNotificationPermissionRequest = policyForNotificationPermissionRequest;
     WKPageSetPageUIClient(pageRef, &uiClient);
+}
+
+quint64 QtWebPageUIClient::exceededDatabaseQuota(const QString& databaseName, const QString& displayName, WKSecurityOriginRef securityOrigin, quint64 currentQuota, quint64 currentOriginUsage, quint64 currentDatabaseUsage, quint64 expectedUsage)
+{
+    return m_webView->d_func()->exceededDatabaseQuota(databaseName, displayName, securityOrigin, currentQuota, currentOriginUsage, currentDatabaseUsage, expectedUsage);
 }
 
 void QtWebPageUIClient::runJavaScriptAlert(const QString& message)
@@ -86,6 +96,13 @@ static QtWebPageUIClient* toQtWebPageUIClient(const void* clientInfo)
 {
     ASSERT(clientInfo);
     return reinterpret_cast<QtWebPageUIClient*>(const_cast<void*>(clientInfo));
+}
+
+unsigned long long QtWebPageUIClient::exceededDatabaseQuota(WKPageRef, WKFrameRef, WKSecurityOriginRef securityOrigin, WKStringRef databaseName, WKStringRef displayName, unsigned long long currentQuota, unsigned long long currentOriginUsage, unsigned long long currentDatabaseUsage, unsigned long long expectedUsage, const void *clientInfo)
+{
+    QString qDisplayName = WKStringCopyQString(displayName);
+    QString qDatabaseName = WKStringCopyQString(databaseName);
+    return toQtWebPageUIClient(clientInfo)->exceededDatabaseQuota(qDatabaseName, qDisplayName, securityOrigin, currentQuota, currentOriginUsage, currentDatabaseUsage, expectedUsage);
 }
 
 void QtWebPageUIClient::runJavaScriptAlert(WKPageRef, WKStringRef alertText, WKFrameRef, const void* clientInfo)
@@ -144,4 +161,15 @@ void QtWebPageUIClient::policyForGeolocationPermissionRequest(WKPageRef page, WK
     QWebPermissionRequest* req = QWebPermissionRequest::create(origin, request);
     toQtWebPageUIClient(clientInfo)->permissionRequest(req);
 }
+
+void QtWebPageUIClient::policyForNotificationPermissionRequest(WKPageRef page, WKSecurityOriginRef origin, WKNotificationPermissionRequestRef request, const void *clientInfo)
+{
+    if (!request)
+        return;
+
+    QWebPermissionRequest* req = QWebPermissionRequest::create(origin, request);
+    toQtWebPageUIClient(clientInfo)->permissionRequest(req);
+}
+
+} // namespace WebKit
 

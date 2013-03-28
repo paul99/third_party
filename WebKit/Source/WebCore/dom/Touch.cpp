@@ -29,6 +29,7 @@
 
 #include "Touch.h"
 
+#include "DOMWindow.h"
 #include "Frame.h"
 #include "FrameView.h"
 
@@ -41,7 +42,7 @@ static int contentsX(Frame* frame)
     FrameView* frameView = frame->view();
     if (!frameView)
         return 0;
-    return frameView->scrollX() / frame->pageZoomFactor();
+    return frameView->scrollX() / frame->pageZoomFactor() / frame->frameScaleFactor();
 }
 
 static int contentsY(Frame* frame)
@@ -51,7 +52,7 @@ static int contentsY(Frame* frame)
     FrameView* frameView = frame->view();
     if (!frameView)
         return 0;
-    return frameView->scrollY() / frame->pageZoomFactor();
+    return frameView->scrollY() / frame->pageZoomFactor() / frame->frameScaleFactor();
 }
 
 Touch::Touch(Frame* frame, EventTarget* target, unsigned identifier, int screenX, int screenY, int pageX, int pageY, int radiusX, int radiusY, float rotationAngle, float force)
@@ -68,6 +69,10 @@ Touch::Touch(Frame* frame, EventTarget* target, unsigned identifier, int screenX
     , m_rotationAngle(rotationAngle)
     , m_force(force)
 {
+    float scaleFactor = frame->pageZoomFactor() * frame->frameScaleFactor();
+    float x = pageX * scaleFactor;
+    float y = pageY * scaleFactor;
+    m_absoluteLocation = roundedLayoutPoint(FloatPoint(x, y));
 }
 
 } // namespace WebCore

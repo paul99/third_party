@@ -49,9 +49,15 @@ WK_EXPORT void WKBundleFrameResumeAnimations(WKBundleFrameRef frame);
 WK_EXPORT unsigned WKBundleFrameGetPendingUnloadCount(WKBundleFrameRef frame);
 WK_EXPORT WKStringRef WKBundleFrameCopyLayerTreeAsText(WKBundleFrameRef frame);
 WK_EXPORT void WKBundleFrameClearOpener(WKBundleFrameRef frame);
+WK_EXPORT void WKBundleFrameStopLoading(WKBundleFrameRef frame);
 
 WK_EXPORT bool WKBundleFrameContainsAnyFormElements(WKBundleFrameRef frame);
 WK_EXPORT void WKBundleFrameSetTextDirection(WKBundleFrameRef frame, WKStringRef);
+WK_EXPORT bool WKBundleFrameCallShouldCloseOnWebView(WKBundleFrameRef frame);
+
+WK_EXPORT WKBundleHitTestResultRef WKBundleFrameCreateHitTestResult(WKBundleFrameRef frame, WKPoint point);
+
+WK_EXPORT bool WKBundleFrameHandlesPageScaleGesture(WKBundleFrameRef frame);
 
 #ifdef __cplusplus
 }

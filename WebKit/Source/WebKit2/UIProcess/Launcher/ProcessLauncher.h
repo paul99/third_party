@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,8 +31,8 @@
 #include <wtf/RefPtr.h>
 #include <wtf/Threading.h>
 
-#if PLATFORM(QT)
-class QLocalSocket;
+#ifndef NDEBUG
+#include <wtf/text/WTFString.h>
 #endif
 
 namespace WebKit {
@@ -48,7 +48,15 @@ public:
     
     enum ProcessType {
         WebProcess,
-        PluginProcess
+#if ENABLE(PLUGIN_PROCESS)
+        PluginProcess,
+#endif
+#if ENABLE(NETWORK_PROCESS)
+        NetworkProcess,
+#endif
+#if ENABLE(SHARED_WORKER_PROCESS)
+        SharedWorkerProcess
+#endif
     };
 
     struct LaunchOptions {
@@ -57,6 +65,14 @@ public:
         static const cpu_type_t MatchCurrentArchitecture = 0;
         cpu_type_t architecture;
         bool executableHeap;
+#if HAVE(XPC)
+        bool useXPC;
+#endif
+#endif
+#if PLATFORM(EFL)
+#ifndef NDEBUG
+        String processCmdPrefix;
+#endif
 #endif
     };
 
@@ -72,11 +88,10 @@ public:
     void invalidate();
 
     static bool getProcessTypeFromString(const char*, ProcessType&);
+    static const char* processTypeAsString(ProcessType);
 
 private:
     ProcessLauncher(Client*, const LaunchOptions& launchOptions);
-
-    static const char* processTypeAsString(ProcessType);
 
     void launchProcess();
     void didFinishLaunchingProcess(PlatformProcessIdentifier, CoreIPC::Connection::Identifier);

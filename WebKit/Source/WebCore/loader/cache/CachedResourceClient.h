@@ -39,6 +39,9 @@ public:
         ImageType,
         FontType,
         StyleSheetType,
+#if ENABLE(SVG)
+        SVGDocumentType,
+#endif
         RawResourceType
     };
 
@@ -47,7 +50,7 @@ public:
     virtual void didReceiveData(CachedResource*) { };
     
     static CachedResourceClientType expectedType() { return BaseResourceType; }
-    virtual CachedResourceClientType resourceClientType() { return expectedType(); }
+    virtual CachedResourceClientType resourceClientType() const { return expectedType(); }
 
 protected:
     CachedResourceClient() { }

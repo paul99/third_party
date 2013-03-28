@@ -44,12 +44,7 @@ namespace WebCore {
 extern HDC g_screenDC;
 
 static IMultiLanguage *multiLanguage = 0;
-
-#if defined(IMLANG_FONT_LINK) && (IMLANG_FONT_LINK == 2)
-static IMLangFontLink2* langFontLink = 0;
-#else
-static IMLangFontLink* langFontLink = 0;
-#endif
+static IMLangFontLinkType* langFontLink = 0;
 
 IMultiLanguage* FontCache::getMultiLanguageInterface()
 {
@@ -59,11 +54,7 @@ IMultiLanguage* FontCache::getMultiLanguageInterface()
     return multiLanguage;
 }
 
-#if defined(IMLANG_FONT_LINK) && (IMLANG_FONT_LINK == 2)
-IMLangFontLink2* FontCache::getFontLinkInterface()
-#else
-IMLangFontLink* FontCache::getFontLinkInterface()
-#endif
+IMLangFontLinkType* FontCache::getFontLinkInterface()
 {
     if (!langFontLink) {
         if (IMultiLanguage* mli = getMultiLanguageInterface())
@@ -147,11 +138,7 @@ static const Vector<DWORD, 4>& getCJKCodePageMasks()
     static bool initialized;
     if (!initialized) {
         initialized = true;
-#if defined(IMLANG_FONT_LINK) && (IMLANG_FONT_LINK == 2)
-        IMLangFontLink2* langFontLink = fontCache()->getFontLinkInterface();
-#else
-        IMLangFontLink* langFontLink = fontCache()->getFontLinkInterface();
-#endif
+        IMLangFontLinkType* langFontLink = fontCache()->getFontLinkInterface();
         if (!langFontLink)
             return codePageMasks;
 
@@ -225,7 +212,7 @@ void FontCache::comUninitialize()
     }
 }
 
-const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, const UChar* characters, int length)
+PassRefPtr<SimpleFontData> FontCache::getFontDataForCharacters(const Font& font, const UChar* characters, int length)
 {
     String familyName;
     WCHAR name[LF_FACESIZE];
@@ -234,11 +221,7 @@ const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, cons
     const FontPlatformData& origFont = font.primaryFont()->fontDataForCharacter(character)->platformData();
     unsigned unicodeRange = findCharUnicodeRange(character);
 
-#if defined(IMLANG_FONT_LINK) && (IMLANG_FONT_LINK == 2)
-    if (IMLangFontLink2* langFontLink = getFontLinkInterface()) {
-#else
-    if (IMLangFontLink* langFontLink = getFontLinkInterface()) {
-#endif
+    if (IMLangFontLinkType* langFontLink = getFontLinkInterface()) {
         HGDIOBJ oldFont = GetCurrentObject(g_screenDC, OBJ_FONT);
         HFONT hfont = 0;
         DWORD codePages = 0;
@@ -267,10 +250,11 @@ const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, cons
                     // We asked about a code page that is not one of the code pages
                     // returned by MLang, so the font might not contain the character.
 #if defined(IMLANG_FONT_LINK) && (IMLANG_FONT_LINK == 2)
-                    if (!currentFontContainsCharacter(langFontLink, g_screenDC, character)) {
+                    if (!currentFontContainsCharacter(langFontLink, g_screenDC, character))
 #else
-                    if (!currentFontContainsCharacter(langFontLink, g_screenDC, hfont, character, name)) {
+                    if (!currentFontContainsCharacter(langFontLink, g_screenDC, hfont, character, name))
 #endif
+                    {
                         SelectObject(g_screenDC, oldFont);
                         langFontLink->ReleaseFont(hfont);
                         hfont = 0;
@@ -308,20 +292,20 @@ const SimpleFontData* FontCache::getFontDataForCharacters(const Font& font, cons
 
         FontPlatformData* result = getCachedFontPlatformData(fontDescription, familyName);
         if (result && result->hash() != origFont.hash()) {
-            if (SimpleFontData* fontData = getCachedFontData(result, DoNotRetain))
-                return fontData;
+            if (RefPtr<SimpleFontData> fontData = getCachedFontData(result, DoNotRetain))
+                return fontData.release();
         }
     }
 
     return 0;
 }
 
-SimpleFontData* FontCache::getSimilarFontPlatformData(const Font& font)
+PassRefPtr<SimpleFontData> FontCache::getSimilarFontPlatformData(const Font&)
 {
     return 0;
 }
 
-SimpleFontData* FontCache::getLastResortFallbackFont(const FontDescription& fontDesc, ShouldRetain shouldRetain)
+PassRefPtr<SimpleFontData> FontCache::getLastResortFallbackFont(const FontDescription& fontDesc, ShouldRetain shouldRetain)
 {
     // FIXME: Would be even better to somehow get the user's default font here.  For now we'll pick
     // the default that the user would get without changing any prefs.

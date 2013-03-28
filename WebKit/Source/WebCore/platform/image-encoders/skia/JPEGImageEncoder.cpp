@@ -81,7 +81,7 @@ static void handleError(j_common_ptr common)
 
 static void preMultipliedBGRAtoRGB(const unsigned char* pixels, unsigned int pixelCount, unsigned char* output)
 {
-    const SkPMColor* input = reinterpret_cast<const SkPMColor*>(pixels);
+    const SkPMColor* input = reinterpret_cast_ptr<const SkPMColor*>(pixels);
     for (; pixelCount-- > 0; ++input) {
         *output++ = SkGetPackedR32(*input);
         *output++ = SkGetPackedG32(*input);
@@ -173,8 +173,9 @@ static bool encodePixels(IntSize imageSize, unsigned char* inputPixels, bool pre
     row.resize(cinfo.image_width * cinfo.input_components);
     const size_t pixelRowStride = cinfo.image_width * 4;
     while (cinfo.next_scanline < cinfo.image_height) {
-        extractRowRGB(pixels, cinfo.image_width, row.data());
-        jpeg_write_scanlines(&cinfo, row.dataSlot(), 1);
+        JSAMPLE* rowData = row.data();
+        extractRowRGB(pixels, cinfo.image_width, rowData);
+        jpeg_write_scanlines(&cinfo, &rowData, 1);
         pixels += pixelRowStride;
     }
 
@@ -187,7 +188,7 @@ bool JPEGImageEncoder::encode(const SkBitmap& bitmap, int quality, Vector<unsign
 {
     SkAutoLockPixels bitmapLock(bitmap);
 
-    if (bitmap.config() != SkBitmap::kARGB_8888_Config)
+    if (bitmap.config() != SkBitmap::kARGB_8888_Config || !bitmap.getPixels())
         return false; // Only support 32 bit/pixel skia bitmaps.
 
     return encodePixels(IntSize(bitmap.width(), bitmap.height()), static_cast<unsigned char *>(bitmap.getPixels()), true, quality, output);
@@ -195,7 +196,7 @@ bool JPEGImageEncoder::encode(const SkBitmap& bitmap, int quality, Vector<unsign
 
 bool JPEGImageEncoder::encode(const ImageData& imageData, int quality, Vector<unsigned char>* output)
 {
-    return encodePixels(imageData.size(), imageData.data()->data()->data(), false, quality, output);
+    return encodePixels(imageData.size(), imageData.data()->data(), false, quality, output);
 }
 
 } // namespace WebCore

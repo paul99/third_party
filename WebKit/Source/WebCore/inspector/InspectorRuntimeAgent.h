@@ -40,6 +40,7 @@
 
 namespace WebCore {
 
+class InjectedScript;
 class InjectedScriptManager;
 class InspectorArray;
 class InspectorFrontend;
@@ -51,51 +52,58 @@ class WorkerContext;
 
 typedef String ErrorString;
 
-class InspectorRuntimeAgent : public InspectorBaseAgent<InspectorRuntimeAgent> {
+class InspectorRuntimeAgent : public InspectorBaseAgent<InspectorRuntimeAgent>, public InspectorBackendDispatcher::RuntimeCommandHandler {
     WTF_MAKE_NONCOPYABLE(InspectorRuntimeAgent);
 public:
     virtual ~InspectorRuntimeAgent();
 
+    bool enabled() { return m_enabled; }
     // Part of the protocol.
-    void evaluate(ErrorString*,
+    virtual void enable(ErrorString*) { m_enabled = true; }
+    virtual void disable(ErrorString*) { m_enabled = false; }
+    virtual void evaluate(ErrorString*,
                   const String& expression,
-                  const String* const objectGroup,
-                  const bool* const includeCommandLineAPI,
-                  const bool* const doNotPauseOnExceptions,
-                  const String* const frameId,
-                  const bool* const returnByValue,
-                  RefPtr<InspectorObject>& result,
-                  bool* wasThrown);
-    void callFunctionOn(ErrorString*,
+                  const String* objectGroup,
+                  const bool* includeCommandLineAPI,
+                  const bool* doNotPauseOnExceptionsAndMuteConsole,
+                  const int* executionContextId,
+                  const bool* returnByValue,
+                  const bool* generatePreview,
+                  RefPtr<TypeBuilder::Runtime::RemoteObject>& result,
+                  TypeBuilder::OptOutput<bool>* wasThrown);
+    virtual void callFunctionOn(ErrorString*,
                         const String& objectId,
                         const String& expression,
-                        const RefPtr<InspectorArray>* const optionalArguments,
-                        const bool* const returnByValue,
-                        RefPtr<InspectorObject>& result,
-                        bool* wasThrown);
-    void releaseObject(ErrorString*, const String& objectId);
-    void getProperties(ErrorString*, const String& objectId, const bool* const ownProperties, RefPtr<InspectorArray>& result);
-    void releaseObjectGroup(ErrorString*, const String& objectGroup);
-    void run(ErrorString*);
+                        const RefPtr<InspectorArray>* optionalArguments,
+                        const bool* doNotPauseOnExceptionsAndMuteConsole,
+                        const bool* returnByValue,
+                        const bool* generatePreview,
+                        RefPtr<TypeBuilder::Runtime::RemoteObject>& result,
+                        TypeBuilder::OptOutput<bool>* wasThrown);
+    virtual void releaseObject(ErrorString*, const String& objectId);
+    virtual void getProperties(ErrorString*, const String& objectId, const bool* ownProperties, RefPtr<TypeBuilder::Array<TypeBuilder::Runtime::PropertyDescriptor> >& result, RefPtr<TypeBuilder::Array<TypeBuilder::Runtime::InternalPropertyDescriptor> >& internalProperties);
+    virtual void releaseObjectGroup(ErrorString*, const String& objectGroup);
+    virtual void run(ErrorString*);
 
 #if ENABLE(JAVASCRIPT_DEBUGGER)
     void setScriptDebugServer(ScriptDebugServer*);
-#if ENABLE(WORKERS)
-    void pauseWorkerContext(WorkerContext*);
-#endif
 #endif
 
 protected:
     InspectorRuntimeAgent(InstrumentingAgents*, InspectorState*, InjectedScriptManager*);
-    virtual ScriptState* scriptStateForFrameId(const String& frameId) = 0;
-    virtual ScriptState* getDefaultInspectedState() = 0;
+    virtual InjectedScript injectedScriptForEval(ErrorString*, const int* executionContextId) = 0;
+
+    virtual void muteConsole() = 0;
+    virtual void unmuteConsole() = 0;
+
+    InjectedScriptManager* injectedScriptManager() { return m_injectedScriptManager; }
+    bool m_enabled;
 
 private:
     InjectedScriptManager* m_injectedScriptManager;
 #if ENABLE(JAVASCRIPT_DEBUGGER)
     ScriptDebugServer* m_scriptDebugServer;
 #endif
-    bool m_paused;
 };
 
 } // namespace WebCore

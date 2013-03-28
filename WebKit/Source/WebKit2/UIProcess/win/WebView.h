@@ -185,7 +185,7 @@ private:
     virtual void toolTipChanged(const WTF::String&, const WTF::String&);
     virtual void setCursor(const WebCore::Cursor&);
     virtual void setCursorHiddenUntilMouseMoves(bool);
-    virtual void didChangeViewportProperties(const WebCore::ViewportArguments&);
+    virtual void didChangeViewportProperties(const WebCore::ViewportAttributes&);
     virtual void registerEditCommand(PassRefPtr<WebEditCommandProxy>, WebPageProxy::UndoOrRedo);
     virtual void clearAllEditCommands();
     virtual bool canUndoRedo(WebPageProxy::UndoOrRedo);
@@ -198,12 +198,16 @@ private:
     virtual void compositionSelectionChanged(bool);
     virtual PassRefPtr<WebPopupMenuProxy> createPopupMenuProxy(WebPageProxy*);
     virtual PassRefPtr<WebContextMenuProxy> createContextMenuProxy(WebPageProxy*);
+#if ENABLE(INPUT_TYPE_COLOR)
+    virtual PassRefPtr<WebColorChooserProxy> createColorChooserProxy(WebPageProxy*, const WebCore::Color& intialColor, const WebCore::IntRect&);
+#endif
     virtual void setFindIndicator(PassRefPtr<FindIndicator>, bool fadeOut, bool animate);
     virtual void didInstallOrUninstallPageOverlay(bool);
 
 #if USE(ACCELERATED_COMPOSITING)
     virtual void enterAcceleratedCompositingMode(const LayerTreeContext&);
     virtual void exitAcceleratedCompositingMode();
+    virtual void updateAcceleratedCompositingMode(const LayerTreeContext&);
 #endif
 
     void didCommitLoadForMainFrame(bool useCustomRepresentation);
@@ -211,7 +215,6 @@ private:
     virtual double customRepresentationZoomFactor();
     virtual void setCustomRepresentationZoomFactor(double);
     WebCore::DragOperation keyStateToDragOperation(DWORD grfKeyState) const;
-    virtual void didChangeScrollbarsForMainFrame() const;
 
     virtual void findStringInCustomRepresentation(const String&, FindOptions, unsigned maxMatchCount);
     virtual void countStringMatchesInCustomRepresentation(const String&, FindOptions, unsigned maxMatchCount);

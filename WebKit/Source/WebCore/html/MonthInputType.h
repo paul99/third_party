@@ -31,33 +31,39 @@
 #ifndef MonthInputType_h
 #define MonthInputType_h
 
-#include "BaseDateAndTimeInputType.h"
-
 #if ENABLE(INPUT_TYPE_MONTH)
+#include "BaseChooserOnlyDateAndTimeInputType.h"
+#include "BaseMultipleFieldsDateAndTimeInputType.h"
 
 namespace WebCore {
 
-class MonthInputType : public BaseDateAndTimeInputType {
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+typedef BaseMultipleFieldsDateAndTimeInputType BaseMonthInputType;
+#else
+typedef BaseChooserOnlyDateAndTimeInputType BaseMonthInputType;
+#endif
+
+class MonthInputType : public BaseMonthInputType {
 public:
     static PassOwnPtr<InputType> create(HTMLInputElement*);
 
 private:
-    MonthInputType(HTMLInputElement* element) : BaseDateAndTimeInputType(element) { }
+    MonthInputType(HTMLInputElement* element) : BaseMonthInputType(element) { }
     virtual const AtomicString& formControlType() const OVERRIDE;
     virtual DateComponents::Type dateType() const OVERRIDE;
     virtual double valueAsDate() const OVERRIDE;
     virtual String serializeWithMilliseconds(double) const OVERRIDE;
-    virtual double parseToDouble(const String&, double) const OVERRIDE;
-    virtual double defaultValueForStepUp() const OVERRIDE;
-    virtual double minimum() const OVERRIDE;
-    virtual double maximum() const OVERRIDE;
-    virtual double defaultStep() const OVERRIDE;
-    virtual double stepScaleFactor() const OVERRIDE;
-    virtual bool parsedStepValueShouldBeInteger() const OVERRIDE;
+    virtual Decimal parseToNumber(const String&, const Decimal&) const OVERRIDE;
+    virtual Decimal defaultValueForStepUp() const OVERRIDE;
+    virtual StepRange createStepRange(AnyStepHandling) const OVERRIDE;
     virtual bool parseToDateComponentsInternal(const UChar*, unsigned length, DateComponents*) const OVERRIDE;
     virtual bool setMillisecondToDateComponents(double, DateComponents*) const OVERRIDE;
-#if OS(ANDROID)
     virtual bool isMonthField() const OVERRIDE;
+
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+    // BaseMultipleFieldsDateAndTimeInputType functions
+    virtual String formatDateTimeFieldsState(const DateTimeFieldsState&) const OVERRIDE FINAL;
+    virtual void setupLayoutParameters(DateTimeEditElement::LayoutParameters&, const DateComponents&) const OVERRIDE FINAL;
 #endif
 };
 

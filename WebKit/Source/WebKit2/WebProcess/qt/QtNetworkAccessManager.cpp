@@ -33,6 +33,7 @@
 #include "WebPageProxyMessages.h"
 #include "WebProcess.h"
 #include <QAuthenticator>
+#include <QNetworkProxy>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 
@@ -43,7 +44,10 @@ QtNetworkAccessManager::QtNetworkAccessManager(WebProcess* webProcess)
     , m_webProcess(webProcess)
 {
     connect(this, SIGNAL(authenticationRequired(QNetworkReply*, QAuthenticator*)), SLOT(onAuthenticationRequired(QNetworkReply*, QAuthenticator*)));
+    connect(this, SIGNAL(proxyAuthenticationRequired(const QNetworkProxy&, QAuthenticator*)), SLOT(onProxyAuthenticationRequired(const QNetworkProxy&, QAuthenticator*)));
+#ifndef QT_NO_SSL
     connect(this, SIGNAL(sslErrors(QNetworkReply*, QList<QSslError>)), SLOT(onSslErrors(QNetworkReply*, QList<QSslError>)));
+#endif
 }
 
 WebPage* QtNetworkAccessManager::obtainOriginatingWebPage(const QNetworkRequest& request)
@@ -73,6 +77,31 @@ void QtNetworkAccessManager::registerApplicationScheme(const WebPage* page, cons
     m_applicationSchemes.insert(page, scheme.toLower());
 }
 
+void QtNetworkAccessManager::onProxyAuthenticationRequired(const QNetworkProxy& proxy, QAuthenticator* authenticator)
+{
+    // FIXME: Check if there is a better way to get a reference to the page.
+    WebPage* webPage = m_webProcess->focusedWebPage();
+
+    if (!webPage)
+        return;
+
+    String hostname = proxy.hostName();
+    uint16_t port = static_cast<uint16_t>(proxy.port());
+    String prefilledUsername = authenticator->user();
+    String username;
+    String password;
+
+    if (webPage->sendSync(
+         Messages::WebPageProxy::ProxyAuthenticationRequiredRequest(hostname, port, prefilledUsername),
+         Messages::WebPageProxy::ProxyAuthenticationRequiredRequest::Reply(username, password))) {
+         if (!username.isEmpty())
+             authenticator->setUser(username);
+         if (!password.isEmpty())
+             authenticator->setPassword(password);
+     }
+
+}
+
 void QtNetworkAccessManager::onAuthenticationRequired(QNetworkReply* reply, QAuthenticator* authenticator)
 {
     WebPage* webPage = obtainOriginatingWebPage(reply->request());
@@ -99,6 +128,7 @@ void QtNetworkAccessManager::onAuthenticationRequired(QNetworkReply* reply, QAut
 
 void QtNetworkAccessManager::onSslErrors(QNetworkReply* reply, const QList<QSslError>& qSslErrors)
 {
+#ifndef QT_NO_SSL
     WebPage* webPage = obtainOriginatingWebPage(reply->request());
 
     // FIXME: This check can go away once our Qt version is up-to-date. See: QTBUG-23512.
@@ -114,6 +144,7 @@ void QtNetworkAccessManager::onSslErrors(QNetworkReply* reply, const QList<QSslE
         if (ignoreErrors)
             reply->ignoreSslErrors(qSslErrors);
     }
+#endif
 }
 
 }

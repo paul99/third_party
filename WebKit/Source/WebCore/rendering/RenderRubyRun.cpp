@@ -36,6 +36,7 @@
 #include "RenderRubyText.h"
 #include "RenderText.h"
 #include "RenderView.h"
+#include "StyleInheritedData.h"
 
 using namespace std;
 
@@ -74,6 +75,9 @@ bool RenderRubyRun::isEmpty() const
 RenderRubyText* RenderRubyRun::rubyText() const
 {
     RenderObject* child = firstChild();
+    // If in future it becomes necessary to support floating or positioned ruby text,
+    // layout will have to be changed to handle them properly.
+    ASSERT(!child || !child->isRubyText() || !child->isFloatingOrOutOfFlowPositioned());
     return child && child->isRubyText() ? static_cast<RenderRubyText*>(child) : 0;
 }
 
@@ -213,12 +217,13 @@ RenderRubyRun* RenderRubyRun::staticCreateRubyRun(const RenderObject* parentRuby
 
 RenderObject* RenderRubyRun::layoutSpecialExcludedChild(bool relayoutChildren)
 {
+    StackStats::LayoutCheckPoint layoutCheckPoint;
     // Don't bother positioning the RenderRubyRun yet.
     RenderRubyText* rt = rubyText();
     if (!rt)
         return 0;
     if (relayoutChildren)
-        rt->setChildNeedsLayout(true, false);
+        rt->setChildNeedsLayout(true, MarkOnlyThis);
     rt->layoutIfNeeded();
     return rt;
 }
@@ -241,7 +246,7 @@ void RenderRubyRun::layout()
         lastLineRubyTextBottom = rootBox->logicalBottomLayoutOverflow();
     }
 
-    if (!style()->isFlippedLinesWritingMode()) {
+    if (style()->isFlippedLinesWritingMode() == (style()->rubyPosition() == RubyPositionAfter)) {
         LayoutUnit firstLineTop = 0;
         if (RenderRubyBase* rb = rubyBase()) {
             RootInlineBox* rootBox = rb->firstRootBox();

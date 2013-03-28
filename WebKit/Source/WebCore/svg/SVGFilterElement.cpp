@@ -84,17 +84,17 @@ PassRefPtr<SVGFilterElement> SVGFilterElement::create(const QualifiedName& tagNa
 
 const AtomicString& SVGFilterElement::filterResXIdentifier()
 {
-    DEFINE_STATIC_LOCAL(AtomicString, s_identifier, ("SVGFilterResX"));
+    DEFINE_STATIC_LOCAL(AtomicString, s_identifier, ("SVGFilterResX", AtomicString::ConstructFromLiteral));
     return s_identifier;
 }
 
 const AtomicString& SVGFilterElement::filterResYIdentifier()
 {
-    DEFINE_STATIC_LOCAL(AtomicString, s_identifier, ("SVGFilterResY"));
+    DEFINE_STATIC_LOCAL(AtomicString, s_identifier, ("SVGFilterResY", AtomicString::ConstructFromLiteral));
     return s_identifier;
 }
 
-void SVGFilterElement::setFilterRes(unsigned long filterResX, unsigned long filterResY)
+void SVGFilterElement::setFilterRes(unsigned filterResX, unsigned filterResY)
 {
     setFilterResXBaseValue(filterResX);
     setFilterResYBaseValue(filterResY);
@@ -121,42 +121,41 @@ bool SVGFilterElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<QualifiedName, SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGFilterElement::parseMappedAttribute(Attribute* attr)
+void SVGFilterElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
     SVGParsingError parseError = NoError;
-    const AtomicString& value = attr->value();
 
-    if (!isSupportedAttribute(attr->name()))
-        SVGStyledElement::parseMappedAttribute(attr);
-    else if (attr->name() == SVGNames::filterUnitsAttr) {
+    if (!isSupportedAttribute(name))
+        SVGStyledElement::parseAttribute(name, value);
+    else if (name == SVGNames::filterUnitsAttr) {
         SVGUnitTypes::SVGUnitType propertyValue = SVGPropertyTraits<SVGUnitTypes::SVGUnitType>::fromString(value);
         if (propertyValue > 0)
             setFilterUnitsBaseValue(propertyValue);
-    } else if (attr->name() == SVGNames::primitiveUnitsAttr) {
+    } else if (name == SVGNames::primitiveUnitsAttr) {
         SVGUnitTypes::SVGUnitType propertyValue = SVGPropertyTraits<SVGUnitTypes::SVGUnitType>::fromString(value);
         if (propertyValue > 0)
             setPrimitiveUnitsBaseValue(propertyValue);
-    } else if (attr->name() == SVGNames::xAttr)
+    } else if (name == SVGNames::xAttr)
         setXBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
-    else if (attr->name() == SVGNames::yAttr)
+    else if (name == SVGNames::yAttr)
         setYBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
-    else if (attr->name() == SVGNames::widthAttr)
+    else if (name == SVGNames::widthAttr)
         setWidthBaseValue(SVGLength::construct(LengthModeWidth, value, parseError));
-    else if (attr->name() == SVGNames::heightAttr)
+    else if (name == SVGNames::heightAttr)
         setHeightBaseValue(SVGLength::construct(LengthModeHeight, value, parseError));
-    else if (attr->name() == SVGNames::filterResAttr) {
+    else if (name == SVGNames::filterResAttr) {
         float x, y;
         if (parseNumberOptionalNumber(value, x, y)) {
             setFilterResXBaseValue(x);
             setFilterResYBaseValue(y);
         }
-    } else if (SVGURIReference::parseMappedAttribute(attr)
-             || SVGLangSpace::parseMappedAttribute(attr)
-             || SVGExternalResourcesRequired::parseMappedAttribute(attr)) {
+    } else if (SVGURIReference::parseAttribute(name, value)
+             || SVGLangSpace::parseAttribute(name, value)
+             || SVGExternalResourcesRequired::parseAttribute(name, value)) {
     } else
         ASSERT_NOT_REACHED();
 
-    reportAttributeParsingError(parseError, attr);
+    reportAttributeParsingError(parseError, name, value);
 }
 
 void SVGFilterElement::svgAttributeChanged(const QualifiedName& attrName)

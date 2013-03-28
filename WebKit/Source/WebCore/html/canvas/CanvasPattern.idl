@@ -22,15 +22,8 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
-
-module html {
-
-    interface [
-        InterfaceUUID=c2131348-6d8c-47b5-86cc-d41aff34ce15,
-        ImplementationUUID=82f5d713-3d17-44dd-aa4a-7766fe345940
-    ] CanvasPattern {
-
-    };
-
-}
+[
+    ImplementationLacksVTable
+] interface CanvasPattern {
+};
 

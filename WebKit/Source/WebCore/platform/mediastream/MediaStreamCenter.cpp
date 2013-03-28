@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2011 Ericsson AB. All rights reserved.
+ * Copyright (C) 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,29 +35,9 @@
 
 #include "MediaStreamCenter.h"
 
-#include "MainThread.h"
 #include "MediaStreamDescriptor.h"
 
 namespace WebCore {
-
-MediaStreamCenter& MediaStreamCenter::instance()
-{
-    ASSERT(isMainThread());
-    DEFINE_STATIC_LOCAL(MediaStreamCenter, center, ());
-    return center;
-}
-
-void MediaStreamCenter::endLocalMediaStream(MediaStreamDescriptor* streamDescriptor)
-{
-    MediaStreamDescriptorOwner* owner = streamDescriptor->owner();
-    if (owner)
-        owner->streamEnded();
-    else
-        streamDescriptor->setEnded();
-}
-
-// FIXME: remove when real implementations are available
-// Empty implementations for ports that build with MEDIA_STREAM enabled by default.
 
 MediaStreamCenter::MediaStreamCenter()
 {
@@ -66,22 +47,27 @@ MediaStreamCenter::~MediaStreamCenter()
 {
 }
 
-void MediaStreamCenter::queryMediaStreamSources(PassRefPtr<MediaStreamSourcesQueryClient> client)
+void MediaStreamCenter::endLocalMediaStream(MediaStreamDescriptor* streamDescriptor)
 {
-    MediaStreamSourceVector audioSources, videoSources;
-    client->mediaStreamSourcesQueryCompleted(audioSources, videoSources);
+    MediaStreamDescriptorClient* client = streamDescriptor->client();
+    if (client)
+        client->streamEnded();
+    else
+        streamDescriptor->setEnded();
 }
 
-void MediaStreamCenter::didSetMediaStreamTrackEnabled(MediaStreamDescriptor*, MediaStreamComponent*)
+void MediaStreamCenter::addMediaStreamTrack(MediaStreamDescriptor* streamDescriptor, MediaStreamComponent* component)
 {
+    MediaStreamDescriptorClient* client = streamDescriptor->client();
+    if (client)
+        client->addTrack(component);
 }
 
-void MediaStreamCenter::didStopLocalMediaStream(MediaStreamDescriptor*)
+void MediaStreamCenter::removeMediaStreamTrack(MediaStreamDescriptor* streamDescriptor, MediaStreamComponent* component)
 {
-}
-
-void MediaStreamCenter::didConstructMediaStream(MediaStreamDescriptor*)
-{
+    MediaStreamDescriptorClient* client = streamDescriptor->client();
+    if (client)
+        client->removeTrack(component);
 }
 
 } // namespace WebCore

@@ -34,7 +34,7 @@
 namespace WebCore {
 
 HTMLFrameOwnerElement::HTMLFrameOwnerElement(const QualifiedName& tagName, Document* document)
-    : HTMLElement(tagName, document)
+    : HTMLElement(tagName, document, CreateFrameOwnerElement)
     , m_contentFrame(0)
     , m_sandboxFlags(SandboxNone)
 {
@@ -49,17 +49,25 @@ RenderPart* HTMLFrameOwnerElement::renderPart() const
     return toRenderPart(renderer());
 }
 
-void HTMLFrameOwnerElement::willRemove()
+void HTMLFrameOwnerElement::setContentFrame(Frame* frame)
 {
-    // FIXME: It is unclear why this can't be moved to removedFromDocument()
-    // this is the only implementation of willRemove in WebCore!
+    // Make sure we will not end up with two frames referencing the same owner element.
+    ASSERT(!m_contentFrame || m_contentFrame->ownerElement() != this);
+    ASSERT(frame);
+    // Disconnected frames should not be allowed to load.
+    ASSERT(inDocument());
+    m_contentFrame = frame;
+}
+
+void HTMLFrameOwnerElement::disconnectContentFrame()
+{
+    ASSERT(hasCustomCallbacks());
+    // This causes an unload event thus cannot be a part of removedFrom().
     if (Frame* frame = contentFrame()) {
         RefPtr<Frame> protect(frame);
         frame->loader()->frameDetached();
         frame->disconnectOwnerElement();
     }
-
-    HTMLElement::willRemove();
 }
 
 HTMLFrameOwnerElement::~HTMLFrameOwnerElement()
@@ -75,7 +83,7 @@ Document* HTMLFrameOwnerElement::contentDocument() const
 
 DOMWindow* HTMLFrameOwnerElement::contentWindow() const
 {
-    return m_contentFrame ? m_contentFrame->domWindow() : 0;
+    return m_contentFrame ? m_contentFrame->document()->domWindow() : 0;
 }
 
 void HTMLFrameOwnerElement::setSandboxFlags(SandboxFlags flags)

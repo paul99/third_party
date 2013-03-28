@@ -1,7 +1,7 @@
 /*
  *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2003, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ *  Copyright (C) 2003, 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -37,6 +37,15 @@
 #include <wtf/Noncopyable.h>
 #include <wtf/OwnPtr.h>
 #include <wtf/RefPtr.h>
+namespace JSC {
+struct Scope;
+}
+
+namespace WTF {
+template <> struct VectorTraits<JSC::Scope> : SimpleClassVectorTraits {
+    static const bool canInitializeWithMemset = false; // Not all Scope data members initialize to 0.
+};
+}
 
 namespace JSC {
 
@@ -47,30 +56,8 @@ class Identifier;
 class JSGlobalData;
 class ProgramNode;
 class SourceCode;
-class UString;
 
-#define fail() do { if (!m_error) updateErrorMessage(); return 0; } while (0)
-#define failWithToken(tok) do { if (!m_error) updateErrorMessage(tok); return 0; } while (0)
-#define failWithMessage(msg) do { if (!m_error) updateErrorMessage(msg); return 0; } while (0)
-#define failWithNameAndMessage(before, name, after) do { if (!m_error) updateErrorWithNameAndMessage(before, name, after); return 0; } while (0)
-#define failIfFalse(cond) do { if (!(cond)) fail(); } while (0)
-#define failIfFalseWithMessage(cond, msg) do { if (!(cond)) failWithMessage(msg); } while (0)
-#define failIfFalseWithNameAndMessage(cond, before, name, msg) do { if (!(cond)) failWithNameAndMessage(before, name, msg); } while (0)
-#define failIfTrue(cond) do { if ((cond)) fail(); } while (0)
-#define failIfTrueWithMessage(cond, msg) do { if ((cond)) failWithMessage(msg); } while (0)
-#define failIfTrueWithNameAndMessage(cond, before, name, msg) do { if ((cond)) failWithNameAndMessage(before, name, msg); } while (0)
-#define failIfTrueIfStrict(cond) do { if ((cond) && strictMode()) fail(); } while (0)
-#define failIfTrueIfStrictWithMessage(cond, msg) do { if ((cond) && strictMode()) failWithMessage(msg); } while (0)
-#define failIfTrueIfStrictWithNameAndMessage(cond, before, name, after) do { if ((cond) && strictMode()) failWithNameAndMessage(before, name, after); } while (0)
-#define failIfFalseIfStrict(cond) do { if ((!(cond)) && strictMode()) fail(); } while (0)
-#define failIfFalseIfStrictWithMessage(cond, msg) do { if ((!(cond)) && strictMode()) failWithMessage(msg); } while (0)
-#define failIfFalseIfStrictWithNameAndMessage(cond, before, name, after) do { if ((!(cond)) && strictMode()) failWithNameAndMessage(before, name, after); } while (0)
-#define consumeOrFail(tokenType) do { if (!consume(tokenType)) failWithToken(tokenType); } while (0)
-#define consumeOrFailWithFlags(tokenType, flags) do { if (!consume(tokenType, flags)) failWithToken(tokenType); } while (0)
-#define matchOrFail(tokenType) do { if (!match(tokenType)) failWithToken(tokenType); } while (0)
-#define failIfStackOverflow() do { failIfFalseWithMessage(canRecurse(), "Code nested too deeply."); } while (0)
-
-    // Macros to make the more common TreeBuilder types a little less verbose
+// Macros to make the more common TreeBuilder types a little less verbose
 #define TreeStatement typename TreeBuilder::Statement
 #define TreeExpression typename TreeBuilder::Expression
 #define TreeFormalParameterList typename TreeBuilder::FormalParameterList
@@ -88,6 +75,49 @@ COMPILE_ASSERT(LastUntaggedToken < 64, LessThan64UntaggedTokens);
 
 enum SourceElementsMode { CheckForStrictMode, DontCheckForStrictMode };
 enum FunctionRequirements { FunctionNoRequirements, FunctionNeedsName };
+
+struct ParserError {
+    enum ErrorType { ErrorNone, StackOverflow, SyntaxError, EvalError, OutOfMemory } m_type;
+    String m_message;
+    int m_line;
+    ParserError()
+        : m_type(ErrorNone)
+        , m_line(-1)
+    {
+    }
+
+    ParserError(ErrorType type)
+        : m_type(type)
+        , m_line(-1)
+    {
+    }
+
+    ParserError(ErrorType type, String msg, int line)
+        : m_type(type)
+        , m_message(msg)
+        , m_line(line)
+    {
+    }
+
+    JSObject* toErrorObject(JSGlobalObject* globalObject, const SourceCode& source)
+    {
+        switch (m_type) {
+        case ErrorNone:
+            return 0;
+        case SyntaxError:
+            return addErrorInfo(globalObject->globalExec(), createSyntaxError(globalObject, m_message), m_line, source);
+        case EvalError:
+            return createSyntaxError(globalObject, m_message);
+        case StackOverflow:
+            return createStackOverflowError(globalObject);
+        case OutOfMemory:
+            return createOutOfMemoryError(globalObject);
+        }
+        CRASH();
+        return createOutOfMemoryError(globalObject); // Appease Qt bot
+    }
+
+};
 
 template <typename T> inline bool isEvalNode() { return false; }
 template <> inline bool isEvalNode<EvalNode>() { return true; }
@@ -200,11 +230,16 @@ struct Scope {
     bool isFunction() { return m_isFunction; }
     bool isFunctionBoundary() { return m_isFunctionBoundary; }
 
+    void declareCallee(const Identifier* ident)
+    {
+        m_declaredVariables.add(ident->string().impl());
+    }
+
     bool declareVariable(const Identifier* ident)
     {
         bool isValidStrictMode = m_globalData->propertyNames->eval != *ident && m_globalData->propertyNames->arguments != *ident;
         m_isValidStrictMode = m_isValidStrictMode && isValidStrictMode;
-        m_declaredVariables.add(ident->ustring().impl());
+        m_declaredVariables.add(ident->string().impl());
         return isValidStrictMode;
     }
 
@@ -220,7 +255,7 @@ struct Scope {
     bool declareParameter(const Identifier* ident)
     {
         bool isArguments = m_globalData->propertyNames->arguments == *ident;
-        bool isValidStrictMode = m_declaredVariables.add(ident->ustring().impl()).second && m_globalData->propertyNames->eval != *ident && !isArguments;
+        bool isValidStrictMode = m_declaredVariables.add(ident->string().impl()).isNewEntry && m_globalData->propertyNames->eval != *ident && !isArguments;
         m_isValidStrictMode = m_isValidStrictMode && isValidStrictMode;
         if (isArguments)
             m_shadowsArguments = true;
@@ -230,7 +265,7 @@ struct Scope {
     void useVariable(const Identifier* ident, bool isEval)
     {
         m_usesEval |= isEval;
-        m_usedVariables.add(ident->ustring().impl());
+        m_usedVariables.add(ident->string().impl());
     }
 
     void setNeedsFullActivation() { m_needsFullActivation = true; }
@@ -374,11 +409,11 @@ class Parser {
     WTF_MAKE_FAST_ALLOCATED;
 
 public:
-    Parser(JSGlobalData*, const SourceCode&, FunctionParameters*, JSParserStrictness, JSParserMode);
+    Parser(JSGlobalData*, const SourceCode&, FunctionParameters*, const Identifier&, JSParserStrictness, JSParserMode);
     ~Parser();
 
     template <class ParsedNode>
-    PassRefPtr<ParsedNode> parse(JSGlobalObject* lexicalGlobalObject, Debugger*, ExecState*, JSObject**);
+    PassRefPtr<ParsedNode> parse(ParserError&);
 
 private:
     struct AllowInOverride {
@@ -480,7 +515,7 @@ private:
     }
 
     Parser();
-    UString parseInner();
+    String parseInner();
 
     void didFinishParsing(SourceElements*, ParserArenaData<DeclarationStacks::VarStack>*, 
                           ParserArenaData<DeclarationStacks::FunctionStack>*, CodeFeatures,
@@ -493,18 +528,18 @@ private:
 
     ALWAYS_INLINE void next(unsigned lexerFlags = 0)
     {
-        m_lastLine = m_token.m_info.line;
-        m_lastTokenEnd = m_token.m_info.endOffset;
+        m_lastLine = m_token.m_location.line;
+        m_lastTokenEnd = m_token.m_location.endOffset;
         m_lexer->setLastLineNumber(m_lastLine);
-        m_token.m_type = m_lexer->lex(&m_token.m_data, &m_token.m_info, lexerFlags, strictMode());
+        m_token.m_type = m_lexer->lex(&m_token.m_data, &m_token.m_location, lexerFlags, strictMode());
     }
 
     ALWAYS_INLINE void nextExpectIdentifier(unsigned lexerFlags = 0)
     {
-        m_lastLine = m_token.m_info.line;
-        m_lastTokenEnd = m_token.m_info.endOffset;
+        m_lastLine = m_token.m_location.line;
+        m_lastTokenEnd = m_token.m_location.endOffset;
         m_lexer->setLastLineNumber(m_lastLine);
-        m_token.m_type = m_lexer->lexExpectIdentifier(&m_token.m_data, &m_token.m_info, lexerFlags, strictMode());
+        m_token.m_type = m_lexer->lexExpectIdentifier(&m_token.m_data, &m_token.m_location, lexerFlags, strictMode());
     }
 
     ALWAYS_INLINE bool nextTokenIsColon()
@@ -520,9 +555,9 @@ private:
         return result;
     }
     
-    ALWAYS_INLINE UString getToken() {
+    ALWAYS_INLINE String getToken() {
         SourceProvider* sourceProvider = m_source->provider();
-        return UString(sourceProvider->getRange(tokenStart(), tokenEnd()).impl());
+        return sourceProvider->getRange(tokenStart(), tokenEnd());
     }
     
     ALWAYS_INLINE bool match(JSTokenType expected)
@@ -532,20 +567,25 @@ private:
     
     ALWAYS_INLINE int tokenStart()
     {
-        return m_token.m_info.startOffset;
+        return m_token.m_location.startOffset;
     }
     
     ALWAYS_INLINE int tokenLine()
     {
-        return m_token.m_info.line;
+        return m_token.m_location.line;
     }
     
     ALWAYS_INLINE int tokenEnd()
     {
-        return m_token.m_info.endOffset;
+        return m_token.m_location.endOffset;
     }
     
-    const char* getTokenName(JSTokenType tok) 
+    ALWAYS_INLINE const JSTokenLocation& tokenLocation()
+    {
+        return m_token.m_location;
+    }
+
+    const char* getTokenName(JSTokenType tok)
     {
         switch (tok) {
         case NULLTOKEN: 
@@ -722,52 +762,34 @@ private:
     
     ALWAYS_INLINE void updateErrorMessageSpecialCase(JSTokenType expectedToken) 
     {
-        String errorMessage;
         switch (expectedToken) {
         case RESERVED_IF_STRICT:
-            errorMessage = "Use of reserved word '";
-            errorMessage += getToken().impl();
-            errorMessage += "' in strict mode";
-            m_errorMessage = errorMessage.impl();
+            m_errorMessage = "Use of reserved word '" + getToken() + "' in strict mode";
             return;
         case RESERVED:
-            errorMessage = "Use of reserved word '";
-            errorMessage += getToken().impl();
-            errorMessage += "'";
-            m_errorMessage = errorMessage.impl();
+            m_errorMessage = "Use of reserved word '" + getToken() + '\'';
             return;
         case NUMBER: 
-            errorMessage = "Unexpected number '";
-            errorMessage += getToken().impl();
-            errorMessage += "'";
-            m_errorMessage = errorMessage.impl();
+            m_errorMessage = "Unexpected number '" + getToken() + '\'';
             return;
         case IDENT: 
-            errorMessage = "Expected an identifier but found '";
-            errorMessage += getToken().impl();
-            errorMessage += "' instead";
-            m_errorMessage = errorMessage.impl();
+            m_errorMessage = "Expected an identifier but found '" + getToken() + "' instead";
             return;
         case STRING: 
-            errorMessage = "Unexpected string ";
-            errorMessage += getToken().impl();
-            m_errorMessage = errorMessage.impl();
+            m_errorMessage = "Unexpected string " + getToken();
             return;
         case ERRORTOK: 
-            errorMessage = "Unrecognized token '";
-            errorMessage += getToken().impl();
-            errorMessage += "'";
-            m_errorMessage = errorMessage.impl();
+            m_errorMessage = "Unrecognized token '" + getToken() + '\'';
             return;
         case EOFTOK:  
-            m_errorMessage = "Unexpected EOF";
+            m_errorMessage = ASCIILiteral("Unexpected EOF");
             return;
         case RETURN:
-            m_errorMessage = "Return statements are only valid inside functions";
+            m_errorMessage = ASCIILiteral("Return statements are only valid inside functions");
             return;
         default:
             ASSERT_NOT_REACHED();
-            m_errorMessage = "internal error";
+            m_errorMessage = ASCIILiteral("internal error");
             return;
         }
     }
@@ -779,7 +801,7 @@ private:
         if (!name) 
             updateErrorMessageSpecialCase(m_token.m_type);
         else 
-            m_errorMessage = UString(String::format("Unexpected token '%s'", name).impl());
+            m_errorMessage = String::format("Unexpected token '%s'", name);
     }
     
     NEVER_INLINE void updateErrorMessage(JSTokenType expectedToken) 
@@ -787,31 +809,25 @@ private:
         m_error = true;
         const char* name = getTokenName(expectedToken);
         if (name)
-            m_errorMessage = UString(String::format("Expected token '%s'", name).impl());
+            m_errorMessage = String::format("Expected token '%s'", name);
         else {
             if (!getTokenName(m_token.m_type))
                 updateErrorMessageSpecialCase(m_token.m_type);
             else
                 updateErrorMessageSpecialCase(expectedToken);
-        } 
+        }
     }
     
-    NEVER_INLINE void updateErrorWithNameAndMessage(const char* beforeMsg, UString name, const char* afterMsg) 
+    NEVER_INLINE void updateErrorWithNameAndMessage(const char* beforeMsg, String name, const char* afterMsg)
     {
         m_error = true;
-        String prefix(beforeMsg);
-        String postfix(afterMsg);
-        prefix += " '";
-        prefix += name.impl();
-        prefix += "' ";
-        prefix += postfix;
-        m_errorMessage = prefix.impl();
+        m_errorMessage = makeString(beforeMsg, " '", name, "' ", afterMsg);
     }
     
-    NEVER_INLINE void updateErrorMessage(const char* msg) 
+    NEVER_INLINE void updateErrorMessage(const char* msg)
     {   
         m_error = true;
-        m_errorMessage = UString(msg);
+        m_errorMessage = String(msg);
     }
     
     void startLoop() { currentScope()->startLoop(); }
@@ -909,7 +925,7 @@ private:
     
     bool canRecurse()
     {
-        return m_stack.recursionCheck();
+        return m_stack.isSafeToRecurse();
     }
     
     int lastTokenEnd() const
@@ -917,14 +933,15 @@ private:
         return m_lastTokenEnd;
     }
 
-    mutable const JSGlobalData* m_globalData;
+    JSGlobalData* m_globalData;
     const SourceCode* m_source;
     ParserArena* m_arena;
     OwnPtr<LexerType> m_lexer;
     
     StackBounds m_stack;
+    bool m_hasStackOverflow;
     bool m_error;
-    UString m_errorMessage;
+    String m_errorMessage;
     JSToken m_token;
     bool m_allowsIn;
     int m_lastLine;
@@ -961,14 +978,13 @@ private:
     };
 };
 
+
 template <typename LexerType>
 template <class ParsedNode>
-PassRefPtr<ParsedNode> Parser<LexerType>::parse(JSGlobalObject* lexicalGlobalObject, Debugger* debugger, ExecState* debuggerExecState, JSObject** exception)
+PassRefPtr<ParsedNode> Parser<LexerType>::parse(ParserError& error)
 {
-    ASSERT(lexicalGlobalObject);
-    ASSERT(exception && !*exception);
     int errLine;
-    UString errMsg;
+    String errMsg;
 
     if (ParsedNode::scopeIsFunction)
         m_lexer->setIsReparsing();
@@ -976,13 +992,13 @@ PassRefPtr<ParsedNode> Parser<LexerType>::parse(JSGlobalObject* lexicalGlobalObj
     m_sourceElements = 0;
 
     errLine = -1;
-    errMsg = UString();
+    errMsg = String();
 
-    UString parseError = parseInner();
+    String parseError = parseInner();
 
     int lineNumber = m_lexer->lineNumber();
     bool lexError = m_lexer->sawError();
-    UString lexErrorMessage = lexError ? m_lexer->getErrorMessage() : UString();
+    String lexErrorMessage = lexError ? m_lexer->getErrorMessage() : String();
     ASSERT(lexErrorMessage.isNull() != lexError);
     m_lexer->clear();
 
@@ -994,8 +1010,11 @@ PassRefPtr<ParsedNode> Parser<LexerType>::parse(JSGlobalObject* lexicalGlobalObj
 
     RefPtr<ParsedNode> result;
     if (m_sourceElements) {
-        result = ParsedNode::create(&lexicalGlobalObject->globalData(),
-                                    m_lexer->lastLineNumber(),
+        JSTokenLocation location;
+        location.line = m_lexer->lastLineNumber();
+        location.column = m_lexer->currentColumnNumber();
+        result = ParsedNode::create(m_globalData,
+                                    location,
                                     m_sourceElements,
                                     m_varDeclarations ? &m_varDeclarations->data : 0,
                                     m_funcDeclarations ? &m_funcDeclarations->data : 0,
@@ -1003,24 +1022,21 @@ PassRefPtr<ParsedNode> Parser<LexerType>::parse(JSGlobalObject* lexicalGlobalObj
                                     *m_source,
                                     m_features,
                                     m_numConstants);
-        result->setLoc(m_source->firstLine(), m_lastLine);
-    } else if (lexicalGlobalObject) {
+        result->setLoc(m_source->firstLine(), m_lastLine, m_lexer->currentColumnNumber());
+    } else {
         // We can never see a syntax error when reparsing a function, since we should have
         // reported the error when parsing the containing program or eval code. So if we're
         // parsing a function body node, we assume that what actually happened here is that
         // we ran out of stack while parsing. If we see an error while parsing eval or program
         // code we assume that it was a syntax error since running out of stack is much less
         // likely, and we are currently unable to distinguish between the two cases.
-        if (isFunctionBodyNode(static_cast<ParsedNode*>(0)))
-            *exception = createStackOverflowError(lexicalGlobalObject);
+        if (isFunctionBodyNode(static_cast<ParsedNode*>(0)) || m_hasStackOverflow)
+            error = ParserError::StackOverflow;
         else if (isEvalNode<ParsedNode>())
-            *exception = createSyntaxError(lexicalGlobalObject, errMsg);
+            error = ParserError(ParserError::EvalError, errMsg, errLine);
         else
-            *exception = addErrorInfo(&lexicalGlobalObject->globalData(), createSyntaxError(lexicalGlobalObject, errMsg), errLine, *m_source);
+            error = ParserError(ParserError::SyntaxError, errMsg, errLine);
     }
-
-    if (debugger && !ParsedNode::scopeIsFunction)
-        debugger->sourceParsed(debuggerExecState, m_source->provider(), errLine, errMsg);
 
     m_arena->reset();
 
@@ -1028,19 +1044,18 @@ PassRefPtr<ParsedNode> Parser<LexerType>::parse(JSGlobalObject* lexicalGlobalObj
 }
 
 template <class ParsedNode>
-PassRefPtr<ParsedNode> parse(JSGlobalData* globalData, JSGlobalObject* lexicalGlobalObject, const SourceCode& source, FunctionParameters* parameters, JSParserStrictness strictness, JSParserMode parserMode, Debugger* debugger, ExecState* execState, JSObject** exception)
+PassRefPtr<ParsedNode> parse(JSGlobalData* globalData, const SourceCode& source, FunctionParameters* parameters, const Identifier& name, JSParserStrictness strictness, JSParserMode parserMode, ParserError& error)
 {
     SamplingRegion samplingRegion("Parsing");
 
-    ASSERT(source.provider()->data());
-
-    if (source.provider()->data()->is8Bit()) {
-        Parser< Lexer<LChar> > parser(globalData, source, parameters, strictness, parserMode);
-        return parser.parse<ParsedNode>(lexicalGlobalObject, debugger, execState, exception);
+    ASSERT(!source.provider()->source().isNull());
+    if (source.provider()->source().is8Bit()) {
+        Parser< Lexer<LChar> > parser(globalData, source, parameters, name, strictness, parserMode);
+        return parser.parse<ParsedNode>(error);
     }
-    Parser< Lexer<UChar> > parser(globalData, source, parameters, strictness, parserMode);
-    return parser.parse<ParsedNode>(lexicalGlobalObject, debugger, execState, exception);
+    Parser< Lexer<UChar> > parser(globalData, source, parameters, name, strictness, parserMode);
+    return parser.parse<ParsedNode>(error);
 }
 
-} // namespace 
+} // namespace
 #endif

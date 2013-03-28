@@ -23,13 +23,11 @@
 
 #include <glib-object.h>
 #include <gtk/gtk.h>
-
 #include <JavaScriptCore/JSBase.h>
-
 #include <webkit/webkitdefines.h>
-#include <webkit/webkitdomdefines.h>
 #include <webkit/webkitnetworkrequest.h>
 #include <webkit/webkitwebdatasource.h>
+#include <webkitdom/webkitdom.h>
 
 G_BEGIN_DECLS
 
@@ -182,6 +180,9 @@ webkit_web_frame_replace_selection           (WebKitWebFrame        *frame,
 
 WEBKIT_API WebKitDOMRange*
 webkit_web_frame_get_range_for_word_around_caret (WebKitWebFrame    *frame);
+
+WEBKIT_API WebKitDOMDocument*
+webkit_web_frame_get_dom_document            (WebKitWebFrame        *frame);
 
 G_END_DECLS
 

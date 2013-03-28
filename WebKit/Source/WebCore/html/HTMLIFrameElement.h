@@ -32,18 +32,23 @@ class HTMLIFrameElement : public HTMLFrameElementBase {
 public:
     static PassRefPtr<HTMLIFrameElement> create(const QualifiedName&, Document*);
 
+    bool shouldDisplaySeamlessly() const;
+
 private:
     HTMLIFrameElement(const QualifiedName&, Document*);
 
-    virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForPresentationAttribute(const Attribute&, StylePropertySet*) OVERRIDE;
 
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
-    
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
+    virtual void removedFrom(ContainerNode*) OVERRIDE;
+
     virtual bool rendererIsNeeded(const NodeRenderingContext&);
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
-       
+
+    virtual void didRecalcStyle(StyleChange) OVERRIDE;
+
 #if ENABLE(MICRODATA)
     virtual String itemValueText() const OVERRIDE;
     virtual void setItemValueText(const String&, ExceptionCode&) OVERRIDE;

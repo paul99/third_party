@@ -25,7 +25,12 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#if HAVE_OPENSSL_SSL_H
+
 #include "talk/base/opensslidentity.h"
+
+// Must be included first before openssl headers.
+#include "talk/base/win32.h"  // NOLINT
 
 #include <openssl/ssl.h>
 #include <openssl/bio.h>
@@ -35,8 +40,9 @@
 #include <openssl/rsa.h>
 #include <openssl/crypto.h>
 
-#include "talk/base/logging.h"
 #include "talk/base/helpers.h"
+#include "talk/base/logging.h"
+#include "talk/base/openssldigest.h"
 
 namespace talk_base {
 
@@ -101,9 +107,9 @@ static X509* MakeCertificate(EVP_PKEY* pkey, const char* common_name) {
   // serial number
   // temporary reference to serial number inside x509 struct
   ASN1_INTEGER* asn1_serial_number;
-  if (!(serial_number = BN_new()) ||
+  if ((serial_number = BN_new()) == NULL ||
       !BN_pseudo_rand(serial_number, SERIAL_RAND_BITS, 0, 0) ||
-      !(asn1_serial_number = X509_get_serialNumber(x509)) ||
+      (asn1_serial_number = X509_get_serialNumber(x509)) == NULL ||
       !BN_to_ASN1_INTEGER(serial_number, asn1_serial_number))
     goto error;
 
@@ -117,7 +123,7 @@ static X509* MakeCertificate(EVP_PKEY* pkey, const char* common_name) {
   // arbitrary common_name. Note that this certificate goes out in
   // clear during SSL negotiation, so there may be a privacy issue in
   // putting anything recognizable here.
-  if (!(name = X509_NAME_new()) ||
+  if ((name = X509_NAME_new()) == NULL ||
       !X509_NAME_add_entry_by_NID(name, NID_commonName, MBSTRING_UTF8,
                                      (unsigned char*)common_name, -1, -1, 0) ||
       !X509_set_subject_name(x509, name) ||
@@ -148,7 +154,7 @@ static void LogSSLErrors(const std::string& prefix) {
   char error_buf[200];
   unsigned long err;
 
-  while ((err = ERR_get_error())) {
+  while ((err = ERR_get_error()) != 0) {
     ERR_error_string_n(err, error_buf, sizeof(error_buf));
     LOG(LS_ERROR) << prefix << ": " << error_buf << "\n";
   }
@@ -225,18 +231,6 @@ OpenSSLCertificate* OpenSSLCertificate::FromPEMString(
     return NULL;
 }
 
-bool OpenSSLCertificate::GetDigestLength(const std::string &algorithm,
-                                         std::size_t *length) {
-  const EVP_MD *md;
-
-  if (!GetDigestEVP(algorithm, &md))
-    return false;
-
-  *length = EVP_MD_size(md);
-
-  return true;
-}
-
 bool OpenSSLCertificate::ComputeDigest(const std::string &algorithm,
                                        unsigned char *digest,
                                        std::size_t size,
@@ -252,7 +246,7 @@ bool OpenSSLCertificate::ComputeDigest(const X509 *x509,
   const EVP_MD *md;
   unsigned int n;
 
-  if (!GetDigestEVP(algorithm, &md))
+  if (!OpenSSLDigest::GetDigestEVP(algorithm, &md))
     return false;
 
   if (size < static_cast<size_t>(EVP_MD_size(md)))
@@ -262,34 +256,6 @@ bool OpenSSLCertificate::ComputeDigest(const X509 *x509,
 
   *length = n;
 
-  return true;
-}
-
-
-bool OpenSSLCertificate::GetDigestEVP(const std::string &algorithm,
-                                      const EVP_MD **mdp) {
-  const EVP_MD *md;
-  if (algorithm == DIGEST_SHA_1) {
-    md = EVP_sha1();
-  }
-#if OPENSSL_VERSION_NUMBER >= 0x10000000L
-  else if (algorithm == DIGEST_SHA_224) {
-    md = EVP_sha224();
-  } else if (algorithm == DIGEST_SHA_256) {
-    md = EVP_sha256();
-  } else if (algorithm == DIGEST_SHA_384) {
-    md = EVP_sha384();
-  } else if (algorithm == DIGEST_SHA_512) {
-    md = EVP_sha512();
-  }
-#endif
-  else {
-    return false;
-  }
-
-  // Can't happen
-  ASSERT(EVP_MD_size(md) >= 20);
-  *mdp = md;
   return true;
 }
 
@@ -313,7 +279,7 @@ std::string OpenSSLCertificate::ToPEMString() const {
   return ret;
 }
 
-void OpenSSLCertificate::AddReference() {
+void OpenSSLCertificate::AddReference() const {
   CRYPTO_add(&x509_->references, 1, CRYPTO_LOCK_X509);
 }
 
@@ -340,4 +306,8 @@ bool OpenSSLIdentity::ConfigureIdentity(SSL_CTX* ctx) {
   return true;
 }
 
-}  // talk_base namespace
+}  // namespace talk_base
+
+#endif  // HAVE_OPENSSL_SSL_H
+
+

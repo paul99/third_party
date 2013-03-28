@@ -26,18 +26,18 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#import "config.h"
-#import "FileSystem.h"
+#include "config.h"
+#include "FileSystem.h"
 
-#import "PlatformString.h"
-#import <wtf/RetainPtr.h>
-#import <wtf/text/CString.h>
+#include <wtf/RetainPtr.h>
+#include <wtf/text/CString.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
 CString fileSystemRepresentation(const String& path)
 {
-    RetainPtr<CFStringRef> cfString(AdoptCF, path.createCFString());
+    RetainPtr<CFStringRef> cfString = path.createCFString();
 
     if (!cfString)
         return CString();
@@ -63,8 +63,7 @@ RetainPtr<CFURLRef> pathAsURL(const String& path)
 #else
     pathStyle = kCFURLPOSIXPathStyle;
 #endif
-    return RetainPtr<CFURLRef>(AdoptCF, CFURLCreateWithFileSystemPath(0,
-        RetainPtr<CFStringRef>(AdoptCF, path.createCFString()).get(), pathStyle, FALSE));
+    return adoptCF(CFURLCreateWithFileSystemPath(0, path.createCFString().get(), pathStyle, FALSE));
 }
 
 } // namespace WebCore

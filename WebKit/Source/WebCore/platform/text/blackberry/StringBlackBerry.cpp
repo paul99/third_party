@@ -17,25 +17,27 @@
  */
 
 #include "config.h"
-#include "PlatformString.h"
 
-#include "WebString.h"
-#include "WebStringImpl.h"
-
-using BlackBerry::WebKit::WebString;
-using BlackBerry::WebKit::WebStringImpl;
+#include "CString.h"
+#include <BlackBerryPlatformString.h>
+#include <wtf/text/WTFString.h>
 
 namespace WTF {
 
-String::String(const WebString& webString)
-    : m_impl(webString.impl())
+String::String(const BlackBerry::Platform::String& webString)
 {
+    *this = String::fromUTF8(webString.data(), webString.length());
 }
 
-String::operator WebString() const
+String::operator BlackBerry::Platform::String() const
 {
-    WebString webString(static_cast<WebStringImpl*>(m_impl.get()));
-    return webString;
+    if (isEmpty())
+        return BlackBerry::Platform::String::emptyString();
+
+    if (is8Bit())
+        return BlackBerry::Platform::String(reinterpret_cast<const char*>(characters8()), length());
+
+    return BlackBerry::Platform::String(characters(), length());
 }
 
 } // namespace WTF

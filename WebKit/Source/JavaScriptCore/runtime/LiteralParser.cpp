@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2012 Mathias Bynens (mathias@qiwi.be)
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,13 +27,15 @@
 #include "config.h"
 #include "LiteralParser.h"
 
+#include "ButterflyInlines.h"
+#include "CopiedSpaceInlines.h"
 #include "JSArray.h"
 #include "JSString.h"
 #include "Lexer.h"
 #include "StrongInlines.h"
-#include "UStringBuilder.h"
 #include <wtf/ASCIICType.h>
 #include <wtf/dtoa.h>
+#include <wtf/text/StringBuilder.h>
 
 namespace JSC {
 
@@ -268,7 +271,7 @@ template <ParserMode mode> TokenType LiteralParser<CharType>::Lexer::lex(Literal
             return lexIdentifier(token);
         if (*m_ptr == '\'') {
             if (mode == StrictJSON) {
-                m_lexErrorMessage = "Single quotes (\') are not allowed in JSON";
+                m_lexErrorMessage = ASCIILiteral("Single quotes (\') are not allowed in JSON");
                 return TokError;
             }
             return lexString<mode, '\''>(token);
@@ -294,7 +297,7 @@ ALWAYS_INLINE TokenType LiteralParser<LChar>::Lexer::lexIdentifier(LiteralParser
 template <>
 ALWAYS_INLINE TokenType LiteralParser<UChar>::Lexer::lexIdentifier(LiteralParserToken<UChar>& token)
 {
-    while (m_ptr < m_end && (isASCIIAlphanumeric(*m_ptr) || *m_ptr == '_' || *m_ptr == '$'))
+    while (m_ptr < m_end && (isASCIIAlphanumeric(*m_ptr) || *m_ptr == '_' || *m_ptr == '$' || *m_ptr == 0x200C || *m_ptr == 0x200D))
         m_ptr++;
     token.stringIs8Bit = 0;
     token.stringToken16 = token.start;
@@ -343,7 +346,7 @@ template <ParserMode mode, char terminator> ALWAYS_INLINE TokenType LiteralParse
 {
     ++m_ptr;
     const CharType* runStart = m_ptr;
-    UStringBuilder builder;
+    StringBuilder builder;
     do {
         runStart = m_ptr;
         while (m_ptr < m_end && isSafeStringCharacter<mode, CharType, terminator>(*m_ptr))
@@ -355,7 +358,7 @@ template <ParserMode mode, char terminator> ALWAYS_INLINE TokenType LiteralParse
                 builder.append(runStart, m_ptr - runStart);
             ++m_ptr;
             if (m_ptr >= m_end) {
-                m_lexErrorMessage = "Unterminated string";
+                m_lexErrorMessage = ASCIILiteral("Unterminated string");
                 return TokError;
             }
             switch (*m_ptr) {
@@ -394,12 +397,12 @@ template <ParserMode mode, char terminator> ALWAYS_INLINE TokenType LiteralParse
 
                 case 'u':
                     if ((m_end - m_ptr) < 5) { 
-                        m_lexErrorMessage = "\\u must be followed by 4 hex digits";
+                        m_lexErrorMessage = ASCIILiteral("\\u must be followed by 4 hex digits");
                         return TokError;
                     } // uNNNN == 5 characters
                     for (int i = 1; i < 5; i++) {
                         if (!isASCIIHexDigit(m_ptr[i])) {
-                            m_lexErrorMessage = String::format("\"\\%s\" is not a valid unicode escape", UString(m_ptr, 5).ascii().data()).impl();
+                            m_lexErrorMessage = String::format("\"\\%s\" is not a valid unicode escape", String(m_ptr, 5).ascii().data()).impl();
                             return TokError;
                         }
                     }
@@ -420,16 +423,16 @@ template <ParserMode mode, char terminator> ALWAYS_INLINE TokenType LiteralParse
     } while ((mode != NonStrictJSON) && m_ptr != runStart && (m_ptr < m_end) && *m_ptr != terminator);
 
     if (m_ptr >= m_end || *m_ptr != terminator) {
-        m_lexErrorMessage = "Unterminated string";
+        m_lexErrorMessage = ASCIILiteral("Unterminated string");
         return TokError;
     }
 
     if (builder.isEmpty()) {
-        token.stringBuffer = UString();
+        token.stringBuffer = String();
         setParserTokenString<CharType>(token, runStart);
         token.stringLength = m_ptr - runStart;
     } else {
-        token.stringBuffer = builder.toUString();
+        token.stringBuffer = builder.toString();
         if (token.stringBuffer.is8Bit()) {
             token.stringIs8Bit = 1;
             token.stringToken8 = token.stringBuffer.characters8();
@@ -473,7 +476,7 @@ TokenType LiteralParser<CharType>::Lexer::lexNumber(LiteralParserToken<CharType>
         while (m_ptr < m_end && isASCIIDigit(*m_ptr))
             ++m_ptr;
     } else {
-        m_lexErrorMessage = "Invalid number";
+        m_lexErrorMessage = ASCIILiteral("Invalid number");
         return TokError;
     }
 
@@ -482,7 +485,7 @@ TokenType LiteralParser<CharType>::Lexer::lexNumber(LiteralParserToken<CharType>
         ++m_ptr;
         // [0-9]+
         if (m_ptr >= m_end || !isASCIIDigit(*m_ptr)) {
-            m_lexErrorMessage = "Invalid digits after decimal point";
+            m_lexErrorMessage = ASCIILiteral("Invalid digits after decimal point");
             return TokError;
         }
 
@@ -517,7 +520,7 @@ TokenType LiteralParser<CharType>::Lexer::lexNumber(LiteralParserToken<CharType>
 
         // [0-9]+
         if (m_ptr >= m_end || !isASCIIDigit(*m_ptr)) {
-            m_lexErrorMessage = "Exponent symbols should be followed by an optional '+' or '-' and then by at least one number";
+            m_lexErrorMessage = ASCIILiteral("Exponent symbols should be followed by an optional '+' or '-' and then by at least one number");
             return TokError;
         }
         
@@ -528,16 +531,8 @@ TokenType LiteralParser<CharType>::Lexer::lexNumber(LiteralParserToken<CharType>
     
     token.type = TokNumber;
     token.end = m_ptr;
-    Vector<char, 64> buffer(token.end - token.start + 1);
-    int i;
-    for (i = 0; i < token.end - token.start; i++) {
-        ASSERT(static_cast<char>(token.start[i]) == token.start[i]);
-        buffer[i] = static_cast<char>(token.start[i]);
-    }
-    buffer[i] = 0;
-    char* end;
-    token.numberToken = WTF::strtod(buffer.data(), &end);
-    ASSERT(buffer.data() + (token.end - token.start) == end);
+    size_t parsedLength;
+    token.numberToken = parseDouble(token.start, token.end - token.start, parsedLength);
     return TokNumber;
 }
 
@@ -553,7 +548,7 @@ JSValue LiteralParser<CharType>::parse(ParserState initialState)
         switch(state) {
             startParseArray:
             case StartParseArray: {
-                JSArray* array = constructEmptyArray(m_exec);
+                JSArray* array = constructEmptyArray(m_exec, 0);
                 objectStack.append(array);
                 // fallthrough
             }
@@ -562,7 +557,7 @@ JSValue LiteralParser<CharType>::parse(ParserState initialState)
                 TokenType lastToken = m_lexer.currentToken().type;
                 if (m_lexer.next() == TokRBracket) {
                     if (lastToken == TokComma) {
-                        m_parseErrorMessage = "Unexpected comma at the end of array expression";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected comma at the end of array expression");
                         return JSValue();
                     }
                     m_lexer.next();
@@ -575,13 +570,14 @@ JSValue LiteralParser<CharType>::parse(ParserState initialState)
                 goto startParseExpression;
             }
             case DoParseArrayEndExpression: {
-                 asArray(objectStack.last())->push(m_exec, lastValue);
+                JSArray* array = asArray(objectStack.last());
+                array->putDirectIndex(m_exec, array->length(), lastValue);
                 
                 if (m_lexer.currentToken().type == TokComma)
                     goto doParseArrayStartExpression;
 
                 if (m_lexer.currentToken().type != TokRBracket) {
-                    m_parseErrorMessage = "Expected ']'";
+                    m_parseErrorMessage = ASCIILiteral("Expected ']'");
                     return JSValue();
                 }
                 
@@ -601,7 +597,7 @@ JSValue LiteralParser<CharType>::parse(ParserState initialState)
 
                     // Check for colon
                     if (m_lexer.next() != TokColon) {
-                        m_parseErrorMessage = "Expected ':' before value in object property definition";
+                        m_parseErrorMessage = ASCIILiteral("Expected ':' before value in object property definition");
                         return JSValue();
                     }
                     
@@ -614,7 +610,7 @@ JSValue LiteralParser<CharType>::parse(ParserState initialState)
                     goto startParseExpression;
                 }
                 if (type != TokRBrace)  {
-                    m_parseErrorMessage = "Expected '}'";
+                    m_parseErrorMessage = ASCIILiteral("Expected '}'");
                     return JSValue();
                 }
                 m_lexer.next();
@@ -626,14 +622,14 @@ JSValue LiteralParser<CharType>::parse(ParserState initialState)
             case DoParseObjectStartExpression: {
                 TokenType type = m_lexer.next();
                 if (type != TokString && (m_mode == StrictJSON || type != TokIdentifier)) {
-                    m_parseErrorMessage = "Property name must be a string literal";
+                    m_parseErrorMessage = ASCIILiteral("Property name must be a string literal");
                     return JSValue();
                 }
                 LiteralParserToken<CharType> identifierToken = m_lexer.currentToken();
 
                 // Check for colon
                 if (m_lexer.next() != TokColon) {
-                    m_parseErrorMessage = "Expected ':'";
+                    m_parseErrorMessage = ASCIILiteral("Expected ':'");
                     return JSValue();
                 }
 
@@ -647,12 +643,18 @@ JSValue LiteralParser<CharType>::parse(ParserState initialState)
             }
             case DoParseObjectEndExpression:
             {
-                asObject(objectStack.last())->putDirect(m_exec->globalData(), identifierStack.last(), lastValue);
+                JSObject* object = asObject(objectStack.last());
+                PropertyName ident = identifierStack.last();
+                unsigned i = ident.asIndex();
+                if (i != PropertyName::NotAnIndex)
+                    object->putDirectIndex(m_exec, i, lastValue);
+                else
+                    object->putDirect(m_exec->globalData(), ident, lastValue);
                 identifierStack.removeLast();
                 if (m_lexer.currentToken().type == TokComma)
                     goto doParseObjectStartExpression;
                 if (m_lexer.currentToken().type != TokRBrace) {
-                    m_parseErrorMessage = "Expected '}'";
+                    m_parseErrorMessage = ASCIILiteral("Expected '}'");
                     return JSValue();
                 }
                 m_lexer.next();
@@ -671,9 +673,9 @@ JSValue LiteralParser<CharType>::parse(ParserState initialState)
                         LiteralParserToken<CharType> stringToken = m_lexer.currentToken();
                         m_lexer.next();
                         if (stringToken.stringIs8Bit)
-                            lastValue = jsString(m_exec, makeIdentifier(stringToken.stringToken8, stringToken.stringLength).ustring());
+                            lastValue = jsString(m_exec, makeIdentifier(stringToken.stringToken8, stringToken.stringLength).string());
                         else
-                            lastValue = jsString(m_exec, makeIdentifier(stringToken.stringToken16, stringToken.stringLength).ustring());
+                            lastValue = jsString(m_exec, makeIdentifier(stringToken.stringToken16, stringToken.stringLength).string());
                         break;
                     }
                     case TokNumber: {
@@ -697,47 +699,47 @@ JSValue LiteralParser<CharType>::parse(ParserState initialState)
                         lastValue = jsBoolean(false);
                         break;
                     case TokRBracket:
-                        m_parseErrorMessage = "Unexpected token ']'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token ']'");
                         return JSValue();
                     case TokRBrace:
-                        m_parseErrorMessage = "Unexpected token '}'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token '}'");
                         return JSValue();
                     case TokIdentifier: {
                         const LiteralParserToken<CharType>& token = m_lexer.currentToken();
                         if (token.stringIs8Bit)
-                            m_parseErrorMessage = String::format("Unexpected identifier \"%s\"", UString(m_lexer.currentToken().stringToken8, m_lexer.currentToken().stringLength).ascii().data()).impl();
+                            m_parseErrorMessage = String::format("Unexpected identifier \"%s\"", String(m_lexer.currentToken().stringToken8, m_lexer.currentToken().stringLength).ascii().data()).impl();
                         else
-                            m_parseErrorMessage = String::format("Unexpected identifier \"%s\"", UString(m_lexer.currentToken().stringToken16, m_lexer.currentToken().stringLength).ascii().data()).impl();
+                            m_parseErrorMessage = String::format("Unexpected identifier \"%s\"", String(m_lexer.currentToken().stringToken16, m_lexer.currentToken().stringLength).ascii().data()).impl();
                         return JSValue();
                     }
                     case TokColon:
-                        m_parseErrorMessage = "Unexpected token ':'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token ':'");
                         return JSValue();
                     case TokLParen:
-                        m_parseErrorMessage = "Unexpected token '('";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token '('");
                         return JSValue();
                     case TokRParen:
-                        m_parseErrorMessage = "Unexpected token ')'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token ')'");
                         return JSValue();
                     case TokComma:
-                        m_parseErrorMessage = "Unexpected token ','";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token ','");
                         return JSValue();
                     case TokDot:
-                        m_parseErrorMessage = "Unexpected token '.'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token '.'");
                         return JSValue();
                     case TokAssign:
-                        m_parseErrorMessage = "Unexpected token '='";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token '='");
                         return JSValue();
                     case TokSemi:
-                        m_parseErrorMessage = "Unexpected token ';'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token ';'");
                         return JSValue();
                     case TokEnd:
-                        m_parseErrorMessage = "Unexpected EOF";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected EOF");
                         return JSValue();
                     case TokError:
                     default:
                         // Error
-                        m_parseErrorMessage = "Could not parse value expression";
+                        m_parseErrorMessage = ASCIILiteral("Could not parse value expression");
                         return JSValue();
                 }
                 break;
@@ -755,50 +757,50 @@ JSValue LiteralParser<CharType>::parse(ParserState initialState)
                         goto startParseExpression;
                     }
                     case TokRBracket:
-                        m_parseErrorMessage = "Unexpected token ']'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token ']'");
                         return JSValue();
                     case TokLBrace:
-                        m_parseErrorMessage = "Unexpected token '{'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token '{'");
                         return JSValue();
                     case TokRBrace:
-                        m_parseErrorMessage = "Unexpected token '}'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token '}'");
                         return JSValue();
                     case TokIdentifier:
-                        m_parseErrorMessage = "Unexpected identifier";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected identifier");
                         return JSValue();
                     case TokColon:
-                        m_parseErrorMessage = "Unexpected token ':'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token ':'");
                         return JSValue();
                     case TokRParen:
-                        m_parseErrorMessage = "Unexpected token ')'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token ')'");
                         return JSValue();
                     case TokComma:
-                        m_parseErrorMessage = "Unexpected token ','";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token ','");
                         return JSValue();
                     case TokTrue:
-                        m_parseErrorMessage = "Unexpected token 'true'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token 'true'");
                         return JSValue();
                     case TokFalse:
-                        m_parseErrorMessage = "Unexpected token 'false'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token 'false'");
                         return JSValue();
                     case TokNull:
-                        m_parseErrorMessage = "Unexpected token 'null'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token 'null'");
                         return JSValue();
                     case TokEnd:
-                        m_parseErrorMessage = "Unexpected EOF";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected EOF");
                         return JSValue();
                     case TokDot:
-                        m_parseErrorMessage = "Unexpected token '.'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token '.'");
                         return JSValue();
                     case TokAssign:
-                        m_parseErrorMessage = "Unexpected token '='";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token '='");
                         return JSValue();
                     case TokSemi:
-                        m_parseErrorMessage = "Unexpected token ';'";
+                        m_parseErrorMessage = ASCIILiteral("Unexpected token ';'");
                         return JSValue();
                     case TokError:
                     default:
-                        m_parseErrorMessage = "Could not parse statement";
+                        m_parseErrorMessage = ASCIILiteral("Could not parse statement");
                         return JSValue();
                 }
             }
@@ -808,7 +810,7 @@ JSValue LiteralParser<CharType>::parse(ParserState initialState)
                     return JSValue();
                 if (m_lexer.next() == TokEnd)
                     return lastValue;
-                m_parseErrorMessage = "Unexpected content at end of JSON literal";
+                m_parseErrorMessage = ASCIILiteral("Unexpected content at end of JSON literal");
                 return JSValue();
             }
             default:

@@ -30,18 +30,39 @@
 #ifndef ClipboardChromium_h
 #define ClipboardChromium_h
 
-#include "CachedImage.h"
+#include "CachedImageClient.h"
 #include "ChromiumDataObject.h"
 #include "Clipboard.h"
+#include "DataTransferItem.h"
 
 namespace WebCore {
 
     class CachedImage;
-    class ChromiumDataObject;
-    class DataTransferItem;
-    class DataTransferItemListChromium;
+    class ChromiumDataObjectItem;
+    class ClipboardChromium;
     class Frame;
     class IntPoint;
+
+    // A wrapper class that invalidates a DataTransferItem when the associated Clipboard object goes out of scope.
+    class DataTransferItemPolicyWrapper : public DataTransferItem {
+    public:
+        static PassRefPtr<DataTransferItemPolicyWrapper> create(PassRefPtr<ClipboardChromium>, PassRefPtr<ChromiumDataObjectItem>);
+        virtual ~DataTransferItemPolicyWrapper();
+
+        virtual String kind() const OVERRIDE;
+        virtual String type() const OVERRIDE;
+        virtual void getAsString(PassRefPtr<StringCallback>) const OVERRIDE;
+        virtual PassRefPtr<Blob> getAsFile() const OVERRIDE;
+
+        ClipboardChromium* clipboard() { return m_clipboard.get(); }
+        ChromiumDataObjectItem* dataObjectItem() { return m_item.get(); }
+
+    private:
+        DataTransferItemPolicyWrapper(PassRefPtr<ClipboardChromium>, PassRefPtr<ChromiumDataObjectItem>);
+
+        RefPtr<ClipboardChromium> m_clipboard;
+        RefPtr<ChromiumDataObjectItem> m_item;
+    };
 
     class ClipboardChromium : public Clipboard, public CachedImageClient {
         WTF_MAKE_FAST_ALLOCATED;
@@ -58,12 +79,12 @@ namespace WebCore {
 
         virtual void clearData(const String& type);
         void clearAllData();
-        String getData(const String& type, bool& success) const;
+        String getData(const String& type) const;
         bool setData(const String& type, const String& data);
         bool platformClipboardChanged() const;
 
         // extensions beyond IE's API
-        virtual HashSet<String> types() const;
+        virtual ListHashSet<String> types() const;
         virtual PassRefPtr<FileList> files() const;
 
         void setDragImage(CachedImage*, const IntPoint&);
@@ -84,11 +105,8 @@ namespace WebCore {
 
 #if ENABLE(DATA_TRANSFER_ITEMS)
         virtual PassRefPtr<DataTransferItemList> items();
-
-        // Internal routines to keep the list returned by items() (i.e. m_itemList) synchronized with the content of the clipboard data.
-        void mayUpdateItems(Vector<RefPtr<DataTransferItem> >& items);
-        bool storageHasUpdated() const;
 #endif
+        Frame* frame() const { return m_frame; }
 
     private:
         ClipboardChromium(ClipboardType, PassRefPtr<ChromiumDataObject>, ClipboardAccessPolicy, Frame*);
@@ -97,13 +115,6 @@ namespace WebCore {
         void setDragImage(CachedImage*, Node*, const IntPoint&);
         RefPtr<ChromiumDataObject> m_dataObject;
         Frame* m_frame;
-
-#if ENABLE(DATA_TRANSFER_ITEMS)
-        RefPtr<DataTransferItemListChromium> m_itemList;
-#endif
-
-        uint64_t m_originalSequenceNumber;
-        bool m_dragStorageUpdated;
     };
 
 } // namespace WebCore

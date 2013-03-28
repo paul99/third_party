@@ -30,30 +30,7 @@
 #if !USE(OPENTYPE_SANITIZER)
 
 #include "SharedBuffer.h"
-
-#if OS(UNIX)
-#include <netinet/in.h>
-#endif
-
-#if OS(WINDOWS)
-#if CPU(BIG_ENDIAN)
-#define ntohs(x) ((uint16_t)(x))
-#define htons(x) ((uint16_t)(x))
-#define ntohl(x) ((uint32_t)(x))
-#define htonl(x) ((uint32_t)(x))
-#elif CPU(MIDDLE_ENDIAN)
-#define ntohs(x) ((unit16_t)(x))
-#define htons(x) ((uint16_t)(x))
-#define ntohl(x) ((uint32_t)((((uint32_t)(x) & 0xffff0000) >> 16) | (((uint32_t)(x) & 0xffff) << 16))
-#define htonl(x) ntohl(x)
-#else
-#define ntohs(x) ((uint16_t)((((uint16_t)(x) & 0xff00) >> 8) | (((uint16_t)(x) & 0x00ff) << 8)))
-#define htons(x) ntohs(x)
-#define ntohl(x) ((uint32_t)((((uint32_t)(x) & 0xff000000) >> 24) | (((uint32_t)(x) & 0x00ff0000) >>  8) | \
-                 (((uint32_t)(x) & 0x0000ff00) <<  8) | (((uint32_t)(x) & 0x000000ff) << 24)))
-#define htonl(x) ntohl(x)
-#endif
-#endif // OS(WINDOWS)
+#include <wtf/ByteOrder.h>
 
 namespace WebCore {
 
@@ -63,7 +40,7 @@ static bool readUInt32(SharedBuffer* buffer, size_t& offset, uint32_t& value)
     if (buffer->size() - offset < sizeof(value))
         return false;
 
-    value = ntohl(*reinterpret_cast<const uint32_t*>(buffer->data() + offset));
+    value = ntohl(*reinterpret_cast_ptr<const uint32_t*>(buffer->data() + offset));
     offset += sizeof(value);
 
     return true;
@@ -75,7 +52,7 @@ static bool readUInt16(SharedBuffer* buffer, size_t& offset, uint16_t& value)
     if (buffer->size() - offset < sizeof(value))
         return false;
 
-    value = ntohs(*reinterpret_cast<const uint16_t*>(buffer->data() + offset));
+    value = ntohs(*reinterpret_cast_ptr<const uint16_t*>(buffer->data() + offset));
     offset += sizeof(value);
 
     return true;
@@ -84,13 +61,13 @@ static bool readUInt16(SharedBuffer* buffer, size_t& offset, uint16_t& value)
 static bool writeUInt32(Vector<char>& vector, uint32_t value)
 {
     uint32_t bigEndianValue = htonl(value);
-    return vector.tryAppend(reinterpret_cast<char*>(&bigEndianValue), sizeof(bigEndianValue));
+    return vector.tryAppend(reinterpret_cast_ptr<char*>(&bigEndianValue), sizeof(bigEndianValue));
 }
 
 static bool writeUInt16(Vector<char>& vector, uint16_t value)
 {
     uint16_t bigEndianValue = htons(value);
-    return vector.tryAppend(reinterpret_cast<char*>(&bigEndianValue), sizeof(bigEndianValue));
+    return vector.tryAppend(reinterpret_cast_ptr<char*>(&bigEndianValue), sizeof(bigEndianValue));
 }
 
 static const uint32_t woffSignature = 0x774f4646; /* 'wOFF' */
@@ -210,7 +187,7 @@ bool convertWOFFToSfnt(SharedBuffer* woff, Vector<char>& sfnt)
             return false;
 
         // Write an sfnt table directory entry.
-        uint32_t* sfntTableDirectoryPtr = reinterpret_cast<uint32_t*>(sfnt.data() + sfntTableDirectoryCursor);
+        uint32_t* sfntTableDirectoryPtr = reinterpret_cast_ptr<uint32_t*>(sfnt.data() + sfntTableDirectoryCursor);
         *sfntTableDirectoryPtr++ = htonl(tableTag);
         *sfntTableDirectoryPtr++ = htonl(tableOrigChecksum);
         *sfntTableDirectoryPtr++ = htonl(sfnt.size());

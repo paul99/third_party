@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2009, 2012 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -30,50 +30,21 @@
 
 #include "config.h"
 #include "SocketStreamHandle.h"
+#include "SocketStreamHandleInternal.h"
 
 #if ENABLE(WEB_SOCKETS)
 
 #include "Logging.h"
 #include "NotImplemented.h"
 #include "SocketStreamHandleClient.h"
-#include "platform/WebData.h"
-#include "WebKit.h"
-#include "platform/WebKitPlatformSupport.h"
-#include "platform/WebSocketStreamHandle.h"
-#include "platform/WebSocketStreamHandleClient.h"
-#include "platform/WebURL.h"
+#include <public/Platform.h>
+#include <public/WebData.h>
+#include <public/WebSocketStreamHandle.h>
 #include <wtf/PassOwnPtr.h>
 
 using namespace WebKit;
 
 namespace WebCore {
-
-class SocketStreamHandleInternal : public WebSocketStreamHandleClient {
-public:
-    static PassOwnPtr<SocketStreamHandleInternal> create(SocketStreamHandle* handle)
-    {
-        return adoptPtr(new SocketStreamHandleInternal(handle));
-    }
-    virtual ~SocketStreamHandleInternal();
-
-    void connect(const KURL&);
-    int send(const char*, int);
-    void close();
-
-    virtual void didOpenStream(WebSocketStreamHandle*, int);
-    virtual void didSendData(WebSocketStreamHandle*, int);
-    virtual void didReceiveData(WebSocketStreamHandle*, const WebData&);
-    virtual void didClose(WebSocketStreamHandle*);
-    virtual void didFail(WebSocketStreamHandle*, const WebSocketStreamError&);
-
-private:
-    explicit SocketStreamHandleInternal(SocketStreamHandle*);
-
-    SocketStreamHandle* m_handle;
-    OwnPtr<WebSocketStreamHandle> m_socket;
-    int m_maxPendingSendAllowed;
-    int m_pendingAmountSent;
-};
 
 SocketStreamHandleInternal::SocketStreamHandleInternal(SocketStreamHandle* handle)
     : m_handle(handle)
@@ -89,16 +60,25 @@ SocketStreamHandleInternal::~SocketStreamHandleInternal()
 
 void SocketStreamHandleInternal::connect(const KURL& url)
 {
-    m_socket = adoptPtr(webKitPlatformSupport()->createSocketStreamHandle());
+    m_socket = adoptPtr(WebKit::Platform::current()->createSocketStreamHandle());
     LOG(Network, "connect");
     ASSERT(m_socket);
+    ASSERT(m_handle);
+    if (m_handle->m_client)
+        m_handle->m_client->willOpenSocketStream(m_handle);
     m_socket->connect(url, this);
 }
 
 int SocketStreamHandleInternal::send(const char* data, int len)
 {
     LOG(Network, "send len=%d", len);
-    ASSERT(m_socket);
+    // FIXME: |m_socket| should not be null here, but it seems that there is the
+    // case. We should figure out such a path and fix it rather than checking
+    // null here.
+    if (!m_socket) {
+        LOG(Network, "m_socket is null when sending. It should not be.");
+        return 0;
+    }
     if (m_pendingAmountSent + len >= m_maxPendingSendAllowed)
         len = m_maxPendingSendAllowed - m_pendingAmountSent - 1;
 
@@ -117,7 +97,8 @@ int SocketStreamHandleInternal::send(const char* data, int len)
 void SocketStreamHandleInternal::close()
 {
     LOG(Network, "close");
-    m_socket->close();
+    if (m_socket)
+        m_socket->close();
 }
     
 void SocketStreamHandleInternal::didOpenStream(WebSocketStreamHandle* socketHandle, int maxPendingSendAllowed)

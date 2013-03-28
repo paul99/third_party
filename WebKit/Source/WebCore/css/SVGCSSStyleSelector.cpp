@@ -29,7 +29,7 @@
 #include "config.h"
 
 #if ENABLE(SVG)
-#include "CSSStyleSelector.h"
+#include "StyleResolver.h"
 
 #include "CSSPrimitiveValueMappings.h"
 #include "CSSPropertyNames.h"
@@ -102,7 +102,7 @@ static Color colorFromSVGColorCSSValue(SVGColor* svgColor, const Color& fgColor)
     return color;
 }
 
-void CSSStyleSelector::applySVGProperty(int id, CSSValue* value)
+void StyleResolver::applySVGProperty(CSSPropertyID id, CSSValue* value)
 {
     ASSERT(value);
     CSSPrimitiveValue* primitiveValue = 0;
@@ -183,6 +183,11 @@ void CSSStyleSelector::applySVGProperty(int id, CSSValue* value)
             HANDLE_INHERIT_AND_INITIAL(colorInterpolationFilters, ColorInterpolationFilters)
             if (primitiveValue)
                 svgstyle->setColorInterpolationFilters(*primitiveValue);
+            break;
+        }
+        case CSSPropertyColorProfile:
+        {
+            // Not implemented.
             break;
         }
         case CSSPropertyColorRendering:
@@ -357,8 +362,6 @@ void CSSStyleSelector::applySVGProperty(int id, CSSValue* value)
             int type = primitiveValue->primitiveType();
             if (type == CSSPrimitiveValue::CSS_URI)
                 s = primitiveValue->getStringValue();
-            else
-                return;
 
             svgstyle->setMarkerStartResource(SVGURIReference::fragmentIdentifierFromIRIString(s, m_element->document()));
             break;
@@ -373,8 +376,6 @@ void CSSStyleSelector::applySVGProperty(int id, CSSValue* value)
             int type = primitiveValue->primitiveType();
             if (type == CSSPrimitiveValue::CSS_URI)
                 s = primitiveValue->getStringValue();
-            else
-                return;
 
             svgstyle->setMarkerMidResource(SVGURIReference::fragmentIdentifierFromIRIString(s, m_element->document()));
             break;
@@ -389,8 +390,6 @@ void CSSStyleSelector::applySVGProperty(int id, CSSValue* value)
             int type = primitiveValue->primitiveType();
             if (type == CSSPrimitiveValue::CSS_URI)
                 s = primitiveValue->getStringValue();
-            else
-                return;
 
             svgstyle->setMarkerEndResource(SVGURIReference::fragmentIdentifierFromIRIString(s, m_element->document()));
             break;
@@ -428,8 +427,6 @@ void CSSStyleSelector::applySVGProperty(int id, CSSValue* value)
             int type = primitiveValue->primitiveType();
             if (type == CSSPrimitiveValue::CSS_URI)
                 s = primitiveValue->getStringValue();
-            else
-                return;
 
             svgstyle->setFilterResource(SVGURIReference::fragmentIdentifierFromIRIString(s, m_element->document()));
             break;
@@ -444,8 +441,6 @@ void CSSStyleSelector::applySVGProperty(int id, CSSValue* value)
             int type = primitiveValue->primitiveType();
             if (type == CSSPrimitiveValue::CSS_URI)
                 s = primitiveValue->getStringValue();
-            else
-                return;
 
             svgstyle->setMaskerResource(SVGURIReference::fragmentIdentifierFromIRIString(s, m_element->document()));
             break;
@@ -460,8 +455,6 @@ void CSSStyleSelector::applySVGProperty(int id, CSSValue* value)
             int type = primitiveValue->primitiveType();
             if (type == CSSPrimitiveValue::CSS_URI)
                 s = primitiveValue->getStringValue();
-            else
-                return;
 
             svgstyle->setClipperResource(SVGURIReference::fragmentIdentifierFromIRIString(s, m_element->document()));
             break;
@@ -571,8 +564,8 @@ void CSSStyleSelector::applySVGProperty(int id, CSSValue* value)
             if (!firstValue->isShadowValue())
                 return;
             ShadowValue* item = static_cast<ShadowValue*>(firstValue);
-            int x = item->x->computeLength<int>(style(), m_rootElementStyle);
-            int y = item->y->computeLength<int>(style(), m_rootElementStyle);
+            IntPoint location(item->x->computeLength<int>(style(), m_rootElementStyle),
+                              item->y->computeLength<int>(style(), m_rootElementStyle));
             int blur = item->blur ? item->blur->computeLength<int>(style(), m_rootElementStyle) : 0;
             Color color;
             if (item->color)
@@ -582,7 +575,7 @@ void CSSStyleSelector::applySVGProperty(int id, CSSValue* value)
             ASSERT(!item->spread);
             ASSERT(!item->style);
 
-            OwnPtr<ShadowData> shadowData = adoptPtr(new ShadowData(x, y, blur, 0, Normal, false, color.isValid() ? color : Color::transparent));
+            OwnPtr<ShadowData> shadowData = adoptPtr(new ShadowData(location, blur, 0, Normal, false, color.isValid() ? color : Color::transparent));
             svgstyle->setShadow(shadowData.release());
             return;
         }
@@ -594,9 +587,17 @@ void CSSStyleSelector::applySVGProperty(int id, CSSValue* value)
             svgstyle->setVectorEffect(*primitiveValue);
             break;
         }
+        case CSSPropertyMaskType: {
+            HANDLE_INHERIT_AND_INITIAL(maskType, MaskType)
+            if (!primitiveValue)
+                break;
+
+            svgstyle->setMaskType(*primitiveValue);
+            break;
+        }
         default:
             // If you crash here, it's because you added a css property and are not handling it
-            // in either this switch statement or the one in CSSStyleSelector::applyProperty
+            // in either this switch statement or the one in StyleResolver::applyProperty
             ASSERT_WITH_MESSAGE(0, "unimplemented propertyID: %d", id);
             return;
     }

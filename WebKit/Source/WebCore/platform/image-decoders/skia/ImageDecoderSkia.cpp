@@ -27,17 +27,13 @@
 #include "config.h"
 #include "ImageDecoder.h"
 
-#include "NotImplemented.h"
-
-#if PLATFORM(CHROMIUM) && OS(DARWIN)
-#include "GraphicsContextCG.h"
-#include "SkCGUtils.h"
-#endif
+#include "PlatformMemoryInstrumentation.h"
 
 namespace WebCore {
 
 ImageFrame::ImageFrame()
-    : m_status(FrameEmpty)
+    : m_hasAlpha(false)
+    , m_status(FrameEmpty)
     , m_duration(0)
     , m_disposalMethod(DisposeNotSpecified)
     , m_premultiplyAlpha(true)
@@ -58,6 +54,9 @@ ImageFrame& ImageFrame::operator=(const ImageFrame& other)
     setDuration(other.duration());
     setDisposalMethod(other.disposalMethod());
     setPremultiplyAlpha(other.premultiplyAlpha());
+    // Be sure that this is called after we've called setStatus(), since we
+    // look at our status to know what to do with the alpha value.
+    setHasAlpha(other.hasAlpha());
     return *this;
 }
 
@@ -74,6 +73,7 @@ void ImageFrame::clearPixelData()
 void ImageFrame::zeroFillPixelData()
 {
     m_bitmap.bitmap().eraseARGB(0, 0, 0, 0);
+    m_hasAlpha = true;
 }
 
 bool ImageFrame::copyBitmapData(const ImageFrame& other)
@@ -81,6 +81,7 @@ bool ImageFrame::copyBitmapData(const ImageFrame& other)
     if (this == &other)
         return true;
 
+    m_hasAlpha = other.m_hasAlpha;
     m_bitmap.bitmap().reset();
     const NativeImageSkia& otherBitmap = other.m_bitmap;
     return otherBitmap.bitmap().copyTo(&m_bitmap.bitmap(), otherBitmap.bitmap().config());
@@ -106,76 +107,41 @@ NativeImagePtr ImageFrame::asNewNativeImage() const
 
 bool ImageFrame::hasAlpha() const
 {
-    return !m_bitmap.bitmap().isOpaque();
+    return m_hasAlpha;
 }
 
 void ImageFrame::setHasAlpha(bool alpha)
 {
-    m_bitmap.bitmap().setIsOpaque(!alpha);
-}
+    m_hasAlpha = alpha;
 
-#if PLATFORM(CHROMIUM) && OS(DARWIN)
-static void resolveColorSpace(const SkBitmap& bitmap, CGColorSpaceRef colorSpace)
-{
-    int width = bitmap.width();
-    int height = bitmap.height();
-    RetainPtr<CGImageRef> srcImage(AdoptCF, SkCreateCGImageRefWithColorspace(bitmap, colorSpace));
-    SkAutoLockPixels lock(bitmap);
-    void* pixels = bitmap.getPixels();
-    RetainPtr<CGContextRef> cgBitmap(AdoptCF, CGBitmapContextCreate(pixels, width, height, 8, width * 4, deviceRGBColorSpaceRef(), kCGBitmapByteOrder32Host | kCGImageAlphaPremultipliedFirst));
-    if (!cgBitmap)
-        return;
-    CGContextSetBlendMode(cgBitmap.get(), kCGBlendModeCopy);
-    CGRect bounds = { {0, 0}, {width, height} };
-    CGContextDrawImage(cgBitmap.get(), bounds, srcImage.get());
+    // If the frame is not fully loaded, there will be transparent pixels,
+    // so we can't tell skia we're opaque, even for image types that logically
+    // always are (e.g. jpeg).
+    bool isOpaque = !m_hasAlpha;
+    if (m_status != FrameComplete)
+        isOpaque = false;
+    m_bitmap.bitmap().setIsOpaque(isOpaque);
 }
-
-static CGColorSpaceRef createColorSpace(const ColorProfile& colorProfile)
-{
-    RetainPtr<CFDataRef> data(AdoptCF, CFDataCreate(kCFAllocatorDefault, reinterpret_cast<const UInt8*>(colorProfile.data()), colorProfile.size()));
-#ifndef TARGETING_LEOPARD
-    return CGColorSpaceCreateWithICCProfile(data.get());
-#else
-    RetainPtr<CGDataProviderRef> profileDataProvider(AdoptCF, CGDataProviderCreateWithCFData(data.get()));
-    CGFloat ranges[] = {0.0, 255.0, 0.0, 255.0, 0.0, 255.0};
-    return CGColorSpaceCreateICCBased(3, ranges, profileDataProvider.get(), deviceRGBColorSpaceRef());
-#endif
-}
-#endif
 
 void ImageFrame::setColorProfile(const ColorProfile& colorProfile)
 {
-#if PLATFORM(CHROMIUM) && OS(DARWIN)
-    m_colorProfile = colorProfile;
-#else
-    notImplemented();
-#endif
+    // FIXME: Do we need this ImageFrame function anymore, on any port?
+    UNUSED_PARAM(colorProfile);
 }
 
 void ImageFrame::setStatus(FrameStatus status)
 {
     m_status = status;
     if (m_status == FrameComplete) {
+        m_bitmap.bitmap().setIsOpaque(!m_hasAlpha);
         m_bitmap.setDataComplete();  // Tell the bitmap it's done.
-#if PLATFORM(CHROMIUM) && OS(DARWIN)
-        // resolveColorSpace() and callees assume that the alpha channel is
-        // premultiplied, so don't apply the color profile if it isn't.
-        if (m_colorProfile.isEmpty() || (!m_premultiplyAlpha && hasAlpha()))
-            return;
-        RetainPtr<CGColorSpaceRef> cgColorSpace(AdoptCF, createColorSpace(m_colorProfile));
-        resolveColorSpace(m_bitmap.bitmap(), cgColorSpace.get());
-#endif
     }
 }
 
-int ImageFrame::width() const
+void ImageFrame::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
 {
-    return m_bitmap.bitmap().width();
-}
-
-int ImageFrame::height() const
-{
-    return m_bitmap.bitmap().height();
+    MemoryClassInfo info(memoryObjectInfo, this, PlatformMemoryTypes::Image);
+    info.addMember(m_bitmap);
 }
 
 } // namespace WebCore

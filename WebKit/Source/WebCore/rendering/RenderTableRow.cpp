@@ -28,9 +28,12 @@
 #include "CachedImage.h"
 #include "Document.h"
 #include "HTMLNames.h"
+#include "HitTestResult.h"
 #include "PaintInfo.h"
 #include "RenderTableCell.h"
 #include "RenderView.h"
+#include "StyleInheritedData.h"
+#include "WebCoreMemoryInstrumentation.h"
 
 namespace WebCore {
 
@@ -38,27 +41,17 @@ using namespace HTMLNames;
 
 RenderTableRow::RenderTableRow(Node* node)
     : RenderBox(node)
+    , m_rowIndex(unsetRowIndex)
 {
     // init RenderObject attributes
     setInline(false);   // our object is not Inline
 }
 
-void RenderTableRow::willBeDestroyed()
+void RenderTableRow::willBeRemovedFromTree()
 {
-    RenderTableSection* recalcSection = section();
-    
-    RenderBox::willBeDestroyed();
-    
-    if (recalcSection)
-        recalcSection->setNeedsCellRecalc();
-}
+    RenderBox::willBeRemovedFromTree();
 
-void RenderTableRow::updateBeforeAndAfterContent()
-{
-    if (!isAnonymous() && document()->usesBeforeAfterRules()) {
-        children()->updateBeforeAfterContent(this, BEFORE);
-        children()->updateBeforeAfterContent(this, AFTER);
-    }
+    section()->setNeedsCellRecalc();
 }
 
 void RenderTableRow::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
@@ -68,11 +61,8 @@ void RenderTableRow::styleDidChange(StyleDifference diff, const RenderStyle* old
     RenderBox::styleDidChange(diff, oldStyle);
     propagateStyleToAnonymousChildren();
 
-    if (parent())
-        updateBeforeAndAfterContent();
-
     if (section() && oldStyle && style()->logicalHeight() != oldStyle->logicalHeight())
-        section()->rowLogicalHeightChanged(section()->rowIndexForRenderer(this));
+        section()->rowLogicalHeightChanged(rowIndex());
 
     // If border was changed, notify table.
     if (parent()) {
@@ -82,12 +72,22 @@ void RenderTableRow::styleDidChange(StyleDifference diff, const RenderStyle* old
     }
 }
 
+const BorderValue& RenderTableRow::borderAdjoiningStartCell(const RenderTableCell* cell) const
+{
+    ASSERT_UNUSED(cell, cell->isFirstOrLastCellInRow());
+    // FIXME: https://webkit.org/b/79272 - Add support for mixed directionality at the cell level.
+    return style()->borderStart();
+}
+
+const BorderValue& RenderTableRow::borderAdjoiningEndCell(const RenderTableCell* cell) const
+{
+    ASSERT_UNUSED(cell, cell->isFirstOrLastCellInRow());
+    // FIXME: https://webkit.org/b/79272 - Add support for mixed directionality at the cell level.
+    return style()->borderEnd();
+}
+
 void RenderTableRow::addChild(RenderObject* child, RenderObject* beforeChild)
 {
-    // Make sure we don't append things after :after-generated content if we have it.
-    if (!beforeChild)
-        beforeChild = afterPseudoElementRenderer();
-
     if (!child->isTableCell()) {
         RenderObject* last = beforeChild;
         if (!last)
@@ -137,6 +137,7 @@ void RenderTableRow::addChild(RenderObject* child, RenderObject* beforeChild)
 
 void RenderTableRow::layout()
 {
+    StackStats::LayoutCheckPoint layoutCheckPoint;
     ASSERT(needsLayout());
 
     // Table rows do not add translation.
@@ -147,11 +148,11 @@ void RenderTableRow::layout()
     for (RenderObject* child = firstChild(); child; child = child->nextSibling()) {
         if (child->isTableCell()) {
             RenderTableCell* cell = toRenderTableCell(child);
-            if (!cell->needsLayout() && paginated && view()->layoutState()->pageLogicalHeight() && view()->layoutState()->pageLogicalOffset(cell->logicalTop()) != cell->pageLogicalOffset())
-                cell->setChildNeedsLayout(true, false);
+            if (!cell->needsLayout() && paginated && view()->layoutState()->pageLogicalHeight() && view()->layoutState()->pageLogicalOffset(cell, cell->logicalTop()) != cell->pageLogicalOffset())
+                cell->setChildNeedsLayout(true, MarkOnlyThis);
 
             if (child->needsLayout()) {
-                cell->computeBlockDirectionMargins(table());
+                cell->computeAndSetBlockDirectionMargins(table());
                 cell->layout();
             }
         }
@@ -174,7 +175,7 @@ void RenderTableRow::layout()
     setNeedsLayout(false);
 }
 
-LayoutRect RenderTableRow::clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer) const
+LayoutRect RenderTableRow::clippedOverflowRectForRepaint(const RenderLayerModelObject* repaintContainer) const
 {
     ASSERT(parent());
 
@@ -192,7 +193,7 @@ LayoutRect RenderTableRow::clippedOverflowRectForRepaint(RenderBoxModelObject* r
 }
 
 // Hit Testing
-bool RenderTableRow::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction action)
+bool RenderTableRow::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction action)
 {
     // Table rows cannot ever be hit tested.  Effectively they do not exist.
     // Just forward to our children always.
@@ -203,21 +204,22 @@ bool RenderTableRow::nodeAtPoint(const HitTestRequest& request, HitTestResult& r
         // then we can remove this check.
         if (child->isTableCell() && !toRenderBox(child)->hasSelfPaintingLayer()) {
             LayoutPoint cellPoint = flipForWritingModeForChild(toRenderTableCell(child), accumulatedOffset);
-            if (child->nodeAtPoint(request, result, pointInContainer, cellPoint, action)) {
-                updateHitTestResult(result, pointInContainer - toLayoutSize(cellPoint));
+            if (child->nodeAtPoint(request, result, locationInContainer, cellPoint, action)) {
+                updateHitTestResult(result, locationInContainer.point() - toLayoutSize(cellPoint));
                 return true;
             }
         }
     }
-    
+
     return false;
 }
 
 void RenderTableRow::paintOutlineForRowIfNeeded(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
+    LayoutPoint adjustedPaintOffset = paintOffset + location();
     PaintPhase paintPhase = paintInfo.phase;
     if ((paintPhase == PaintPhaseOutline || paintPhase == PaintPhaseSelfOutline) && style()->visibility() == VISIBLE)
-        paintOutline(paintInfo.context, LayoutRect(paintOffset, size()));
+        paintOutline(paintInfo.context, LayoutRect(adjustedPaintOffset, size()));
 }
 
 void RenderTableRow::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
@@ -250,6 +252,13 @@ RenderTableRow* RenderTableRow::createAnonymousWithParentRenderer(const RenderOb
     RenderTableRow* newRow = new (parent->renderArena()) RenderTableRow(parent->document() /* is anonymous */);
     newRow->setStyle(newStyle.release());
     return newRow;
+}
+
+void RenderTableRow::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, PlatformMemoryTypes::Rendering);
+    RenderBox::reportMemoryUsage(memoryObjectInfo);
+    info.addMember(m_children);
 }
 
 } // namespace WebCore

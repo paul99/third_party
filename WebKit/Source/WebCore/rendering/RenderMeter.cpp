@@ -19,11 +19,9 @@
  */
 
 #include "config.h"
-
-#if ENABLE(METER_TAG)
-
 #include "RenderMeter.h"
 
+#if ENABLE(METER_ELEMENT)
 #include "HTMLMeterElement.h"
 #include "HTMLNames.h"
 #include "RenderTheme.h"
@@ -34,7 +32,7 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-RenderMeter::RenderMeter(HTMLMeterElement* element)
+RenderMeter::RenderMeter(HTMLElement* element)
     : RenderBlock(element)
 {
 }
@@ -43,21 +41,41 @@ RenderMeter::~RenderMeter()
 {
 }
 
-void RenderMeter::computeLogicalWidth()
+HTMLMeterElement* RenderMeter::meterElement() const
 {
-    RenderBox::computeLogicalWidth();
-    setWidth(theme()->meterSizeForBounds(this, frameRect()).width());
+    ASSERT(node());
+
+    if (isHTMLMeterElement(node()))
+        return toHTMLMeterElement(node());
+
+    ASSERT(node()->shadowHost());
+    return toHTMLMeterElement(node()->shadowHost());
 }
 
-void RenderMeter::computeLogicalHeight()
+void RenderMeter::updateLogicalWidth()
 {
-    RenderBox::computeLogicalHeight();
-    setHeight(theme()->meterSizeForBounds(this, frameRect()).height());
+    RenderBox::updateLogicalWidth();
+
+    IntSize frameSize = theme()->meterSizeForBounds(this, pixelSnappedIntRect(frameRect()));
+    setLogicalWidth(isHorizontalWritingMode() ? frameSize.width() : frameSize.height());
+}
+
+void RenderMeter::computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues& computedValues) const
+{
+    RenderBox::computeLogicalHeight(logicalHeight, logicalTop, computedValues);
+
+    LayoutRect frame = frameRect();
+    if (isHorizontalWritingMode())
+        frame.setHeight(computedValues.m_extent);
+    else
+        frame.setWidth(computedValues.m_extent);
+    IntSize frameSize = theme()->meterSizeForBounds(this, pixelSnappedIntRect(frame));
+    computedValues.m_extent = isHorizontalWritingMode() ? frameSize.height() : frameSize.width();
 }
 
 double RenderMeter::valueRatio() const
 {
-    return static_cast<HTMLMeterElement*>(node())->valueRatio();
+    return meterElement()->valueRatio();
 }
 
 void RenderMeter::updateFromElement()

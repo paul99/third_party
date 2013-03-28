@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -33,7 +33,9 @@ namespace WebKit {
 
 static WorkQueue& processLauncherWorkQueue()
 {
-    DEFINE_STATIC_LOCAL(WorkQueue, processLauncherWorkQueue, ("com.apple.WebKit.ProcessLauncher"));
+    // Give in to VisualStudio and its 31 character thread name limit and shorten the thread name to ProcLauncher instead of class name.
+    // See createThread() in Threading.cpp.
+    DEFINE_STATIC_LOCAL(WorkQueue, processLauncherWorkQueue, ("com.apple.WebKit.ProcLauncher"));
     return processLauncherWorkQueue;
 }
 
@@ -71,8 +73,18 @@ const char* ProcessLauncher::processTypeAsString(ProcessType processType)
     switch (processType) {
     case WebProcess:
         return "webprocess";
+#if ENABLE(PLUGIN_PROCESS)
     case PluginProcess:
         return "pluginprocess";
+#endif
+#if ENABLE(NETWORK_PROCESS)
+    case NetworkProcess:
+        return "networkprocess";
+#endif
+#if ENABLE(SHARED_WORKER_PROCESS)
+    case SharedWorkerProcess:
+        return "sharedworkerprocess";
+#endif
     }
 
     ASSERT_NOT_REACHED();
@@ -86,10 +98,26 @@ bool ProcessLauncher::getProcessTypeFromString(const char* string, ProcessType& 
         return true;
     }
 
+#if ENABLE(PLUGIN_PROCESS)
     if (!strcmp(string, "pluginprocess")) {
         processType = PluginProcess;
         return true;
     }
+#endif
+
+#if ENABLE(NETWORK_PROCESS)
+    if (!strcmp(string, "networkprocess")) {
+        processType = NetworkProcess;
+        return true;
+    }
+#endif
+
+#if ENABLE(SHARED_WORKER_PROCESS)
+    if (!strcmp(string, "sharedworkerprocess")) {
+        processType = SharedWorkerProcess;
+        return true;
+    }
+#endif
 
     return false;
 }

@@ -26,9 +26,10 @@
 
 #include "config.h"
 
-#if ENABLE(WEBGL)
+#if USE(3D_GRAPHICS)
 
 #include "GraphicsContext3D.h"
+#include "GraphicsContext3DNEON.h"
 
 #include "CheckedInt.h"
 #include "DrawingBuffer.h"
@@ -85,9 +86,9 @@ bool GraphicsContext3D::computeFormatAndTypeParameters(GC3Denum format,
 {
     switch (format) {
     case GraphicsContext3D::ALPHA:
-        *componentsPerPixel = 1;
-        break;
     case GraphicsContext3D::LUMINANCE:
+    case GraphicsContext3D::DEPTH_COMPONENT:
+    case GraphicsContext3D::DEPTH_STENCIL:
         *componentsPerPixel = 1;
         break;
     case GraphicsContext3D::LUMINANCE_ALPHA:
@@ -107,11 +108,18 @@ bool GraphicsContext3D::computeFormatAndTypeParameters(GC3Denum format,
     case GraphicsContext3D::UNSIGNED_BYTE:
         *bytesPerComponent = sizeof(GC3Dubyte);
         break;
+    case GraphicsContext3D::UNSIGNED_SHORT:
+        *bytesPerComponent = sizeof(GC3Dushort);
+        break;
     case GraphicsContext3D::UNSIGNED_SHORT_5_6_5:
     case GraphicsContext3D::UNSIGNED_SHORT_4_4_4_4:
     case GraphicsContext3D::UNSIGNED_SHORT_5_5_5_1:
         *componentsPerPixel = 1;
         *bytesPerComponent = sizeof(GC3Dushort);
+        break;
+    case GraphicsContext3D::UNSIGNED_INT_24_8:
+    case GraphicsContext3D::UNSIGNED_INT:
+        *bytesPerComponent = sizeof(GC3Duint);
         break;
     case GraphicsContext3D::FLOAT: // OES_texture_float
         *bytesPerComponent = sizeof(GC3Dfloat);
@@ -140,7 +148,7 @@ GC3Denum GraphicsContext3D::computeImageSizeInBytes(GC3Denum format, GC3Denum ty
     }
     CheckedInt<uint32_t> checkedValue(bytesPerComponent * componentsPerPixel);
     checkedValue *=  width;
-    if (!checkedValue.valid())
+    if (!checkedValue.isValid())
         return GraphicsContext3D::INVALID_VALUE;
     unsigned int validRowSize = checkedValue.value();
     unsigned int padding = 0;
@@ -152,7 +160,7 @@ GC3Denum GraphicsContext3D::computeImageSizeInBytes(GC3Denum format, GC3Denum ty
     // Last row needs no padding.
     checkedValue *= (height - 1);
     checkedValue += validRowSize;
-    if (!checkedValue.valid())
+    if (!checkedValue.isValid())
         return GraphicsContext3D::INVALID_VALUE;
     *imageSizeInBytes = checkedValue.value();
     if (paddingInBytes)
@@ -160,30 +168,58 @@ GC3Denum GraphicsContext3D::computeImageSizeInBytes(GC3Denum format, GC3Denum ty
     return GraphicsContext3D::NO_ERROR;
 }
 
-bool GraphicsContext3D::extractImageData(Image* image,
-                                         GC3Denum format,
-                                         GC3Denum type,
-                                         bool flipY,
-                                         bool premultiplyAlpha,
-                                         bool ignoreGammaAndColorProfile,
-                                         Vector<uint8_t>& data)
+GraphicsContext3D::ImageExtractor::ImageExtractor(Image* image, ImageHtmlDomSource imageHtmlDomSource, bool premultiplyAlpha, bool ignoreGammaAndColorProfile)
 {
-    if (!image)
+    m_image = image;
+    m_imageHtmlDomSource = imageHtmlDomSource;
+    m_extractSucceeded = extractImage(premultiplyAlpha, ignoreGammaAndColorProfile);
+}
+
+bool GraphicsContext3D::packImageData(
+    Image* image,
+    const void* pixels,
+    GC3Denum format,
+    GC3Denum type,
+    bool flipY,
+    AlphaOp alphaOp,
+    SourceDataFormat sourceFormat, 
+    unsigned width,
+    unsigned height,
+    unsigned sourceUnpackAlignment,
+    Vector<uint8_t>& data)
+{
+    if (!pixels)
         return false;
-    if (!getImageData(image, format, type, premultiplyAlpha, ignoreGammaAndColorProfile, data))
+
+    unsigned packedSize;
+    // Output data is tightly packed (alignment == 1).
+    if (computeImageSizeInBytes(format, type, width, height, 1, &packedSize, 0) != GraphicsContext3D::NO_ERROR)
+        return false;
+    data.resize(packedSize);
+
+    if (!packPixels(reinterpret_cast<const uint8_t*>(pixels),
+        sourceFormat,
+        width,
+        height,
+        sourceUnpackAlignment,
+        format,
+        type,
+        alphaOp,
+        data.data()))
         return false;
     if (flipY) {
-        unsigned int componentsPerPixel, bytesPerComponent;
+        unsigned componentsPerPixel, bytesPerComponent;
         if (!computeFormatAndTypeParameters(format, type,
-                                            &componentsPerPixel,
-                                            &bytesPerComponent))
+            &componentsPerPixel,
+            &bytesPerComponent))
             return false;
         // The image data is tightly packed, and we upload it as such.
-        unsigned int unpackAlignment = 1;
-        flipVertically(data.data(), image->width(), image->height(),
-                       componentsPerPixel * bytesPerComponent,
-                       unpackAlignment);
+        unsigned unpackAlignment = 1;
+        flipVertically(data.data(), width, height,
+            componentsPerPixel * bytesPerComponent,
+            unpackAlignment);
     }
+
     if (ImageObserver *observer = image->imageObserver())
         observer->didDraw(image);
     return true;
@@ -200,9 +236,14 @@ bool GraphicsContext3D::extractImageData(ImageData* imageData,
         return false;
     int width = imageData->width();
     int height = imageData->height();
-    int dataBytes = width * height * 4;
-    data.resize(dataBytes);
-    if (!packPixels(imageData->data()->data()->data(),
+
+    unsigned int packedSize;
+    // Output data is tightly packed (alignment == 1).
+    if (computeImageSizeInBytes(format, type, width, height, 1, &packedSize, 0) != GraphicsContext3D::NO_ERROR)
+        return false;
+    data.resize(packedSize);
+
+    if (!packPixels(imageData->data()->data(),
                     SourceFormatRGBA8,
                     width,
                     height,
@@ -471,8 +512,8 @@ void unpackOneRowOfABGR8ToRGBA8(const uint8_t* source, uint8_t* destination, uns
 
 void unpackOneRowOfBGRA8ToRGBA8(const uint8_t* source, uint8_t* destination, unsigned int pixelsPerRow)
 {
-    const uint32_t* source32 = reinterpret_cast<const uint32_t*>(source);
-    uint32_t* destination32 = reinterpret_cast<uint32_t*>(destination);
+    const uint32_t* source32 = reinterpret_cast_ptr<const uint32_t*>(source);
+    uint32_t* destination32 = reinterpret_cast_ptr<uint32_t*>(destination);
     for (unsigned int i = 0; i < pixelsPerRow; ++i) {
         uint32_t bgra = source32[i];
 #if CPU(BIG_ENDIAN)
@@ -513,6 +554,9 @@ void unpackOneRowOfBGRA16BigToRGBA8(const uint16_t* source, uint8_t* destination
 
 void unpackOneRowOfRGBA5551ToRGBA8(const uint16_t* source, uint8_t* destination, unsigned int pixelsPerRow)
 {
+#if HAVE(ARM_NEON_INTRINSICS)
+    SIMD::unpackOneRowOfRGBA5551ToRGBA8(source, destination, pixelsPerRow);
+#endif
     for (unsigned int i = 0; i < pixelsPerRow; ++i) {
         uint16_t packedValue = source[0];
         uint8_t r = packedValue >> 11;
@@ -529,6 +573,9 @@ void unpackOneRowOfRGBA5551ToRGBA8(const uint16_t* source, uint8_t* destination,
 
 void unpackOneRowOfRGBA4444ToRGBA8(const uint16_t* source, uint8_t* destination, unsigned int pixelsPerRow)
 {
+#if HAVE(ARM_NEON_INTRINSICS)
+    SIMD::unpackOneRowOfRGBA4444ToRGBA8(source, destination, pixelsPerRow);
+#endif
     for (unsigned int i = 0; i < pixelsPerRow; ++i) {
         uint16_t packedValue = source[0];
         uint8_t r = packedValue >> 12;
@@ -546,6 +593,9 @@ void unpackOneRowOfRGBA4444ToRGBA8(const uint16_t* source, uint8_t* destination,
 
 void unpackOneRowOfRGB565ToRGBA8(const uint16_t* source, uint8_t* destination, unsigned int pixelsPerRow)
 {
+#if HAVE(ARM_NEON_INTRINSICS)
+    SIMD::unpackOneRowOfRGB565ToRGBA8(source, destination, pixelsPerRow);
+#endif
     for (unsigned int i = 0; i < pixelsPerRow; ++i) {
         uint16_t packedValue = source[0];
         uint8_t r = packedValue >> 11;
@@ -700,6 +750,32 @@ void unpackOneRowOfA16BigToRGBA8(const uint16_t* source, uint8_t* destination, u
         destination[2] = 0x0;
         destination[3] = convertColor16BigTo8(source[0]);
         source += 1;
+        destination += 4;
+    }
+}
+
+void unpackOneRowOfRGBA8ToRGBA32F(const uint8_t* source, float* destination, unsigned int pixelsPerRow)
+{
+    const float scaleFactor = 1.0f / 255.0f;
+    for (unsigned int i = 0; i < pixelsPerRow; ++i) {
+        destination[0] = source[0] * scaleFactor;
+        destination[1] = source[1] * scaleFactor;
+        destination[2] = source[2] * scaleFactor;
+        destination[3] = source[3] * scaleFactor;
+        source += 4;
+        destination += 4;
+    }
+}
+
+void unpackOneRowOfBGRA8ToRGBA32F(const uint8_t* source, float* destination, unsigned int pixelsPerRow)
+{
+    const float scaleFactor = 1.0f / 255.0f;
+    for (unsigned int i = 0; i < pixelsPerRow; ++i) {
+        destination[0] = source[2] * scaleFactor;
+        destination[1] = source[1] * scaleFactor;
+        destination[2] = source[0] * scaleFactor;
+        destination[3] = source[3] * scaleFactor;
+        source += 4;
         destination += 4;
     }
 }
@@ -909,6 +985,9 @@ void packOneRowOfRGBA8ToRGBA8Unmultiply(const uint8_t* source, uint8_t* destinat
 
 void packOneRowOfRGBA8ToUnsignedShort4444(const uint8_t* source, uint16_t* destination, unsigned int pixelsPerRow)
 {
+#if HAVE(ARM_NEON_INTRINSICS)
+    SIMD::packOneRowOfRGBA8ToUnsignedShort4444(source, destination, pixelsPerRow);
+#endif
     for (unsigned int i = 0; i < pixelsPerRow; ++i) {
         *destination = (((source[0] & 0xF0) << 8)
                         | ((source[1] & 0xF0) << 4)
@@ -954,6 +1033,9 @@ void packOneRowOfRGBA8ToUnsignedShort4444Unmultiply(const uint8_t* source, uint1
 
 void packOneRowOfRGBA8ToUnsignedShort5551(const uint8_t* source, uint16_t* destination, unsigned int pixelsPerRow)
 {
+#if HAVE(ARM_NEON_INTRINSICS)
+    SIMD::packOneRowOfRGBA8ToUnsignedShort5551(source, destination, pixelsPerRow);
+#endif
     for (unsigned int i = 0; i < pixelsPerRow; ++i) {
         *destination = (((source[0] & 0xF8) << 8)
                         | ((source[1] & 0xF8) << 3)
@@ -999,6 +1081,9 @@ void packOneRowOfRGBA8ToUnsignedShort5551Unmultiply(const uint8_t* source, uint1
 
 void packOneRowOfRGBA8ToUnsignedShort565(const uint8_t* source, uint16_t* destination, unsigned int pixelsPerRow)
 {
+#if HAVE(ARM_NEON_INTRINSICS)
+    SIMD::packOneRowOfRGBA8ToUnsignedShort565(source, destination, pixelsPerRow);
+#endif
     for (unsigned int i = 0; i < pixelsPerRow; ++i) {
         *destination = (((source[0] & 0xF8) << 8)
                         | ((source[1] & 0xFC) << 3)
@@ -1062,10 +1147,48 @@ void packOneRowOfRGBA32FToRGB32FPremultiply(const float* source, float* destinat
     }
 }
 
+void packOneRowOfRGBA32FToRGB32FUnmultiply(const float* source, float* destination, unsigned int pixelsPerRow)
+{
+    for (unsigned int i = 0; i < pixelsPerRow; ++i) {
+        float scaleFactor = source[3] ? 1.0f / source[3] : 1.0f;
+        destination[0] = source[0] * scaleFactor;
+        destination[1] = source[1] * scaleFactor;
+        destination[2] = source[2] * scaleFactor;
+        source += 4;
+        destination += 3;
+    }
+}
+
+// Used only during RGBA8 or BGRA8 -> floating-point uploads.
+void packOneRowOfRGBA32FToRGBA32F(const float* source, float* destination, unsigned int pixelsPerRow)
+{
+    for (unsigned int i = 0; i < pixelsPerRow; ++i) {
+        destination[0] = source[0];
+        destination[1] = source[1];
+        destination[2] = source[2];
+        destination[3] = source[3];
+        source += 4;
+        destination += 4;
+    }
+}
+
 void packOneRowOfRGBA32FToRGBA32FPremultiply(const float* source, float* destination, unsigned int pixelsPerRow)
 {
     for (unsigned int i = 0; i < pixelsPerRow; ++i) {
         float scaleFactor = source[3];
+        destination[0] = source[0] * scaleFactor;
+        destination[1] = source[1] * scaleFactor;
+        destination[2] = source[2] * scaleFactor;
+        destination[3] = source[3];
+        source += 4;
+        destination += 4;
+    }
+}
+
+void packOneRowOfRGBA32FToRGBA32FUnmultiply(const float* source, float* destination, unsigned int pixelsPerRow)
+{
+    for (unsigned int i = 0; i < pixelsPerRow; ++i) {
+        float scaleFactor = source[3] ? 1.0f / source[3] : 1.0f;
         destination[0] = source[0] * scaleFactor;
         destination[1] = source[1] * scaleFactor;
         destination[2] = source[2] * scaleFactor;
@@ -1103,6 +1226,15 @@ void packOneRowOfRGBA32FToR32FPremultiply(const float* source, float* destinatio
     }
 }
 
+void packOneRowOfRGBA32FToR32FUnmultiply(const float* source, float* destination, unsigned int pixelsPerRow)
+{
+    for (unsigned int i = 0; i < pixelsPerRow; ++i) {
+        float scaleFactor = source[3] ? 1.0f / source[3] : 1.0f;
+        destination[0] = source[0] * scaleFactor;
+        source += 4;
+        destination += 1;
+    }
+}
 
 void packOneRowOfRGBA32FToRA32F(const float* source, float* destination, unsigned int pixelsPerRow)
 {
@@ -1119,7 +1251,18 @@ void packOneRowOfRGBA32FToRA32FPremultiply(const float* source, float* destinati
     for (unsigned int i = 0; i < pixelsPerRow; ++i) {
         float scaleFactor = source[3];
         destination[0] = source[0] * scaleFactor;
-        destination[1] = scaleFactor;
+        destination[1] = source[3];
+        source += 4;
+        destination += 2;
+    }
+}
+
+void packOneRowOfRGBA32FToRA32FUnmultiply(const float* source, float* destination, unsigned int pixelsPerRow)
+{
+    for (unsigned int i = 0; i < pixelsPerRow; ++i) {
+        float scaleFactor = source[3] ? 1.0f / source[3] : 1.0f;
+        destination[0] = source[0] * scaleFactor;
+        destination[1] = source[3];
         source += 4;
         destination += 2;
     }
@@ -1348,7 +1491,7 @@ static void doPacking(const void* sourceData,
         break;
     }
     default:
-        ASSERT(false);
+        ASSERT_NOT_REACHED();
     }
 }
 
@@ -1367,6 +1510,16 @@ static void doFloatingPointPacking(const void* sourceData,
 {
     switch (sourceDataFormat) {
     case GraphicsContext3D::SourceFormatRGBA8: {
+        unsigned int sourceElementsPerRow = computeSourceElementsPerRow<uint8_t>(width, 4, sourceUnpackAlignment);
+        doUnpackingAndPacking<uint8_t, float, float>(static_cast<const uint8_t*>(sourceData), unpackOneRowOfRGBA8ToRGBA32F, width, height, sourceElementsPerRow, destinationData, rowPackingFunc, destinationElementsPerPixel);
+        break;
+    }
+    case GraphicsContext3D::SourceFormatBGRA8: {
+        unsigned int sourceElementsPerRow = computeSourceElementsPerRow<uint8_t>(width, 4, sourceUnpackAlignment);
+        doUnpackingAndPacking<uint8_t, float, float>(static_cast<const uint8_t*>(sourceData), unpackOneRowOfBGRA8ToRGBA32F, width, height, sourceElementsPerRow, destinationData, rowPackingFunc, destinationElementsPerPixel);
+        break;
+    }
+    case GraphicsContext3D::SourceFormatRGBA32F: {
         unsigned int sourceElementsPerRow = computeSourceElementsPerRow<float>(width, 4, sourceUnpackAlignment);
         const float* source = static_cast<const float*>(sourceData);
         const float* endPointer = source + height * sourceElementsPerRow;
@@ -1402,6 +1555,23 @@ static void doFloatingPointPacking(const void* sourceData,
         ASSERT_NOT_REACHED();
     }
 }
+
+
+#if !ASSERT_DISABLED
+static bool isFloatingPointSource(GraphicsContext3D::SourceDataFormat format)
+{
+    switch (format) {
+    case GraphicsContext3D::SourceFormatRGBA32F:
+    case GraphicsContext3D::SourceFormatRGB32F:
+    case GraphicsContext3D::SourceFormatRA32F:
+    case GraphicsContext3D::SourceFormatR32F:
+    case GraphicsContext3D::SourceFormatA32F:
+        return true;
+    default:
+        return false;
+    }
+}
+#endif
 
 bool GraphicsContext3D::packPixels(const uint8_t* sourceData,
                                    GraphicsContext3D::SourceDataFormat sourceDataFormat,
@@ -1539,16 +1709,21 @@ bool GraphicsContext3D::packPixels(const uint8_t* sourceData,
     }
     case FLOAT: {
         // OpenGL ES, and therefore WebGL, require that the format and
-        // internalformat be identical, which implies that the source and
-        // destination formats will both be floating-point in this branch -- at
-        // least, until WebKit supports floating-point image formats natively.
-        ASSERT(sourceDataFormat == SourceFormatRGBA32F || sourceDataFormat == SourceFormatRGB32F
-               || sourceDataFormat == SourceFormatRA32F || sourceDataFormat == SourceFormatR32F
-               || sourceDataFormat == SourceFormatA32F);
-        // Because WebKit doesn't use floating-point color channels for anything
-        // internally, there's no chance we have to do a (lossy) unmultiply
-        // operation.
-        ASSERT(alphaOp == AlphaDoNothing || alphaOp == AlphaDoPremultiply);
+        // internalformat be identical. This means that whenever the
+        // developer supplies an ArrayBufferView on this code path,
+        // the source data will be in a floating-point format.
+        //
+        // The only time the source data will not be floating-point is
+        // when uploading a DOM element or ImageData as a
+        // floating-point texture. Only RGBA8 and BGRA8 are handled in
+        // this case.
+        ASSERT(isFloatingPointSource(sourceDataFormat)
+               || sourceDataFormat == SourceFormatRGBA8
+               || sourceDataFormat == SourceFormatBGRA8);
+        // When uploading a canvas into a floating-point texture,
+        // unmultiplication may be necessary.
+        ASSERT((alphaOp == AlphaDoNothing || alphaOp == AlphaDoPremultiply)
+               || !isFloatingPointSource(sourceDataFormat));
         // For the source formats with an even number of channels (RGBA32F,
         // RA32F) it is guaranteed that the pixel data is tightly packed because
         // unpack alignment <= sizeof(float) * number of channels.
@@ -1570,14 +1745,25 @@ bool GraphicsContext3D::packPixels(const uint8_t* sourceData,
             case AlphaDoPremultiply:
                 doFloatingPointPacking(sourceData, sourceDataFormat, width, height, sourceUnpackAlignment, destination, packOneRowOfRGBA32FToRGB32FPremultiply, 3);
                 break;
-            default:
-                ASSERT_NOT_REACHED();
+            case AlphaDoUnmultiply:
+                doFloatingPointPacking(sourceData, sourceDataFormat, width, height, sourceUnpackAlignment, destination, packOneRowOfRGBA32FToRGB32FUnmultiply, 3);
+                break;
             }
             break;
         case RGBA:
-            // AlphaDoNothing is handled above with fast path.
-            ASSERT(alphaOp == AlphaDoPremultiply);
-            doFloatingPointPacking(sourceData, sourceDataFormat, width, height, sourceUnpackAlignment, destination, packOneRowOfRGBA32FToRGBA32FPremultiply, 4);
+            // AlphaDoNothing for RGBA32F -> RGBA is handled above with fast path.
+            ASSERT(alphaOp != AlphaDoNothing || sourceDataFormat != SourceFormatRGBA32F);
+            switch (alphaOp) {
+            case AlphaDoNothing:
+                doFloatingPointPacking(sourceData, sourceDataFormat, width, height, sourceUnpackAlignment, destination, packOneRowOfRGBA32FToRGBA32F, 4);
+                break;
+            case AlphaDoPremultiply:
+                doFloatingPointPacking(sourceData, sourceDataFormat, width, height, sourceUnpackAlignment, destination, packOneRowOfRGBA32FToRGBA32FPremultiply, 4);
+                break;
+            case AlphaDoUnmultiply:
+                doFloatingPointPacking(sourceData, sourceDataFormat, width, height, sourceUnpackAlignment, destination, packOneRowOfRGBA32FToRGBA32FUnmultiply, 4);
+                break;
+            }
             break;
         case ALPHA:
             // From the desktop OpenGL conversion rules (OpenGL 2.1
@@ -1596,8 +1782,9 @@ bool GraphicsContext3D::packPixels(const uint8_t* sourceData,
             case AlphaDoPremultiply:
                 doFloatingPointPacking(sourceData, sourceDataFormat, width, height, sourceUnpackAlignment, destination, packOneRowOfRGBA32FToR32FPremultiply, 1);
                 break;
-            default:
-                ASSERT_NOT_REACHED();
+            case AlphaDoUnmultiply:
+                doFloatingPointPacking(sourceData, sourceDataFormat, width, height, sourceUnpackAlignment, destination, packOneRowOfRGBA32FToR32FUnmultiply, 1);
+                break;
             }
             break;
         case LUMINANCE_ALPHA:
@@ -1611,8 +1798,9 @@ bool GraphicsContext3D::packPixels(const uint8_t* sourceData,
             case AlphaDoPremultiply:
                 doFloatingPointPacking(sourceData, sourceDataFormat, width, height, sourceUnpackAlignment, destination, packOneRowOfRGBA32FToRA32FPremultiply, 2);
                 break;
-            default:
-                ASSERT_NOT_REACHED();
+            case AlphaDoUnmultiply:
+                doFloatingPointPacking(sourceData, sourceDataFormat, width, height, sourceUnpackAlignment, destination, packOneRowOfRGBA32FToRA32FUnmultiply, 2);
+                break;
             }
             break;
         }
@@ -1622,6 +1810,74 @@ bool GraphicsContext3D::packPixels(const uint8_t* sourceData,
     return true;
 }
 
+unsigned GraphicsContext3D::getClearBitsByAttachmentType(GC3Denum attachment)
+{
+    switch (attachment) {
+    case GraphicsContext3D::COLOR_ATTACHMENT0:
+        return GraphicsContext3D::COLOR_BUFFER_BIT;
+    case GraphicsContext3D::DEPTH_ATTACHMENT:
+        return GraphicsContext3D::DEPTH_BUFFER_BIT;
+    case GraphicsContext3D::STENCIL_ATTACHMENT:
+        return GraphicsContext3D::STENCIL_BUFFER_BIT;
+    case GraphicsContext3D::DEPTH_STENCIL_ATTACHMENT:
+        return GraphicsContext3D::DEPTH_BUFFER_BIT | GraphicsContext3D::STENCIL_BUFFER_BIT;
+    default:
+        return 0;
+    }
+}
+
+unsigned GraphicsContext3D::getClearBitsByFormat(GC3Denum format)
+{
+    switch (format) {
+    case GraphicsContext3D::ALPHA:
+    case GraphicsContext3D::LUMINANCE:
+    case GraphicsContext3D::LUMINANCE_ALPHA:
+    case GraphicsContext3D::RGB:
+    case GraphicsContext3D::RGB565:
+    case GraphicsContext3D::RGBA:
+    case GraphicsContext3D::RGBA4:
+    case GraphicsContext3D::RGB5_A1:
+        return GraphicsContext3D::COLOR_BUFFER_BIT;
+    case GraphicsContext3D::DEPTH_COMPONENT16:
+    case GraphicsContext3D::DEPTH_COMPONENT:
+        return GraphicsContext3D::DEPTH_BUFFER_BIT;
+    case GraphicsContext3D::STENCIL_INDEX8:
+        return GraphicsContext3D::STENCIL_BUFFER_BIT;
+    case GraphicsContext3D::DEPTH_STENCIL:
+        return GraphicsContext3D::DEPTH_BUFFER_BIT | GraphicsContext3D::STENCIL_BUFFER_BIT;
+    default:
+        return 0;
+    }
+}
+
+unsigned GraphicsContext3D::getChannelBitsByFormat(GC3Denum format)
+{
+    switch (format) {
+    case GraphicsContext3D::ALPHA:
+        return ChannelAlpha;
+    case GraphicsContext3D::LUMINANCE:
+        return ChannelRGB;
+    case GraphicsContext3D::LUMINANCE_ALPHA:
+        return ChannelRGBA;
+    case GraphicsContext3D::RGB:
+    case GraphicsContext3D::RGB565:
+        return ChannelRGB;
+    case GraphicsContext3D::RGBA:
+    case GraphicsContext3D::RGBA4:
+    case GraphicsContext3D::RGB5_A1:
+        return ChannelRGBA;
+    case GraphicsContext3D::DEPTH_COMPONENT16:
+    case GraphicsContext3D::DEPTH_COMPONENT:
+        return ChannelDepth;
+    case GraphicsContext3D::STENCIL_INDEX8:
+        return ChannelStencil;
+    case GraphicsContext3D::DEPTH_STENCIL:
+        return ChannelDepth | ChannelStencil;
+    default:
+        return 0;
+    }
+}
+
 } // namespace WebCore
 
-#endif // ENABLE(WEBGL)
+#endif // USE(3D_GRAPHICS)

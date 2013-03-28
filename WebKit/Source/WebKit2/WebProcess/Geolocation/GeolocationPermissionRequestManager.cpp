@@ -26,6 +26,8 @@
 #include "config.h"
 #include "GeolocationPermissionRequestManager.h"
 
+#if ENABLE(GEOLOCATION)
+
 #include "WebCoreArgumentCoders.h"
 #include "WebFrame.h"
 #include "WebPage.h"
@@ -71,8 +73,9 @@ void GeolocationPermissionRequestManager::cancelRequestForGeolocation(Geolocatio
     if (it == m_geolocationToIDMap.end())
         return;
 
+    uint64_t geolocationID = it->value;
     m_geolocationToIDMap.remove(it);
-    m_idToGeolocationMap.remove(it->second);
+    m_idToGeolocationMap.remove(geolocationID);
 }
 
 void GeolocationPermissionRequestManager::didReceiveGeolocationPermissionDecision(uint64_t geolocationID, bool allowed)
@@ -81,7 +84,7 @@ void GeolocationPermissionRequestManager::didReceiveGeolocationPermissionDecisio
     if (it == m_idToGeolocationMap.end())
         return;
 
-    Geolocation* geolocation = it->second;
+    Geolocation* geolocation = it->value;
     geolocation->setIsAllowed(allowed);
 
     m_idToGeolocationMap.remove(it);
@@ -89,3 +92,5 @@ void GeolocationPermissionRequestManager::didReceiveGeolocationPermissionDecisio
 }
 
 } // namespace WebKit
+
+#endif // ENABLE(GEOLOCATION)

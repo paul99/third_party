@@ -30,18 +30,8 @@
 #   include "unicode/plinux.h"
 #elif defined(__FreeBSD__)
 #   include "unicode/pfreebsd.h"
-<<<<<<< HEAD
 #elif defined(__OpenBSD__)
 #   include "unicode/popenbsd.h"
-#elif defined(ANDROID)
-#   include "unicode/pandroid.h"
-||||||| parent of 8fe08cf... Make use_system_icu=0 work for Android
-#elif defined(ANDROID)
-#   include "unicode/pandroid.h"
-=======
-#elif defined(__OpenBSD__)
-#   include "unicode/popenbsd.h"
->>>>>>> 8fe08cf... Make use_system_icu=0 work for Android
 #else
 #   include "unicode/platform.h"
 #endif

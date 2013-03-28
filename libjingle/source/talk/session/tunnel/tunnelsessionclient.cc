@@ -92,6 +92,9 @@ struct TunnelContentDescription : public ContentDescription {
   std::string description;
 
   TunnelContentDescription(const std::string& desc) : description(desc) { }
+  virtual ContentDescription* Copy() const {
+    return new TunnelContentDescription(*this);
+  }
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -147,6 +150,7 @@ talk_base::StreamInterface* TunnelSessionClientBase::CreateTunnel(
   data.jid = to;
   data.description = description;
   data.thread = talk_base::Thread::Current();
+  data.stream = NULL;
   session_manager_->signaling_thread()->Send(this, MSG_CREATE_TUNNEL, &data);
   return data.stream;
 }
@@ -182,11 +186,15 @@ void TunnelSessionClientBase::OnMessage(talk_base::Message* pmsg) {
   if (pmsg->message_id == MSG_CREATE_TUNNEL) {
     ASSERT(session_manager_->signaling_thread()->IsCurrent());
     CreateTunnelData* data = static_cast<CreateTunnelData*>(pmsg->pdata);
+    SessionDescription* offer = CreateOffer(data->jid, data->description);
+    if (offer == NULL) {
+      return;
+    }
+
     Session* session = session_manager_->CreateSession(jid_.Str(), namespace_);
     TunnelSession* tunnel = MakeTunnelSession(session, data->thread,
                                               INITIATOR);
     sessions_.push_back(tunnel);
-    SessionDescription* offer = CreateOffer(data->jid, data->description);
     session->Initiate(data->jid.Str(), offer);
     data->stream = tunnel->GetStream();
   }
@@ -219,7 +227,7 @@ TunnelSessionClient::~TunnelSessionClient() {
 
 bool TunnelSessionClient::ParseContent(SignalingProtocol protocol,
                                        const buzz::XmlElement* elem,
-                                       const ContentDescription** content,
+                                       ContentDescription** content,
                                        ParseError* error) {
   if (const buzz::XmlElement* type_elem = elem->FirstNamed(QN_TUNNEL_TYPE)) {
     *content = new TunnelContentDescription(type_elem->BodyText());
@@ -244,7 +252,7 @@ bool TunnelSessionClient::WriteContent(
 }
 
 SessionDescription* NewTunnelSessionDescription(
-    const std::string& content_name, const ContentDescription* content) {
+    const std::string& content_name, ContentDescription* content) {
   SessionDescription* sdesc = new SessionDescription();
   sdesc->AddContent(content_name, NS_TUNNEL, content);
   return sdesc;
@@ -278,8 +286,17 @@ void TunnelSessionClient::OnIncomingTunnel(const buzz::Jid &jid,
 
 SessionDescription* TunnelSessionClient::CreateOffer(
     const buzz::Jid &jid, const std::string &description) {
-  return NewTunnelSessionDescription(
+  SessionDescription* offer = NewTunnelSessionDescription(
       CN_TUNNEL, new TunnelContentDescription(description));
+  talk_base::scoped_ptr<TransportDescription> tdesc(
+      session_manager_->transport_desc_factory()->CreateOffer(NULL));
+  if (tdesc.get()) {
+    offer->AddTransportInfo(TransportInfo(CN_TUNNEL, *tdesc));
+  } else {
+    delete offer;
+    offer = NULL;
+  }
+  return offer;
 }
 
 SessionDescription* TunnelSessionClient::CreateAnswer(
@@ -289,8 +306,23 @@ SessionDescription* TunnelSessionClient::CreateAnswer(
   if (!FindTunnelContent(offer, &content_name, &offer_tunnel))
     return NULL;
 
-  return NewTunnelSessionDescription(
+  SessionDescription* answer = NewTunnelSessionDescription(
       content_name, new TunnelContentDescription(offer_tunnel->description));
+  const TransportInfo* tinfo = offer->GetTransportInfoByName(content_name);
+  if (tinfo) {
+    const TransportDescription* offer_tdesc = &tinfo->description;
+    ASSERT(offer_tdesc != NULL);
+    talk_base::scoped_ptr<TransportDescription> tdesc(
+      session_manager_->transport_desc_factory()->CreateAnswer(
+          offer_tdesc, NULL));
+    if (tdesc.get()) {
+      answer->AddTransportInfo(TransportInfo(content_name, *tdesc));
+    } else {
+      delete answer;
+      answer = NULL;
+    }
+  }
+  return answer;
 }
 ///////////////////////////////////////////////////////////////////////////////
 // TunnelSession
@@ -379,7 +411,8 @@ void TunnelSession::OnAccept() {
   const ContentInfo* content =
       session_->remote_description()->FirstContentByType(NS_TUNNEL);
   ASSERT(content != NULL);
-  VERIFY(channel_->Connect(content->name, "tcp"));
+  VERIFY(channel_->Connect(
+      content->name, "tcp", ICE_CANDIDATE_COMPONENT_DEFAULT));
 }
 
 void TunnelSession::OnTerminate() {

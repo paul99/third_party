@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,25 +26,32 @@
 #ifndef LayerTreeHost_h
 #define LayerTreeHost_h
 
+#include "LayerTreeContext.h"
+#include <WebCore/Color.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 
 namespace CoreIPC {
-class ArgumentDecoder;
 class Connection;
+class MessageDecoder;
 class MessageID;
 }
 
 namespace WebCore {
 class FloatPoint;
+class FloatRect;
 class IntRect;
 class IntSize;
 class GraphicsLayer;
+class GraphicsLayerFactory;
+
+#if PLATFORM(WIN) && USE(AVFOUNDATION)
+struct GraphicsDeviceAdapter;
+#endif
 }
 
 namespace WebKit {
 
-class LayerTreeContext;
 class UpdateInfo;
 class WebPage;
 
@@ -69,27 +76,43 @@ public:
     virtual void setNonCompositedContentsNeedDisplay(const WebCore::IntRect&) = 0;
     virtual void scrollNonCompositedContents(const WebCore::IntRect& scrollRect, const WebCore::IntSize& scrollOffset) = 0;
     virtual void forceRepaint() = 0;
+    virtual bool forceRepaintAsync(uint64_t /*callbackID*/) { return false; }
     virtual void sizeDidChange(const WebCore::IntSize& newSize) = 0;
     virtual void deviceScaleFactorDidChange() = 0;
 
     virtual void didInstallPageOverlay() = 0;
     virtual void didUninstallPageOverlay() = 0;
     virtual void setPageOverlayNeedsDisplay(const WebCore::IntRect&) = 0;
+    virtual void setPageOverlayOpacity(float) { }
+    virtual bool pageOverlayShouldApplyFadeWhenPainting() const { return true; }
 
     virtual void pauseRendering() { }
     virtual void resumeRendering() { }
 
-#if USE(TILED_BACKING_STORE)
-    virtual void setVisibleContentRectAndScale(const WebCore::IntRect&, float scale) { }
-    virtual void setVisibleContentRectTrajectoryVector(const WebCore::FloatPoint&) { }
-    virtual void setVisibleContentRectForLayer(int layerID, const WebCore::IntRect&) { }
+    virtual WebCore::GraphicsLayerFactory* graphicsLayerFactory() { return 0; }
+    virtual void setBackgroundColor(const WebCore::Color&) { }
+
+#if USE(COORDINATED_GRAPHICS)
+    virtual void setVisibleContentsRect(const WebCore::FloatRect&, float /* scale */, const WebCore::FloatPoint&) { }
     virtual void renderNextFrame() { }
     virtual void purgeBackingStores() { }
-    virtual void didReceiveLayerTreeHostMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+    virtual void didReceiveCoordinatedLayerTreeHostMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&) = 0;
 #endif
 
 #if PLATFORM(WIN)
     virtual void scheduleChildWindowGeometryUpdate(const WindowGeometry&) = 0;
+#endif
+
+#if PLATFORM(MAC)
+    virtual void setLayerHostingMode(LayerHostingMode) { }
+#endif
+
+#if PLATFORM(WIN) && USE(AVFOUNDATION)
+    virtual WebCore::GraphicsDeviceAdapter* graphicsDeviceAdapter() const { return 0; }
+#endif
+
+#if USE(COORDINATED_GRAPHICS) && ENABLE(REQUEST_ANIMATION_FRAME)
+    virtual void scheduleAnimation() = 0;
 #endif
 
 protected:
@@ -97,13 +120,12 @@ protected:
 
     WebPage* m_webPage;
 
-
-#if USE(TILED_BACKING_STORE)
+#if USE(COORDINATED_GRAPHICS)
     bool m_waitingForUIProcess;
 #endif
 };
 
-#if !PLATFORM(WIN) && !PLATFORM(QT)
+#if !PLATFORM(WIN) && !USE(COORDINATED_GRAPHICS)
 inline bool LayerTreeHost::supportsAcceleratedCompositing()
 {
     return true;

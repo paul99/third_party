@@ -13,14 +13,15 @@
 #include <CoreFoundation/CoreFoundation.h>
 
 #include "talk/base/asyncsocket.h"
+#include "talk/base/nethelpers.h"
 
 namespace talk_base {
 
 class MacBaseSocketServer;
 
-class MacAsyncSocket : public AsyncSocket {
+class MacAsyncSocket : public AsyncSocket, public sigslot::has_slots<> {
  public:
-  MacAsyncSocket(MacBaseSocketServer* ss);
+  MacAsyncSocket(MacBaseSocketServer* ss, int family);
   virtual ~MacAsyncSocket();
 
   bool valid() const { return source_ != NULL; }
@@ -30,12 +31,13 @@ class MacAsyncSocket : public AsyncSocket {
   virtual SocketAddress GetRemoteAddress() const;
   virtual int Bind(const SocketAddress& addr);
   virtual int Connect(const SocketAddress& addr);
-  virtual int Send(const void* pv, size_t cb);
-  virtual int SendTo(const void* pv, size_t cb, const SocketAddress& addr);
-  virtual int Recv(void* pv, size_t cb);
-  virtual int RecvFrom(void* pv, size_t cb, SocketAddress* paddr);
+  virtual int Send(const void* buffer, size_t length);
+  virtual int SendTo(const void* buffer, size_t length,
+                     const SocketAddress& addr);
+  virtual int Recv(void* buffer, size_t length);
+  virtual int RecvFrom(void* buffer, size_t length, SocketAddress* out_addr);
   virtual int Listen(int backlog);
-  virtual MacAsyncSocket* Accept(SocketAddress* paddr);
+  virtual MacAsyncSocket* Accept(SocketAddress* out_addr);
   virtual int Close();
   virtual int GetError() const;
   virtual void SetError(int error);
@@ -48,13 +50,17 @@ class MacAsyncSocket : public AsyncSocket {
   void EnableCallbacks();
   void DisableCallbacks();
 
+ protected:
+  void OnResolveResult(SignalThread* thread);
+  int DoConnect(const SocketAddress& addr);
+
  private:
   // Creates an async socket from an existing bsd socket
-  explicit MacAsyncSocket(MacBaseSocketServer* ss, int native_socket);
+  MacAsyncSocket(MacBaseSocketServer* ss, int family, int native_socket);
 
    // Attaches the socket to the CFRunloop and sets the wrapped bsd socket
   // to async mode
-  void Initialize();
+  void Initialize(int family);
 
   // Translate the SocketAddress into a CFDataRef to pass to CF socket
   // functions. Caller must call CFRelease on the result when done.
@@ -75,6 +81,7 @@ class MacAsyncSocket : public AsyncSocket {
   bool disabled_;
   int error_;
   ConnState state_;
+  AsyncResolver* resolver_;
 
   DISALLOW_EVIL_CONSTRUCTORS(MacAsyncSocket);
 };

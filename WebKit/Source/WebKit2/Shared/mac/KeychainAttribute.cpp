@@ -26,6 +26,8 @@
 #include "config.h"
 #include "KeychainAttribute.h"
 
+#if USE(SECURITY_FRAMEWORK)
+
 #include "ArgumentCoders.h"
 #include "ArgumentCodersCF.h"
 
@@ -49,10 +51,10 @@ KeychainAttribute::KeychainAttribute(const SecKeychainAttribute& secKeychainAttr
 
 namespace CoreIPC {
 
-void encode(CoreIPC::ArgumentEncoder* encoder, const WebKit::KeychainAttribute& attribute)
+void encode(CoreIPC::ArgumentEncoder& encoder, const WebKit::KeychainAttribute& attribute)
 {
-    encoder->encodeUInt32(static_cast<uint32_t>(attribute.tag));
-    encoder->encodeBool(attribute.data);
+    encoder << static_cast<uint32_t>(attribute.tag);
+    encoder << static_cast<bool>(attribute.data);
     if (attribute.data)
         CoreIPC::encode(encoder, attribute.data.get());
 }
@@ -76,3 +78,5 @@ bool decode(CoreIPC::ArgumentDecoder* decoder, WebKit::KeychainAttribute& attrib
 }
 
 } // namespace CoreIPC
+
+#endif // USE(SECURITY_FRAMEWORK)

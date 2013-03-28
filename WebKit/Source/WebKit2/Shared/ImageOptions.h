@@ -32,6 +32,14 @@ enum ImageOptions {
     ImageOptionsShareable = 1 << 0,
 };
 
+enum {
+    SnapshotOptionsShareable = 1 << 0,
+    SnapshotOptionsExcludeSelectionHighlighting = 1 << 1,
+    SnapshotOptionsInViewCoordinates = 1 << 2,
+    SnapshotOptionsPaintSelectionRectangle = 1 << 3
+};
+typedef uint32_t SnapshotOptions;
+
 } // namespace WebKit
 
 #endif // ImageOptions_h

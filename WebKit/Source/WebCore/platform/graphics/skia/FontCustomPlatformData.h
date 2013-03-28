@@ -35,14 +35,13 @@
 #include "FontOrientation.h"
 #include "FontRenderingMode.h"
 #include "FontWidthVariant.h"
-#include "TextOrientation.h"
 #include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
 
 #if OS(WINDOWS)
-#include "PlatformString.h"
 #include <windows.h>
-#elif OS(UNIX) || OS(ANDROID)
+#include <wtf/text/WTFString.h>
+#elif OS(UNIX)
 #include "SkTypeface.h"
 #endif
 
@@ -59,7 +58,7 @@ public:
         : m_fontReference(fontReference)
         , m_name(name)
     {}
-#elif OS(UNIX) || OS(ANDROID)
+#elif OS(UNIX)
     explicit FontCustomPlatformData(SkTypeface* typeface)
         : m_fontReference(typeface)
     {}
@@ -67,7 +66,7 @@ public:
 
     ~FontCustomPlatformData();
 
-    FontPlatformData fontPlatformData(int size, bool bold, bool italic, FontOrientation = Horizontal, TextOrientation = TextOrientationVerticalRight,
+    FontPlatformData fontPlatformData(int size, bool bold, bool italic, FontOrientation = Horizontal,
                                       FontWidthVariant = RegularWidth, FontRenderingMode = NormalRenderingMode);
 
     static bool supportsFormat(const String&);
@@ -75,7 +74,7 @@ public:
 #if OS(WINDOWS)
     HANDLE m_fontReference;
     String m_name;
-#elif OS(UNIX) || OS(ANDROID)
+#elif OS(UNIX)
     SkTypeface* m_fontReference;
 #endif
 };

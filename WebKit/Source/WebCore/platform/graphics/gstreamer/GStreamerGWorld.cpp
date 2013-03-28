@@ -19,7 +19,7 @@
 
 #include "config.h"
 #include "GStreamerGWorld.h"
-#if ENABLE(VIDEO) && USE(GSTREAMER)
+#if ENABLE(VIDEO) && USE(GSTREAMER) && !defined(GST_API_VERSION_1)
 
 #include "GRefPtrGStreamer.h"
 #include <gst/gst.h>
@@ -37,7 +37,7 @@ using namespace std;
 
 namespace WebCore {
 
-gboolean gstGWorldSyncMessageCallback(GstBus* bus, GstMessage* message, gpointer data)
+gboolean gstGWorldSyncMessageCallback(GstBus*, GstMessage* message, gpointer data)
 {
     ASSERT(GST_MESSAGE_TYPE(message) == GST_MESSAGE_ELEMENT);
 
@@ -216,4 +216,4 @@ void GStreamerGWorld::setWindowOverlay(GstMessage* message)
 }
 
 }
-#endif // USE(GSTREAMER)
+#endif // ENABLE(VIDEO) && USE(GSTREAMER) && !defined(GST_API_VERSION_1)

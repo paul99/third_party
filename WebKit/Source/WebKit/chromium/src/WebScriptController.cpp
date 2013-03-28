@@ -31,11 +31,7 @@
 #include "config.h"
 #include "WebScriptController.h"
 
-#include "V8Binding.h"
-#include "V8DOMMap.h"
-#include "V8Proxy.h"
-
-#include "platform/WebString.h"
+#include "ScriptController.h"
 
 using namespace WebCore;
 
@@ -43,12 +39,12 @@ namespace WebKit {
 
 void WebScriptController::registerExtension(v8::Extension* extension)
 {
-    V8Proxy::registerExtension(extension);
+    ScriptController::registerExtensionIfNeeded(extension);
 }
 
 void WebScriptController::enableV8SingleThreadMode()
 {
-    enableFasterDOMStoreAccess();
+    // FIXME: remove this method after all it's usages are gone.
 }
 
 void WebScriptController::flushConsoleMessages()

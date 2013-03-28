@@ -33,49 +33,50 @@
 #if ENABLE(WORKERS)
 #include "V8DedicatedWorkerContext.h"
 
-#include "ArrayBuffer.h"
+#include <wtf/ArrayBuffer.h>
 #include "DedicatedWorkerContext.h"
-#include "WorkerContextExecutionProxy.h"
 #include "V8Binding.h"
-#include "V8Proxy.h"
 #include "V8Utilities.h"
 #include "V8WorkerContextEventListener.h"
 
 namespace WebCore {
 
-static v8::Handle<v8::Value> handlePostMessageCallback(const v8::Arguments& args, bool extendedTransfer)
+static v8::Handle<v8::Value> handlePostMessageCallback(const v8::Arguments& args)
 {
     DedicatedWorkerContext* workerContext = V8DedicatedWorkerContext::toNative(args.Holder());
     MessagePortArray ports;
     ArrayBufferArray arrayBuffers;
     if (args.Length() > 1) {
-        if (!extractTransferables(args[1], ports, arrayBuffers))
+        if (!extractTransferables(args[1], ports, arrayBuffers, args.GetIsolate()))
             return v8::Undefined();
     }
     bool didThrow = false;
     RefPtr<SerializedScriptValue> message =
         SerializedScriptValue::create(args[0],
                                       &ports,
-                                      extendedTransfer ? &arrayBuffers : 0,
-                                      didThrow);
+                                      &arrayBuffers,
+                                      didThrow,
+                                      args.GetIsolate());
     if (didThrow)
         return v8::Undefined();
     ExceptionCode ec = 0;
     workerContext->postMessage(message.release(), &ports, ec);
-    return throwError(ec);
+    return setDOMException(ec, args.GetIsolate());
 }
 
 v8::Handle<v8::Value> V8DedicatedWorkerContext::postMessageCallback(const v8::Arguments& args)
 {
-    INC_STATS(L"DOM.DedicatedWorkerContext.postMessage");
-    return handlePostMessageCallback(args, false);
+    INC_STATS("DOM.DedicatedWorkerContext.postMessage");
+    return handlePostMessageCallback(args);
 }
 
+#if ENABLE(LEGACY_VENDOR_PREFIXES)
 v8::Handle<v8::Value> V8DedicatedWorkerContext::webkitPostMessageCallback(const v8::Arguments& args)
 {
-    INC_STATS(L"DOM.DedicatedWorkerContext.postMessage");
-    return handlePostMessageCallback(args, true);
+    INC_STATS("DOM.DedicatedWorkerContext.postMessage");
+    return handlePostMessageCallback(args);
 }
+#endif
 
 } // namespace WebCore
 

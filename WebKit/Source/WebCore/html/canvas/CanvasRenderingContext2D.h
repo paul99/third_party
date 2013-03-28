@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2009, 2010, 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,12 +34,13 @@
 #include "FloatSize.h"
 #include "Font.h"
 #include "GraphicsTypes.h"
+#include "ImageBuffer.h"
 #include "Path.h"
-#include "PlatformString.h"
 #include <wtf/Vector.h>
+#include <wtf/text/WTFString.h>
 
 #if USE(ACCELERATED_COMPOSITING)
-#include "GraphicsLayer.h"
+#include "PlatformLayer.h"
 #endif
 
 namespace WebCore {
@@ -65,10 +66,6 @@ public:
     }
     virtual ~CanvasRenderingContext2D();
 
-    virtual bool is2d() const { return true; }
-    virtual bool isAccelerated() const;
-    virtual bool paintsIntoCanvasBuffer() const;
-
     CanvasStyle* strokeStyle() const;
     void setStrokeStyle(PassRefPtr<CanvasStyle>);
 
@@ -87,9 +84,12 @@ public:
     float miterLimit() const;
     void setMiterLimit(float);
 
-    const DashArray* webkitLineDash() const;
-    void setWebkitLineDash(const DashArray&);
+    const Vector<float>& getLineDash() const;
+    void setLineDash(const Vector<float>&);
+    void setWebkitLineDash(const Vector<float>&);
 
+    float lineDashOffset() const;
+    void setLineDashOffset(float);
     float webkitLineDashOffset() const;
     void setWebkitLineDashOffset(float);
 
@@ -111,9 +111,8 @@ public:
     String globalCompositeOperation() const;
     void setGlobalCompositeOperation(const String&);
 
-    void save();
+    void save() { ++m_unrealizedSaveCount; }
     void restore();
-    void setAllAttributesToDefault();
 
     void scale(float sx, float sy);
     void rotate(float angleInRadians);
@@ -198,8 +197,13 @@ public:
     PassRefPtr<ImageData> createImageData(PassRefPtr<ImageData>, ExceptionCode&) const;
     PassRefPtr<ImageData> createImageData(float width, float height, ExceptionCode&) const;
     PassRefPtr<ImageData> getImageData(float sx, float sy, float sw, float sh, ExceptionCode&) const;
+    PassRefPtr<ImageData> webkitGetImageDataHD(float sx, float sy, float sw, float sh, ExceptionCode&) const;
     void putImageData(ImageData*, float dx, float dy, ExceptionCode&);
     void putImageData(ImageData*, float dx, float dy, float dirtyX, float dirtyY, float dirtyWidth, float dirtyHeight, ExceptionCode&);
+    void webkitPutImageDataHD(ImageData*, float dx, float dy, ExceptionCode&);
+    void webkitPutImageDataHD(ImageData*, float dx, float dy, float dirtyX, float dirtyY, float dirtyWidth, float dirtyHeight, ExceptionCode&);
+
+    float webkitBackingStorePixelRatio() const { return canvas()->deviceScaleFactor(); }
 
     void reset();
 
@@ -221,9 +225,8 @@ public:
     LineCap getLineCap() const { return state().m_lineCap; }
     LineJoin getLineJoin() const { return state().m_lineJoin; }
 
-#if ENABLE(ACCELERATED_2D_CANVAS) && USE(ACCELERATED_COMPOSITING)
-    virtual PlatformLayer* platformLayer() const;
-#endif
+    bool webkitImageSmoothingEnabled() const;
+    void setWebkitImageSmoothingEnabled(bool);
 
 private:
     struct State : FontSelectorClient {
@@ -233,7 +236,7 @@ private:
         State(const State&);
         State& operator=(const State&);
 
-        virtual void fontsNeedUpdate(FontSelector*);
+        virtual void fontsNeedUpdate(FontSelector*) OVERRIDE;
 
         String m_unparsedStrokeColor;
         String m_unparsedFillColor;
@@ -248,10 +251,12 @@ private:
         RGBA32 m_shadowColor;
         float m_globalAlpha;
         CompositeOperator m_globalComposite;
+        BlendMode m_globalBlend;
         AffineTransform m_transform;
         bool m_invertibleCTM;
-        DashArray m_lineDash;
+        Vector<float> m_lineDash;
         float m_lineDashOffset;
+        bool m_imageSmoothingEnabled;
 
         // Text state.
         TextAlign m_textAlign;
@@ -272,12 +277,13 @@ private:
 
     CanvasRenderingContext2D(HTMLCanvasElement*, bool usesCSSCompatibilityParseMode, bool usesDashboardCompatibilityMode);
 
-    Path m_path;
-
-    State& state() { return m_stateStack.last(); }
+    State& modifiableState() { ASSERT(!m_unrealizedSaveCount); return m_stateStack.last(); }
     const State& state() const { return m_stateStack.last(); }
 
+    void applyLineDash() const;
+    void setShadow(const FloatSize& offset, float blur, RGBA32 color);
     void applyShadow();
+    bool shouldDrawShadows() const;
 
     void didDraw(const FloatRect&, unsigned options = CanvasDidDrawApplyAll);
     void didDrawEntireCanvas();
@@ -285,6 +291,12 @@ private:
     GraphicsContext* drawingContext() const;
 
     void unwindStateStack();
+    void realizeSaves()
+    {
+        if (m_unrealizedSaveCount)
+            realizeSavesLoop();
+    }
+    void realizeSavesLoop();
 
     void applyStrokePattern();
     void applyFillPattern();
@@ -306,12 +318,26 @@ private:
     PassOwnPtr<ImageBuffer> createCompositingBuffer(const IntRect&);
     void compositeBuffer(ImageBuffer*, const IntRect&, CompositeOperator);
 
+    void inflateStrokeRect(FloatRect&) const;
+
     template<class T> void fullCanvasCompositedFill(const T&);
     template<class T> void fullCanvasCompositedDrawImage(T*, ColorSpace, const FloatRect&, const FloatRect&, CompositeOperator);
 
     void prepareGradientForDashboard(CanvasGradient* gradient) const;
 
+    PassRefPtr<ImageData> getImageData(ImageBuffer::CoordinateSystem, float sx, float sy, float sw, float sh, ExceptionCode&) const;
+    void putImageData(ImageData*, ImageBuffer::CoordinateSystem, float dx, float dy, float dirtyX, float dirtyY, float dirtyWidth, float dirtyHeight, ExceptionCode&);
+
+    virtual bool is2d() const OVERRIDE { return true; }
+    virtual bool isAccelerated() const OVERRIDE;
+
+#if ENABLE(ACCELERATED_2D_CANVAS) && USE(ACCELERATED_COMPOSITING)
+    virtual PlatformLayer* platformLayer() const OVERRIDE;
+#endif
+
+    Path m_path;
     Vector<State, 1> m_stateStack;
+    unsigned m_unrealizedSaveCount;
     bool m_usesCSSCompatibilityParseMode;
 #if ENABLE(DASHBOARD_SUPPORT)
     bool m_usesDashboardCompatibilityMode;

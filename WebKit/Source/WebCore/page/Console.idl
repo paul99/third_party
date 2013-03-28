@@ -26,39 +26,40 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-module window {
+[
+    JSGenerateIsReachable=ImplFrame,
+    OmitConstructor
+] interface Console {
 
-    interface [
-        GenerateIsReachable=ImplFrame,
-        OmitConstructor
-    ] Console {
-
-        [CustomArgumentHandling] void debug();
-        [CustomArgumentHandling] void error();
-        [CustomArgumentHandling] void info();
-        [CustomArgumentHandling] void log();
-        [CustomArgumentHandling] void warn();
-        [CustomArgumentHandling] void dir();
-        [CustomArgumentHandling] void dirxml();
-        [V8Custom, CustomArgumentHandling] void trace();
-        [V8Custom, CustomArgumentHandling, ImplementationFunction=assertCondition] void assert(in boolean condition);
-        [CustomArgumentHandling] void count();
-        [CustomArgumentHandling] void markTimeline();
+    [CallWith=ScriptArguments|ScriptState] void debug();
+    [CallWith=ScriptArguments|ScriptState] void error();
+    [CallWith=ScriptArguments|ScriptState] void info();
+    [CallWith=ScriptArguments|ScriptState] void log();
+    [CallWith=ScriptArguments|ScriptState] void warn();
+    [CallWith=ScriptArguments|ScriptState] void dir();
+    [CallWith=ScriptArguments|ScriptState] void dirxml();
+    [V8Custom, CallWith=ScriptArguments|ScriptState] void trace();
+    [V8Custom, CallWith=ScriptArguments|ScriptState, ImplementedAs=assertCondition] void assert(in boolean condition);
+    [CallWith=ScriptArguments|ScriptState] void count();
+    [CallWith=ScriptArguments] void markTimeline();
 
 #if defined(ENABLE_JAVASCRIPT_DEBUGGER) && ENABLE_JAVASCRIPT_DEBUGGER
-        readonly attribute [CustomGetter] Array profiles;
-        [Custom] void profile(in DOMString title);
-        [Custom] void profileEnd(in DOMString title);
+    // As per spec: http://www.w3.org/TR/WebIDL/#idl-sequence
+    // "Sequences must not be used as the type of an attribute, constant or exception field."
+    // FIXME: this will lead to BUG console.profiles !== console.profiles as profile will always returns new array.
+    readonly attribute ScriptProfile[] profiles;
+    [Custom] void profile(in DOMString title);
+    [Custom] void profileEnd(in DOMString title);
 #endif
 
-        void time(in [ConvertUndefinedOrNullToNullString,Optional=CallWithDefaultValue] DOMString title);
-        [CustomArgumentHandling] void timeEnd(in [ConvertUndefinedOrNullToNullString] DOMString title);
-        [CustomArgumentHandling] void timeStamp();
-        [CustomArgumentHandling] void group();
-        [CustomArgumentHandling] void groupCollapsed();
-        void groupEnd();
+    void time(in [TreatNullAs=NullString, TreatUndefinedAs=NullString] DOMString title);
+    [CallWith=ScriptState] void timeEnd(in [TreatNullAs=NullString, TreatUndefinedAs=NullString] DOMString title);
+    [CallWith=ScriptArguments] void timeStamp();
+    [CallWith=ScriptArguments|ScriptState] void group();
+    [CallWith=ScriptArguments|ScriptState] void groupCollapsed();
+    void groupEnd();
+    [CallWith=ScriptArguments|ScriptState] void clear();
 
-        readonly attribute [V8CustomGetter] MemoryInfo memory;
-    };
+    readonly attribute MemoryInfo memory;
+};
 
-}

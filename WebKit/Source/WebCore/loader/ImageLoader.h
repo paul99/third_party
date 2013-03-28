@@ -24,19 +24,29 @@
 #define ImageLoader_h
 
 #include "CachedImage.h"
+#include "CachedImageClient.h"
 #include "CachedResourceHandle.h"
+#include <wtf/OwnPtr.h>
+#include <wtf/PassOwnPtr.h>
 #include <wtf/text/AtomicString.h>
 
 namespace WebCore {
 
 class Element;
-class ImageLoadEventSender;
+class ImageLoader;
+class ImageLoaderClient;
+class QualifiedName;
 class RenderImageResource;
+
+template<typename T> class EventSender;
+typedef EventSender<ImageLoader> ImageEventSender;
 
 class ImageLoader : public CachedImageClient {
 public:
-    ImageLoader(Element*);
+    explicit ImageLoader(ImageLoaderClient*);
     virtual ~ImageLoader();
+
+    ImageLoaderClient* client() const { return m_client; }
 
     // This function should be called when the element is attached to a document; starts
     // loading if a load hasn't already been started.
@@ -48,7 +58,6 @@ public:
 
     void elementDidMoveToNewDocument();
 
-    Element* element() const { return m_element; }
     bool imageComplete() const { return m_imageComplete; }
 
     CachedImage* image() const { return m_image.get(); }
@@ -56,33 +65,43 @@ public:
 
     void setLoadManually(bool loadManually) { m_loadManually = loadManually; }
 
-    bool haveFiredBeforeLoadEvent() const { return m_firedBeforeLoad; }
-    bool haveFiredLoadEvent() const { return m_firedLoad; }
+    bool hasPendingBeforeLoadEvent() const { return m_hasPendingBeforeLoadEvent; }
+    bool hasPendingActivity() const { return m_hasPendingLoadEvent || m_hasPendingErrorEvent; }
+
+    void dispatchPendingEvent(ImageEventSender*);
 
     static void dispatchPendingBeforeLoadEvents();
     static void dispatchPendingLoadEvents();
+    static void dispatchPendingErrorEvents();
 
 protected:
     virtual void notifyFinished(CachedResource*);
 
 private:
+    Document* document();
     virtual void dispatchLoadEvent() = 0;
     virtual String sourceURI(const AtomicString&) const = 0;
 
-    friend class ImageEventSender;
+    void updatedHasPendingEvent();
+
     void dispatchPendingBeforeLoadEvent();
     void dispatchPendingLoadEvent();
+    void dispatchPendingErrorEvent();
 
     RenderImageResource* renderImageResource();
     void updateRenderer();
 
-    Element* m_element;
+    void setImageWithoutConsideringPendingLoadEvent(CachedImage*);
+
+    ImageLoaderClient* m_client;
     CachedResourceHandle<CachedImage> m_image;
     AtomicString m_failedLoadURL;
-    bool m_firedBeforeLoad : 1;
-    bool m_firedLoad : 1;
+    bool m_hasPendingBeforeLoadEvent : 1;
+    bool m_hasPendingLoadEvent : 1;
+    bool m_hasPendingErrorEvent : 1;
     bool m_imageComplete : 1;
     bool m_loadManually : 1;
+    bool m_elementIsProtected : 1;
 };
 
 }

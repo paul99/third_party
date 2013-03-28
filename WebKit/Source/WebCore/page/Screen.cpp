@@ -35,6 +35,7 @@
 #include "FrameView.h"
 #include "InspectorInstrumentation.h"
 #include "PlatformScreen.h"
+#include "Settings.h"
 #include "Widget.h"
 
 namespace WebCore {
@@ -48,14 +49,29 @@ unsigned Screen::horizontalDPI() const
 {
     if (!m_frame)
         return 0;
-    return static_cast<unsigned>(screenHorizontalDPI(m_frame->view()));
+
+    // Used by the testing system, can be set from internals.
+    IntSize override = m_frame->page()->settings()->resolutionOverride();
+    if (!override.isEmpty())
+        return override.width();
+
+    // The DPI is defined as dots per CSS inch and thus not device inch.
+    return m_frame->page()->deviceScaleFactor() * 96;
 }
 
 unsigned Screen::verticalDPI() const
 {
+    // The DPI is defined as dots per CSS inch and thus not device inch.
     if (!m_frame)
         return 0;
-    return static_cast<unsigned>(screenVerticalDPI(m_frame->view()));
+
+    // Used by the testing system, can be set from internals.
+    IntSize override = m_frame->page()->settings()->resolutionOverride();
+    if (!override.isEmpty())
+        return override.height();
+
+    // The DPI is defined as dots per CSS inch and thus not device inch.
+    return m_frame->page()->deviceScaleFactor() * 96;
 }
 
 unsigned Screen::height() const

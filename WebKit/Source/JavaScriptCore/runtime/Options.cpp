@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,72 +26,37 @@
 #include "config.h"
 #include "Options.h"
 
+#include "HeapStatistics.h"
+#include <algorithm>
 #include <limits>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <wtf/NumberOfCores.h>
 #include <wtf/PageBlock.h>
+#include <wtf/StdLibExtras.h>
+#include <wtf/StringExtras.h>
+#include <wtf/UnusedParam.h>
 
 #if OS(DARWIN) && ENABLE(PARALLEL_GC)
 #include <sys/sysctl.h>
 #endif
 
-// Set to 1 to control the heuristics using environment variables.
-#define ENABLE_RUN_TIME_HEURISTICS 0
+namespace JSC {
 
-#if ENABLE(RUN_TIME_HEURISTICS)
-#include <stdio.h>
-#include <stdlib.h>
-#include <wtf/StdLibExtras.h>
-#endif
+static bool parse(const char* string, bool& value)
+{
+    if (!strcasecmp(string, "true") || !strcasecmp(string, "yes") || !strcmp(string, "1")) {
+        value = true;
+        return true;
+    }
+    if (!strcasecmp(string, "false") || !strcasecmp(string, "no") || !strcmp(string, "0")) {
+        value = false;
+        return true;
+    }
+    return false;
+}
 
-namespace JSC { namespace Options {
-
-unsigned maximumOptimizationCandidateInstructionCount;
-
-unsigned maximumFunctionForCallInlineCandidateInstructionCount;
-unsigned maximumFunctionForConstructInlineCandidateInstructionCount;
-
-unsigned maximumInliningDepth;
-
-int32_t executionCounterValueForOptimizeAfterWarmUp;
-int32_t executionCounterValueForOptimizeAfterLongWarmUp;
-int32_t executionCounterValueForDontOptimizeAnytimeSoon;
-int32_t executionCounterValueForOptimizeSoon;
-int32_t executionCounterValueForOptimizeNextInvocation;
-
-int32_t executionCounterIncrementForLoop;
-int32_t executionCounterIncrementForReturn;
-
-unsigned desiredSpeculativeSuccessFailRatio;
-
-double likelyToTakeSlowCaseThreshold;
-double couldTakeSlowCaseThreshold;
-unsigned likelyToTakeSlowCaseMinimumCount;
-unsigned couldTakeSlowCaseMinimumCount;
-
-double osrExitProminenceForFrequentExitSite;
-
-unsigned largeFailCountThresholdBase;
-unsigned largeFailCountThresholdBaseForLoop;
-
-unsigned reoptimizationRetryCounterMax;
-unsigned reoptimizationRetryCounterStep;
-
-unsigned minimumOptimizationDelay;
-unsigned maximumOptimizationDelay;
-double desiredProfileLivenessRate;
-double desiredProfileFullnessRate;
-
-double doubleVoteRatioForDoubleFormat;
-
-unsigned minimumNumberOfScansBetweenRebalance;
-unsigned gcMarkStackSegmentSize;
-unsigned minimumNumberOfCellsToKeep;
-unsigned maximumNumberOfSharedSegments;
-unsigned sharedStackWakeupThreshold;
-unsigned numberOfGCMarkers;
-unsigned opaqueRootMergeThreshold;
-
-#if ENABLE(RUN_TIME_HEURISTICS)
 static bool parse(const char* string, int32_t& value)
 {
     return sscanf(string, "%d", &value) == 1;
@@ -107,105 +72,164 @@ static bool parse(const char* string, double& value)
     return sscanf(string, "%lf", &value) == 1;
 }
 
-template<typename T, typename U>
-void setHeuristic(T& variable, const char* name, U value)
+template<typename T>
+void overrideOptionWithHeuristic(T& variable, const char* name)
 {
+#if !OS(WINCE)
     const char* stringValue = getenv(name);
-    if (!stringValue) {
-        variable = safeCast<T>(value);
+    if (!stringValue)
         return;
-    }
     
     if (parse(stringValue, variable))
         return;
     
     fprintf(stderr, "WARNING: failed to parse %s=%s\n", name, stringValue);
-    variable = safeCast<T>(value);
+#endif
 }
 
-#define SET(variable, value) setHeuristic(variable, "JSC_" #variable, value)
-#else
-#define SET(variable, value) variable = value
-#endif
-
-void initializeOptions()
+static unsigned computeNumberOfGCMarkers(int maxNumberOfGCMarkers)
 {
-    SET(maximumOptimizationCandidateInstructionCount, 1100);
-    
-    SET(maximumFunctionForCallInlineCandidateInstructionCount, 180);
-    SET(maximumFunctionForConstructInlineCandidateInstructionCount, 100);
-    
-    SET(maximumInliningDepth, 5);
-
-    SET(executionCounterValueForOptimizeAfterWarmUp,     -1000);
-    SET(executionCounterValueForOptimizeAfterLongWarmUp, -5000);
-    SET(executionCounterValueForDontOptimizeAnytimeSoon, std::numeric_limits<int32_t>::min());
-    SET(executionCounterValueForOptimizeSoon,            -1000);
-    SET(executionCounterValueForOptimizeNextInvocation,  0);
-
-    SET(executionCounterIncrementForLoop,   1);
-    SET(executionCounterIncrementForReturn, 15);
-
-    SET(desiredSpeculativeSuccessFailRatio, 6);
-    
-    SET(likelyToTakeSlowCaseThreshold,    0.15);
-    SET(couldTakeSlowCaseThreshold,       0.05); // Shouldn't be zero because some ops will spuriously take slow case, for example for linking or caching.
-    SET(likelyToTakeSlowCaseMinimumCount, 100);
-    SET(couldTakeSlowCaseMinimumCount,    10);
-    
-    SET(osrExitProminenceForFrequentExitSite, 0.3);
-
-    SET(largeFailCountThresholdBase,        20);
-    SET(largeFailCountThresholdBaseForLoop, 1);
-
-    SET(reoptimizationRetryCounterStep, 1);
-
-    SET(minimumOptimizationDelay,   1);
-    SET(maximumOptimizationDelay,   5);
-    SET(desiredProfileLivenessRate, 0.75);
-    SET(desiredProfileFullnessRate, 0.35);
-    
-    SET(doubleVoteRatioForDoubleFormat, 2);
-    
-    SET(minimumNumberOfScansBetweenRebalance, 10000);
-    SET(gcMarkStackSegmentSize,               pageSize());
-    SET(minimumNumberOfCellsToKeep,           10);
-    SET(maximumNumberOfSharedSegments,        3);
-    SET(sharedStackWakeupThreshold,           1);
-    SET(opaqueRootMergeThreshold,             1000);
-
     int cpusToUse = 1;
+
 #if ENABLE(PARALLEL_GC)
-    cpusToUse = WTF::numberOfProcessorCores();
-#endif
-    // We don't scale so well beyond 4.
-    if (cpusToUse > 4)
-        cpusToUse = 4;
+    cpusToUse = std::min(WTF::numberOfProcessorCores(), maxNumberOfGCMarkers);
+
     // Be paranoid, it is the OS we're dealing with, after all.
+    ASSERT(cpusToUse >= 1);
     if (cpusToUse < 1)
         cpusToUse = 1;
-    
-    SET(numberOfGCMarkers, cpusToUse);
+#else
+    UNUSED_PARAM(maxNumberOfGCMarkers);
+#endif
 
-    ASSERT(executionCounterValueForDontOptimizeAnytimeSoon <= executionCounterValueForOptimizeAfterLongWarmUp);
-    ASSERT(executionCounterValueForOptimizeAfterLongWarmUp <= executionCounterValueForOptimizeAfterWarmUp);
-    ASSERT(executionCounterValueForOptimizeAfterWarmUp <= executionCounterValueForOptimizeSoon);
-    ASSERT(executionCounterValueForOptimizeAfterWarmUp < 0);
-    ASSERT(executionCounterValueForOptimizeSoon <= executionCounterValueForOptimizeNextInvocation);
+    return cpusToUse;
+}
+
+Options::Entry Options::s_options[Options::numberOfOptions];
+
+// Realize the names for each of the options:
+const Options::EntryInfo Options::s_optionsInfo[Options::numberOfOptions] = {
+#define FOR_EACH_OPTION(type_, name_, defaultValue_) \
+    { #name_, Options::type_##Type },
+    JSC_OPTIONS(FOR_EACH_OPTION)
+#undef FOR_EACH_OPTION
+};
+
+void Options::initialize()
+{
+    // Initialize each of the options with their default values:
+#define FOR_EACH_OPTION(type_, name_, defaultValue_) \
+    name_() = defaultValue_;
+    JSC_OPTIONS(FOR_EACH_OPTION)
+#undef FOR_EACH_OPTION
+        
+#if USE(CF) || OS(UNIX)
+    objectsAreImmortal() = !!getenv("JSImmortalZombieEnabled");
+    useZombieMode() = !!getenv("JSImmortalZombieEnabled") || !!getenv("JSZombieEnabled");
+
+    gcMaxHeapSize() = getenv("GCMaxHeapSize") ? HeapStatistics::parseMemoryAmount(getenv("GCMaxHeapSize")) : 0;
+    recordGCPauseTimes() = !!getenv("JSRecordGCPauseTimes");
+    logHeapStatisticsAtExit() = gcMaxHeapSize() || recordGCPauseTimes();
+#endif
+
+    // Allow environment vars to override options if applicable.
+    // The evn var should be the name of the option prefixed with
+    // "JSC_".
+#define FOR_EACH_OPTION(type_, name_, defaultValue_) \
+    overrideOptionWithHeuristic(name_(), "JSC_" #name_);
+    JSC_OPTIONS(FOR_EACH_OPTION)
+#undef FOR_EACH_OPTION
+
+#if 0
+    ; // Deconfuse editors that do auto indentation
+#endif
     
+#if !ENABLE(JIT)
+    useJIT() = false;
+    useDFGJIT() = false;
+#endif
+#if !ENABLE(YARR_JIT)
+    useRegExpJIT() = false;
+#endif
+    
+    // Do range checks where needed and make corrections to the options:
+    ASSERT(thresholdForOptimizeAfterLongWarmUp() >= thresholdForOptimizeAfterWarmUp());
+    ASSERT(thresholdForOptimizeAfterWarmUp() >= thresholdForOptimizeSoon());
+    ASSERT(thresholdForOptimizeAfterWarmUp() >= 0);
+
     // Compute the maximum value of the reoptimization retry counter. This is simply
     // the largest value at which we don't overflow the execute counter, when using it
     // to left-shift the execution counter by this amount. Currently the value ends
     // up being 18, so this loop is not so terrible; it probably takes up ~100 cycles
     // total on a 32-bit processor.
-    reoptimizationRetryCounterMax = 0;
-    while ((static_cast<int64_t>(executionCounterValueForOptimizeAfterLongWarmUp) << (reoptimizationRetryCounterMax + 1)) >= static_cast<int64_t>(std::numeric_limits<int32_t>::min()))
-        reoptimizationRetryCounterMax++;
-    
-    ASSERT((static_cast<int64_t>(executionCounterValueForOptimizeAfterLongWarmUp) << reoptimizationRetryCounterMax) < 0);
-    ASSERT((static_cast<int64_t>(executionCounterValueForOptimizeAfterLongWarmUp) << reoptimizationRetryCounterMax) >= static_cast<int64_t>(std::numeric_limits<int32_t>::min()));
+    reoptimizationRetryCounterMax() = 0;
+    while ((static_cast<int64_t>(thresholdForOptimizeAfterLongWarmUp()) << (reoptimizationRetryCounterMax() + 1)) <= static_cast<int64_t>(std::numeric_limits<int32>::max()))
+        reoptimizationRetryCounterMax()++;
+
+    ASSERT((static_cast<int64_t>(thresholdForOptimizeAfterLongWarmUp()) << reoptimizationRetryCounterMax()) > 0);
+    ASSERT((static_cast<int64_t>(thresholdForOptimizeAfterLongWarmUp()) << reoptimizationRetryCounterMax()) <= static_cast<int64_t>(std::numeric_limits<int32>::max()));
 }
 
-} } // namespace JSC::Options
+// Parses a single command line option in the format "<optionName>=<value>"
+// (no spaces allowed) and set the specified option if appropriate.
+bool Options::setOption(const char* arg)
+{
+    // arg should look like this:
+    //   <jscOptionName>=<appropriate value>
+    const char* equalStr = strchr(arg, '=');
+    if (!equalStr)
+        return false;
 
+    const char* valueStr = equalStr + 1;
+
+    // For each option, check if the specify arg is a match. If so, set the arg
+    // if the value makes sense. Otherwise, move on to checking the next option.
+#define FOR_EACH_OPTION(type_, name_, defaultValue_)    \
+    if (!strncmp(arg, #name_, equalStr - arg)) {        \
+        type_ value;                                    \
+        bool success = parse(valueStr, value);          \
+        if (success) {                                  \
+            name_() = value;                            \
+            return true;                                \
+        }                                               \
+        return false;                                   \
+    }
+
+    JSC_OPTIONS(FOR_EACH_OPTION)
+#undef FOR_EACH_OPTION
+
+        return false; // No option matched.
+}
+
+void Options::dumpAllOptions(FILE* stream)
+{
+    fprintf(stream, "JSC runtime options:\n");
+    for (int id = 0; id < numberOfOptions; id++)
+        dumpOption(static_cast<OptionID>(id), stream, "   ", "\n");
+}
+
+void Options::dumpOption(OptionID id, FILE* stream, const char* header, const char* footer)
+{
+    if (id >= numberOfOptions)
+        return; // Illegal option.
+
+    fprintf(stream, "%s%s: ", header, s_optionsInfo[id].name);
+    switch (s_optionsInfo[id].type) {
+    case boolType:
+        fprintf(stream, "%s", s_options[id].u.boolVal?"true":"false");
+        break;
+    case unsignedType:
+        fprintf(stream, "%u", s_options[id].u.unsignedVal);
+        break;
+    case doubleType:
+        fprintf(stream, "%lf", s_options[id].u.doubleVal);
+        break;
+    case int32Type:
+        fprintf(stream, "%d", s_options[id].u.int32Val);
+        break;
+    }
+    fprintf(stream, "%s", footer);
+}
+
+} // namespace JSC
 

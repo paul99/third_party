@@ -36,10 +36,11 @@ public:
     public:
         virtual ~Client() { }
         virtual void didBecomeUnresponsive(ResponsivenessTimer*) = 0;
+        virtual void interactionOccurredWhileUnresponsive(ResponsivenessTimer*) = 0;
         virtual void didBecomeResponsive(ResponsivenessTimer*) = 0;
     };
 
-    ResponsivenessTimer(ResponsivenessTimer::Client*);
+    explicit ResponsivenessTimer(ResponsivenessTimer::Client*);
     ~ResponsivenessTimer();
     
     void start();

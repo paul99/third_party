@@ -44,9 +44,7 @@ enum TextIteratorBehavior {
     TextIteratorIgnoresStyleVisibility = 1 << 3,
     TextIteratorEmitsObjectReplacementCharacters = 1 << 4,
     TextIteratorEmitsOriginalText = 1 << 5,
-#if OS(ANDROID)
     TextIteratorStopsOnFormControls = 1 << 6
-#endif
 };
     
 // FIXME: Can't really answer this question correctly without knowing the white-space mode.
@@ -62,8 +60,7 @@ inline bool isCollapsibleWhitespace(UChar c)
     }
 }
 
-String plainText(const Range*, TextIteratorBehavior defaultBehavior = TextIteratorDefaultBehavior);
-UChar* plainTextToMallocAllocatedBuffer(const Range*, unsigned& bufferLength, bool isDisplayString, TextIteratorBehavior = TextIteratorDefaultBehavior);
+String plainText(const Range*, TextIteratorBehavior defaultBehavior = TextIteratorDefaultBehavior, bool isDisplayString = false);
 PassRefPtr<Range> findPlainText(const Range*, const String&, FindOptions);
 
 class BitStack {
@@ -92,21 +89,25 @@ public:
     ~TextIterator();
     explicit TextIterator(const Range*, TextIteratorBehavior = TextIteratorDefaultBehavior);
 
-    bool atEnd() const;
+    bool atEnd() const { return !m_positionNode || m_shouldStop; }
     void advance();
     
     int length() const { return m_textLength; }
-    const UChar* characters() const { return m_textCharacters; }
+    const UChar* characters() const { return m_textCharacters ? m_textCharacters : m_text.characters() + startOffset(); }
+    UChar characterAt(unsigned index) const;
+    void appendTextToStringBuilder(StringBuilder&) const;
     
     PassRefPtr<Range> range() const;
     Node* node() const;
      
     static int rangeLength(const Range*, bool spacesForReplacedElements = false);
-    static PassRefPtr<Range> rangeFromLocationAndLength(Element* scope, int rangeLocation, int rangeLength, bool spacesForReplacedElements = false);
+    static PassRefPtr<Range> rangeFromLocationAndLength(ContainerNode* scope, int rangeLocation, int rangeLength, bool spacesForReplacedElements = false);
     static bool getLocationAndLengthFromRange(Element* scope, const Range*, size_t& location, size_t& length);
     static PassRefPtr<Range> subrange(Range* entireRange, int characterOffset, int characterCount);
     
 private:
+    int startOffset() const { return m_positionStartOffset; }
+    const String& string() const { return m_text; }
     void exitNode();
     bool shouldRepresentNodeOffsetZero();
     bool shouldEmitSpaceBeforeAndAfterNode(Node*);
@@ -141,7 +142,7 @@ private:
     mutable Node* m_positionOffsetBaseNode;
     mutable int m_positionStartOffset;
     mutable int m_positionEndOffset;
-    const UChar* m_textCharacters;
+    const UChar* m_textCharacters; // If null, then use m_text for character data.
     int m_textLength;
     // Hold string m_textCharacters points to so we ensure it won't be deleted.
     String m_text;
@@ -188,12 +189,10 @@ private:
     bool m_ignoresStyleVisibility;
     // Used when emitting the special 0xFFFC character is required.
     bool m_emitsObjectReplacementCharacters;
-#if OS(ANDROID)
     // Used when the iteration should stop if form controls are reached.
     bool m_stopsOnFormControls;
     // Used when m_stopsOnFormControls is set to determine if the iterator should keep advancing.
     bool m_shouldStop;
-#endif
 };
 
 // Iterates through the DOM range, returning all the text, and 0-length boundaries
@@ -204,7 +203,7 @@ public:
     SimplifiedBackwardsTextIterator();
     explicit SimplifiedBackwardsTextIterator(const Range*, TextIteratorBehavior = TextIteratorDefaultBehavior);
     
-    bool atEnd() const;
+    bool atEnd() const { return !m_positionNode || m_shouldStop; }
     void advance();
     
     int length() const { return m_textLength; }
@@ -221,7 +220,6 @@ private:
     void emitCharacter(UChar, Node*, int startOffset, int endOffset);
     bool advanceRespectingRange(Node*);
 
-    TextIteratorBehavior m_behavior;
     // Current position, not necessarily of the text being returned, but position
     // as we walk through the DOM tree.
     Node* m_node;
@@ -257,12 +255,11 @@ private:
     // Should handle first-letter renderer in the next call to handleTextNode.
     bool m_shouldHandleFirstLetter;
 
-#if OS(ANDROID)
     // Used when the iteration should stop if form controls are reached.
     bool m_stopsOnFormControls;
+
     // Used when m_stopsOnFormControls is set to determine if the iterator should keep advancing.
     bool m_shouldStop;
-#endif
 };
 
 // Builds on the text iterator, adding a character position so we can walk one
@@ -304,7 +301,6 @@ public:
     PassRefPtr<Range> range() const;
 
 private:
-    TextIteratorBehavior m_behavior;
     int m_offset;
     int m_runOffset;
     bool m_atBreak;

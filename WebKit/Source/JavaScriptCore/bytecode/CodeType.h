@@ -26,11 +26,20 @@
 #ifndef CodeType_h
 #define CodeType_h
 
+#include <wtf/Platform.h>
+
 namespace JSC {
 
 enum CodeType { GlobalCode, EvalCode, FunctionCode };
 
-}
+} // namespace JSC
+
+namespace WTF {
+
+class PrintStream;
+void printInternal(PrintStream&, JSC::CodeType);
+
+} // namespace WTF
 
 #endif // CodeType_h
 

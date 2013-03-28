@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008, 2009, 2010, 2011 Apple, Inc.  All rights reserved.
+ * Copyright (C) 2006, 2007, 2008, 2009, 2010, 2011, 2012 Apple, Inc.  All rights reserved.
  * Copyright (C) 2009, 2010, 2011 Appcelerator, Inc. All rights reserved.
  * Copyright (C) 2011 Brent Fulgham. All rights reserved.
  *
@@ -33,6 +33,7 @@
 #include "FullscreenVideoController.h"
 #include "MarshallingHelpers.h"
 #include "SoftLinking.h"
+#include "TextIterator.h"
 #include "WebBackForwardList.h"
 #include "WebChromeClient.h"
 #include "WebContextMenuClient.h"
@@ -44,6 +45,7 @@
 #include "WebEditorClient.h"
 #include "WebElementPropertyBag.h"
 #include "WebFrame.h"
+#include "WebFrameNetworkingContext.h"
 #include "WebGeolocationClient.h"
 #include "WebGeolocationPosition.h"
 #include "WebIconDatabase.h"
@@ -65,7 +67,6 @@
 #include <JavaScriptCore/JSLock.h>
 #include <JavaScriptCore/JSValue.h>
 #include <WebCore/AXObjectCache.h>
-#include <WebCore/AbstractDatabase.h>
 #include <WebCore/ApplicationCacheStorage.h>
 #include <WebCore/BString.h>
 #include <WebCore/BackForwardListImpl.h>
@@ -74,6 +75,7 @@
 #include <WebCore/ContextMenu.h>
 #include <WebCore/ContextMenuController.h>
 #include <WebCore/Cursor.h>
+#include <WebCore/DatabaseManager.h>
 #include <WebCore/Document.h>
 #include <WebCore/DocumentMarkerController.h>
 #include <WebCore/DragController.h>
@@ -92,6 +94,8 @@
 #include <WebCore/FrameView.h>
 #include <WebCore/FrameWin.h>
 #include <WebCore/GDIObjectCounter.h>
+#include <WebCore/GeolocationController.h>
+#include <WebCore/GeolocationError.h>
 #include <WebCore/GraphicsContext.h>
 #include <WebCore/HTMLMediaElement.h>
 #include <WebCore/HTMLNames.h>
@@ -99,10 +103,10 @@
 #include <WebCore/HistoryItem.h>
 #include <WebCore/HitTestRequest.h>
 #include <WebCore/HitTestResult.h>
+#include <WebCore/InitializeLogging.h>
 #include <WebCore/IntRect.h>
 #include <WebCore/JSElement.h>
 #include <WebCore/KeyboardEvent.h>
-#include <WebCore/Logging.h>
 #include <WebCore/MIMETypeRegistry.h>
 #include <WebCore/MemoryCache.h>
 #include <WebCore/Page.h>
@@ -125,6 +129,7 @@
 #include <WebCore/ResourceHandle.h>
 #include <WebCore/ResourceHandleClient.h>
 #include <WebCore/ResourceRequest.h>
+#include <WebCore/RuntimeEnabledFeatures.h>
 #include <WebCore/SchemeRegistry.h>
 #include <WebCore/ScriptValue.h>
 #include <WebCore/Scrollbar.h>
@@ -134,15 +139,9 @@
 #include <WebCore/Settings.h>
 #include <WebCore/SimpleFontData.h>
 #include <WebCore/SystemInfo.h>
-#include <WebCore/TypingCommand.h>
 #include <WebCore/WindowMessageBroadcaster.h>
 #include <WebCore/WindowsTouch.h>
 #include <wtf/MainThread.h>
-
-#if ENABLE(CLIENT_BASED_GEOLOCATION)
-#include <WebCore/GeolocationController.h>
-#include <WebCore/GeolocationError.h>
-#endif
 
 #if USE(CG)
 #include <CoreGraphics/CGContext.h>
@@ -202,6 +201,21 @@ WebView* kit(Page* page)
     return page ? static_cast<WebView*>(static_cast<WebChromeClient*>(page->chrome()->client())->webView()) : 0;
 }
 
+static inline AtomicString toAtomicString(BSTR bstr)
+{
+    return AtomicString(bstr, SysStringLen(bstr));
+}
+
+static inline String toString(BSTR bstr)
+{
+    return String(bstr, SysStringLen(bstr));
+}
+
+static inline KURL toKURL(BSTR bstr)
+{
+    return KURL(KURL(), toString(bstr));
+}
+
 class PreferencesChangedOrRemovedObserver : public IWebNotificationObserver {
 public:
     static PreferencesChangedOrRemovedObserver* sharedInstance();
@@ -248,12 +262,10 @@ HRESULT PreferencesChangedOrRemovedObserver::onNotify(IWebNotification* notifica
     if (FAILED(hr))
         return hr;
 
-    BSTR nameBSTR;
-    hr = notification->name(&nameBSTR);
+    BString name;
+    hr = notification->name(&name);
     if (FAILED(hr))
         return hr;
-    BString name;
-    name.adoptBSTR(nameBSTR);
 
     if (wcscmp(name, WebPreferences::webPreferencesChangedNotification()) == 0)
         return notifyPreferencesChanged(cacheModel);
@@ -340,7 +352,9 @@ WebView::WebView()
     , m_viewWindow(0)
     , m_mainFrame(0)
     , m_page(0)
+#if ENABLE(INSPECTOR)
     , m_inspectorClient(0)
+#endif // ENABLE(INSPECTOR)
     , m_hasCustomDropTarget(false)
     , m_useBackForwardList(true)
     , m_userAgentOverridden(false)
@@ -459,7 +473,7 @@ void WebView::setCacheModel(WebCacheModel cacheModel)
     RetainPtr<CFURLCacheRef> cfurlCache(AdoptCF, CFURLCacheCopySharedURLCache());
     RetainPtr<CFStringRef> cfurlCacheDirectory(AdoptCF, wkCopyFoundationCacheDirectory(0));
     if (!cfurlCacheDirectory)
-        cfurlCacheDirectory.adoptCF(WebCore::localUserSpecificStorageDirectory().createCFString());
+        cfurlCacheDirectory = WebCore::localUserSpecificStorageDirectory().createCFString();
 
     // As a fudge factor, use 1000 instead of 1024, in case the reported byte 
     // count doesn't align exactly to a megabyte boundary.
@@ -713,9 +727,11 @@ HRESULT STDMETHODCALLTYPE WebView::close()
     setUIDelegate(0);
     setFormDelegate(0);
 
+#if ENABLE(INSPECTOR)
     m_inspectorClient = 0;
     if (m_webInspector)
         m_webInspector->webViewClosed();
+#endif // ENABLE(INSPECTOR)
 
     delete m_page;
     m_page = 0;
@@ -725,17 +741,15 @@ HRESULT STDMETHODCALLTYPE WebView::close()
     notifyCenter->removeObserver(this, WebPreferences::webPreferencesChangedNotification(), static_cast<IWebPreferences*>(m_preferences.get()));
 
     if (COMPtr<WebPreferences> preferences = m_preferences) {
-        BSTR identifier = 0;
+        BString identifier;
         preferences->identifier(&identifier);
 
         m_preferences = 0;
         preferences->didRemoveFromWebView();
         // Make sure we release the reference, since WebPreferences::removeReferenceForIdentifier will check for last reference to WebPreferences
         preferences = 0;
-        if (identifier) {
+        if (identifier)
             WebPreferences::removeReferenceForIdentifier(identifier);
-            SysFreeString(identifier);
-        }
     }
 
     deleteBackingStore();
@@ -1337,11 +1351,7 @@ bool WebView::handleContextMenuEvent(WPARAM wParam, LPARAM lParam)
     if (!coreMenu)
         return false;
 
-    Node* node = contextMenuController->hitTestResult().innerNonSharedNode();
-    if (!node)
-        return false;
-
-    Frame* frame = node->document()->frame();
+    Frame* frame = contextMenuController->hitTestResult().innerNodeFrame();
     if (!frame)
         return false;
 
@@ -1349,7 +1359,7 @@ bool WebView::handleContextMenuEvent(WPARAM wParam, LPARAM lParam)
     if (!view)
         return false;
 
-    POINT point(view->contentsToWindow(contextMenuController->hitTestResult().point()));
+    POINT point(view->contentsToWindow(contextMenuController->hitTestResult().roundedPointInInnerNodeFrame()));
 
     // Translate the point to screen coordinates
     if (!::ClientToScreen(m_viewWindow, &point))
@@ -1651,7 +1661,7 @@ bool WebView::gesture(WPARAM wParam, LPARAM lParam)
             return false;
 
         // We negate here since panning up moves the content up, but moves the scrollbar down.
-        m_gestureTargetNode->renderer()->enclosingLayer()->scrollByRecursively(-deltaX, -deltaY);
+        m_gestureTargetNode->renderer()->enclosingLayer()->scrollByRecursively(IntSize(-deltaX, -deltaY));
            
         if (!(UpdatePanningFeedbackPtr() && BeginPanningFeedbackPtr() && EndPanningFeedbackPtr())) {
             CloseGestureInfoHandlePtr()(gestureHandle);
@@ -2072,6 +2082,23 @@ void WebView::setIsBeingDestroyed()
     ::SetWindowLongPtrW(m_viewWindow, 0, 0);
 }
 
+void WebView::setShouldInvertColors(bool shouldInvertColors)
+{
+    if (m_shouldInvertColors == shouldInvertColors)
+        return;
+
+    m_shouldInvertColors = shouldInvertColors;
+
+#if USE(ACCELERATED_COMPOSITING)
+    if (m_layerTreeHost)
+        m_layerTreeHost->setShouldInvertColors(shouldInvertColors);
+#endif
+
+    RECT windowRect = {0};
+    frameRect(&windowRect);
+    repaint(windowRect, true, true);
+}
+
 bool WebView::registerWebViewWindowClass()
 {
     static bool haveRegisteredWindowClass = false;
@@ -2087,7 +2114,7 @@ bool WebView::registerWebViewWindowClass()
     wcex.style          = CS_DBLCLKS;
     wcex.lpfnWndProc    = WebViewWndProc;
     wcex.cbClsExtra     = 0;
-    wcex.cbWndExtra     = 4; // 4 bytes for the IWebView pointer
+    wcex.cbWndExtra     = sizeof(WebView*);
     wcex.hInstance      = gInstance;
     wcex.hIcon          = 0;
     wcex.hCursor        = ::LoadCursor(0, IDC_ARROW);
@@ -2495,7 +2522,7 @@ HRESULT STDMETHODCALLTYPE WebView::canShowMIMEType(
     /* [in] */ BSTR mimeType,
     /* [retval][out] */ BOOL* canShow)
 {
-    String mimeTypeStr(mimeType, SysStringLen(mimeType));
+    String mimeTypeStr = toString(mimeType);
 
     if (!canShow)
         return E_POINTER;
@@ -2623,12 +2650,18 @@ HRESULT STDMETHODCALLTYPE WebView::initWithFrame(
 
     static bool didOneTimeInitialization;
     if (!didOneTimeInitialization) {
+#if !LOG_DISABLED
         initializeLoggingChannelsIfNecessary();
+#endif // !LOG_DISABLED
+
+        // Initialize our platform strategies first before invoking the rest
+        // of the initialization code which may depend on the strategies.
+        WebPlatformStrategies::initialize();
+
 #if ENABLE(SQL_DATABASE)
         WebKitInitializeWebDatabasesIfNecessary();
 #endif
         WebKitSetApplicationCachePathIfNecessary();
-        WebPlatformStrategies::initialize();
         Settings::setDefaultMinDOMTimerInterval(0.004);
 
         didOneTimeInitialization = true;
@@ -2644,31 +2677,33 @@ HRESULT STDMETHODCALLTYPE WebView::initWithFrame(
     if (SUCCEEDED(m_preferences->shouldUseHighResolutionTimers(&useHighResolutionTimer)))
         Settings::setShouldUseHighResolutionTimers(useHighResolutionTimer);
 
+#if ENABLE(INSPECTOR)
     m_inspectorClient = new WebInspectorClient(this);
+#endif // ENABLE(INSPECTOR)
 
     Page::PageClients pageClients;
     pageClients.chromeClient = new WebChromeClient(this);
     pageClients.contextMenuClient = new WebContextMenuClient(this);
     pageClients.editorClient = new WebEditorClient(this);
     pageClients.dragClient = new WebDragClient(this);
+#if ENABLE(INSPECTOR)
     pageClients.inspectorClient = m_inspectorClient;
-#if ENABLE(CLIENT_BASED_GEOLOCATION)
-    pageClients.geolocationClient = new WebGeolocationClient(this);
-#endif
-    m_page = new Page(pageClients);
+#endif // ENABLE(INSPECTOR)
 
-    BSTR localStoragePath;
-    if (SUCCEEDED(m_preferences->localStorageDatabasePath(&localStoragePath))) {
-        m_page->settings()->setLocalStorageDatabasePath(String(localStoragePath, SysStringLen(localStoragePath)));
-        SysFreeString(localStoragePath);
-    }
+    m_page = new Page(pageClients);
+    provideGeolocationTo(m_page, new WebGeolocationClient(this));
+
+    unsigned layoutMilestones = DidFirstLayout | DidFirstVisuallyNonEmptyLayout;
+    m_page->addLayoutMilestones(static_cast<LayoutMilestones>(layoutMilestones));
+
+    BString localStoragePath;
+    if (SUCCEEDED(m_preferences->localStorageDatabasePath(&localStoragePath)))
+        m_page->settings()->setLocalStorageDatabasePath(toString(localStoragePath));
 
     if (m_uiDelegate) {
-        BSTR path;
-        if (SUCCEEDED(m_uiDelegate->ftpDirectoryTemplatePath(this, &path))) {
-            m_page->settings()->setFTPDirectoryTemplatePath(String(path, SysStringLen(path)));
-            SysFreeString(path);
-        }
+        BString path;
+        if (SUCCEEDED(m_uiDelegate->ftpDirectoryTemplatePath(this, &path)))
+            m_page->settings()->setFTPDirectoryTemplatePath(toString(path));
     }
 
     WebFrame* webFrame = WebFrame::createInstance();
@@ -2676,7 +2711,7 @@ HRESULT STDMETHODCALLTYPE WebView::initWithFrame(
     m_mainFrame = webFrame;
     webFrame->Release(); // The WebFrame is owned by the Frame, so release our reference to it.
 
-    coreFrame->tree()->setName(String(frameName, SysStringLen(frameName)));
+    coreFrame->tree()->setName(toString(frameName));
     coreFrame->init();
     setGroupName(groupName);
 
@@ -3034,7 +3069,7 @@ float WebView::zoomMultiplier(bool isTextOnly)
 HRESULT STDMETHODCALLTYPE WebView::setApplicationNameForUserAgent( 
     /* [in] */ BSTR applicationName)
 {
-    m_applicationName = String(applicationName, SysStringLen(applicationName));
+    m_applicationName = toString(applicationName);
     m_userAgentStandard = String();
     return S_OK;
 }
@@ -3052,7 +3087,7 @@ HRESULT STDMETHODCALLTYPE WebView::setCustomUserAgent(
     /* [in] */ BSTR userAgentString)
 {
     m_userAgentOverridden = userAgentString;
-    m_userAgentCustom = String(userAgentString, SysStringLen(userAgentString));
+    m_userAgentCustom = toString(userAgentString);
     return S_OK;
 }
 
@@ -3073,7 +3108,7 @@ HRESULT STDMETHODCALLTYPE WebView::userAgentForURL(
     /* [retval][out] */ BSTR* userAgent)
 {
     String userAgentString = userAgentForKURL(MarshallingHelpers::BSTRToKURL(url));
-    *userAgent = SysAllocStringLen(userAgentString.characters(), userAgentString.length());
+    *userAgent = BString(userAgentString).release();
     if (!*userAgent && userAgentString.length())
         return E_OUTOFMEMORY;
     return S_OK;
@@ -3093,14 +3128,14 @@ HRESULT STDMETHODCALLTYPE WebView::setCustomTextEncodingName(
         return E_FAIL;
 
     HRESULT hr;
-    BSTR oldEncoding;
+    BString oldEncoding;
     hr = customTextEncodingName(&oldEncoding);
     if (FAILED(hr))
         return hr;
 
     if (oldEncoding != encodingName && (!oldEncoding || !encodingName || wcscmp(oldEncoding, encodingName))) {
         if (Frame* coreFrame = core(m_mainFrame))
-            coreFrame->loader()->reloadWithOverrideEncoding(String(encodingName, SysStringLen(encodingName)));
+            coreFrame->loader()->reloadWithOverrideEncoding(toString(encodingName));
     }
 
     return S_OK;
@@ -3132,7 +3167,7 @@ HRESULT STDMETHODCALLTYPE WebView::customTextEncodingName(
         return hr;
 
     if (!*encodingName)
-        *encodingName = SysAllocStringLen(m_overrideEncoding.characters(), m_overrideEncoding.length());
+        *encodingName = BString(m_overrideEncoding).release();
 
     if (!*encodingName && m_overrideEncoding.length())
         return E_OUTOFMEMORY;
@@ -3173,9 +3208,9 @@ HRESULT STDMETHODCALLTYPE WebView::stringByEvaluatingJavaScriptFromString(
     if (!scriptExecutionResult)
         return E_FAIL;
     else if (scriptExecutionResult.isString()) {
-        JSLock lock(JSC::SilenceAssertionsOnly);
         JSC::ExecState* exec = coreFrame->script()->globalObject(mainThreadNormalWorld())->globalExec();
-        *result = BString(ustringToString(scriptExecutionResult.getString(exec)));
+        JSC::JSLockHolder lock(exec);
+        *result = BString(scriptExecutionResult.getString(exec));
     }
 
     return S_OK;
@@ -3207,17 +3242,15 @@ HRESULT STDMETHODCALLTYPE WebView::setPreferences(
     IWebNotificationCenter* nc = WebNotificationCenter::defaultCenterInternal();
     nc->removeObserver(this, WebPreferences::webPreferencesChangedNotification(), static_cast<IWebPreferences*>(m_preferences.get()));
 
-    BSTR identifier = 0;
+    BString identifier;
     oldPrefs->identifier(&identifier);
     oldPrefs->didRemoveFromWebView();
     oldPrefs = 0; // Make sure we release the reference, since WebPreferences::removeReferenceForIdentifier will check for last reference to WebPreferences
 
     m_preferences = webPrefs;
 
-    if (identifier) {
+    if (identifier)
         WebPreferences::removeReferenceForIdentifier(identifier);
-        SysFreeString(identifier);
-    }
 
     nc->addObserver(this, WebPreferences::webPreferencesChangedNotification(), static_cast<IWebPreferences*>(m_preferences.get()));
 
@@ -3365,7 +3398,7 @@ HRESULT STDMETHODCALLTYPE WebView::searchFor(
     if (!str || !SysStringLen(str))
         return E_INVALIDARG;
 
-    *found = m_page->findString(String(str, SysStringLen(str)), caseFlag ? TextCaseSensitive : TextCaseInsensitive, forward ? FindDirectionForward : FindDirectionBackward, wrapFlag);
+    *found = m_page->findString(toString(str), caseFlag ? TextCaseSensitive : TextCaseInsensitive, forward ? FindDirectionForward : FindDirectionBackward, wrapFlag);
     return S_OK;
 }
 
@@ -3395,12 +3428,9 @@ HRESULT STDMETHODCALLTYPE WebView::updateFocusedAndActiveState()
     return S_OK;
 }
 
-HRESULT STDMETHODCALLTYPE WebView::executeCoreCommandByName(BSTR bName, BSTR bValue)
+HRESULT STDMETHODCALLTYPE WebView::executeCoreCommandByName(BSTR name, BSTR value)
 {
-    String name(bName, SysStringLen(bName));
-    String value(bValue, SysStringLen(bValue));
-
-    m_page->focusController()->focusedOrMainFrame()->editor()->command(name).execute(value);
+    m_page->focusController()->focusedOrMainFrame()->editor()->command(toString(name)).execute(toString(value));
 
     return S_OK;
 }
@@ -3424,7 +3454,7 @@ HRESULT STDMETHODCALLTYPE WebView::markAllMatchesForText(
     if (!str || !SysStringLen(str))
         return E_INVALIDARG;
 
-    *matches = m_page->markAllMatchesForText(String(str, SysStringLen(str)), caseSensitive ? TextCaseSensitive : TextCaseInsensitive, highlight, limit);
+    *matches = m_page->markAllMatchesForText(toString(str), caseSensitive ? TextCaseSensitive : TextCaseInsensitive, highlight, limit);
     return S_OK;
 }
 
@@ -3507,7 +3537,7 @@ HRESULT STDMETHODCALLTYPE WebView::setGroupName(
 {
     if (!m_page)
         return S_OK;
-    m_page->setGroupName(String(groupName, SysStringLen(groupName)));
+    m_page->setGroupName(toString(groupName));
     return S_OK;
 }
     
@@ -3741,7 +3771,7 @@ HRESULT STDMETHODCALLTYPE WebView::registerURLSchemeAsLocal(
     if (!scheme)
         return E_POINTER;
 
-    SchemeRegistry::registerURLSchemeAsLocal(String(scheme, ::SysStringLen(scheme)));
+    SchemeRegistry::registerURLSchemeAsLocal(toString(scheme));
 
     return S_OK;
 }
@@ -4292,9 +4322,8 @@ HRESULT STDMETHODCALLTYPE WebView::replaceSelectionWithNode(
 HRESULT STDMETHODCALLTYPE WebView::replaceSelectionWithText( 
         /* [in] */ BSTR text)
 {
-    String textString(text, ::SysStringLen(text));
     Position start = m_page->mainFrame()->selection()->selection().start();
-    m_page->focusController()->focusedOrMainFrame()->editor()->insertText(textString, 0);
+    m_page->focusController()->focusedOrMainFrame()->editor()->insertText(toString(text), 0);
     m_page->mainFrame()->selection()->setBase(start);
     return S_OK;
 }
@@ -4513,13 +4542,10 @@ HRESULT STDMETHODCALLTYPE WebView::stopSpeaking(
 HRESULT STDMETHODCALLTYPE WebView::onNotify( 
     /* [in] */ IWebNotification* notification)
 {
-    BSTR nameBSTR;
-    HRESULT hr = notification->name(&nameBSTR);
+    BString name;
+    HRESULT hr = notification->name(&name);
     if (FAILED(hr))
         return hr;
-
-    BString name;
-    name.adoptBSTR(nameBSTR);
 
     if (!wcscmp(name, WebIconDatabase::iconDatabaseDidAddIconNotification()))
         return notifyDidAddIcon(notification);
@@ -4545,7 +4571,7 @@ HRESULT WebView::notifyPreferencesChanged(IWebNotification* notification)
 
     ASSERT(preferences == m_preferences);
 
-    BSTR str;
+    BString str;
     int size;
     BOOL enabled;
 
@@ -4554,8 +4580,8 @@ HRESULT WebView::notifyPreferencesChanged(IWebNotification* notification)
     hr = preferences->cursiveFontFamily(&str);
     if (FAILED(hr))
         return hr;
-    settings->setCursiveFontFamily(AtomicString(str, SysStringLen(str)));
-    SysFreeString(str);
+    settings->setCursiveFontFamily(toAtomicString(str));
+    str.clear();
 
     hr = preferences->defaultFixedFontSize(&size);
     if (FAILED(hr))
@@ -4566,24 +4592,24 @@ HRESULT WebView::notifyPreferencesChanged(IWebNotification* notification)
     if (FAILED(hr))
         return hr;
     settings->setDefaultFontSize(size);
-    
+
     hr = preferences->defaultTextEncodingName(&str);
     if (FAILED(hr))
         return hr;
-    settings->setDefaultTextEncodingName(String(str, SysStringLen(str)));
-    SysFreeString(str);
+    settings->setDefaultTextEncodingName(toString(str));
+    str.clear();
 
     hr = preferences->fantasyFontFamily(&str);
     if (FAILED(hr))
         return hr;
-    settings->setFantasyFontFamily(AtomicString(str, SysStringLen(str)));
-    SysFreeString(str);
+    settings->setFantasyFontFamily(toAtomicString(str));
+    str.clear();
 
     hr = preferences->fixedFontFamily(&str);
     if (FAILED(hr))
         return hr;
-    settings->setFixedFontFamily(AtomicString(str, SysStringLen(str)));
-    SysFreeString(str);
+    settings->setFixedFontFamily(toAtomicString(str));
+    str.clear();
 
 #if ENABLE(VIDEO_TRACK)
     hr = preferences->shouldDisplaySubtitles(&enabled);
@@ -4607,15 +4633,15 @@ HRESULT WebView::notifyPreferencesChanged(IWebNotification* notification)
         hr = prefsPrivate->localStorageDatabasePath(&str);
         if (FAILED(hr))
             return hr;
-        settings->setLocalStorageDatabasePath(String(str, SysStringLen(str)));
-        SysFreeString(str);
+        settings->setLocalStorageDatabasePath(toString(str));
+        str.clear();
     }
 
     hr = preferences->pictographFontFamily(&str);
     if (FAILED(hr))
         return hr;
-    settings->setPictographFontFamily(AtomicString(str, SysStringLen(str)));
-    SysFreeString(str);
+    settings->setPictographFontFamily(toAtomicString(str));
+    str.clear();
 
     hr = preferences->isJavaEnabled(&enabled);
     if (FAILED(hr))
@@ -4647,6 +4673,11 @@ HRESULT WebView::notifyPreferencesChanged(IWebNotification* notification)
         return hr;
     settings->setPluginsEnabled(!!enabled);
 
+    hr = preferences->isCSSRegionsEnabled(&enabled);
+    if (FAILED(hr))
+        return hr;
+    RuntimeEnabledFeatures::setCSSRegionsEnabled(!!enabled);
+
     hr = preferences->privateBrowsingEnabled(&enabled);
     if (FAILED(hr))
         return hr;
@@ -4655,20 +4686,20 @@ HRESULT WebView::notifyPreferencesChanged(IWebNotification* notification)
     hr = preferences->sansSerifFontFamily(&str);
     if (FAILED(hr))
         return hr;
-    settings->setSansSerifFontFamily(AtomicString(str, SysStringLen(str)));
-    SysFreeString(str);
+    settings->setSansSerifFontFamily(toAtomicString(str));
+    str.clear();
 
     hr = preferences->serifFontFamily(&str);
     if (FAILED(hr))
         return hr;
-    settings->setSerifFontFamily(AtomicString(str, SysStringLen(str)));
-    SysFreeString(str);
+    settings->setSerifFontFamily(toAtomicString(str));
+    str.clear();
 
     hr = preferences->standardFontFamily(&str);
     if (FAILED(hr))
         return hr;
-    settings->setStandardFontFamily(AtomicString(str, SysStringLen(str)));
-    SysFreeString(str);
+    settings->setStandardFontFamily(toAtomicString(str));
+    str.clear();
 
     hr = preferences->loadsImagesAutomatically(&enabled);
     if (FAILED(hr))
@@ -4683,8 +4714,7 @@ HRESULT WebView::notifyPreferencesChanged(IWebNotification* notification)
         if (FAILED(hr))
             return hr;
 
-        RetainPtr<CFStringRef> urlString(AdoptCF, String(str, SysStringLen(str)).createCFString());
-        RetainPtr<CFURLRef> url(AdoptCF, CFURLCreateWithString(kCFAllocatorDefault, urlString.get(), 0));
+        RetainPtr<CFURLRef> url(AdoptCF, CFURLCreateWithString(kCFAllocatorDefault, toString(str).createCFString().get(), 0));
 
         // Check if the passed in string is a path and convert it to a URL.
         // FIXME: This is a workaround for nightly builds until we can get Safari to pass 
@@ -4701,10 +4731,9 @@ HRESULT WebView::notifyPreferencesChanged(IWebNotification* notification)
         }
 
         settings->setUserStyleSheetLocation(url.get());
-        SysFreeString(str);
-    } else {
+        str.clear();
+    } else
         settings->setUserStyleSheetLocation(KURL());
-    }
 
     hr = preferences->shouldPrintBackgrounds(&enabled);
     if (FAILED(hr))
@@ -4721,12 +4750,6 @@ HRESULT WebView::notifyPreferencesChanged(IWebNotification* notification)
     if (FAILED(hr))
         return hr;
     settings->setEditableLinkBehavior((EditableLinkBehavior)behavior);
-
-    WebKitEditingBehavior editingBehavior;
-    hr = preferences->editingBehavior(&editingBehavior);
-    if (FAILED(hr))
-        return hr;
-    settings->setEditingBehaviorType((EditingBehaviorType)editingBehavior);
 
     hr = preferences->usesPageCache(&enabled);
     if (FAILED(hr))
@@ -4785,7 +4808,7 @@ HRESULT WebView::notifyPreferencesChanged(IWebNotification* notification)
     hr = prefsPrivate->databasesEnabled(&enabled);
     if (FAILED(hr))
         return hr;
-    AbstractDatabase::setIsAvailable(enabled);
+    DatabaseManager::manager().setIsAvailable(enabled);
 #endif
 
     hr = prefsPrivate->localStorageEnabled(&enabled);
@@ -4885,13 +4908,6 @@ HRESULT WebView::notifyPreferencesChanged(IWebNotification* notification)
         return hr;
     settings->setLoadsSiteIconsIgnoringImageLoadingSetting(!!enabled);
 
-#if ENABLE(WEB_SOCKETS)
-    hr = prefsPrivate->hixie76WebSocketProtocolEnabled(&enabled);
-    if (FAILED(hr))
-        return hr;
-    settings->setUseHixie76WebSocketProtocol(enabled);
-#endif
-
     hr = prefsPrivate->showsToolTipOverTruncatedText(&enabled);
     if (FAILED(hr))
         return hr;
@@ -4922,6 +4938,16 @@ HRESULT WebView::notifyPreferencesChanged(IWebNotification* notification)
         return hr;
     settings->setMediaPlaybackAllowsInline(enabled);
 
+    hr = prefsPrivate->shouldInvertColors(&enabled);
+    if (FAILED(hr))
+        return hr;
+    setShouldInvertColors(enabled);
+
+    hr = prefsPrivate->requestAnimationFrameEnabled(&enabled);
+    if (FAILED(hr))
+        return hr;
+    settings->setRequestAnimationFrameEnabled(enabled);
+
     return S_OK;
 }
 
@@ -4936,9 +4962,7 @@ HRESULT updateSharedSettingsFromPreferencesIfNeeded(IWebPreferences* preferences
         return hr;
 
 #if USE(CFNETWORK)
-    // Set cookie storage accept policy
-    if (RetainPtr<CFHTTPCookieStorageRef> cookieStorage = currentCFHTTPCookieStorage())
-        CFHTTPCookieStorageSetCookieAcceptPolicy(cookieStorage.get(), acceptPolicy);
+    WebFrameNetworkingContext::setCookieAcceptPolicyForAllContexts(acceptPolicy);
 #endif
 
     return S_OK;
@@ -4953,9 +4977,7 @@ HRESULT STDMETHODCALLTYPE WebView::MIMETypeForExtension(
     if (!mimeType)
         return E_POINTER;
 
-    String extensionStr(extension, SysStringLen(extension));
-
-    *mimeType = BString(MIMETypeRegistry::getMIMETypeForExtension(extensionStr)).release();
+    *mimeType = BString(MIMETypeRegistry::getMIMETypeForExtension(toString(extension))).release();
 
     return S_OK;
 }
@@ -5203,8 +5225,7 @@ HRESULT STDMETHODCALLTYPE WebView::standardUserAgentWithApplicationName(
         return E_POINTER;
     }
 
-    BString applicationNameBString(applicationName);
-    *groupName = BString(standardUserAgentWithApplicationName(String(applicationNameBString, SysStringLen(applicationNameBString)))).release();
+    *groupName = BString(standardUserAgentWithApplicationName(toString(applicationName))).release();
     return S_OK;
 }
 
@@ -5259,7 +5280,7 @@ HRESULT STDMETHODCALLTYPE WebView::setAllowSiteSpecificHacks(
 HRESULT STDMETHODCALLTYPE WebView::addAdditionalPluginDirectory( 
         /* [in] */ BSTR directory)
 {
-    PluginDatabase::installedPlugins()->addExtraPluginDirectory(String(directory, SysStringLen(directory)));
+    PluginDatabase::installedPlugins()->addExtraPluginDirectory(toString(directory));
     return S_OK;
 }
 
@@ -5521,19 +5542,17 @@ static void compositionToUnderlines(const Vector<DWORD>& clauses, const Vector<B
 #define APPEND_ARGUMENT_NAME(name) \
     if (lparam & name) { \
         if (needsComma) \
-            result += ", "; \
-            result += #name; \
+            result.appendLiteral(", "); \
+        result.appendLiteral(#name); \
         needsComma = true; \
     }
 
 static String imeCompositionArgumentNames(LPARAM lparam)
 {
-    String result;
+    StringBuilder result;
     bool needsComma = false;
-    if (lparam & GCS_COMPATTR) {
-        result = "GCS_COMPATTR";
-        needsComma = true;
-    }
+
+    APPEND_ARGUMENT_NAME(GCS_COMPATTR);
     APPEND_ARGUMENT_NAME(GCS_COMPCLAUSE);
     APPEND_ARGUMENT_NAME(GCS_COMPREADSTR);
     APPEND_ARGUMENT_NAME(GCS_COMPREADATTR);
@@ -5548,7 +5567,7 @@ static String imeCompositionArgumentNames(LPARAM lparam)
     APPEND_ARGUMENT_NAME(CS_INSERTCHAR);
     APPEND_ARGUMENT_NAME(CS_NOMOVECARET);
 
-    return result;
+    return result.toString();
 }
 
 static String imeNotificationName(WPARAM wparam)
@@ -5754,11 +5773,16 @@ bool WebView::onIMESetContext(WPARAM wparam, LPARAM)
 
 HRESULT STDMETHODCALLTYPE WebView::inspector(IWebInspector** inspector)
 {
+#if ENABLE(INSPECTOR)
     if (!m_webInspector)
         m_webInspector.adoptRef(WebInspector::createInstance(this, m_inspectorClient));
 
     return m_webInspector.copyRefTo(inspector);
+#else // !ENABLE(INSPECTOR)
+    return S_OK;
+#endif // ENABLE(INSPECTOR)
 }
+
 
 HRESULT STDMETHODCALLTYPE WebView::windowAncestryDidChange()
 {
@@ -5821,8 +5845,8 @@ HRESULT STDMETHODCALLTYPE WebView::reportException(
     if (!context || !exception)
         return E_FAIL;
 
-    JSLock lock(JSC::SilenceAssertionsOnly);
     JSC::ExecState* execState = toJS(context);
+    JSC::JSLockHolder lock(execState);
 
     // Make sure the context has a DOMWindow global object, otherwise this context didn't originate from a WebView.
     if (!toJSDOMWindow(execState->lexicalGlobalObject()))
@@ -5848,8 +5872,9 @@ HRESULT STDMETHODCALLTYPE WebView::elementFromJS(
     if (!nodeObject)
         return E_FAIL;
 
-    JSLock lock(JSC::SilenceAssertionsOnly);
-    Element* elt = toElement(toJS(toJS(context), nodeObject));
+    JSC::ExecState* exec = toJS(context);
+    JSC::JSLockHolder lock(exec);
+    Element* elt = toElement(toJS(exec, nodeObject));
     if (!elt)
         return E_FAIL;
 
@@ -5990,7 +6015,7 @@ HRESULT STDMETHODCALLTYPE WebView::setCookieEnabled(BOOL enable)
     if (!m_page)
         return E_FAIL;
 
-    m_page->setCookieEnabled(enable);
+    m_page->settings()->setCookieEnabled(enable);
     return S_OK;
 }
 
@@ -6002,7 +6027,7 @@ HRESULT STDMETHODCALLTYPE WebView::cookieEnabled(BOOL* enabled)
     if (!m_page)
         return E_FAIL;
 
-    *enabled = m_page->cookieEnabled();
+    *enabled = m_page->settings()->cookieEnabled();
     return S_OK;
 }
 
@@ -6089,7 +6114,7 @@ HRESULT STDMETHODCALLTYPE WebView::registerEmbeddedViewMIMEType(BSTR mimeType)
     if (!m_embeddedViewMIMETypes)
         m_embeddedViewMIMETypes = adoptPtr(new HashSet<String>);
 
-    m_embeddedViewMIMETypes->add(String(mimeType, ::SysStringLen(mimeType)));
+    m_embeddedViewMIMETypes->add(toString(mimeType));
     return S_OK;
 }
 
@@ -6149,26 +6174,15 @@ HRESULT WebView::setMemoryCacheDelegateCallsEnabled(BOOL enabled)
     return S_OK;
 }
 
-HRESULT WebView::setJavaScriptURLsAreAllowed(BOOL areAllowed)
+HRESULT WebView::setJavaScriptURLsAreAllowed(BOOL)
 {
-    m_page->setJavaScriptURLsAreAllowed(areAllowed);
-    return S_OK;
+    return E_NOTIMPL;
 }
 
 HRESULT WebView::setCanStartPlugins(BOOL canStartPlugins)
 {
     m_page->setCanStartMedia(canStartPlugins);
     return S_OK;
-}
-
-static String toString(BSTR bstr)
-{
-    return String(bstr, SysStringLen(bstr));
-}
-
-static KURL toKURL(BSTR bstr)
-{
-    return KURL(KURL(), toString(bstr));
 }
 
 void WebView::enterFullscreenForNode(Node* node)
@@ -6211,15 +6225,14 @@ void WebView::exitFullscreen()
 #endif
 }
 
-static PassOwnPtr<Vector<String> > toStringVector(unsigned patternsCount, BSTR* patterns)
+static Vector<String> toStringVector(unsigned patternsCount, BSTR* patterns)
 {
-    // Convert the patterns into a Vector.
-    if (patternsCount == 0)
-        return nullptr;
-    OwnPtr<Vector<String> > patternsVector = adoptPtr(new Vector<String>);
+    Vector<String> patternsVector;
+    if (!patternsCount)
+        return patternsVector;
     for (unsigned i = 0; i < patternsCount; ++i)
-        patternsVector->append(toString(patterns[i]));
-    return patternsVector.release();
+        patternsVector.append(toString(patterns[i]));
+    return patternsVector;
 }
 
 HRESULT WebView::addUserScriptToGroup(BSTR groupName, IWebScriptWorld* iWorld, BSTR source, BSTR url, 
@@ -6386,13 +6399,13 @@ HRESULT WebView::invalidateBackingStore(const RECT* rect)
 
 HRESULT WebView::addOriginAccessWhitelistEntry(BSTR sourceOrigin, BSTR destinationProtocol, BSTR destinationHost, BOOL allowDestinationSubdomains)
 {
-    SecurityPolicy::addOriginAccessWhitelistEntry(*SecurityOrigin::createFromString(String(sourceOrigin, SysStringLen(sourceOrigin))), String(destinationProtocol, SysStringLen(destinationProtocol)), String(destinationHost, SysStringLen(destinationHost)), allowDestinationSubdomains);
+    SecurityPolicy::addOriginAccessWhitelistEntry(*SecurityOrigin::createFromString(toString(sourceOrigin)), toString(destinationProtocol), toString(destinationHost), allowDestinationSubdomains);
     return S_OK;
 }
 
 HRESULT WebView::removeOriginAccessWhitelistEntry(BSTR sourceOrigin, BSTR destinationProtocol, BSTR destinationHost, BOOL allowDestinationSubdomains)
 {
-    SecurityPolicy::removeOriginAccessWhitelistEntry(*SecurityOrigin::createFromString(String(sourceOrigin, SysStringLen(sourceOrigin))), String(destinationProtocol, SysStringLen(destinationProtocol)), String(destinationHost, SysStringLen(destinationHost)), allowDestinationSubdomains);
+    SecurityPolicy::removeOriginAccessWhitelistEntry(*SecurityOrigin::createFromString(toString(sourceOrigin)), toString(destinationProtocol), toString(destinationHost), allowDestinationSubdomains);
     return S_OK;
 }
 
@@ -6463,6 +6476,8 @@ void WebView::setAcceleratedCompositing(bool accelerated)
         if (m_layerTreeHost) {
             m_isAcceleratedCompositing = true;
 
+            m_layerTreeHost->setShouldInvertColors(m_shouldInvertColors);
+
             m_layerTreeHost->setClient(this);
             ASSERT(m_viewWindow);
             m_layerTreeHost->setWindow(m_viewWindow);
@@ -6470,7 +6485,7 @@ void WebView::setAcceleratedCompositing(bool accelerated)
             // FIXME: We could perhaps get better performance by never allowing this layer to
             // become tiled (or choosing a higher-than-normal tiling threshold).
             // <http://webkit.org/b/52603>
-            m_backingLayer = GraphicsLayer::create(this);
+            m_backingLayer = GraphicsLayer::create(0, this);
             m_backingLayer->setDrawsContent(true);
             m_backingLayer->setContentsOpaque(true);
             RECT clientRect;
@@ -6493,6 +6508,15 @@ void WebView::setAcceleratedCompositing(bool accelerated)
         m_backingLayer = nullptr;
         m_isAcceleratedCompositing = false;
     }
+}
+#endif
+
+#if PLATFORM(WIN) && USE(AVFOUNDATION)
+WebCore::GraphicsDeviceAdapter* WebView::graphicsDeviceAdapter() const
+{
+    if (!m_layerTreeHost)
+        return 0;
+    return m_layerTreeHost->graphicsDeviceAdapter();
 }
 #endif
 
@@ -6545,41 +6569,31 @@ HRESULT WebView::geolocationProvider(IWebGeolocationProvider** locationProvider)
 
 HRESULT WebView::geolocationDidChangePosition(IWebGeolocationPosition* position)
 {
-#if ENABLE(CLIENT_BASED_GEOLOCATION)
     if (!m_page)
         return E_FAIL;
-    m_page->geolocationController()->positionChanged(core(position));
+    GeolocationController::from(m_page)->positionChanged(core(position));
     return S_OK;
-#else
-    return E_NOTIMPL;
-#endif
 }
 
 HRESULT WebView::geolocationDidFailWithError(IWebError* error)
 {
-#if ENABLE(CLIENT_BASED_GEOLOCATION)
     if (!m_page)
         return E_FAIL;
     if (!error)
         return E_POINTER;
 
-    BSTR descriptionBSTR;
-    if (FAILED(error->localizedDescription(&descriptionBSTR)))
+    BString description;
+    if (FAILED(error->localizedDescription(&description)))
         return E_FAIL;
-    String descriptionString(descriptionBSTR, SysStringLen(descriptionBSTR));
-    SysFreeString(descriptionBSTR);
 
-    RefPtr<GeolocationError> geolocationError = GeolocationError::create(GeolocationError::PositionUnavailable, descriptionString);
-    m_page->geolocationController()->errorOccurred(geolocationError.get());
+    RefPtr<GeolocationError> geolocationError = GeolocationError::create(GeolocationError::PositionUnavailable, toString(description));
+    GeolocationController::from(m_page)->errorOccurred(geolocationError.get());
     return S_OK;
-#else
-    return E_NOTIMPL;
-#endif
 }
 
 HRESULT WebView::setDomainRelaxationForbiddenForURLScheme(BOOL forbidden, BSTR scheme)
 {
-    SchemeRegistry::setDomainRelaxationForbiddenForURLScheme(forbidden, String(scheme, SysStringLen(scheme)));
+    SchemeRegistry::setDomainRelaxationForbiddenForURLScheme(forbidden, toString(scheme));
     return S_OK;
 }
 
@@ -6614,7 +6628,7 @@ void WebView::notifyAnimationStarted(const GraphicsLayer*, double)
     ASSERT_NOT_REACHED();
 }
 
-void WebView::notifySyncRequired(const GraphicsLayer*)
+void WebView::notifyFlushRequired(const GraphicsLayer*)
 {
     flushPendingGraphicsLayerChangesSoon();
 }
@@ -6629,16 +6643,6 @@ void WebView::paintContents(const GraphicsLayer*, GraphicsContext& context, Grap
     context.clip(inClip);
     frame->view()->paint(&context, inClip);
     context.restore();
-}
-
-bool WebView::showDebugBorders(const GraphicsLayer*) const
-{
-    return m_page->settings()->showDebugBorders();
-}
-
-bool WebView::showRepaintCounter(const GraphicsLayer*) const
-{
-    return m_page->settings()->showRepaintCounter();
 }
 
 void WebView::flushPendingGraphicsLayerChanges()
@@ -6656,9 +6660,9 @@ void WebView::flushPendingGraphicsLayerChanges()
 
     // Updating layout might have taken us out of compositing mode.
     if (m_backingLayer)
-        m_backingLayer->syncCompositingStateForThisLayerOnly();
+        m_backingLayer->flushCompositingStateForThisLayerOnly();
 
-    view->syncCompositingStateIncludingSubframes();
+    view->flushCompositingStateIncludingSubframes();
 }
 
 #endif
@@ -6860,3 +6864,140 @@ void WebView::fullScreenClientForceRepaint()
 }
 
 #endif
+// Used by TextInputController in DumpRenderTree
+
+HRESULT STDMETHODCALLTYPE WebView::setCompositionForTesting(
+    /* [in] */ BSTR composition, 
+    /* [in] */ UINT from, 
+    /* [in] */ UINT length)
+{
+    if (!m_page)
+        return E_FAIL;
+
+    Frame* frame = m_page->focusController()->focusedOrMainFrame();
+    if (!frame || !frame->editor()->canEdit())
+        return E_FAIL;
+
+    String compositionStr = toString(composition);
+
+    Vector<CompositionUnderline> underlines;
+    underlines.append(CompositionUnderline(0, compositionStr.length(), Color(Color::black), false));
+    frame->editor()->setComposition(compositionStr, underlines, from, from + length);
+
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WebView::hasCompositionForTesting(/* [out, retval] */ BOOL* result)
+{
+    if (!m_page)
+        return E_FAIL;
+
+    Frame* frame = m_page->focusController()->focusedOrMainFrame();
+     if (!frame)
+        return E_FAIL;
+
+    *result = frame && frame->editor()->hasComposition();
+
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WebView::confirmCompositionForTesting(/* [in] */ BSTR composition)
+{
+    if (!m_page)
+        return E_FAIL;
+
+    Frame* frame = m_page->focusController()->focusedOrMainFrame();
+    if (!frame || !frame->editor()->canEdit())
+        return E_FAIL;
+
+    String compositionStr = toString(composition);
+
+    if (compositionStr.isNull())
+        frame->editor()->confirmComposition();
+
+    frame->editor()->confirmComposition(compositionStr);
+
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WebView::compositionRangeForTesting(/* [out] */ UINT* startPosition, /* [out] */ UINT* length)
+{
+    if (!m_page)
+        return E_FAIL;
+
+    Frame* frame = m_page->focusController()->focusedOrMainFrame();
+    if (!frame || !frame->editor()->canEdit())
+        return E_FAIL;
+
+    RefPtr<Range> range = frame->editor()->compositionRange();
+
+    if (!range)
+        return E_FAIL;
+
+    *startPosition = range->startOffset();
+    *length = range->startOffset() + range->endOffset();
+
+    return S_OK;
+}
+
+
+HRESULT STDMETHODCALLTYPE WebView::firstRectForCharacterRangeForTesting(
+    /* [in] */ UINT location, 
+    /* [in] */ UINT length, 
+    /* [out, retval] */ RECT* resultRect)
+{
+    if (!m_page)
+        return E_FAIL;
+
+    Frame* frame = m_page->focusController()->focusedOrMainFrame();
+    if (!frame)
+        return E_FAIL;
+
+    IntRect resultIntRect;
+    resultIntRect.setLocation(IntPoint(0, 0));
+    resultIntRect.setSize(IntSize(0, 0));
+    
+    if (location > INT_MAX)
+        return E_FAIL;
+    if (length > INT_MAX || location + length > INT_MAX)
+        length = INT_MAX - location;
+        
+    RefPtr<Range> range = TextIterator::rangeFromLocationAndLength(frame->selection()->rootEditableElementOrDocumentElement(), location, length);
+
+    if (!range)
+        return E_FAIL;
+    
+    ASSERT(range->startContainer());
+    ASSERT(range->endContainer());
+     
+    IntRect rect = frame->editor()->firstRectForRange(range.get());
+    resultIntRect = frame->view()->contentsToWindow(rect);
+
+    resultRect->left = resultIntRect.x();
+    resultRect->top = resultIntRect.y();
+    resultRect->right = resultIntRect.x() + resultIntRect.width();
+    resultRect->bottom = resultIntRect.y() + resultIntRect.height();
+
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE WebView::selectedRangeForTesting(/* [out] */ UINT* location, /* [out] */ UINT* length)
+{
+    if (!m_page)
+        return E_FAIL;
+
+    Frame* frame = m_page->focusController()->focusedOrMainFrame();
+    if (!frame)
+        return E_FAIL;
+
+    RefPtr<Range> range = frame->editor()->selectedRange();
+
+    size_t locationSize;
+    size_t lengthSize;
+    if (range && TextIterator::getLocationAndLengthFromRange(frame->selection()->rootEditableElementOrDocumentElement(), range.get(), locationSize, lengthSize)) {
+        *location = static_cast<UINT>(locationSize);
+        *length = static_cast<UINT>(lengthSize);
+    }
+
+    return S_OK;
+}

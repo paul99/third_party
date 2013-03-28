@@ -29,13 +29,14 @@
 #include "CallFrame.h"
 #include "JSGlobalData.h"
 #include "JSObject.h"
-#include "ScopeChain.h"
+
 
 namespace JSC {
 
 AbstractPC::AbstractPC(JSGlobalData& globalData, ExecState* exec)
 {
     UNUSED_PARAM(globalData);
+    UNUSED_PARAM(exec);
     
 #if ENABLE(JIT)
     if (globalData.canUseJIT()) {
@@ -43,11 +44,6 @@ AbstractPC::AbstractPC(JSGlobalData& globalData, ExecState* exec)
         m_mode = JIT;
         return;
     }
-#endif
-    
-#if ENABLE(INTERPRETER)
-    m_pointer = exec->returnVPC();
-    m_mode = Interpreter;
 #endif
 }
 

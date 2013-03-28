@@ -24,11 +24,11 @@
 #include "config.h"
 #include "TextCheckerClientGtk.h"
 
-#include "GOwnPtr.h"
 #include "NotImplemented.h"
 #include "webkitspellchecker.h"
 #include "webkitwebsettingsprivate.h"
 #include <glib.h>
+#include <wtf/gobject/GOwnPtr.h>
 #include <wtf/text/CString.h>
 
 using namespace WebCore;
@@ -44,6 +44,11 @@ TextCheckerClientGtk::~TextCheckerClientGtk()
 {
 }
 
+bool TextCheckerClientGtk::shouldEraseMarkersAfterChangeSelection(TextCheckingType) const
+{
+    return true;
+}
+
 void TextCheckerClientGtk::ignoreWordInSpellDocument(const String& text)
 {
     webkit_spell_checker_ignore_word(m_spellChecker.get(), text.utf8().data());
@@ -56,8 +61,8 @@ void TextCheckerClientGtk::learnWord(const String& text)
 
 void TextCheckerClientGtk::checkSpellingOfString(const UChar* text, int length, int* misspellingLocation, int* misspellingLength)
 {
-    GOwnPtr<gchar> utf8Text(g_utf16_to_utf8(const_cast<gunichar2*>(text), length, 0, 0, 0));
-    webkit_spell_checker_check_spelling_of_string(m_spellChecker.get(), utf8Text.get(), misspellingLocation, misspellingLength);
+    String textAsString(text, length);
+    webkit_spell_checker_check_spelling_of_string(m_spellChecker.get(), textAsString.utf8().data(), misspellingLocation, misspellingLength);
 }
 
 String TextCheckerClientGtk::getAutoCorrectSuggestionForMisspelledWord(const String& inputWord)

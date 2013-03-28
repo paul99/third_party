@@ -79,7 +79,7 @@ class Color {
     WTF_MAKE_FAST_ALLOCATED;
 public:
     Color() : m_color(0), m_valid(false) { }
-    Color(RGBA32 col) : m_color(col), m_valid(true) { }
+    Color(RGBA32 color, bool valid = true) : m_color(color), m_valid(valid) { ASSERT(!m_color || m_valid); }
     Color(int r, int g, int b) : m_color(makeRGB(r, g, b)), m_valid(true) { }
     Color(int r, int g, int b, int a) : m_color(makeRGBA(r, g, b, a)), m_valid(true) { }
     // Color is currently limited to 32bit RGBA, perhaps some day we'll support better colors
@@ -88,6 +88,17 @@ public:
     Color(float c, float m, float y, float k, float a) : m_color(makeRGBAFromCMYKA(c, m, y, k, a)), m_valid(true) { }
     explicit Color(const String&);
     explicit Color(const char*);
+
+    static Color createUnchecked(int r, int g, int b)
+    {
+        RGBA32 color = 0xFF000000 | r << 16 | g << 8 | b;
+        return Color(color);
+    }
+    static Color createUnchecked(int r, int g, int b, int a)
+    {
+        RGBA32 color = a << 24 | r << 16 | g << 8 | b;
+        return Color(color);
+    }
 
     // Returns the color serialized according to HTML5
     // - http://www.whatwg.org/specs/web-apps/current-work/#serialization-of-a-color
@@ -145,8 +156,9 @@ public:
     Color(CGColorRef);
 #endif
 
-    static bool parseHexColor(const String& name, RGBA32& rgb);
-    static bool parseHexColor(const UChar* name, unsigned length, RGBA32& rgb);
+    static bool parseHexColor(const String&, RGBA32&);
+    static bool parseHexColor(const LChar*, unsigned, RGBA32&);
+    static bool parseHexColor(const UChar*, unsigned, RGBA32&);
 
     static const RGBA32 black = 0xFF000000;
     static const RGBA32 white = 0xFFFFFFFF;

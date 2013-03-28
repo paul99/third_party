@@ -26,6 +26,9 @@
 #import "config.h"
 #import "TiledCoreAnimationDrawingAreaProxy.h"
 
+#if ENABLE(THREADED_SCROLLING)
+
+#import "ColorSpaceData.h"
 #import "DrawingAreaMessages.h"
 #import "DrawingAreaProxyMessages.h"
 #import "LayerTreeContext.h"
@@ -44,6 +47,7 @@ PassOwnPtr<TiledCoreAnimationDrawingAreaProxy> TiledCoreAnimationDrawingAreaProx
 TiledCoreAnimationDrawingAreaProxy::TiledCoreAnimationDrawingAreaProxy(WebPageProxy* webPageProxy)
     : DrawingAreaProxy(DrawingAreaTypeTiledCoreAnimation, webPageProxy)
     , m_isWaitingForDidUpdateGeometry(false)
+    , m_lastSentMinimumLayoutWidth(0)
 {
 }
 
@@ -53,7 +57,20 @@ TiledCoreAnimationDrawingAreaProxy::~TiledCoreAnimationDrawingAreaProxy()
 
 void TiledCoreAnimationDrawingAreaProxy::deviceScaleFactorDidChange()
 {
-    // FIXME: Implement.
+    m_webPageProxy->process()->send(Messages::DrawingArea::SetDeviceScaleFactor(m_webPageProxy->deviceScaleFactor()), m_webPageProxy->pageID());
+}
+
+void TiledCoreAnimationDrawingAreaProxy::visibilityDidChange()
+{
+    if (!m_webPageProxy->isViewVisible())
+        m_webPageProxy->process()->send(Messages::DrawingArea::SuspendPainting(), m_webPageProxy->pageID());
+    else
+        m_webPageProxy->process()->send(Messages::DrawingArea::ResumePainting(), m_webPageProxy->pageID());
+}
+
+void TiledCoreAnimationDrawingAreaProxy::layerHostingModeDidChange()
+{
+    m_webPageProxy->process()->send(Messages::DrawingArea::SetLayerHostingMode(m_webPageProxy->layerHostingMode()), m_webPageProxy->pageID());
 }
 
 void TiledCoreAnimationDrawingAreaProxy::sizeDidChange()
@@ -67,6 +84,12 @@ void TiledCoreAnimationDrawingAreaProxy::sizeDidChange()
         return;
 
     sendUpdateGeometry();
+}
+
+void TiledCoreAnimationDrawingAreaProxy::waitForPossibleGeometryUpdate()
+{
+    if (!m_isWaitingForDidUpdateGeometry)
+        return;
 
     if (m_webPageProxy->process()->isLaunching())
         return;
@@ -74,6 +97,24 @@ void TiledCoreAnimationDrawingAreaProxy::sizeDidChange()
     // The timeout, in seconds, we use when waiting for a DidUpdateGeometry message.
     static const double didUpdateBackingStoreStateTimeout = 0.5;
     m_webPageProxy->process()->connection()->waitForAndDispatchImmediately<Messages::DrawingAreaProxy::DidUpdateGeometry>(m_webPageProxy->pageID(), didUpdateBackingStoreStateTimeout);
+}
+
+void TiledCoreAnimationDrawingAreaProxy::colorSpaceDidChange()
+{
+    m_webPageProxy->process()->send(Messages::DrawingArea::SetColorSpace(m_webPageProxy->colorSpace()), m_webPageProxy->pageID());
+}
+
+void TiledCoreAnimationDrawingAreaProxy::minimumLayoutWidthDidChange()
+{
+    if (!m_webPageProxy->isValid())
+        return;
+
+    // We only want one UpdateGeometry message in flight at once, so if we've already sent one but
+    // haven't yet received the reply we'll just return early here.
+    if (m_isWaitingForDidUpdateGeometry)
+        return;
+
+    sendUpdateGeometry();
 }
 
 void TiledCoreAnimationDrawingAreaProxy::enterAcceleratedCompositingMode(uint64_t backingStoreStateID, const LayerTreeContext& layerTreeContext)
@@ -87,25 +128,44 @@ void TiledCoreAnimationDrawingAreaProxy::exitAcceleratedCompositingMode(uint64_t
     ASSERT_NOT_REACHED();
 }
 
-void TiledCoreAnimationDrawingAreaProxy::didUpdateGeometry()
+void TiledCoreAnimationDrawingAreaProxy::updateAcceleratedCompositingMode(uint64_t backingStoreStateID, const LayerTreeContext& layerTreeContext)
+{
+    m_webPageProxy->updateAcceleratedCompositingMode(layerTreeContext);
+}
+
+void TiledCoreAnimationDrawingAreaProxy::didUpdateGeometry(const IntSize& newIntrinsicContentSize)
 {
     ASSERT(m_isWaitingForDidUpdateGeometry);
 
     m_isWaitingForDidUpdateGeometry = false;
 
+    double minimumLayoutWidth = m_webPageProxy->minimumLayoutWidth();
+
     // If the WKView was resized while we were waiting for a DidUpdateGeometry reply from the web process,
     // we need to resend the new size here.
-    if (m_lastSentSize != m_size)
+    if (m_lastSentSize != m_size || m_lastSentMinimumLayoutWidth != minimumLayoutWidth)
         sendUpdateGeometry();
+
+    if (minimumLayoutWidth > 0)
+        m_webPageProxy->intrinsicContentSizeDidChange(newIntrinsicContentSize);
+}
+
+void TiledCoreAnimationDrawingAreaProxy::intrinsicContentSizeDidChange(const IntSize& newIntrinsicContentSize)
+{
+    if (m_webPageProxy->minimumLayoutWidth() > 0)
+        m_webPageProxy->intrinsicContentSizeDidChange(newIntrinsicContentSize);
 }
 
 void TiledCoreAnimationDrawingAreaProxy::sendUpdateGeometry()
 {
     ASSERT(!m_isWaitingForDidUpdateGeometry);
 
+    m_lastSentMinimumLayoutWidth = m_webPageProxy->minimumLayoutWidth();
     m_lastSentSize = m_size;
-    m_webPageProxy->process()->send(Messages::DrawingArea::UpdateGeometry(m_size), m_webPageProxy->pageID());
+    m_webPageProxy->process()->send(Messages::DrawingArea::UpdateGeometry(m_size, m_lastSentMinimumLayoutWidth), m_webPageProxy->pageID());
     m_isWaitingForDidUpdateGeometry = true;
 }
 
 } // namespace WebKit
+
+#endif // ENABLE(THREADED_SCROLLING)

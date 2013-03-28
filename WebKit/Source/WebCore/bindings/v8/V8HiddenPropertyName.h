@@ -1,10 +1,10 @@
 /*
- * Copyright (C) 2009 Google Inc. All rights reserved.
- * 
+ * Copyright (C) 2012 Google Inc. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
  * met:
- * 
+ *
  *     * Redistributions of source code must retain the above copyright
  * notice, this list of conditions and the following disclaimer.
  *     * Redistributions in binary form must reproduce the above
@@ -14,7 +14,7 @@
  *     * Neither the name of Google Inc. nor the names of its
  * contributors may be used to endorse or promote products derived from
  * this software without specific prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
@@ -36,15 +36,19 @@
 namespace WebCore {
 
 #define V8_HIDDEN_PROPERTIES(V) \
-    V(objectPrototype) \
-    V(listener) \
     V(attributeListener) \
+    V(callback) \
+    V(detail) \
+    V(document) \
+    V(event) \
+    V(listener) \
     V(scriptState) \
-    V(devtoolsInjectedScript) \
     V(sleepFunction) \
+    V(state) \
     V(toStringString) \
-    V(event)
+    V(typedArrayHiddenCopyMethod)
 
+    enum V8HiddenPropertyCreationType { NewSymbol, NewString };
 
     class V8HiddenPropertyName {
     public:
@@ -53,7 +57,7 @@ namespace WebCore {
         V8_HIDDEN_PROPERTIES(V8_DECLARE_PROPERTY);
 #undef V8_DECLARE_PROPERTY
 
-        static v8::Handle<v8::String> hiddenReferenceName(const char* name);
+        static v8::Handle<v8::String> hiddenReferenceName(const char*, unsigned, V8HiddenPropertyCreationType = NewSymbol);
 
     private:
         static v8::Persistent<v8::String> createString(const char* key);

@@ -35,9 +35,9 @@
 #include "Image.h"
 #include "RenderImage.h"
 #include "markup.h"
-#include <qguiapplication.h>
 #include <qclipboard.h>
 #include <qdebug.h>
+#include <qguiapplication.h>
 #include <qmimedata.h>
 #include <qurl.h>
 
@@ -111,7 +111,7 @@ PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefP
     if (mimeData->hasHtml()) {
         QString html = mimeData->html();
         if (!html.isEmpty()) {
-            RefPtr<DocumentFragment> fragment = createFragmentFromMarkup(frame->document(), html, "", FragmentScriptingNotAllowed);
+            RefPtr<DocumentFragment> fragment = createFragmentFromMarkup(frame->document(), html, "", DisallowScriptingContent);
             if (fragment)
                 return fragment.release();
         }
@@ -127,7 +127,7 @@ PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefP
     return 0;
 }
 
-void Pasteboard::writePlainText(const String& text)
+void Pasteboard::writePlainText(const String& text, SmartReplaceOption smartReplaceOption)
 {
 #ifndef QT_NO_CLIPBOARD
     QMimeData* md = new QMimeData;
@@ -135,6 +135,8 @@ void Pasteboard::writePlainText(const String& text)
     qtext.replace(QChar(0xa0), QLatin1Char(' '));
     md->setText(qtext);
     QGuiApplication::clipboard()->setMimeData(md, m_selectionMode ? QClipboard::Selection : QClipboard::Clipboard);
+    if (smartReplaceOption == CanSmartReplace)
+        md->setData(QLatin1String("application/vnd.qtwebkit.smartpaste"), QByteArray());
 #endif
 }
 

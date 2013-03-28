@@ -12,14 +12,17 @@ JAVASCRIPTCORE_GENERATED_SOURCES_DIR = $${ROOT_BUILD_DIR}/Source/JavaScriptCore/
 INCLUDEPATH += \
     $$SOURCE_DIR \
     $$SOURCE_DIR/.. \
+    $$SOURCE_DIR/../WTF \
     $$SOURCE_DIR/assembler \
     $$SOURCE_DIR/bytecode \
     $$SOURCE_DIR/bytecompiler \
     $$SOURCE_DIR/heap \
     $$SOURCE_DIR/dfg \
     $$SOURCE_DIR/debugger \
+    $$SOURCE_DIR/disassembler \
     $$SOURCE_DIR/interpreter \
     $$SOURCE_DIR/jit \
+    $$SOURCE_DIR/llint \
     $$SOURCE_DIR/parser \
     $$SOURCE_DIR/profiler \
     $$SOURCE_DIR/runtime \
@@ -29,18 +32,15 @@ INCLUDEPATH += \
     $$SOURCE_DIR/ForwardingHeaders \
     $$JAVASCRIPTCORE_GENERATED_SOURCES_DIR
 
-win32-* {
-    DEFINES += _HAS_TR1=0
-    LIBS += -lwinmm
+# Pick up the right version of LLIntAssembly.h
+macx: INCLUDEPATH += $$JAVASCRIPTCORE_GENERATED_SOURCES_DIR/$$activeBuildConfig()
 
-    win32-g++* {
-        LIBS += -lpthreadGC2
-    } else:win32-msvc* {
-        LIBS += -lpthreadVC2
-    }
-}
+win32-*: LIBS += -lwinmm
 
 wince* {
-    INCLUDEPATH += $$QT_SOURCE_TREE/src/3rdparty/ce-compat
     INCLUDEPATH += $$SOURCE_DIR/os-win32
+}
+
+linux-*:if(isEqual(QT_ARCH, "i386")|isEqual(QT_ARCH, "x86_64")) {
+    INCLUDEPATH += $$SOURCE_DIR/disassembler/udis86
 }

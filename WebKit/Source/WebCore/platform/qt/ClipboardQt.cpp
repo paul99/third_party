@@ -42,14 +42,14 @@
 #include "IntPoint.h"
 #include "KURL.h"
 #include "NotImplemented.h"
-#include "PlatformString.h"
 #include "Range.h"
 #include "RenderImage.h"
 #include "markup.h"
 #include <wtf/text/StringHash.h>
+#include <wtf/text/WTFString.h>
 
-#include <QGuiApplication>
 #include <QClipboard>
+#include <QGuiApplication>
 #include <QList>
 #include <QMimeData>
 #include <QStringList>
@@ -143,28 +143,21 @@ void ClipboardQt::clearAllData()
     m_writableData = 0;
 }
 
-String ClipboardQt::getData(const String& type, bool& success) const
+String ClipboardQt::getData(const String& type) const
 {
 
-    if (policy() != ClipboardReadable) {
-        success = false;
+    if (policy() != ClipboardReadable)
         return String();
-    }
 
-    if (isHtmlMimeType(type) && m_readableData->hasHtml()) {
-        success = true;
+    if (isHtmlMimeType(type) && m_readableData->hasHtml())
         return m_readableData->html();
-    }
 
-    if (isTextMimeType(type) && m_readableData->hasText()) {
-        success = true;
+    if (isTextMimeType(type) && m_readableData->hasText())
         return m_readableData->text();
-    }
 
     ASSERT(m_readableData);
     QByteArray rawData = m_readableData->data(type);
     QString data = QTextCodec::codecForName("UTF-16")->toUnicode(rawData);
-    success = !data.isEmpty();
     return data;
 }
 
@@ -189,13 +182,13 @@ bool ClipboardQt::setData(const String& type, const String& data)
 }
 
 // extensions beyond IE's API
-HashSet<String> ClipboardQt::types() const
+ListHashSet<String> ClipboardQt::types() const
 {
     if (policy() != ClipboardReadable && policy() != ClipboardTypesReadable)
-        return HashSet<String>();
+        return ListHashSet<String>();
 
     ASSERT(m_readableData);
-    HashSet<String> result;
+    ListHashSet<String> result;
     QStringList formats = m_readableData->formats();
     for (int i = 0; i < formats.count(); ++i)
         result.add(formats.at(i));
@@ -214,7 +207,7 @@ PassRefPtr<FileList> ClipboardQt::files() const
         QUrl url = urls[i];
         if (url.scheme() != QLatin1String("file"))
             continue;
-        fileList->append(File::create(url.toLocalFile()));
+        fileList->append(File::create(url.toLocalFile(), File::AllContentTypes));
     }
 
     return fileList.release();
@@ -247,10 +240,14 @@ void ClipboardQt::setDragImage(CachedImage* image, Node *node, const IntPoint &l
 
 DragImageRef ClipboardQt::createDragImage(IntPoint& dragLoc) const
 {
-    if (!m_dragImage)
-        return 0;
     dragLoc = m_dragLoc;
-    return m_dragImage->image()->nativeImageForCurrentFrame();
+
+    if (m_dragImage)
+        return m_dragImage->image()->nativeImageForCurrentFrame();
+    if (m_dragImageElement && m_frame)
+        return m_frame->nodeImage(m_dragImageElement.get());
+
+    return 0;
 }
 
 

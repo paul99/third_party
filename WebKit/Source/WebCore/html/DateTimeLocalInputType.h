@@ -31,31 +31,37 @@
 #ifndef DateTimeLocalInputType_h
 #define DateTimeLocalInputType_h
 
-#include "BaseDateAndTimeInputType.h"
-
 #if ENABLE(INPUT_TYPE_DATETIMELOCAL)
+#include "BaseChooserOnlyDateAndTimeInputType.h"
+#include "BaseMultipleFieldsDateAndTimeInputType.h"
 
 namespace WebCore {
 
-class DateTimeLocalInputType : public BaseDateAndTimeInputType {
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+typedef BaseMultipleFieldsDateAndTimeInputType BaseDateTimeLocalInputType;
+#else
+typedef BaseChooserOnlyDateAndTimeInputType BaseDateTimeLocalInputType;
+#endif
+
+class DateTimeLocalInputType : public BaseDateTimeLocalInputType {
 public:
     static PassOwnPtr<InputType> create(HTMLInputElement*);
 
 private:
-    DateTimeLocalInputType(HTMLInputElement* element) : BaseDateAndTimeInputType(element) { }
+    DateTimeLocalInputType(HTMLInputElement* element) : BaseDateTimeLocalInputType(element) { }
     virtual const AtomicString& formControlType() const OVERRIDE;
     virtual DateComponents::Type dateType() const OVERRIDE;
     virtual double valueAsDate() const OVERRIDE;
     virtual void setValueAsDate(double, ExceptionCode&) const OVERRIDE;
-    virtual double minimum() const OVERRIDE;
-    virtual double maximum() const OVERRIDE;
-    virtual double defaultStep() const OVERRIDE;
-    virtual double stepScaleFactor() const OVERRIDE;
-    virtual bool scaledStepValueShouldBeInteger() const OVERRIDE;
+    virtual StepRange createStepRange(AnyStepHandling) const;
     virtual bool parseToDateComponentsInternal(const UChar*, unsigned length, DateComponents*) const OVERRIDE;
     virtual bool setMillisecondToDateComponents(double, DateComponents*) const OVERRIDE;
-#if OS(ANDROID)
     virtual bool isDateTimeLocalField() const OVERRIDE;
+
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+    // BaseMultipleFieldsDateAndTimeInputType functions
+    virtual String formatDateTimeFieldsState(const DateTimeFieldsState&) const OVERRIDE FINAL;
+    virtual void setupLayoutParameters(DateTimeEditElement::LayoutParameters&, const DateComponents&) const OVERRIDE FINAL;
 #endif
 };
 

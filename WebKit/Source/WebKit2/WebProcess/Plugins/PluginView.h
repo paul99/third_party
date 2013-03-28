@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,25 +30,33 @@
 #include "Plugin.h"
 #include "PluginController.h"
 #include "WebFrame.h"
+#include <WebCore/Image.h>
 #include <WebCore/MediaCanStartListener.h>
 #include <WebCore/PluginViewBase.h>
 #include <WebCore/ResourceError.h>
 #include <WebCore/ResourceResponse.h>
 #include <WebCore/RunLoop.h>
+#include <WebCore/Timer.h>
 #include <wtf/Deque.h>
 
 // FIXME: Eventually this should move to WebCore.
 
 namespace WebCore {
-    class Frame;
-    class HTMLPlugInElement;
+class Frame;
+class HTMLPlugInElement;
+class MouseEvent;
+class RenderBoxModelObject;
 }
 
 namespace WebKit {
 
+class WebEvent;
+
 class PluginView : public WebCore::PluginViewBase, public PluginController, private WebCore::MediaCanStartListener, private WebFrame::LoadListener {
 public:
     static PassRefPtr<PluginView> create(PassRefPtr<WebCore::HTMLPlugInElement>, PassRefPtr<Plugin>, const Plugin::Parameters&);
+
+    void recreateAndInitialize(PassRefPtr<Plugin>);
 
     WebCore::Frame* frame() const;
 
@@ -65,21 +73,33 @@ public:
     void setDeviceScaleFactor(float);
     void windowAndViewFramesChanged(const WebCore::IntRect& windowFrameInScreenCoordinates, const WebCore::IntRect& viewFrameInWindowCoordinates);
     bool sendComplexTextInput(uint64_t pluginComplexTextInputIdentifier, const String& textInput);
+    void setLayerHostingMode(LayerHostingMode);
+    RetainPtr<PDFDocument> pdfDocumentForPrinting() const { return m_plugin->pdfDocumentForPrinting(); }
 #endif
 
-#if USE(CG)
-    RetainPtr<CGPDFDocumentRef> pdfDocumentForPrinting() const { return m_plugin->pdfDocumentForPrinting(); }
-#endif
+    WebCore::HTMLPlugInElement* pluginElement() const { return m_pluginElement.get(); }
+    const Plugin::Parameters& initialParameters() const { return m_parameters; }
 
     // FIXME: Remove this; nobody should have to know about the plug-in view's renderer except the plug-in view itself.
     WebCore::RenderBoxModelObject* renderer() const;
+    
+    void setPageScaleFactor(double scaleFactor, WebCore::IntPoint origin);
+    double pageScaleFactor();
+    bool handlesPageScaleFactor() { return m_plugin->handlesPageScaleFactor(); }
+
+    void pageScaleFactorDidChange();
+    void webPageDestroyed();
+
+    virtual bool handleEditingCommand(const String& commandName, const String& argument);
+    virtual bool isEditingCommandEnabled(const String& commandName);
+
+    bool shouldAllowScripting();
 
 private:
     PluginView(PassRefPtr<WebCore::HTMLPlugInElement>, PassRefPtr<Plugin>, const Plugin::Parameters& parameters);
     virtual ~PluginView();
 
     void initializePlugin();
-    void destroyPlugin();
 
     void viewGeometryDidChange();
     void viewVisibilityDidChange();
@@ -103,16 +123,21 @@ private:
 
     void redeliverManualStream();
 
+    void pluginSnapshotTimerFired(WebCore::DeferrableOneShotTimer<PluginView>*);
+
     // WebCore::PluginViewBase
 #if PLATFORM(MAC)
     virtual PlatformLayer* platformLayer() const;
 #endif
     virtual JSC::JSObject* scriptObject(JSC::JSGlobalObject*);
+    virtual void storageBlockingStateChanged();
     virtual void privateBrowsingStateChanged(bool);
     virtual bool getFormValue(String&);
     virtual bool scroll(WebCore::ScrollDirection, WebCore::ScrollGranularity);
     virtual WebCore::Scrollbar* horizontalScrollbar();
     virtual WebCore::Scrollbar* verticalScrollbar();
+    virtual bool wantsWheelEvents();
+    virtual bool shouldAlwaysAutoStart() const OVERRIDE;
 
     // WebCore::Widget
     virtual void setFrameRect(const WebCore::IntRect&);
@@ -138,10 +163,11 @@ private:
                          const WebCore::HTTPHeaderMap& headerFields, const Vector<uint8_t>& httpBody, bool allowPopups);
     virtual void cancelStreamLoad(uint64_t streamID);
     virtual void cancelManualStreamLoad();
+#if ENABLE(NETSCAPE_PLUGIN_API)
     virtual NPObject* windowScriptNPObject();
     virtual NPObject* pluginElementNPObject();
     virtual bool evaluate(NPObject*, const String&scriptString, NPVariant* result, bool allowPopups);
-    virtual bool tryToShortCircuitInvoke(NPObject*, NPIdentifier methodName, const NPVariant* arguments, uint32_t argumentCount, bool& returnValue, NPVariant& result);
+#endif
     virtual void setStatusbarText(const String&);
     virtual bool isAcceleratedCompositingEnabled();
     virtual void pluginProcessCrashed();
@@ -161,12 +187,25 @@ private:
     virtual void setCookiesForURL(const String& urlString, const String& cookieString);
     virtual bool getAuthenticationInfo(const WebCore::ProtectionSpace&, String& username, String& password);
     virtual bool isPrivateBrowsingEnabled();
+    virtual bool asynchronousPluginInitializationEnabled() const;
+    virtual bool asynchronousPluginInitializationEnabledForAllPlugins() const;
+    virtual bool artificialPluginInitializationDelayEnabled() const;
     virtual void protectPluginFromDestruction();
     virtual void unprotectPluginFromDestruction();
+#if PLUGIN_ARCHITECTURE(X11)
+    virtual uint64_t createPluginContainer();
+    virtual void windowedPluginGeometryDidChange(const WebCore::IntRect& frameRect, const WebCore::IntRect& clipRect, uint64_t windowID);
+#endif
+
+    virtual void didInitializePlugin();
+    virtual void didFailToInitializePlugin();
+    void destroyPluginAndReset();
 
     // WebFrame::LoadListener
     virtual void didFinishLoad(WebFrame*);
     virtual void didFailLoad(WebFrame*, bool wasCancelled);
+
+    PassOwnPtr<WebEvent> createWebEvent(WebCore::MouseEvent*) const;
 
     RefPtr<WebCore::HTMLPlugInElement> m_pluginElement;
     RefPtr<Plugin> m_plugin;
@@ -174,6 +213,7 @@ private:
     Plugin::Parameters m_parameters;
     
     bool m_isInitialized;
+    bool m_isWaitingForSynchronousInitialization;
     bool m_isWaitingUntilMediaCanStart;
     bool m_isBeingDestroyed;
 
@@ -188,8 +228,10 @@ private:
     // Streams that the plug-in has requested to load. 
     HashMap<uint64_t, RefPtr<Stream> > m_streams;
 
+#if ENABLE(NETSCAPE_PLUGIN_API)
     // A map of all related NPObjects for this plug-in view.
     NPRuntimeObjectMap m_npRuntimeObjectMap;
+#endif
 
     // The manual stream state. This is used so we can deliver a manual stream to a plug-in
     // when it is initialized.
@@ -205,7 +247,13 @@ private:
     WebCore::ResourceError m_manualStreamError;
     RefPtr<WebCore::SharedBuffer> m_manualStreamData;
     
-    RefPtr<ShareableBitmap> m_snapshot;
+    // This snapshot is used to avoid side effects should the plugin run JS during painting.
+    RefPtr<ShareableBitmap> m_transientPaintingSnapshot;
+    // This timer is used when plugin snapshotting is enabled, to capture a plugin placeholder.
+    WebCore::DeferrableOneShotTimer<PluginView> m_pluginSnapshotTimer;
+    unsigned m_countSnapshotRetries;
+
+    double m_pageScaleFactor;
 };
 
 } // namespace WebKit

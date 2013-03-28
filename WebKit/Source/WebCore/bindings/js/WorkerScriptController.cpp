@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2008 Apple Inc. All Rights Reserved.
- * Copyright (C) 2011 Google Inc. All Rights Reserved.
+ * Copyright (C) 2011, 2012 Google Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,12 +31,14 @@
 
 #include "WorkerScriptController.h"
 
+#include "JSDOMBinding.h"
 #include "JSDedicatedWorkerContext.h"
 #include "ScriptSourceCode.h"
 #include "ScriptValue.h"
 #include "WebCoreJSClientData.h"
 #include "WorkerContext.h"
 #include "WorkerObjectProxy.h"
+#include "WorkerScriptDebugServer.h"
 #include "WorkerThread.h"
 #include <heap/StrongInlines.h>
 #include <interpreter/Interpreter.h>
@@ -54,7 +56,7 @@ using namespace JSC;
 namespace WebCore {
 
 WorkerScriptController::WorkerScriptController(WorkerContext* workerContext)
-    : m_globalData(JSGlobalData::create(ThreadStackTypeSmall))
+    : m_globalData(JSGlobalData::create())
     , m_workerContext(workerContext)
     , m_workerContextWrapper(*m_globalData)
     , m_executionForbidden(false)
@@ -64,16 +66,16 @@ WorkerScriptController::WorkerScriptController(WorkerContext* workerContext)
 
 WorkerScriptController::~WorkerScriptController()
 {
-    m_workerContextWrapper.clear(); // Unprotect the global object.
-    m_globalData->clearBuiltinStructures();
-    m_globalData->heap.destroy();
+    JSLockHolder lock(globalData());
+    m_workerContextWrapper.clear();
+    m_globalData.clear();
 }
 
 void WorkerScriptController::initScript()
 {
     ASSERT(!m_workerContextWrapper);
 
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(m_globalData.get());
 
     // Explicitly protect the global object's prototype so it isn't collected
     // when we allocate the global object. (Once the global object is fully
@@ -109,64 +111,71 @@ void WorkerScriptController::initScript()
     ASSERT(asObject(m_workerContextWrapper->prototype())->globalObject() == m_workerContextWrapper);
 }
 
-ScriptValue WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode)
+void WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode)
 {
     if (isExecutionForbidden())
-        return ScriptValue();
+        return;
 
     ScriptValue exception;
-    ScriptValue result(evaluate(sourceCode, &exception));
+    evaluate(sourceCode, &exception);
     if (exception.jsValue()) {
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(globalData());
         reportException(m_workerContextWrapper->globalExec(), exception.jsValue());
     }
-    return result;
 }
 
-ScriptValue WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode, ScriptValue* exception)
+void WorkerScriptController::evaluate(const ScriptSourceCode& sourceCode, ScriptValue* exception)
 {
     if (isExecutionForbidden())
-        return ScriptValue();
+        return;
 
     initScriptIfNeeded();
-    JSLock lock(SilenceAssertionsOnly);
 
     ExecState* exec = m_workerContextWrapper->globalExec();
+    JSLockHolder lock(exec);
 
     m_workerContextWrapper->globalData().timeoutChecker.start();
 
     JSValue evaluationException;
-    JSValue returnValue = JSC::evaluate(exec, exec->dynamicGlobalObject()->globalScopeChain(), sourceCode.jsSourceCode(), m_workerContextWrapper.get(), &evaluationException);
+    JSC::evaluate(exec, sourceCode.jsSourceCode(), m_workerContextWrapper.get(), &evaluationException);
 
     m_workerContextWrapper->globalData().timeoutChecker.stop();
 
     if ((evaluationException && isTerminatedExecutionException(evaluationException)) ||  m_workerContextWrapper->globalData().terminator.shouldTerminate()) {
         forbidExecution();
-        return ScriptValue();
+        return;
     }
 
     if (evaluationException) {
         String errorMessage;
         int lineNumber = 0;
         String sourceURL = sourceCode.url().string();
-        if (m_workerContext->sanitizeScriptError(errorMessage, lineNumber, sourceURL))
+        if (m_workerContext->sanitizeScriptError(errorMessage, lineNumber, sourceURL, sourceCode.cachedScript()))
             *exception = ScriptValue(*m_globalData, throwError(exec, createError(exec, errorMessage.impl())));
         else
             *exception = ScriptValue(*m_globalData, evaluationException);
     }
-
-    return ScriptValue(*m_globalData, returnValue);
-
 }
 
-void WorkerScriptController::setException(ScriptValue exception)
+void WorkerScriptController::setException(const ScriptValue& exception)
 {
     throwError(m_workerContextWrapper->globalExec(), exception.jsValue());
 }
 
 void WorkerScriptController::scheduleExecutionTermination()
 {
+    // The mutex provides a memory barrier to ensure that once
+    // termination is scheduled, isExecutionTerminating will
+    // accurately reflect that state when called from another thread.
+    MutexLocker locker(m_scheduledTerminationMutex);
     m_globalData->terminator.terminateSoon();
+}
+
+bool WorkerScriptController::isExecutionTerminating() const
+{
+    // See comments in scheduleExecutionTermination regarding mutex usage.
+    MutexLocker locker(m_scheduledTerminationMutex);
+    return m_globalData->terminator.shouldTerminate();
 }
 
 void WorkerScriptController::forbidExecution()
@@ -181,12 +190,23 @@ bool WorkerScriptController::isExecutionForbidden() const
     return m_executionForbidden;
 }
 
-void WorkerScriptController::disableEval()
+void WorkerScriptController::disableEval(const String& errorMessage)
 {
     initScriptIfNeeded();
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(globalData());
 
-    m_workerContextWrapper->setEvalEnabled(false);
+    m_workerContextWrapper->setEvalEnabled(false, errorMessage);
+}
+
+void WorkerScriptController::attachDebugger(JSC::Debugger* debugger)
+{
+    initScriptIfNeeded();
+    debugger->attach(m_workerContextWrapper->globalObject());
+}
+
+void WorkerScriptController::detachDebugger(JSC::Debugger* debugger)
+{
+    debugger->detach(m_workerContextWrapper->globalObject());
 }
 
 } // namespace WebCore

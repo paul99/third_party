@@ -25,7 +25,6 @@
 #include "SVGGradientElement.h"
 
 #include "Attribute.h"
-#include "CSSStyleSelector.h"
 #include "RenderSVGHiddenContainer.h"
 #include "RenderSVGPath.h"
 #include "RenderSVGResourceLinearGradient.h"
@@ -35,6 +34,7 @@
 #include "SVGStopElement.h"
 #include "SVGTransformList.h"
 #include "SVGTransformable.h"
+#include "StyleResolver.h"
 
 namespace WebCore {
 
@@ -75,40 +75,38 @@ bool SVGGradientElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<QualifiedName, SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGGradientElement::parseMappedAttribute(Attribute* attr)
+void SVGGradientElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
-    if (!isSupportedAttribute(attr->name())) {
-        SVGStyledElement::parseMappedAttribute(attr);
+    if (!isSupportedAttribute(name)) {
+        SVGStyledElement::parseAttribute(name, value);
         return;
     }
 
-    if (attr->name() == SVGNames::gradientUnitsAttr) {
-        SVGUnitTypes::SVGUnitType propertyValue = SVGPropertyTraits<SVGUnitTypes::SVGUnitType>::fromString(attr->value());
+    if (name == SVGNames::gradientUnitsAttr) {
+        SVGUnitTypes::SVGUnitType propertyValue = SVGPropertyTraits<SVGUnitTypes::SVGUnitType>::fromString(value);
         if (propertyValue > 0)
             setGradientUnitsBaseValue(propertyValue);
         return;
     }
 
-    if (attr->name() == SVGNames::gradientTransformAttr) {
+    if (name == SVGNames::gradientTransformAttr) {
         SVGTransformList newList;
-        if (!SVGTransformable::parseTransformAttribute(newList, attr->value()))
-            newList.clear();
-
+        newList.parse(value);
         detachAnimatedGradientTransformListWrappers(newList.size());
         setGradientTransformBaseValue(newList);
         return;
     }
 
-    if (attr->name() == SVGNames::spreadMethodAttr) {
-        SVGSpreadMethodType propertyValue = SVGPropertyTraits<SVGSpreadMethodType>::fromString(attr->value());
+    if (name == SVGNames::spreadMethodAttr) {
+        SVGSpreadMethodType propertyValue = SVGPropertyTraits<SVGSpreadMethodType>::fromString(value);
         if (propertyValue > 0)
             setSpreadMethodBaseValue(propertyValue);
         return;
     }
 
-    if (SVGURIReference::parseMappedAttribute(attr))
+    if (SVGURIReference::parseAttribute(name, value))
         return;
-    if (SVGExternalResourcesRequired::parseMappedAttribute(attr))
+    if (SVGExternalResourcesRequired::parseAttribute(name, value))
         return;
 
     ASSERT_NOT_REACHED();

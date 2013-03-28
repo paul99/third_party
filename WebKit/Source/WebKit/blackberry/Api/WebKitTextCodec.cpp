@@ -19,11 +19,11 @@
 #include "config.h"
 #include "WebKitTextCodec.h"
 
-#include "Base64.h"
 #include "KURL.h"
-#include "MIMETypeRegistry.h"
 #include "TextCodecICU.h"
+#include <BlackBerryPlatformString.h>
 #include <wtf/Vector.h>
+#include <wtf/text/Base64.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/WTFString.h>
 
@@ -85,66 +85,52 @@ TranscodeResult transcode(const char* sourceEncoding, const char* targetEncoding
     return Success;
 }
 
-WebCore::Base64DecodePolicy base64DecodePolicyForWebCore(Base64DecodePolicy policy)
+WTF::Base64DecodePolicy base64DecodePolicyForWTF(Base64DecodePolicy policy)
 {
-    // Must make sure Base64DecodePolicy is the same in WebKit and WebCore!
-    return static_cast<WebCore::Base64DecodePolicy>(policy);
+    COMPILE_ASSERT(WTF::Base64FailOnInvalidCharacter == static_cast<WTF::Base64DecodePolicy>(Base64FailOnInvalidCharacter));
+    COMPILE_ASSERT(WTF::Base64IgnoreWhitespace == static_cast<WTF::Base64DecodePolicy>(Base64IgnoreWhitespace));
+    COMPILE_ASSERT(WTF::Base64IgnoreInvalidCharacters == static_cast<WTF::Base64DecodePolicy>(Base64IgnoreInvalidCharacters));
+    return static_cast<WTF::Base64DecodePolicy>(policy);
 }
 
-bool base64Decode(const std::string& base64, std::vector<char>& binary, Base64DecodePolicy policy)
+bool base64Decode(const BlackBerry::Platform::String& base64, std::vector<char>& binary, Base64DecodePolicy policy)
 {
     Vector<char> result;
-    if (!WebCore::base64Decode(base64.c_str(), base64.length(), result, base64DecodePolicyForWebCore(policy)))
+    if (!WTF::base64Decode(base64.c_str(), base64.length(), result, base64DecodePolicyForWTF(policy)))
         return false;
 
     binary.insert(binary.begin(), result.begin(), result.end());
     return true;
 }
 
-bool base64Encode(const std::vector<char>& binary, std::string& base64, Base64EncodePolicy policy)
+WTF::Base64DecodePolicy base64EncodePolicyForWTF(Base64EncodePolicy policy)
+{
+    // FIXME: Base64InsertCRLF should be Base64InsertLFs. WTF::encodeBase64 doesn't insert CR.
+    COMPILE_ASSERT(WTF::Base64DoNotInsertLFs == static_cast<WTF::Base64EncodePolicy>(Base64DoNotInsertCRLF));
+    COMPILE_ASSERT(WTF::Base64InsertLFs == static_cast<WTF::Base64EncodePolicy>(Base64InsertCRLF));
+    return static_cast<WTF::Base64EncodePolicy>(policy);
+}
+
+bool base64Encode(const std::vector<char>& binary, BlackBerry::Platform::String& base64, Base64EncodePolicy policy)
 {
     Vector<char> result;
     result.append(&binary[0], binary.size());
 
-    WebCore::base64Encode(&binary[0], binary.size(), result, Base64InsertCRLF == policy ? true : false);
+    WTF::base64Encode(&binary[0], binary.size(), result, base64EncodePolicyForWTF(policy));
 
-    base64.clear();
-    base64.append(&result[0], result.size());
+    base64 = Blackberry::Platform::String(&result[0], result.size());
 
     return true;
 }
 
-void unescapeURL(const std::string& escaped, std::string& url)
+void unescapeURL(const BlackBerry::Platform::String& escaped, BlackBerry::Platform::String& url)
 {
-    String escapedString(escaped.data(), escaped.length());
-    String urlString = WebCore::decodeURLEscapeSequences(escapedString);
-    CString utf8 = urlString.utf8();
-
-    url.clear();
-    url.append(utf8.data(), utf8.length());
+    url = WebCore::decodeURLEscapeSequences(escaped);
 }
 
-void escapeURL(const std::string& url, std::string& escaped)
+void escapeURL(const BlackBerry::Platform::String& url, BlackBerry::Platform::String& escaped)
 {
-    String urlString(url.data(), url.length());
-    String escapedString = WebCore::encodeWithURLEscapeSequences(urlString);
-    CString utf8 = escapedString.utf8();
-
-    escaped.clear();
-    escaped.append(utf8.data(), utf8.length());
-}
-
-bool getExtensionForMimeType(const std::string& mime, std::string& extension)
-{
-    String mimeType(mime.data(), mime.length());
-    String preferredExtension = WebCore::MIMETypeRegistry::getPreferredExtensionForMIMEType(mimeType);
-    if (preferredExtension.isEmpty())
-        return false;
-
-    CString utf8 = preferredExtension.utf8();
-    extension.clear();
-    extension.append(utf8.data(), utf8.length());
-    return true;
+    escaped = WebCore::encodeWithURLEscapeSequences(url);
 }
 
 } // namespace WebKit

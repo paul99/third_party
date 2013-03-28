@@ -29,29 +29,64 @@
 #define TALK_P2P_BASE_TRANSPORTCHANNEL_H_
 
 #include <string>
+#include <vector>
+
 #include "talk/base/basictypes.h"
 #include "talk/base/sigslot.h"
 #include "talk/base/socket.h"
+#include "talk/base/sslidentity.h"
+#include "talk/base/sslstreamadapter.h"
+#include "talk/p2p/base/candidate.h"
+#include "talk/p2p/base/transportdescription.h"
 
 namespace cricket {
 
 class Candidate;
-class P2PTransportChannel;
+
+// Stats that we can return about the connections for this transport channel.
+struct ConnectionInfo {
+  bool best_connection;        // Is this the best connection we have?
+  bool writable;               // Has this connection received a STUN response?
+  bool readable;               // Has this connection received a STUN request?
+  bool timeout;                // Has this connection timed out?
+  bool new_connection;         // Is this a newly created connection?
+  size_t rtt;                  // The STUN RTT for this connection.
+  size_t sent_total_bytes;     // Total bytes sent on this connection.
+  size_t sent_bytes_second;    // Bps over the last measurement interval.
+  size_t recv_total_bytes;     // Total bytes received on this connection.
+  size_t recv_bytes_second;    // Bps over the last measurement interval.
+  Candidate local_candidate;   // The local candidate for this connection.
+  Candidate remote_candidate;  // The remote candidate for this connection.
+  void* key;                   // A static value that identifies this conn.
+};
+typedef std::vector<ConnectionInfo> ConnectionInfos;
+
+// Flags for SendPacket/SignalReadPacket.
+enum PacketFlags {
+  PF_NORMAL       = 0x00,  // A normal packet.
+  PF_SRTP_BYPASS  = 0x01,  // An encrypted SRTP packet; bypass any additional
+                           // crypto provided by the transport (e.g. DTLS)
+};
 
 // A TransportChannel represents one logical stream of packets that are sent
 // between the two sides of a session.
-class TransportChannel: public sigslot::has_slots<> {
+class TransportChannel : public sigslot::has_slots<> {
  public:
-  TransportChannel(const std::string& name, const std::string &content_type)
-      : name_(name), content_type_(content_type),
+  explicit TransportChannel(const std::string& content_name, int component)
+      : content_name_(content_name),
+        component_(component),
         readable_(false), writable_(false) {}
   virtual ~TransportChannel() {}
 
   // Returns the session id of this channel.
-  const std::string& session_id() const { return session_id_; }
-  // Returns the name of this channel.
-  const std::string& name() const { return name_; }
-  const std::string& content_type() const { return content_type_; }
+  virtual const std::string& SessionId() const { return session_id_; }
+  // Sets session id which created this transport channel.
+  // This is called from TransportProxy::GetOrCreateImpl.
+  virtual void SetSessionId(const std::string& session_id) {
+    session_id_ = session_id;
+  }
+  const std::string& content_name() const { return content_name_; }
+  int component() const { return component_; }
 
   // Returns the readable and states of this channel.  Each time one of these
   // states changes, a signal is raised.  These states are aggregated by the
@@ -62,28 +97,49 @@ class TransportChannel: public sigslot::has_slots<> {
   sigslot::signal1<TransportChannel*> SignalWritableState;
 
   // Attempts to send the given packet.  The return value is < 0 on failure.
-  virtual int SendPacket(const char *data, size_t len) = 0;
+  // TODO: Remove the default argument once channel code is updated.
+  virtual int SendPacket(const char* data, size_t len, int flags = 0) = 0;
 
   // Sets a socket option on this channel.  Note that not all options are
   // supported by all transport types.
   virtual int SetOption(talk_base::Socket::Option opt, int value) = 0;
 
-  // Sets session id which created this transport channel.
-  // This is called from TransportProxy::GetOrCreateImpl.
-  void set_session_id(const std::string& session_id) {
-    session_id_ = session_id;
-  }
-
   // Returns the most recent error that occurred on this channel.
   virtual int GetError() = 0;
 
-  // This hack is here to allow the SocketMonitor to downcast to the
-  // P2PTransportChannel safely.
-  // TODO: Generalize network monitoring.
-  virtual P2PTransportChannel* GetP2PChannel() { return NULL; }
+  // Returns the current stats for this connection.
+  virtual bool GetStats(ConnectionInfos* infos) {
+    return false;
+  }
+
+  // Is DTLS active?
+  virtual bool IsDtlsActive() const {
+    return false;
+  }
+
+  // Set up the ciphers to use for DTLS-SRTP.
+  virtual bool SetSrtpCiphers(const std::vector<std::string>& ciphers) {
+    return false;
+  }
+
+  // Find out which DTLS-SRTP cipher was negotiated
+  virtual bool GetSrtpCipher(std::string* cipher) {
+    return false;
+  }
+
+  // Allows key material to be extracted for external encryption.
+  virtual bool ExportKeyingMaterial(const std::string& label,
+      const uint8* context,
+      size_t context_len,
+      bool use_context,
+      uint8* result,
+      size_t result_len) {
+    return false;
+  }
 
   // Signalled each time a packet is received on this channel.
-  sigslot::signal3<TransportChannel*, const char*, size_t> SignalReadPacket;
+  sigslot::signal4<TransportChannel*, const char*,
+                   size_t, int> SignalReadPacket;
 
   // This signal occurs when there is a change in the way that packets are
   // being routed, i.e. to a different remote location. The candidate
@@ -106,8 +162,9 @@ class TransportChannel: public sigslot::has_slots<> {
 
  private:
   std::string session_id_;
-  std::string name_;
-  std::string content_type_;
+  // Used mostly for debugging.
+  std::string content_name_;
+  int component_;
   bool readable_;
   bool writable_;
 

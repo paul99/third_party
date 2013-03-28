@@ -32,6 +32,7 @@
 #include "config.h"
 #include "BaseCheckableInputType.h"
 
+#include "FormController.h"
 #include "FormDataList.h"
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
@@ -42,15 +43,14 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-bool BaseCheckableInputType::saveFormControlState(String& result) const
+FormControlState BaseCheckableInputType::saveFormControlState() const
 {
-    result = element()->checked() ? "on" : "off";
-    return true;
+    return FormControlState(element()->checked() ? "on" : "off");
 }
 
-void BaseCheckableInputType::restoreFormControlState(const String& state) const
+void BaseCheckableInputType::restoreFormControlState(const FormControlState& state)
 {
-    element()->setChecked(state == "on");
+    element()->setChecked(state[0] == "on");
 }
 
 bool BaseCheckableInputType::appendFormData(FormDataList& encoding, bool) const
@@ -84,14 +84,12 @@ bool BaseCheckableInputType::canSetStringValue() const
     return false;
 }
 
-// FIXME: Could share this with BaseButtonInputType and RangeInputType if we had a common base class.
+// FIXME: Could share this with BaseClickableWithKeyInputType and RangeInputType if we had a common base class.
 void BaseCheckableInputType::accessKeyAction(bool sendMouseEvents)
 {
     InputType::accessKeyAction(sendMouseEvents);
 
-    // Send mouse button events if the caller specified sendMouseEvents.
-    // FIXME: The comment above is no good. It says what we do, but not why.
-    element()->dispatchSimulatedClick(0, sendMouseEvents);
+    element()->dispatchSimulatedClick(0, sendMouseEvents ? SendMouseUpDownEvents : SendNoEvents);
 }
 
 String BaseCheckableInputType::fallbackValue() const
@@ -104,7 +102,7 @@ bool BaseCheckableInputType::storesValueSeparateFromAttribute()
     return false;
 }
 
-void BaseCheckableInputType::setValue(const String& sanitizedValue, bool, bool)
+void BaseCheckableInputType::setValue(const String& sanitizedValue, bool, TextFieldEventBehavior)
 {
     element()->setAttribute(valueAttr, sanitizedValue);
 }

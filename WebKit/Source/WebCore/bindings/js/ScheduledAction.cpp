@@ -53,12 +53,12 @@ PassOwnPtr<ScheduledAction> ScheduledAction::create(ExecState* exec, DOMWrapperW
     JSValue v = exec->argument(0);
     CallData callData;
     if (getCallData(v, callData) == CallTypeNone) {
-        if (policy && !policy->allowEval())
+        if (policy && !policy->allowEval(exec))
             return nullptr;
-        UString string = v.toString(exec)->value(exec);
+        String string = v.toString(exec)->value(exec);
         if (exec->hadException())
             return nullptr;
-        return adoptPtr(new ScheduledAction(ustringToString(string), isolatedWorld));
+        return adoptPtr(new ScheduledAction(string, isolatedWorld));
     }
 
     return adoptPtr(new ScheduledAction(exec, v, isolatedWorld));
@@ -91,7 +91,7 @@ void ScheduledAction::execute(ScriptExecutionContext* context)
 void ScheduledAction::executeFunctionInContext(JSGlobalObject* globalObject, JSValue thisValue, ScriptExecutionContext* context)
 {
     ASSERT(m_function);
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(context->globalData());
 
     CallData callData;
     CallType callType = getCallData(m_function.get(), callData);
@@ -106,10 +106,14 @@ void ScheduledAction::executeFunctionInContext(JSGlobalObject* globalObject, JSV
         args.append(m_args[i].get());
 
     globalObject->globalData().timeoutChecker.start();
+    InspectorInstrumentationCookie cookie = JSMainThreadExecState::instrumentFunctionCall(context, callType, callData);
+
     if (context->isDocument())
         JSMainThreadExecState::call(exec, m_function.get(), callType, callData, thisValue, args);
     else
         JSC::call(exec, m_function.get(), callType, callData, thisValue, args);
+
+    InspectorInstrumentation::didCallFunction(cookie);
     globalObject->globalData().timeoutChecker.stop();
 
     if (exec->hadException())

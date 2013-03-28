@@ -39,7 +39,8 @@ class TestStunServer {
  public:
   TestStunServer(talk_base::Thread* thread,
                  const talk_base::SocketAddress& addr)
-      : socket_(thread->socketserver()->CreateAsyncSocket(SOCK_DGRAM)),
+      : socket_(thread->socketserver()->CreateAsyncSocket(addr.family(),
+                                                          SOCK_DGRAM)),
         udp_socket_(talk_base::AsyncUDPSocket::Create(socket_, addr)),
         server_(udp_socket_) {
   }

@@ -34,20 +34,20 @@ class EditingStyle;
 
 class InsertParagraphSeparatorCommand : public CompositeEditCommand {
 public:
-    static PassRefPtr<InsertParagraphSeparatorCommand> create(Document* document, bool useDefaultParagraphElement = false)
+    static PassRefPtr<InsertParagraphSeparatorCommand> create(Document* document, bool useDefaultParagraphElement = false, bool pasteBlockqutoeIntoUnquotedArea = false)
     {
-        return adoptRef(new InsertParagraphSeparatorCommand(document, useDefaultParagraphElement));
+        return adoptRef(new InsertParagraphSeparatorCommand(document, useDefaultParagraphElement, pasteBlockqutoeIntoUnquotedArea));
     }
 
 private:
-    InsertParagraphSeparatorCommand(Document*, bool useDefaultParagraphElement);
+    InsertParagraphSeparatorCommand(Document*, bool useDefaultParagraphElement, bool pasteBlockqutoeIntoUnquotedArea);
 
     virtual void doApply();
 
     void calculateStyleBeforeInsertion(const Position&);
     void applyStyleAfterInsertion(Node* originalEnclosingBlock);
-    void getAncestorsInsideBlock(const Node* insertionNode, Element* outerBlock, Vector<Element*>& ancestors);
-    PassRefPtr<Element> cloneHierarchyUnderNewBlock(const Vector<Element*>& ancestors, PassRefPtr<Element> blockToInsert);
+    void getAncestorsInsideBlock(const Node* insertionNode, Element* outerBlock, Vector<RefPtr<Element> >& ancestors);
+    PassRefPtr<Element> cloneHierarchyUnderNewBlock(const Vector<RefPtr<Element> >& ancestors, PassRefPtr<Element> blockToInsert);
 
     bool shouldUseDefaultParagraphElement(Node*) const;
 
@@ -56,6 +56,7 @@ private:
     RefPtr<EditingStyle> m_style;
 
     bool m_mustUseDefaultParagraphElement;
+    bool m_pasteBlockqutoeIntoUnquotedArea;
 };
 
 }

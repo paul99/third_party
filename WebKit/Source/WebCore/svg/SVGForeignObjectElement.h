@@ -43,10 +43,11 @@ private:
 
     virtual bool isValid() const { return SVGTests::isValid(); }
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
     virtual void svgAttributeChanged(const QualifiedName&);
 
-    virtual bool childShouldCreateRenderer(Node*) const;
+    virtual bool rendererIsNeeded(const NodeRenderingContext&) OVERRIDE;
+    virtual bool childShouldCreateRenderer(const NodeRenderingContext&) const;
     virtual RenderObject* createRenderer(RenderArena* arena, RenderStyle* style);
 
     virtual bool selfHasRelativeLengths() const;

@@ -99,8 +99,8 @@ DragImageRef Frame::nodeImage(Node* node)
     if (!renderer)
         return 0;
 
-    IntRect topLevelRect;
-    IntRect paintingRect = renderer->paintingRootRect(topLevelRect);
+    LayoutRect topLevelRect;
+    IntRect paintingRect = pixelSnappedIntRect(renderer->paintingRootRect(topLevelRect));
 
     m_view->setNodeToDraw(node); // invoke special sub-tree drawing mode
     HBITMAP result = imageFromRect(this, paintingRect);

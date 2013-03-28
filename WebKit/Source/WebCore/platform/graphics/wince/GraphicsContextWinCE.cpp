@@ -354,6 +354,10 @@ static PassOwnPtr<HPEN> createPen(const Color& col, double fWidth, StrokeStyle s
     int penStyle = PS_NULL;
     switch (style) {
         case SolidStroke:
+#if ENABLE(CSS3_TEXT)
+        case DoubleStroke:
+        case WavyStroke: // FIXME: https://bugs.webkit.org/show_bug.cgi?id=94114 - Needs platform support.
+#endif // CSS3_TEXT
             penStyle = PS_SOLID;
             break;
         case DottedStroke:  // not supported on Windows CE
@@ -1032,7 +1036,7 @@ void GraphicsContext::drawLineForText(const FloatPoint& origin, float width, boo
     setStrokeStyle(oldStyle);
 }
 
-void GraphicsContext::drawLineForTextChecking(const FloatPoint&, float width, TextCheckingLineStyle style)
+void GraphicsContext::drawLineForDocumentMarker(const FloatPoint&, float width, DocumentMarkerLineStyle style)
 {
     notImplemented();
 }
@@ -1189,7 +1193,7 @@ void GraphicsContext::setAlpha(float alpha)
     m_data->m_opacity = alpha;
 }
 
-void GraphicsContext::setPlatformCompositeOperation(CompositeOperator op)
+void GraphicsContext::setPlatformCompositeOperation(CompositeOperator op, BlendMode blendMode)
 {
     notImplemented();
 }
@@ -1330,6 +1334,9 @@ Color gradientAverageColor(const Gradient* gradient)
 
 void GraphicsContext::fillPath(const Path& path)
 {
+    if (path.isNull())
+        return;
+
     Color c = m_state.fillGradient
         ? gradientAverageColor(m_state.fillGradient.get())
         : fillColor();
@@ -1369,7 +1376,7 @@ void GraphicsContext::fillPath(const Path& path)
 
 void GraphicsContext::strokePath(const Path& path)
 {
-    if (!m_data->m_opacity)
+    if (path.isNull() || !m_data->m_opacity)
         return;
 
     ScopeDCProvider dcProvider(m_data);
@@ -1492,7 +1499,7 @@ void GraphicsContext::fillRect(const FloatRect& r, const Gradient* gradient)
     GradientFill(dc, tv.data(), tv.size(), mesh.data(), mesh.size(), vertical ? GRADIENT_FILL_RECT_V : GRADIENT_FILL_RECT_H);
 }
 
-AffineTransform GraphicsContext::getCTM() const
+AffineTransform GraphicsContext::getCTM(IncludeDeviceScale) const
 {
     if (paintingDisabled())
         return AffineTransform();
@@ -1595,7 +1602,7 @@ void GraphicsContext::drawText(const SimpleFontData* fontData, const GlyphBuffer
     double scaleY = m_data->m_transform.d();
 
     int height = fontData->platformData().size() * scaleY;
-    int width = fontData->platformData().averageCharWidth() * scaleX;
+    int width = fontData->avgCharWidth() * scaleX;
 
     if (!height || !width)
         return;
@@ -1623,10 +1630,10 @@ void GraphicsContext::drawText(const SimpleFontData* fontData, const GlyphBuffer
         const GlyphBufferAdvance* advance = glyphBuffer.advances(from);
         if (scaleX == 1.)
             for (int i = 1; i < numGlyphs; ++i)
-                offset += *advance++;
+                offset += (*advance++).width();
         else
             for (int i = 1; i < numGlyphs; ++i)
-                offset += *advance++ * scaleX;
+                offset += (*advance++).width() * scaleX;
 
         offset += width;
 
@@ -1684,7 +1691,7 @@ void GraphicsContext::drawText(const SimpleFontData* fontData, const GlyphBuffer
         bool drawOneByOne = false;
         if (scaleX == 1.) {
             for (; srcChar < srcCharEnd; ++srcChar) {
-                offset += *advance++;
+                offset += (*advance++).width();
                 int offsetInt = stableRound(offset);
                 if (isCharVisible(*srcChar)) {
                     if (!drawOneByOne && WTF::Unicode::direction(*srcChar) == WTF::Unicode::RightToLeft)
@@ -1696,7 +1703,7 @@ void GraphicsContext::drawText(const SimpleFontData* fontData, const GlyphBuffer
             }
         } else {
             for (; srcChar < srcCharEnd; ++srcChar) {
-                offset += *advance++ * scaleX;
+                offset += (*advance++).width() * scaleX;
                 int offsetInt = stableRound(offset);
                 if (isCharVisible(*srcChar)) {
                     if (!drawOneByOne && WTF::Unicode::direction(*srcChar) == WTF::Unicode::RightToLeft)
@@ -1822,7 +1829,7 @@ void GraphicsContext::paintTextField(const IntRect& rect, unsigned state)
     FillRect(dc, &rectWin, reinterpret_cast<HBRUSH>(((state & DFCS_INACTIVE) ? COLOR_BTNFACE : COLOR_WINDOW) + 1));
 }
 
-void GraphicsContext::drawBitmap(SharedBitmap* bmp, const IntRect& dstRectIn, const IntRect& srcRect, ColorSpace styleColorSpace, CompositeOperator compositeOp)
+void GraphicsContext::drawBitmap(SharedBitmap* bmp, const IntRect& dstRectIn, const IntRect& srcRect, ColorSpace styleColorSpace, CompositeOperator compositeOp, BlendMode blendMode)
 {
     if (!m_data->m_opacity)
         return;
@@ -1838,7 +1845,7 @@ void GraphicsContext::drawBitmap(SharedBitmap* bmp, const IntRect& dstRectIn, co
         return;
     dstRect.move(transparentDC.toShift());
 
-    bmp->draw(dc, dstRect, srcRect, compositeOp);
+    bmp->draw(dc, dstRect, srcRect, compositeOp, blendMode);
 
     if (bmp->is16bit())
         transparentDC.fillAlphaChannel();

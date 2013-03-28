@@ -29,7 +29,9 @@
 #ifndef Location_h
 #define Location_h
 
+#include "DOMStringList.h"
 #include "DOMWindowProperty.h"
+#include "ScriptWrappable.h"
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/text/WTFString.h>
@@ -42,7 +44,7 @@ class KURL;
 
 typedef int ExceptionCode;
 
-class Location : public RefCounted<Location>, public DOMWindowProperty {
+class Location : public ScriptWrappable, public RefCounted<Location>, public DOMWindowProperty {
 public:
     static PassRefPtr<Location> create(Frame* frame) { return adoptRef(new Location(frame)); }
 
@@ -71,8 +73,12 @@ public:
 
     String toString() const { return href(); }
 
+    PassRefPtr<DOMStringList> ancestorOrigins() const;
+
 private:
     explicit Location(Frame*);
+
+    void setLocation(const String&, DOMWindow* activeWindow, DOMWindow* firstWindow);
 
     const KURL& url() const;
 };

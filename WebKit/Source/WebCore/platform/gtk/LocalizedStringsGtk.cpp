@@ -31,11 +31,11 @@
 #include "config.h"
 
 #include "LocalizedStrings.h"
-#include "GOwnPtr.h"
+#include <wtf/gobject/GOwnPtr.h>
 #include "IntSize.h"
 #include "NotImplemented.h"
-#include "PlatformString.h"
 #include <wtf/text/CString.h>
+#include <wtf/text/WTFString.h>
 
 #include <glib/gi18n-lib.h>
 #include <gtk/gtk.h>
@@ -342,6 +342,56 @@ String contextMenuItemTagInspectElement()
     return String::fromUTF8(_("Inspect _Element"));
 }
 
+String contextMenuItemTagUnicodeInsertLRMMark()
+{
+    return String::fromUTF8(_("LRM _Left-to-right mark"));
+}
+
+String contextMenuItemTagUnicodeInsertRLMMark()
+{
+    return String::fromUTF8(_("RLM _Right-to-left mark"));
+}
+
+String contextMenuItemTagUnicodeInsertLREMark()
+{
+    return String::fromUTF8(_("LRE Left-to-right _embedding"));
+}
+
+String contextMenuItemTagUnicodeInsertRLEMark()
+{
+    return String::fromUTF8(_("RLE Right-to-left e_mbedding"));
+}
+
+String contextMenuItemTagUnicodeInsertLROMark()
+{
+    return String::fromUTF8(_("LRO Left-to-right _override"));
+}
+
+String contextMenuItemTagUnicodeInsertRLOMark()
+{
+    return String::fromUTF8(_("RLO Right-to-left o_verride"));
+}
+
+String contextMenuItemTagUnicodeInsertPDFMark()
+{
+    return String::fromUTF8(_("PDF _Pop directional formatting"));
+}
+
+String contextMenuItemTagUnicodeInsertZWSMark()
+{
+    return String::fromUTF8(_("ZWS _Zero width space"));
+}
+
+String contextMenuItemTagUnicodeInsertZWJMark()
+{
+    return String::fromUTF8(_("ZWJ Zero width _joiner"));
+}
+
+String contextMenuItemTagUnicodeInsertZWNJMark()
+{
+    return String::fromUTF8(_("ZWNJ Zero width _non-joiner"));
+}
+
 String searchMenuNoRecentSearchesText()
 {
     return String::fromUTF8(_("No recent searches"));
@@ -365,6 +415,11 @@ String AXDefinitionListTermText()
 String AXDefinitionListDefinitionText()
 {
     return String::fromUTF8(_("definition"));
+}
+
+String AXFooterRoleDescriptionText()
+{
+    return String::fromUTF8(_("footer"));
 }
 
 String AXButtonActionVerb()
@@ -416,6 +471,24 @@ String crashedPluginText()
 {
     notImplemented();
     return String::fromUTF8(_("Plug-in Failure"));
+}
+
+String blockedPluginByContentSecurityPolicyText()
+{
+    notImplemented();
+    return String();
+}
+
+String insecurePluginVersionText()
+{
+    notImplemented();
+    return String();
+}
+
+String inactivePluginText()
+{
+    notImplemented();
+    return String();
 }
 
 String multipleFileUploadText(unsigned numberOfFiles)
@@ -479,8 +552,10 @@ String localizedMediaControlElementString(const String& name)
         return String::fromUTF8(_("remaining time"));
     if (name == "StatusDisplay")
         return String::fromUTF8(_("status"));
-    if (name == "FullscreenButton")
-        return String::fromUTF8(_("fullscreen"));
+    if (name == "EnterFullscreenButton")
+        return String::fromUTF8(_("enter fullscreen"));
+    if (name == "ExitFullscreenButton")
+        return String::fromUTF8(_("exit fullscreen"));
     if (name == "SeekForwardButton")
         return String::fromUTF8(_("fast forward"));
     if (name == "SeekBackButton")
@@ -489,6 +564,8 @@ String localizedMediaControlElementString(const String& name)
         return String::fromUTF8(_("show closed captions"));
     if (name == "HideClosedCaptionsButton")
         return String::fromUTF8(_("hide closed captions"));
+    if (name == "ControlsPanel")
+        return String::fromUTF8(_("media controls"));
 
     ASSERT_NOT_REACHED();
     return String();
@@ -526,8 +603,10 @@ String localizedMediaControlElementHelpText(const String& name)
         return String::fromUTF8(_("seek quickly back"));
     if (name == "SeekForwardButton")
         return String::fromUTF8(_("seek quickly forward"));
-    if (name == "FullscreenButton")
+    if (name == "EnterFullscreenButton")
         return String::fromUTF8(_("Play movie in fullscreen mode"));
+    if (name == "EnterFullscreenButton")
+        return String::fromUTF8(_("Exit fullscreen mode"));
     if (name == "ShowClosedCaptionsButton")
         return String::fromUTF8(_("start displaying closed captions"));
     if (name == "HideClosedCaptionsButton")
@@ -652,9 +731,20 @@ String validationMessageStepMismatchText(const String&, const String&)
     return String::fromUTF8(_("step mismatch"));
 }
 
+String unacceptableTLSCertificate()
+{
+    return String::fromUTF8(_("Unacceptable TLS certificate"));
+}
+
 String localizedString(const char* key)
 {
     return String::fromUTF8(key, strlen(key));
+}
+
+String validationMessageBadInputForNumberText()
+{
+    notImplemented();
+    return validationMessageTypeMismatchText();
 }
 
 }

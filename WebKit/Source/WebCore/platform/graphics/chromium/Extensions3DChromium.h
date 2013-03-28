@@ -38,6 +38,7 @@ public:
     virtual ~Extensions3DChromium();
 
     // Supported extensions:
+    //   GL_CHROMIUM_shallow_flush  : only supported if an ipc command buffer is used.
     //   GL_CHROMIUM_resource_safe  : indicating that textures/renderbuffers are always initialized before read/write.
     //   GL_CHROMIUM_strict_attribs : indicating a GL error is generated for out-of-bounds buffer accesses.
     //   GL_CHROMIUM_post_sub_buffer
@@ -46,8 +47,11 @@ public:
     //   GL_CHROMIUM_rate_limit_offscreen_context
     //   GL_CHROMIUM_paint_framebuffer_canvas
     //   GL_CHROMIUM_iosurface (Mac OS X specific)
+    //   GL_CHROMIUM_command_buffer_query
     //   GL_ANGLE_texture_usage
+    //   GL_EXT_debug_marker
     //   GL_EXT_texture_storage
+    //   GL_EXT_occlusion_query_boolean
 
     // Extensions3D methods.
     virtual bool supports(const String&);
@@ -75,28 +79,24 @@ public:
         GL_FRAMEBUFFER_ATTACHMENT_ANGLE = 0x93A3,
 
         // GL_EXT_texture_storage
-        BGRA8_EXT = 0x93A1
-    };
+        BGRA8_EXT = 0x93A1,
 
-    // GL_CHROMIUM_post_sub_buffer
-    void postSubBufferCHROMIUM(int x, int y, int width, int height);
+        // GL_EXT_occlusion_query_boolean
+        ANY_SAMPLES_PASSED_EXT = 0x8C2F,
+        ANY_SAMPLES_PASSED_CONSERVATIVE_EXT = 0x8D6A,
+        CURRENT_QUERY_EXT = 0x8865,
+        QUERY_RESULT_EXT = 0x8866,
+        QUERY_RESULT_AVAILABLE_EXT = 0x8867,
+
+        // GL_CHROMIUM_command_buffer_query
+        COMMANDS_ISSUED_CHROMIUM = 0x84F2
+    };
 
     // GL_CHROMIUM_map_sub
     void* mapBufferSubDataCHROMIUM(unsigned target, int offset, int size, unsigned access);
     void unmapBufferSubDataCHROMIUM(const void*);
     void* mapTexSubImage2DCHROMIUM(unsigned target, int level, int xoffset, int yoffset, int width, int height, unsigned format, unsigned type, unsigned access);
     void unmapTexSubImage2DCHROMIUM(const void*);
-
-    // GL_CHROMIUM_set_visibility
-    void setVisibilityCHROMIUM(bool);
-
-    // GL_CHROMIUM_swapbuffers_complete_callback
-    class SwapBuffersCompleteCallbackCHROMIUM {
-    public:
-        virtual void onSwapBuffersComplete() = 0;
-        virtual ~SwapBuffersCompleteCallbackCHROMIUM() { }
-    };
-    void setSwapBuffersCompleteCallbackCHROMIUM(PassOwnPtr<SwapBuffersCompleteCallbackCHROMIUM>);
 
     // GL_CHROMIUM_rate_limit_offscreen_context
     void rateLimitOffscreenContextCHROMIUM();
@@ -111,6 +111,40 @@ public:
 
     // GL_EXT_texture_storage
     void texStorage2DEXT(unsigned target, int levels, unsigned internalformat, int width, int height);
+
+    // GL_EXT_occlusion_query
+    Platform3DObject createQueryEXT();
+    void deleteQueryEXT(Platform3DObject);
+    GC3Dboolean isQueryEXT(Platform3DObject);
+    void beginQueryEXT(GC3Denum, Platform3DObject);
+    void endQueryEXT(GC3Denum);
+    void getQueryivEXT(GC3Denum, GC3Denum, GC3Dint*);
+    void getQueryObjectuivEXT(Platform3DObject, GC3Denum, GC3Duint*);
+
+    // GL_CHROMIUM_copy_texture
+    void copyTextureCHROMIUM(GC3Denum, Platform3DObject, Platform3DObject, GC3Dint, GC3Denum);
+
+    // GL_CHROMIUM_shallow_flush
+    virtual void shallowFlushCHROMIUM();
+
+    // GL_EXT_robustness
+    virtual void readnPixelsEXT(int x, int y, GC3Dsizei width, GC3Dsizei height, GC3Denum format, GC3Denum type, GC3Dsizei bufSize, void *data);
+    virtual void getnUniformfvEXT(GC3Duint program, int location, GC3Dsizei bufSize, float *params);
+    virtual void getnUniformivEXT(GC3Duint program, int location, GC3Dsizei bufSize, int *params);
+
+    // GL_EXT_debug_marker
+    virtual void insertEventMarkerEXT(const String&);
+    virtual void pushGroupMarkerEXT(const String&);
+    virtual void popGroupMarkerEXT(void);
+
+    // Some helper methods to detect GPU functionality
+    virtual bool isNVIDIA() { return false; }
+    virtual bool isAMD() { return false; }
+    virtual bool isIntel() { return false; }
+    virtual String vendor() { return ""; }
+
+    virtual bool maySupportMultisampling() { return true; }
+    virtual bool requiresBuiltInFunctionEmulation() { return false; }
 
 private:
     // Instances of this class are strictly owned by the GraphicsContext3D implementation and do not

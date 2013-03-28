@@ -29,11 +29,16 @@ enum FallbackScripts {
     kFallbackScriptNumber
 };
 
+// This particular mapping will be removed after WebKit is updated to use the
+// new mappings. No new caller should use the kTamil_FallbackScript but rather
+// the more specific Tamil scripts in the standard enum.
+#define kTamil_FallbackScript kTamilRegular_FallbackScript
+
 #define SkTypeface_ValidScript(s) (s >= 0 && s < kFallbackScriptNumber)
 
 /**
  *  Return a new typeface for a fallback script. If the script is
- *  not valid, or can not map to a font file, returns null.
+ *  not valid, or can not map to a font, returns null.
  *  @param  script  The script id.
  *  @return reference to the matching typeface. Caller must call
  *          unref() when they are done.
@@ -41,19 +46,36 @@ enum FallbackScripts {
 SK_API SkTypeface* SkCreateTypefaceForScript(FallbackScripts script);
 
 /**
- *  Return the file name for the fallback script on Android.
+ *  Return the string representation for the fallback script on Android.
  *  If the script is not valid, returns null.
- *  Note it returns a file name does not necessarily mean the file
- *  exists on the system or the file can be successfully loaded as
- *  a font. It returns all known script font file on Android.
  */
 SK_API const char* SkGetFallbackScriptID(FallbackScripts script);
 
 /**
- *  Return the fallback script for the font file name on Android.
- *  If the file name is not valid, or can not map to a fallback
+ *  Return the fallback script enum for the ID on Android.
+ *  If the ID is not valid, or can not map to a fallback
  *  script, returns kFallbackScriptNumber.
  */
 SK_API FallbackScripts SkGetFallbackScriptFromID(const char* id);
+
+/**
+ *  Return a new typeface of the font in the fallback font list containing
+ *  the specified chararacter. If no typeface is found, returns null.
+ */
+SK_API SkTypeface* SkCreateFallbackTypefaceForChar(SkUnichar uni,
+                                                   SkTypeface::Style style);
+
+/**
+ *  Get the family name of the font in the fallback font list containing
+ *  the specified chararacter. if no font is found, returns false.
+ */
+SK_API bool SkGetFallbackFamilyNameForChar(SkUnichar uni, SkString* name);
+
+/**
+ *  For test only.
+ *  Load font config from given xml files, instead of those from Android system.
+ */
+SK_API void SkUseTestFontConfigFile(const char* mainconf, const char* fallbackconf,
+                                    const char* fontsdir);
 
 #endif

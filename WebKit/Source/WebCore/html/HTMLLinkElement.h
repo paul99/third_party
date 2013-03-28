@@ -37,7 +37,11 @@
 
 namespace WebCore {
 
+class HTMLLinkElement;
 class KURL;
+
+template<typename T> class EventSender;
+typedef EventSender<HTMLLinkElement> LinkEventSender;
 
 class HTMLLinkElement : public HTMLElement, public CachedStyleSheetClient, public LinkLoaderClient {
 public:
@@ -51,6 +55,11 @@ public:
 
     String type() const;
 
+    IconType iconType() const;
+
+    // the icon size string as parsed from the HTML attribute
+    String iconSizes() const;
+
     CSSStyleSheet* sheet() const { return m_sheet.get(); }
 
     bool styleSheetIsLoading() const;
@@ -60,30 +69,40 @@ public:
     void setSizes(const String&);
     DOMSettableTokenList* sizes() const;
 
+    void dispatchPendingEvent(LinkEventSender*);
+    static void dispatchPendingLoadEvents();
+
 private:
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
 
     virtual bool shouldLoadLink();
     void process();
     static void processCallback(Node*);
     void clearSheet();
 
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
+    virtual void removedFrom(ContainerNode*) OVERRIDE;
 
     // from CachedResourceClient
     virtual void setCSSStyleSheet(const String& href, const KURL& baseURL, const String& charset, const CachedCSSStyleSheet* sheet);
     virtual bool sheetLoaded();
+    virtual void notifyLoadedSheetAndAllCriticalSubresources(bool errorOccurred);
     virtual void startLoadingDynamicSheet();
 
-    virtual void linkLoaded();
-    virtual void linkLoadingErrored();
+    virtual void linkLoaded() OVERRIDE;
+    virtual void linkLoadingErrored() OVERRIDE;
+#if ENABLE(LINK_PRERENDER) 
+    virtual void didStartLinkPrerender() OVERRIDE;
+    virtual void didStopLinkPrerender() OVERRIDE;
+    virtual void didSendLoadForLinkPrerender() OVERRIDE;
+    virtual void didSendDOMContentLoadedForLinkPrerender() OVERRIDE;
+#endif
 
     bool isAlternate() const { return m_disabledState == Unset && m_relAttribute.m_isAlternate; }
     
     void setDisabledState(bool);
 
-    virtual bool isURLAttribute(Attribute*) const;
+    virtual bool isURLAttribute(const Attribute&) const OVERRIDE;
 
 private:
     virtual void addSubresourceAttributeURLs(ListHashSet<KURL>&) const;
@@ -92,7 +111,13 @@ private:
     
     enum PendingSheetType { None, NonBlocking, Blocking };
     void addPendingSheet(PendingSheetType);
-    void removePendingSheet();
+
+    enum RemovePendingSheetNotificationType {
+        RemovePendingSheetNotifyImmediately,
+        RemovePendingSheetNotifyLater
+    };
+
+    void removePendingSheet(RemovePendingSheetNotificationType = RemovePendingSheetNotifyImmediately);
 
 #if ENABLE(MICRODATA)
     virtual String itemValueText() const OVERRIDE;
@@ -120,7 +145,9 @@ private:
     bool m_loading;
     bool m_createdByParser;
     bool m_isInShadowTree;
-    
+    bool m_firedLoad;
+    bool m_loadedSheet;
+
     PendingSheetType m_pendingSheetType;
 };
 

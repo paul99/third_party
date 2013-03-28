@@ -34,28 +34,30 @@
 
 #include "ScriptProfile.h"
 #include "V8Binding.h"
-#include "V8Proxy.h"
 
 #include <v8-profiler.h>
 
 namespace WebCore {
 
-v8::Handle<v8::Value> toV8(ScriptProfile* impl)
+v8::Handle<v8::Value> toV8(ScriptProfile* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
 {
     if (!impl)
-        return v8::Null();
+        return v8NullWithCheck(isolate);
+
+    // FIXME: Use creationContext.
+
     v8::Local<v8::Function> function = V8ScriptProfile::GetTemplate()->GetFunction();
     if (function.IsEmpty()) {
         // Return if allocation failed.
-        return v8::Local<v8::Object>();
+        return v8Undefined();
     }
-    v8::Local<v8::Object> instance = SafeAllocation::newInstance(function);
+    v8::Local<v8::Object> instance = V8ObjectConstructor::newInstance(function);
     if (instance.IsEmpty()) {
         // Avoid setting the wrapper if allocation failed.
-        return v8::Local<v8::Object>();
+        return v8Undefined();
     }
     impl->ref();
-    V8DOMWrapper::setDOMWrapper(instance, &V8ScriptProfile::info, impl);
+    V8DOMWrapper::setNativeInfo(instance, &V8ScriptProfile::info, impl);
     return instance;
 }
 

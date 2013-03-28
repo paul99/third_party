@@ -1,6 +1,6 @@
 /*
  * Copyright © 2007,2008,2009,2010  Red Hat, Inc.
- * Copyright © 2010  Google, Inc.
+ * Copyright © 2010,2012  Google, Inc.
  *
  *  This is part of HarfBuzz, a text shaping library.
  *
@@ -32,6 +32,8 @@
 #include "hb-ot-layout-gsubgpos-private.hh"
 
 
+namespace OT {
+
 
 struct SingleSubstFormat1
 {
@@ -39,29 +41,55 @@ struct SingleSubstFormat1
 
   private:
 
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    Coverage::Iter iter;
+    for (iter.init (this+coverage); iter.more (); iter.next ()) {
+      hb_codepoint_t glyph_id = iter.get_glyph ();
+      if (c->glyphs->has (glyph_id))
+	c->glyphs->add ((glyph_id + deltaGlyphID) & 0xFFFF);
+    }
+  }
+
+  inline const Coverage &get_coverage (void) const
+  {
+    return this+coverage;
+  }
+
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
-    hb_codepoint_t glyph_id = c->buffer->info[c->buffer->idx].codepoint;
+    hb_codepoint_t glyph_id = c->buffer->cur().codepoint;
     unsigned int index = (this+coverage) (glyph_id);
-    if (likely (index == NOT_COVERED))
-      return false;
+    if (likely (index == NOT_COVERED)) return TRACE_RETURN (false);
 
     /* According to the Adobe Annotated OpenType Suite, result is always
      * limited to 16bit. */
     glyph_id = (glyph_id + deltaGlyphID) & 0xFFFF;
     c->replace_glyph (glyph_id);
 
-    return true;
+    return TRACE_RETURN (true);
+  }
+
+  inline bool serialize (hb_serialize_context_t *c,
+			 Supplier<GlyphID> &glyphs,
+			 unsigned int num_glyphs,
+			 int delta)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!c->extend_min (*this))) return TRACE_RETURN (false);
+    if (unlikely (!coverage.serialize (c, this).serialize (c, glyphs, num_glyphs))) return TRACE_RETURN (false);
+    deltaGlyphID.set (delta); /* TODO(serilaize) overflow? */
+    return TRACE_RETURN (true);
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    return coverage.sanitize (c, this)
-	&& deltaGlyphID.sanitize (c);
+    return TRACE_RETURN (coverage.sanitize (c, this) && deltaGlyphID.sanitize (c));
   }
 
-  private:
+  protected:
   USHORT	format;			/* Format identifier--format = 1 */
   OffsetTo<Coverage>
 		coverage;		/* Offset to Coverage table--from
@@ -78,30 +106,54 @@ struct SingleSubstFormat2
 
   private:
 
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    Coverage::Iter iter;
+    for (iter.init (this+coverage); iter.more (); iter.next ()) {
+      if (c->glyphs->has (iter.get_glyph ()))
+	c->glyphs->add (substitute[iter.get_coverage ()]);
+    }
+  }
+
+  inline const Coverage &get_coverage (void) const
+  {
+    return this+coverage;
+  }
+
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
-    hb_codepoint_t glyph_id = c->buffer->info[c->buffer->idx].codepoint;
+    hb_codepoint_t glyph_id = c->buffer->cur().codepoint;
     unsigned int index = (this+coverage) (glyph_id);
-    if (likely (index == NOT_COVERED))
-      return false;
+    if (likely (index == NOT_COVERED)) return TRACE_RETURN (false);
 
-    if (unlikely (index >= substitute.len))
-      return false;
+    if (unlikely (index >= substitute.len)) return TRACE_RETURN (false);
 
     glyph_id = substitute[index];
     c->replace_glyph (glyph_id);
 
-    return true;
+    return TRACE_RETURN (true);
+  }
+
+  inline bool serialize (hb_serialize_context_t *c,
+			 Supplier<GlyphID> &glyphs,
+			 Supplier<GlyphID> &substitutes,
+			 unsigned int num_glyphs)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!c->extend_min (*this))) return TRACE_RETURN (false);
+    if (unlikely (!substitute.serialize (c, substitutes, num_glyphs))) return TRACE_RETURN (false);
+    if (unlikely (!coverage.serialize (c, this).serialize (c, glyphs, num_glyphs))) return TRACE_RETURN (false);
+    return TRACE_RETURN (true);
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    return coverage.sanitize (c, this)
-	&& substitute.sanitize (c);
+    return TRACE_RETURN (coverage.sanitize (c, this) && substitute.sanitize (c));
   }
 
-  private:
+  protected:
   USHORT	format;			/* Format identifier--format = 2 */
   OffsetTo<Coverage>
 		coverage;		/* Offset to Coverage table--from
@@ -116,30 +168,77 @@ struct SingleSubstFormat2
 struct SingleSubst
 {
   friend struct SubstLookupSubTable;
+  friend struct SubstLookup;
 
   private:
+
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    switch (u.format) {
+    case 1: u.format1.closure (c); break;
+    case 2: u.format2.closure (c); break;
+    default:                       break;
+    }
+  }
+
+  inline const Coverage &get_coverage (void) const
+  {
+    switch (u.format) {
+    case 1: return u.format1.get_coverage ();
+    case 2: return u.format2.get_coverage ();
+    default:return Null(Coverage);
+    }
+  }
 
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
     switch (u.format) {
-    case 1: return u.format1.apply (c);
-    case 2: return u.format2.apply (c);
-    default:return false;
+    case 1: return TRACE_RETURN (u.format1.apply (c));
+    case 2: return TRACE_RETURN (u.format2.apply (c));
+    default:return TRACE_RETURN (false);
+    }
+  }
+
+  inline bool serialize (hb_serialize_context_t *c,
+			 Supplier<GlyphID> &glyphs,
+			 Supplier<GlyphID> &substitutes,
+			 unsigned int num_glyphs)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!c->extend_min (u.format))) return TRACE_RETURN (false);
+    unsigned int format = 2;
+    int delta;
+    if (num_glyphs) {
+      format = 1;
+      /* TODO(serialize) check for wrap-around */
+      delta = substitutes[0] - glyphs[0];
+      for (unsigned int i = 1; i < num_glyphs; i++)
+	if (delta != substitutes[i] - glyphs[i]) {
+	  format = 2;
+	  break;
+	}
+    }
+    u.format.set (format);
+    switch (u.format) {
+    case 1: return TRACE_RETURN (u.format1.serialize (c, glyphs, num_glyphs, delta));
+    case 2: return TRACE_RETURN (u.format2.serialize (c, glyphs, substitutes, num_glyphs));
+    default:return TRACE_RETURN (false);
     }
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    if (!u.format.sanitize (c)) return false;
+    if (!u.format.sanitize (c)) return TRACE_RETURN (false);
     switch (u.format) {
-    case 1: return u.format1.sanitize (c);
-    case 2: return u.format2.sanitize (c);
-    default:return true;
+    case 1: return TRACE_RETURN (u.format1.sanitize (c));
+    case 2: return TRACE_RETURN (u.format2.sanitize (c));
+    default:return TRACE_RETURN (true);
     }
   }
 
-  private:
+  protected:
   union {
   USHORT		format;		/* Format identifier */
   SingleSubstFormat1	format1;
@@ -153,26 +252,48 @@ struct Sequence
   friend struct MultipleSubstFormat1;
 
   private:
+
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    unsigned int count = substitute.len;
+    for (unsigned int i = 0; i < count; i++)
+      c->glyphs->add (substitute[i]);
+  }
+
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
-    if (unlikely (!substitute.len))
-      return false;
+    if (unlikely (!substitute.len)) return TRACE_RETURN (false);
 
-    if (c->property & HB_OT_LAYOUT_GLYPH_CLASS_LIGATURE)
-      c->guess_glyph_class (HB_OT_LAYOUT_GLYPH_CLASS_BASE_GLYPH);
-    c->replace_glyphs_be16 (1, substitute.len, (const uint16_t *) substitute.array);
+    unsigned int klass = c->property & HB_OT_LAYOUT_GLYPH_CLASS_LIGATURE ? HB_OT_LAYOUT_GLYPH_CLASS_BASE_GLYPH : 0;
+    unsigned int count = substitute.len;
+    for (unsigned int i = 0; i < count; i++) {
+      set_lig_props_for_component (c->buffer->cur(), i);
+      c->output_glyph (substitute.array[i], klass);
+    }
+    c->buffer->skip_glyph ();
 
-    return true;
+    return TRACE_RETURN (true);
+  }
+
+  inline bool serialize (hb_serialize_context_t *c,
+			 Supplier<GlyphID> &glyphs,
+			 unsigned int num_glyphs)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!c->extend_min (*this))) return TRACE_RETURN (false);
+    if (unlikely (!substitute.serialize (c, glyphs, num_glyphs))) return TRACE_RETURN (false);
+    return TRACE_RETURN (true);
   }
 
   public:
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    return substitute.sanitize (c);
+    return TRACE_RETURN (substitute.sanitize (c));
   }
 
-  private:
+  protected:
   ArrayOf<GlyphID>
 		substitute;		/* String of GlyphIDs to substitute */
   public:
@@ -185,24 +306,55 @@ struct MultipleSubstFormat1
 
   private:
 
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    Coverage::Iter iter;
+    for (iter.init (this+coverage); iter.more (); iter.next ()) {
+      if (c->glyphs->has (iter.get_glyph ()))
+	(this+sequence[iter.get_coverage ()]).closure (c);
+    }
+  }
+
+  inline const Coverage &get_coverage (void) const
+  {
+    return this+coverage;
+  }
+
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
 
-    unsigned int index = (this+coverage) (c->buffer->info[c->buffer->idx].codepoint);
-    if (likely (index == NOT_COVERED))
-      return false;
+    unsigned int index = (this+coverage) (c->buffer->cur().codepoint);
+    if (likely (index == NOT_COVERED)) return TRACE_RETURN (false);
 
-    return (this+sequence[index]).apply (c);
+    return TRACE_RETURN ((this+sequence[index]).apply (c));
+  }
+
+  inline bool serialize (hb_serialize_context_t *c,
+			 Supplier<GlyphID> &glyphs,
+			 Supplier<unsigned int> &substitute_len_list,
+			 unsigned int num_glyphs,
+			 Supplier<GlyphID> &substitute_glyphs_list)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!c->extend_min (*this))) return TRACE_RETURN (false);
+    if (unlikely (!sequence.serialize (c, num_glyphs))) return TRACE_RETURN (false);
+    for (unsigned int i = 0; i < num_glyphs; i++)
+      if (unlikely (!sequence[i].serialize (c, this).serialize (c,
+								substitute_glyphs_list,
+								substitute_len_list[i]))) return TRACE_RETURN (false);
+    substitute_len_list.advance (num_glyphs);
+    if (unlikely (!coverage.serialize (c, this).serialize (c, glyphs, num_glyphs))) return TRACE_RETURN (false);
+    return TRACE_RETURN (true);
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    return coverage.sanitize (c, this)
-	&& sequence.sanitize (c, this);
+    return TRACE_RETURN (coverage.sanitize (c, this) && sequence.sanitize (c, this));
   }
 
-  private:
+  protected:
   USHORT	format;			/* Format identifier--format = 1 */
   OffsetTo<Coverage>
 		coverage;		/* Offset to Coverage table--from
@@ -217,28 +369,62 @@ struct MultipleSubstFormat1
 struct MultipleSubst
 {
   friend struct SubstLookupSubTable;
+  friend struct SubstLookup;
 
   private:
+
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    switch (u.format) {
+    case 1: u.format1.closure (c); break;
+    default:                       break;
+    }
+  }
+
+  inline const Coverage &get_coverage (void) const
+  {
+    switch (u.format) {
+    case 1: return u.format1.get_coverage ();
+    default:return Null(Coverage);
+    }
+  }
 
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
     switch (u.format) {
-    case 1: return u.format1.apply (c);
-    default:return false;
+    case 1: return TRACE_RETURN (u.format1.apply (c));
+    default:return TRACE_RETURN (false);
+    }
+  }
+
+  inline bool serialize (hb_serialize_context_t *c,
+			 Supplier<GlyphID> &glyphs,
+			 Supplier<unsigned int> &substitute_len_list,
+			 unsigned int num_glyphs,
+			 Supplier<GlyphID> &substitute_glyphs_list)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!c->extend_min (u.format))) return TRACE_RETURN (false);
+    unsigned int format = 1;
+    u.format.set (format);
+    switch (u.format) {
+    case 1: return TRACE_RETURN (u.format1.serialize (c, glyphs, substitute_len_list, num_glyphs, substitute_glyphs_list));
+    default:return TRACE_RETURN (false);
     }
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    if (!u.format.sanitize (c)) return false;
+    if (!u.format.sanitize (c)) return TRACE_RETURN (false);
     switch (u.format) {
-    case 1: return u.format1.sanitize (c);
-    default:return true;
+    case 1: return TRACE_RETURN (u.format1.sanitize (c));
+    default:return TRACE_RETURN (true);
     }
   }
 
-  private:
+  protected:
   union {
   USHORT		format;		/* Format identifier */
   MultipleSubstFormat1	format1;
@@ -255,43 +441,77 @@ struct AlternateSubstFormat1
 
   private:
 
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    Coverage::Iter iter;
+    for (iter.init (this+coverage); iter.more (); iter.next ()) {
+      if (c->glyphs->has (iter.get_glyph ())) {
+	const AlternateSet &alt_set = this+alternateSet[iter.get_coverage ()];
+	unsigned int count = alt_set.len;
+	for (unsigned int i = 0; i < count; i++)
+	  c->glyphs->add (alt_set[i]);
+      }
+    }
+  }
+
+  inline const Coverage &get_coverage (void) const
+  {
+    return this+coverage;
+  }
+
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
-    hb_codepoint_t glyph_id = c->buffer->info[c->buffer->idx].codepoint;
-    hb_mask_t glyph_mask = c->buffer->info[c->buffer->idx].mask;
-    hb_mask_t lookup_mask = c->lookup_mask;
+    hb_codepoint_t glyph_id = c->buffer->cur().codepoint;
 
     unsigned int index = (this+coverage) (glyph_id);
-    if (likely (index == NOT_COVERED))
-      return false;
+    if (likely (index == NOT_COVERED)) return TRACE_RETURN (false);
 
     const AlternateSet &alt_set = this+alternateSet[index];
 
-    if (unlikely (!alt_set.len))
-      return false;
+    if (unlikely (!alt_set.len)) return TRACE_RETURN (false);
+
+    hb_mask_t glyph_mask = c->buffer->cur().mask;
+    hb_mask_t lookup_mask = c->lookup_mask;
 
     /* Note: This breaks badly if two features enabled this lookup together. */
     unsigned int shift = _hb_ctz (lookup_mask);
     unsigned int alt_index = ((lookup_mask & glyph_mask) >> shift);
 
-    if (unlikely (alt_index > alt_set.len || alt_index == 0))
-      return false;
+    if (unlikely (alt_index > alt_set.len || alt_index == 0)) return TRACE_RETURN (false);
 
     glyph_id = alt_set[alt_index - 1];
 
     c->replace_glyph (glyph_id);
 
-    return true;
+    return TRACE_RETURN (true);
+  }
+
+  inline bool serialize (hb_serialize_context_t *c,
+			 Supplier<GlyphID> &glyphs,
+			 Supplier<unsigned int> &alternate_len_list,
+			 unsigned int num_glyphs,
+			 Supplier<GlyphID> &alternate_glyphs_list)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!c->extend_min (*this))) return TRACE_RETURN (false);
+    if (unlikely (!alternateSet.serialize (c, num_glyphs))) return TRACE_RETURN (false);
+    for (unsigned int i = 0; i < num_glyphs; i++)
+      if (unlikely (!alternateSet[i].serialize (c, this).serialize (c,
+								    alternate_glyphs_list,
+								    alternate_len_list[i]))) return TRACE_RETURN (false);
+    alternate_len_list.advance (num_glyphs);
+    if (unlikely (!coverage.serialize (c, this).serialize (c, glyphs, num_glyphs))) return TRACE_RETURN (false);
+    return TRACE_RETURN (true);
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    return coverage.sanitize (c, this)
-	&& alternateSet.sanitize (c, this);
+    return TRACE_RETURN (coverage.sanitize (c, this) && alternateSet.sanitize (c, this));
   }
 
-  private:
+  protected:
   USHORT	format;			/* Format identifier--format = 1 */
   OffsetTo<Coverage>
 		coverage;		/* Offset to Coverage table--from
@@ -306,28 +526,62 @@ struct AlternateSubstFormat1
 struct AlternateSubst
 {
   friend struct SubstLookupSubTable;
+  friend struct SubstLookup;
 
   private:
+
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    switch (u.format) {
+    case 1: u.format1.closure (c); break;
+    default:                       break;
+    }
+  }
+
+  inline const Coverage &get_coverage (void) const
+  {
+    switch (u.format) {
+    case 1: return u.format1.get_coverage ();
+    default:return Null(Coverage);
+    }
+  }
 
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
     switch (u.format) {
-    case 1: return u.format1.apply (c);
-    default:return false;
+    case 1: return TRACE_RETURN (u.format1.apply (c));
+    default:return TRACE_RETURN (false);
+    }
+  }
+
+  inline bool serialize (hb_serialize_context_t *c,
+			 Supplier<GlyphID> &glyphs,
+			 Supplier<unsigned int> &alternate_len_list,
+			 unsigned int num_glyphs,
+			 Supplier<GlyphID> &alternate_glyphs_list)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!c->extend_min (u.format))) return TRACE_RETURN (false);
+    unsigned int format = 1;
+    u.format.set (format);
+    switch (u.format) {
+    case 1: return TRACE_RETURN (u.format1.serialize (c, glyphs, alternate_len_list, num_glyphs, alternate_glyphs_list));
+    default:return TRACE_RETURN (false);
     }
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    if (!u.format.sanitize (c)) return false;
+    if (!u.format.sanitize (c)) return TRACE_RETURN (false);
     switch (u.format) {
-    case 1: return u.format1.sanitize (c);
-    default:return true;
+    case 1: return TRACE_RETURN (u.format1.sanitize (c));
+    default:return TRACE_RETURN (true);
     }
   }
 
-  private:
+  protected:
   union {
   USHORT		format;		/* Format identifier */
   AlternateSubstFormat1	format1;
@@ -340,81 +594,82 @@ struct Ligature
   friend struct LigatureSet;
 
   private:
+
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    unsigned int count = component.len;
+    for (unsigned int i = 1; i < count; i++)
+      if (!c->glyphs->has (component[i]))
+        return;
+    c->glyphs->add (ligGlyph);
+  }
+
+  inline bool would_apply (hb_would_apply_context_t *c) const
+  {
+    if (c->len != component.len)
+      return false;
+
+    for (unsigned int i = 1; i < c->len; i++)
+      if (likely (c->glyphs[i] != component[i]))
+	return false;
+
+    return true;
+  }
+
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
     unsigned int count = component.len;
-    if (unlikely (count < 2))
-      return false;
+    if (unlikely (count < 1)) return TRACE_RETURN (false);
 
-    hb_apply_context_t::mark_skipping_forward_iterator_t skippy_iter (c, c->buffer->idx, count - 1);
-    if (skippy_iter.has_no_chance ())
-      return false;
+    unsigned int end_offset;
+    bool is_mark_ligature;
+    unsigned int total_component_count;
 
-    bool first_was_mark = (c->property & HB_OT_LAYOUT_GLYPH_CLASS_MARK);
-    bool found_non_mark = false;
+    if (likely (!match_input (c, count,
+			      &component[1],
+			      match_glyph,
+			      NULL,
+			      &end_offset,
+			      &is_mark_ligature,
+			      &total_component_count)))
+      return TRACE_RETURN (false);
 
-    for (unsigned int i = 1; i < count; i++)
-    {
-      unsigned int property;
+    /* Deal, we are forming the ligature. */
+    c->buffer->merge_clusters (c->buffer->idx, c->buffer->idx + end_offset);
 
-      if (!skippy_iter.next (&property))
-	return false;
+    ligate_input (c,
+		  count,
+		  &component[1],
+		  ligGlyph,
+		  match_glyph,
+		  NULL,
+		  is_mark_ligature,
+		  total_component_count);
 
-      found_non_mark |= !(property & HB_OT_LAYOUT_GLYPH_CLASS_MARK);
+    return TRACE_RETURN (true);
+  }
 
-      if (likely (c->buffer->info[skippy_iter.idx].codepoint != component[i]))
-        return false;
-    }
-
-    if (first_was_mark && found_non_mark)
-      c->guess_glyph_class (HB_OT_LAYOUT_GLYPH_CLASS_LIGATURE);
-
-    /* Allocate new ligature id */
-    unsigned int lig_id = allocate_lig_id (c->buffer);
-    c->buffer->info[c->buffer->idx].lig_comp() = 0;
-    c->buffer->info[c->buffer->idx].lig_id() = lig_id;
-
-    if (skippy_iter.idx < c->buffer->idx + count) /* No input glyphs skipped */
-    {
-      c->replace_glyphs_be16 (count, 1, (const uint16_t *) &ligGlyph);
-    }
-    else
-    {
-      c->replace_glyph (ligGlyph);
-
-      /* Now we must do a second loop to copy the skipped glyphs to
-	 `out' and assign component values to it.  We start with the
-	 glyph after the first component.  Glyphs between component
-	 i and i+1 belong to component i.  Together with the lig_id
-	 value it is later possible to check whether a specific
-	 component value really belongs to a given ligature. */
-
-      for (unsigned int i = 1; i < count; i++)
-      {
-	while (c->should_mark_skip_current_glyph ())
-	{
-	  c->buffer->info[c->buffer->idx].lig_comp() = i;
-	  c->buffer->info[c->buffer->idx].lig_id() = lig_id;
-	  c->replace_glyph (c->buffer->info[c->buffer->idx].codepoint);
-	}
-
-	/* Skip the base glyph */
-	c->buffer->idx++;
-      }
-    }
-
-    return true;
+  inline bool serialize (hb_serialize_context_t *c,
+			 GlyphID ligature,
+			 Supplier<GlyphID> &components, /* Starting from second */
+			 unsigned int num_components /* Including first component */)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!c->extend_min (*this))) return TRACE_RETURN (false);
+    ligGlyph = ligature;
+    if (unlikely (!component.serialize (c, components, num_components))) return TRACE_RETURN (false);
+    return TRACE_RETURN (true);
   }
 
   public:
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    return ligGlyph.sanitize (c)
-        && component.sanitize (c);
+    return TRACE_RETURN (ligGlyph.sanitize (c) && component.sanitize (c));
   }
 
-  private:
+  protected:
   GlyphID	ligGlyph;		/* GlyphID of ligature to substitute */
   HeadlessArrayOf<GlyphID>
 		component;		/* Array of component GlyphIDs--start
@@ -429,6 +684,27 @@ struct LigatureSet
   friend struct LigatureSubstFormat1;
 
   private:
+
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    unsigned int num_ligs = ligature.len;
+    for (unsigned int i = 0; i < num_ligs; i++)
+      (this+ligature[i]).closure (c);
+  }
+
+  inline bool would_apply (hb_would_apply_context_t *c) const
+  {
+    unsigned int num_ligs = ligature.len;
+    for (unsigned int i = 0; i < num_ligs; i++)
+    {
+      const Ligature &lig = this+ligature[i];
+      if (lig.would_apply (c))
+        return true;
+    }
+    return false;
+  }
+
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
@@ -436,20 +712,38 @@ struct LigatureSet
     for (unsigned int i = 0; i < num_ligs; i++)
     {
       const Ligature &lig = this+ligature[i];
-      if (lig.apply (c))
-        return true;
+      if (lig.apply (c)) return TRACE_RETURN (true);
     }
 
-    return false;
+    return TRACE_RETURN (false);
+  }
+
+  inline bool serialize (hb_serialize_context_t *c,
+			 Supplier<GlyphID> &ligatures,
+			 Supplier<unsigned int> &component_count_list,
+			 unsigned int num_ligatures,
+			 Supplier<GlyphID> &component_list /* Starting from second for each ligature */)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!c->extend_min (*this))) return TRACE_RETURN (false);
+    if (unlikely (!ligature.serialize (c, num_ligatures))) return TRACE_RETURN (false);
+    for (unsigned int i = 0; i < num_ligatures; i++)
+      if (unlikely (!ligature[i].serialize (c, this).serialize (c,
+								ligatures[i],
+								component_list,
+								component_count_list[i]))) return TRACE_RETURN (false);
+    ligatures.advance (num_ligatures);
+    component_count_list.advance (num_ligatures);
+    return TRACE_RETURN (true);
   }
 
   public:
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    return ligature.sanitize (c, this);
+    return TRACE_RETURN (ligature.sanitize (c, this));
   }
 
-  private:
+  protected:
   OffsetArrayOf<Ligature>
 		ligature;		/* Array LigatureSet tables
 					 * ordered by preference */
@@ -462,26 +756,67 @@ struct LigatureSubstFormat1
   friend struct LigatureSubst;
 
   private:
+
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    Coverage::Iter iter;
+    for (iter.init (this+coverage); iter.more (); iter.next ()) {
+      if (c->glyphs->has (iter.get_glyph ()))
+	(this+ligatureSet[iter.get_coverage ()]).closure (c);
+    }
+  }
+
+  inline const Coverage &get_coverage (void) const
+  {
+    return this+coverage;
+  }
+
+  inline bool would_apply (hb_would_apply_context_t *c) const
+  {
+    return (this+ligatureSet[(this+coverage) (c->glyphs[0])]).would_apply (c);
+  }
+
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
-    hb_codepoint_t glyph_id = c->buffer->info[c->buffer->idx].codepoint;
+    hb_codepoint_t glyph_id = c->buffer->cur().codepoint;
 
     unsigned int index = (this+coverage) (glyph_id);
-    if (likely (index == NOT_COVERED))
-      return false;
+    if (likely (index == NOT_COVERED)) return TRACE_RETURN (false);
 
     const LigatureSet &lig_set = this+ligatureSet[index];
-    return lig_set.apply (c);
+    return TRACE_RETURN (lig_set.apply (c));
+  }
+
+  inline bool serialize (hb_serialize_context_t *c,
+			 Supplier<GlyphID> &first_glyphs,
+			 Supplier<unsigned int> &ligature_per_first_glyph_count_list,
+			 unsigned int num_first_glyphs,
+			 Supplier<GlyphID> &ligatures_list,
+			 Supplier<unsigned int> &component_count_list,
+			 Supplier<GlyphID> &component_list /* Starting from second for each ligature */)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!c->extend_min (*this))) return TRACE_RETURN (false);
+    if (unlikely (!ligatureSet.serialize (c, num_first_glyphs))) return TRACE_RETURN (false);
+    for (unsigned int i = 0; i < num_first_glyphs; i++)
+      if (unlikely (!ligatureSet[i].serialize (c, this).serialize (c,
+								   ligatures_list,
+								   component_count_list,
+								   ligature_per_first_glyph_count_list[i],
+								   component_list))) return TRACE_RETURN (false);
+    ligature_per_first_glyph_count_list.advance (num_first_glyphs);
+    if (unlikely (!coverage.serialize (c, this).serialize (c, first_glyphs, num_first_glyphs))) return TRACE_RETURN (false);
+    return TRACE_RETURN (true);
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    return coverage.sanitize (c, this)
-	&& ligatureSet.sanitize (c, this);
+    return TRACE_RETURN (coverage.sanitize (c, this) && ligatureSet.sanitize (c, this));
   }
 
-  private:
+  protected:
   USHORT	format;			/* Format identifier--format = 1 */
   OffsetTo<Coverage>
 		coverage;		/* Offset to Coverage table--from
@@ -496,27 +831,73 @@ struct LigatureSubstFormat1
 struct LigatureSubst
 {
   friend struct SubstLookupSubTable;
+  friend struct SubstLookup;
 
   private:
+
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    switch (u.format) {
+    case 1: u.format1.closure (c); break;
+    default:                       break;
+    }
+  }
+
+  inline const Coverage &get_coverage (void) const
+  {
+    switch (u.format) {
+    case 1: return u.format1.get_coverage ();
+    default:return Null(Coverage);
+    }
+  }
+
+  inline bool would_apply (hb_would_apply_context_t *c) const
+  {
+    switch (u.format) {
+    case 1: return u.format1.would_apply (c);
+    default:return false;
+    }
+  }
+
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
     switch (u.format) {
-    case 1: return u.format1.apply (c);
-    default:return false;
+    case 1: return TRACE_RETURN (u.format1.apply (c));
+    default:return TRACE_RETURN (false);
+    }
+  }
+
+  inline bool serialize (hb_serialize_context_t *c,
+			 Supplier<GlyphID> &first_glyphs,
+			 Supplier<unsigned int> &ligature_per_first_glyph_count_list,
+			 unsigned int num_first_glyphs,
+			 Supplier<GlyphID> &ligatures_list,
+			 Supplier<unsigned int> &component_count_list,
+			 Supplier<GlyphID> &component_list /* Starting from second for each ligature */)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!c->extend_min (u.format))) return TRACE_RETURN (false);
+    unsigned int format = 1;
+    u.format.set (format);
+    switch (u.format) {
+    case 1: return TRACE_RETURN (u.format1.serialize (c, first_glyphs, ligature_per_first_glyph_count_list, num_first_glyphs,
+						      ligatures_list, component_count_list, component_list));
+    default:return TRACE_RETURN (false);
     }
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    if (!u.format.sanitize (c)) return false;
+    if (!u.format.sanitize (c)) return TRACE_RETURN (false);
     switch (u.format) {
-    case 1: return u.format1.sanitize (c);
-    default:return true;
+    case 1: return TRACE_RETURN (u.format1.sanitize (c));
+    default:return TRACE_RETURN (true);
     }
   }
 
-  private:
+  protected:
   union {
   USHORT		format;		/* Format identifier */
   LigatureSubstFormat1	format1;
@@ -525,16 +906,24 @@ struct LigatureSubst
 
 
 static inline bool substitute_lookup (hb_apply_context_t *c, unsigned int lookup_index);
+static inline void closure_lookup (hb_closure_context_t *c, unsigned int lookup_index);
 
 struct ContextSubst : Context
 {
   friend struct SubstLookupSubTable;
 
   private:
+
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    return Context::closure (c, closure_lookup);
+  }
+
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
-    return Context::apply (c, substitute_lookup);
+    return TRACE_RETURN (Context::apply (c, substitute_lookup));
   }
 };
 
@@ -543,10 +932,17 @@ struct ChainContextSubst : ChainContext
   friend struct SubstLookupSubTable;
 
   private:
+
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    return ChainContext::closure (c, closure_lookup);
+  }
+
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
-    return ChainContext::apply (c, substitute_lookup);
+    return TRACE_RETURN (ChainContext::apply (c, substitute_lookup));
   }
 };
 
@@ -564,6 +960,12 @@ struct ExtensionSubst : Extension
     return StructAtOffset<SubstLookupSubTable> (this, offset);
   }
 
+  inline void closure (hb_closure_context_t *c) const;
+
+  inline const Coverage &get_coverage (void) const;
+
+  inline bool would_apply (hb_would_apply_context_t *c) const;
+
   inline bool apply (hb_apply_context_t *c) const;
 
   inline bool sanitize (hb_sanitize_context_t *c);
@@ -577,15 +979,45 @@ struct ReverseChainSingleSubstFormat1
   friend struct ReverseChainSingleSubst;
 
   private:
+
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    const OffsetArrayOf<Coverage> &lookahead = StructAfter<OffsetArrayOf<Coverage> > (backtrack);
+
+    unsigned int count;
+
+    count = backtrack.len;
+    for (unsigned int i = 0; i < count; i++)
+      if (!(this+backtrack[i]).intersects (c->glyphs))
+        return;
+
+    count = lookahead.len;
+    for (unsigned int i = 0; i < count; i++)
+      if (!(this+lookahead[i]).intersects (c->glyphs))
+        return;
+
+    const ArrayOf<GlyphID> &substitute = StructAfter<ArrayOf<GlyphID> > (lookahead);
+    Coverage::Iter iter;
+    for (iter.init (this+coverage); iter.more (); iter.next ()) {
+      if (c->glyphs->has (iter.get_glyph ()))
+	c->glyphs->add (substitute[iter.get_coverage ()]);
+    }
+  }
+
+  inline const Coverage &get_coverage (void) const
+  {
+    return this+coverage;
+  }
+
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
-    if (unlikely (c->context_length != NO_CONTEXT))
-      return false; /* No chaining to this type */
+    if (unlikely (c->nesting_level_left != MAX_NESTING_LEVEL))
+      return TRACE_RETURN (false); /* No chaining to this type */
 
-    unsigned int index = (this+coverage) (c->buffer->info[c->buffer->idx].codepoint);
-    if (likely (index == NOT_COVERED))
-      return false;
+    unsigned int index = (this+coverage) (c->buffer->cur().codepoint);
+    if (likely (index == NOT_COVERED)) return TRACE_RETURN (false);
 
     const OffsetArrayOf<Coverage> &lookahead = StructAfter<OffsetArrayOf<Coverage> > (backtrack);
     const ArrayOf<GlyphID> &substitute = StructAfter<ArrayOf<GlyphID> > (lookahead);
@@ -598,27 +1030,26 @@ struct ReverseChainSingleSubstFormat1
 			 match_coverage, this,
 			 1))
     {
-      c->buffer->info[c->buffer->idx].codepoint = substitute[index];
+      c->replace_glyph_inplace (substitute[index]);
       c->buffer->idx--; /* Reverse! */
-      return true;
+      return TRACE_RETURN (true);
     }
 
-    return false;
+    return TRACE_RETURN (false);
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    if (!(coverage.sanitize (c, this)
-       && backtrack.sanitize (c, this)))
-      return false;
+    if (!(coverage.sanitize (c, this) && backtrack.sanitize (c, this)))
+      return TRACE_RETURN (false);
     OffsetArrayOf<Coverage> &lookahead = StructAfter<OffsetArrayOf<Coverage> > (backtrack);
     if (!lookahead.sanitize (c, this))
-      return false;
+      return TRACE_RETURN (false);
     ArrayOf<GlyphID> &substitute = StructAfter<ArrayOf<GlyphID> > (lookahead);
-    return substitute.sanitize (c);
+    return TRACE_RETURN (substitute.sanitize (c));
   }
 
-  private:
+  protected:
   USHORT	format;			/* Format identifier--format = 1 */
   OffsetTo<Coverage>
 		coverage;		/* Offset to Coverage table--from
@@ -643,25 +1074,43 @@ struct ReverseChainSingleSubst
   friend struct SubstLookupSubTable;
 
   private:
+
+  inline void closure (hb_closure_context_t *c) const
+  {
+    TRACE_CLOSURE ();
+    switch (u.format) {
+    case 1: u.format1.closure (c); break;
+    default:                       break;
+    }
+  }
+
+  inline const Coverage &get_coverage (void) const
+  {
+    switch (u.format) {
+    case 1: return u.format1.get_coverage ();
+    default:return Null(Coverage);
+    }
+  }
+
   inline bool apply (hb_apply_context_t *c) const
   {
     TRACE_APPLY ();
     switch (u.format) {
-    case 1: return u.format1.apply (c);
-    default:return false;
+    case 1: return TRACE_RETURN (u.format1.apply (c));
+    default:return TRACE_RETURN (false);
     }
   }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    if (!u.format.sanitize (c)) return false;
+    if (!u.format.sanitize (c)) return TRACE_RETURN (false);
     switch (u.format) {
-    case 1: return u.format1.sanitize (c);
-    default:return true;
+    case 1: return TRACE_RETURN (u.format1.sanitize (c));
+    default:return TRACE_RETURN (true);
     }
   }
 
-  private:
+  protected:
   union {
   USHORT				format;		/* Format identifier */
   ReverseChainSingleSubstFormat1	format1;
@@ -678,7 +1127,7 @@ struct SubstLookupSubTable
 {
   friend struct SubstLookup;
 
-  enum {
+  enum Type {
     Single		= 1,
     Multiple		= 2,
     Alternate		= 3,
@@ -689,51 +1138,113 @@ struct SubstLookupSubTable
     ReverseChainSingle	= 8
   };
 
+  inline void closure (hb_closure_context_t *c,
+		       unsigned int    lookup_type) const
+  {
+    TRACE_CLOSURE ();
+    switch (lookup_type) {
+    case Single:		u.single.closure (c); break;
+    case Multiple:		u.multiple.closure (c); break;
+    case Alternate:		u.alternate.closure (c); break;
+    case Ligature:		u.ligature.closure (c); break;
+    case Context:		u.context.closure (c); break;
+    case ChainContext:		u.chainContext.closure (c); break;
+    case Extension:		u.extension.closure (c); break;
+    case ReverseChainSingle:	u.reverseChainContextSingle.closure (c); break;
+    default:                    break;
+    }
+  }
+
+  inline const Coverage &get_coverage (unsigned int lookup_type) const
+  {
+    switch (lookup_type) {
+    case Single:		return u.single.get_coverage ();
+    case Multiple:		return u.multiple.get_coverage ();
+    case Alternate:		return u.alternate.get_coverage ();
+    case Ligature:		return u.ligature.get_coverage ();
+    case Context:		return u.context.get_coverage ();
+    case ChainContext:		return u.chainContext.get_coverage ();
+    case Extension:		return u.extension.get_coverage ();
+    case ReverseChainSingle:	return u.reverseChainContextSingle.get_coverage ();
+    default:			return Null(Coverage);
+    }
+  }
+
+  inline bool would_apply (hb_would_apply_context_t *c,
+			   unsigned int lookup_type) const
+  {
+    TRACE_WOULD_APPLY ();
+    if (get_coverage (lookup_type).get_coverage (c->glyphs[0]) == NOT_COVERED) return false;
+    if (c->len == 1) {
+      switch (lookup_type) {
+      case Single:
+      case Multiple:
+      case Alternate:
+      case ReverseChainSingle:
+        return true;
+      }
+    }
+
+    /* Only need to look further for lookups that support substitutions
+     * of input longer than 1. */
+    switch (lookup_type) {
+    case Ligature:		return u.ligature.would_apply (c);
+    case Context:		return u.context.would_apply (c);
+    case ChainContext:		return u.chainContext.would_apply (c);
+    case Extension:		return u.extension.would_apply (c);
+    default:			return false;
+    }
+  }
+
   inline bool apply (hb_apply_context_t *c, unsigned int lookup_type) const
   {
     TRACE_APPLY ();
     switch (lookup_type) {
-    case Single:		return u.single.apply (c);
-    case Multiple:		return u.multiple.apply (c);
-    case Alternate:		return u.alternate.apply (c);
-    case Ligature:		return u.ligature.apply (c);
-    case Context:		return u.c.apply (c);
-    case ChainContext:		return u.chainContext.apply (c);
-    case Extension:		return u.extension.apply (c);
-    case ReverseChainSingle:	return u.reverseChainContextSingle.apply (c);
-    default:return false;
+    case Single:		return TRACE_RETURN (u.single.apply (c));
+    case Multiple:		return TRACE_RETURN (u.multiple.apply (c));
+    case Alternate:		return TRACE_RETURN (u.alternate.apply (c));
+    case Ligature:		return TRACE_RETURN (u.ligature.apply (c));
+    case Context:		return TRACE_RETURN (u.context.apply (c));
+    case ChainContext:		return TRACE_RETURN (u.chainContext.apply (c));
+    case Extension:		return TRACE_RETURN (u.extension.apply (c));
+    case ReverseChainSingle:	return TRACE_RETURN (u.reverseChainContextSingle.apply (c));
+    default:			return TRACE_RETURN (false);
     }
   }
 
   inline bool sanitize (hb_sanitize_context_t *c, unsigned int lookup_type) {
     TRACE_SANITIZE ();
+    if (!u.header.sub_format.sanitize (c))
+      return TRACE_RETURN (false);
     switch (lookup_type) {
-    case Single:		return u.single.sanitize (c);
-    case Multiple:		return u.multiple.sanitize (c);
-    case Alternate:		return u.alternate.sanitize (c);
-    case Ligature:		return u.ligature.sanitize (c);
-    case Context:		return u.c.sanitize (c);
-    case ChainContext:		return u.chainContext.sanitize (c);
-    case Extension:		return u.extension.sanitize (c);
-    case ReverseChainSingle:	return u.reverseChainContextSingle.sanitize (c);
-    default:return true;
+    case Single:		return TRACE_RETURN (u.single.sanitize (c));
+    case Multiple:		return TRACE_RETURN (u.multiple.sanitize (c));
+    case Alternate:		return TRACE_RETURN (u.alternate.sanitize (c));
+    case Ligature:		return TRACE_RETURN (u.ligature.sanitize (c));
+    case Context:		return TRACE_RETURN (u.context.sanitize (c));
+    case ChainContext:		return TRACE_RETURN (u.chainContext.sanitize (c));
+    case Extension:		return TRACE_RETURN (u.extension.sanitize (c));
+    case ReverseChainSingle:	return TRACE_RETURN (u.reverseChainContextSingle.sanitize (c));
+    default:			return TRACE_RETURN (true);
     }
   }
 
-  private:
+  protected:
   union {
-  USHORT			sub_format;
+  struct {
+    USHORT			sub_format;
+  } header;
   SingleSubst			single;
   MultipleSubst			multiple;
   AlternateSubst		alternate;
   LigatureSubst			ligature;
-  ContextSubst			c;
+  ContextSubst			context;
   ChainContextSubst		chainContext;
   ExtensionSubst		extension;
   ReverseChainSingleSubst	reverseChainContextSingle;
   } u;
   public:
-  DEFINE_SIZE_UNION (2, sub_format);
+  DEFINE_SIZE_UNION (2, header.sub_format);
 };
 
 
@@ -753,40 +1264,46 @@ struct SubstLookup : Lookup
     return lookup_type_is_reverse (type);
   }
 
-
-  inline bool apply_once (hb_face_t *face,
-			  hb_buffer_t *buffer,
-			  hb_mask_t lookup_mask,
-			  unsigned int context_length,
-			  unsigned int nesting_level_left) const
+  inline void closure (hb_closure_context_t *c) const
   {
     unsigned int lookup_type = get_type ();
-    hb_apply_context_t c[1] = {{0}};
+    unsigned int count = get_subtable_count ();
+    for (unsigned int i = 0; i < count; i++)
+      get_subtable (i).closure (c, lookup_type);
+  }
 
-    c->face = face;
-    c->buffer = buffer;
-    c->direction = buffer->props.direction;
-    c->lookup_mask = lookup_mask;
-    c->context_length = context_length;
-    c->nesting_level_left = nesting_level_left;
-    c->lookup_props = get_props ();
-
-    if (!_hb_ot_layout_check_glyph_property (c->face, &c->buffer->info[c->buffer->idx], c->lookup_props, &c->property))
-      return false;
-
-    if (unlikely (lookup_type == SubstLookupSubTable::Extension))
-    {
-      /* The spec says all subtables should have the same type.
-       * This is specially important if one has a reverse type!
-       *
-       * This is rather slow to do this here for every glyph,
-       * but it's easiest, and who uses extension lookups anyway?!*/
-      unsigned int count = get_subtable_count ();
-      unsigned int type = get_subtable(0).u.extension.get_type ();
-      for (unsigned int i = 1; i < count; i++)
-        if (get_subtable(i).u.extension.get_type () != type)
-	  return false;
+  template <typename set_t>
+  inline void add_coverage (set_t *glyphs) const
+  {
+    const Coverage *last = NULL;
+    unsigned int count = get_subtable_count ();
+    for (unsigned int i = 0; i < count; i++) {
+      const Coverage *c = &get_subtable (i).get_coverage (get_type ());
+      if (c != last) {
+        c->add_coverage (glyphs);
+        last = c;
+      }
     }
+  }
+
+  inline bool would_apply (hb_would_apply_context_t *c, const hb_set_digest_t *digest) const
+  {
+    if (unlikely (!c->len)) return false;
+    if (!digest->may_have (c->glyphs[0])) return false;
+    unsigned int lookup_type = get_type ();
+    unsigned int count = get_subtable_count ();
+    for (unsigned int i = 0; i < count; i++)
+      if (get_subtable (i).would_apply (c, lookup_type))
+	return true;
+    return false;
+  }
+
+  inline bool apply_once (hb_apply_context_t *c) const
+  {
+    unsigned int lookup_type = get_type ();
+
+    if (!c->check_glyph_property (&c->buffer->cur(), c->lookup_props, &c->property))
+      return false;
 
     unsigned int count = get_subtable_count ();
     for (unsigned int i = 0; i < count; i++)
@@ -796,56 +1313,133 @@ struct SubstLookup : Lookup
     return false;
   }
 
-  inline bool apply_string (hb_face_t   *face,
-			    hb_buffer_t *buffer,
-			    hb_mask_t    mask) const
+  inline bool apply_string (hb_apply_context_t *c, const hb_set_digest_t *digest) const
   {
     bool ret = false;
 
-    if (unlikely (!buffer->len))
+    if (unlikely (!c->buffer->len || !c->lookup_mask))
       return false;
+
+    c->set_lookup (*this);
 
     if (likely (!is_reverse ()))
     {
 	/* in/out forward substitution */
-	buffer->clear_output ();
-	buffer->idx = 0;
-	while (buffer->idx < buffer->len)
+	c->buffer->clear_output ();
+	c->buffer->idx = 0;
+
+	while (c->buffer->idx < c->buffer->len)
 	{
-	  if ((buffer->info[buffer->idx].mask & mask) &&
-	      apply_once (face, buffer, mask, NO_CONTEXT, MAX_NESTING_LEVEL))
+	  if ((c->buffer->cur().mask & c->lookup_mask) &&
+	      digest->may_have (c->buffer->cur().codepoint) &&
+	      apply_once (c))
 	    ret = true;
 	  else
-	    buffer->next_glyph ();
-
+	    c->buffer->next_glyph ();
 	}
 	if (ret)
-	  buffer->swap_buffers ();
+	  c->buffer->swap_buffers ();
     }
     else
     {
 	/* in-place backward substitution */
-	buffer->idx = buffer->len - 1;
+	c->buffer->remove_output ();
+	c->buffer->idx = c->buffer->len - 1;
 	do
 	{
-	  if ((buffer->info[buffer->idx].mask & mask) &&
-	      apply_once (face, buffer, mask, NO_CONTEXT, MAX_NESTING_LEVEL))
+	  if ((c->buffer->cur().mask & c->lookup_mask) &&
+	      digest->may_have (c->buffer->cur().codepoint) &&
+	      apply_once (c))
 	    ret = true;
 	  else
-	    buffer->idx--;
+	    c->buffer->idx--;
 
 	}
-	while ((int) buffer->idx >= 0);
+	while ((int) c->buffer->idx >= 0);
     }
 
     return ret;
   }
 
-  inline bool sanitize (hb_sanitize_context_t *c) {
+  private:
+  inline SubstLookupSubTable& serialize_subtable (hb_serialize_context_t *c,
+						  unsigned int i)
+  { return CastR<OffsetArrayOf<SubstLookupSubTable> > (subTable)[i].serialize (c, this); }
+  public:
+
+  inline bool serialize_single (hb_serialize_context_t *c,
+				uint32_t lookup_props,
+			        Supplier<GlyphID> &glyphs,
+			        Supplier<GlyphID> &substitutes,
+			        unsigned int num_glyphs)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!Lookup::serialize (c, SubstLookupSubTable::Single, lookup_props, 1))) return TRACE_RETURN (false);
+    return TRACE_RETURN (serialize_subtable (c, 0).u.single.serialize (c, glyphs, substitutes, num_glyphs));
+  }
+
+  inline bool serialize_multiple (hb_serialize_context_t *c,
+				  uint32_t lookup_props,
+				  Supplier<GlyphID> &glyphs,
+				  Supplier<unsigned int> &substitute_len_list,
+				  unsigned int num_glyphs,
+				  Supplier<GlyphID> &substitute_glyphs_list)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!Lookup::serialize (c, SubstLookupSubTable::Multiple, lookup_props, 1))) return TRACE_RETURN (false);
+    return TRACE_RETURN (serialize_subtable (c, 0).u.multiple.serialize (c, glyphs, substitute_len_list, num_glyphs,
+									 substitute_glyphs_list));
+  }
+
+  inline bool serialize_alternate (hb_serialize_context_t *c,
+				   uint32_t lookup_props,
+				   Supplier<GlyphID> &glyphs,
+				   Supplier<unsigned int> &alternate_len_list,
+				   unsigned int num_glyphs,
+				   Supplier<GlyphID> &alternate_glyphs_list)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!Lookup::serialize (c, SubstLookupSubTable::Alternate, lookup_props, 1))) return TRACE_RETURN (false);
+    return TRACE_RETURN (serialize_subtable (c, 0).u.alternate.serialize (c, glyphs, alternate_len_list, num_glyphs,
+									  alternate_glyphs_list));
+  }
+
+  inline bool serialize_ligature (hb_serialize_context_t *c,
+				  uint32_t lookup_props,
+				  Supplier<GlyphID> &first_glyphs,
+				  Supplier<unsigned int> &ligature_per_first_glyph_count_list,
+				  unsigned int num_first_glyphs,
+				  Supplier<GlyphID> &ligatures_list,
+				  Supplier<unsigned int> &component_count_list,
+				  Supplier<GlyphID> &component_list /* Starting from second for each ligature */)
+  {
+    TRACE_SERIALIZE ();
+    if (unlikely (!Lookup::serialize (c, SubstLookupSubTable::Ligature, lookup_props, 1))) return TRACE_RETURN (false);
+    return TRACE_RETURN (serialize_subtable (c, 0).u.ligature.serialize (c, first_glyphs, ligature_per_first_glyph_count_list, num_first_glyphs,
+									 ligatures_list, component_count_list, component_list));
+  }
+
+  inline bool sanitize (hb_sanitize_context_t *c)
+  {
     TRACE_SANITIZE ();
-    if (unlikely (!Lookup::sanitize (c))) return false;
+    if (unlikely (!Lookup::sanitize (c))) return TRACE_RETURN (false);
     OffsetArrayOf<SubstLookupSubTable> &list = CastR<OffsetArrayOf<SubstLookupSubTable> > (subTable);
-    return list.sanitize (c, this, get_type ());
+    if (unlikely (!list.sanitize (c, this, get_type ()))) return TRACE_RETURN (false);
+
+    if (unlikely (get_type () == SubstLookupSubTable::Extension))
+    {
+      /* The spec says all subtables of an Extension lookup should
+       * have the same type.  This is specially important if one has
+       * a reverse type!
+       *
+       * We just check that they are all either forward, or reverse. */
+      unsigned int type = get_subtable (0).u.extension.get_type ();
+      unsigned int count = get_subtable_count ();
+      for (unsigned int i = 1; i < count; i++)
+        if (get_subtable (i).u.extension.get_type () != type)
+	  return TRACE_RETURN (false);
+    }
+    return TRACE_RETURN (true);
   }
 };
 
@@ -862,20 +1456,22 @@ struct GSUB : GSUBGPOS
   inline const SubstLookup& get_lookup (unsigned int i) const
   { return CastR<SubstLookup> (GSUBGPOS::get_lookup (i)); }
 
-  inline bool substitute_lookup (hb_face_t    *face,
-				 hb_buffer_t  *buffer,
-			         unsigned int  lookup_index,
-				 hb_mask_t     mask) const
-  { return get_lookup (lookup_index).apply_string (face, buffer, mask); }
+  template <typename set_t>
+  inline void add_coverage (set_t *glyphs, unsigned int lookup_index) const
+  { get_lookup (lookup_index).add_coverage (glyphs); }
 
-  static inline void substitute_start (hb_buffer_t *buffer);
-  static inline void substitute_finish (hb_buffer_t *buffer);
+  static inline void substitute_start (hb_font_t *font, hb_buffer_t *buffer);
+  static inline void substitute_finish (hb_font_t *font, hb_buffer_t *buffer);
+
+  inline void closure_lookup (hb_closure_context_t *c,
+			      unsigned int          lookup_index) const
+  { return get_lookup (lookup_index).closure (c); }
 
   inline bool sanitize (hb_sanitize_context_t *c) {
     TRACE_SANITIZE ();
-    if (unlikely (!GSUBGPOS::sanitize (c))) return false;
+    if (unlikely (!GSUBGPOS::sanitize (c))) return TRACE_RETURN (false);
     OffsetTo<SubstLookupList> &list = CastR<OffsetTo<SubstLookupList> > (lookupList);
-    return list.sanitize (c, this);
+    return TRACE_RETURN (list.sanitize (c, this));
   }
   public:
   DEFINE_SIZE_STATIC (10);
@@ -883,38 +1479,56 @@ struct GSUB : GSUBGPOS
 
 
 void
-GSUB::substitute_start (hb_buffer_t *buffer)
+GSUB::substitute_start (hb_font_t *font, hb_buffer_t *buffer)
 {
-  HB_BUFFER_ALLOCATE_VAR (buffer, props_cache);
-  HB_BUFFER_ALLOCATE_VAR (buffer, lig_id);
-  HB_BUFFER_ALLOCATE_VAR (buffer, lig_comp);
+  HB_BUFFER_ALLOCATE_VAR (buffer, glyph_props);
+  HB_BUFFER_ALLOCATE_VAR (buffer, lig_props);
+  HB_BUFFER_ALLOCATE_VAR (buffer, syllable);
 
+  const GDEF &gdef = *hb_ot_layout_from_face (font->face)->gdef;
   unsigned int count = buffer->len;
-  for (unsigned int i = 0; i < count; i++)
-    buffer->info[i].props_cache() = buffer->info[i].lig_id() = buffer->info[i].lig_comp() = 0;
+  for (unsigned int i = 0; i < count; i++) {
+    buffer->info[i].lig_props() = buffer->info[i].syllable() = 0;
+    buffer->info[i].glyph_props() = gdef.get_glyph_props (buffer->info[i].codepoint);
+  }
 }
 
 void
-GSUB::substitute_finish (hb_buffer_t *buffer)
+GSUB::substitute_finish (hb_font_t *font HB_UNUSED, hb_buffer_t *buffer HB_UNUSED)
 {
 }
 
 
 /* Out-of-class implementation for methods recursing */
 
+inline void ExtensionSubst::closure (hb_closure_context_t *c) const
+{
+  get_subtable ().closure (c, get_type ());
+}
+
+inline const Coverage & ExtensionSubst::get_coverage (void) const
+{
+  return get_subtable ().get_coverage (get_type ());
+}
+
+inline bool ExtensionSubst::would_apply (hb_would_apply_context_t *c) const
+{
+  return get_subtable ().would_apply (c, get_type ());
+}
+
 inline bool ExtensionSubst::apply (hb_apply_context_t *c) const
 {
   TRACE_APPLY ();
-  return get_subtable ().apply (c, get_type ());
+  return TRACE_RETURN (get_subtable ().apply (c, get_type ()));
 }
 
 inline bool ExtensionSubst::sanitize (hb_sanitize_context_t *c)
 {
   TRACE_SANITIZE ();
-  if (unlikely (!Extension::sanitize (c))) return false;
+  if (unlikely (!Extension::sanitize (c))) return TRACE_RETURN (false);
   unsigned int offset = get_offset ();
-  if (unlikely (!offset)) return true;
-  return StructAtOffset<SubstLookupSubTable> (this, offset).sanitize (c, get_type ());
+  if (unlikely (!offset)) return TRACE_RETURN (true);
+  return TRACE_RETURN (StructAtOffset<SubstLookupSubTable> (this, offset).sanitize (c, get_type ()));
 }
 
 inline bool ExtensionSubst::is_reverse (void) const
@@ -925,20 +1539,35 @@ inline bool ExtensionSubst::is_reverse (void) const
   return SubstLookup::lookup_type_is_reverse (type);
 }
 
+static inline void closure_lookup (hb_closure_context_t *c, unsigned int lookup_index)
+{
+  const GSUB &gsub = *(hb_ot_layout_from_face (c->face)->gsub);
+  const SubstLookup &l = gsub.get_lookup (lookup_index);
+
+  if (unlikely (c->nesting_level_left == 0))
+    return;
+
+  c->nesting_level_left--;
+  l.closure (c);
+  c->nesting_level_left++;
+}
+
 static inline bool substitute_lookup (hb_apply_context_t *c, unsigned int lookup_index)
 {
-  const GSUB &gsub = *(c->face->ot_layout->gsub);
+  const GSUB &gsub = *(hb_ot_layout_from_face (c->face)->gsub);
   const SubstLookup &l = gsub.get_lookup (lookup_index);
 
   if (unlikely (c->nesting_level_left == 0))
     return false;
 
-  if (unlikely (c->context_length < 1))
-    return false;
-
-  return l.apply_once (c->face, c->buffer, c->lookup_mask, c->context_length, c->nesting_level_left - 1);
+  hb_apply_context_t new_c (*c);
+  new_c.nesting_level_left--;
+  new_c.set_lookup (l);
+  return l.apply_once (&new_c);
 }
 
+
+} // namespace OT
 
 
 #endif /* HB_OT_LAYOUT_GSUB_TABLE_HH */

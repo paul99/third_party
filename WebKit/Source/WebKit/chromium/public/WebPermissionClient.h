@@ -33,6 +33,7 @@
 
 namespace WebKit {
 
+class WebDocument;
 class WebFrame;
 class WebSecurityOrigin;
 class WebString;
@@ -88,6 +89,20 @@ public:
 
     // Controls whether access to write the clipboard is allowed for this frame.
     virtual bool allowWriteToClipboard(WebFrame*, bool defaultValue) { return defaultValue; }
+
+    // Controls whether enabling Web Components API for this frame.
+    virtual bool allowWebComponents(const WebDocument&, bool defaultValue) { return defaultValue; }
+
+    // Controls whether enabling HTML notifications for this frame.
+    virtual bool allowHTMLNotifications(const WebDocument&) { return true; }
+
+    // Controls whether to enable MutationEvents for this document.
+    // The common use case of this method is actually to selectively disable MutationEvents,
+    // but it's been named for consistency with the rest of the interface.
+    virtual bool allowMutationEvents(const WebDocument&, bool defaultValue) { return defaultValue; }
+
+    // Controls whether pushState and related History APIs are enabled for this frame.
+    virtual bool allowPushState(const WebDocument&) { return true; }
 
     // Notifies the client that the frame would have instantiated a plug-in if plug-ins were enabled.
     virtual void didNotAllowPlugins(WebFrame*) { }

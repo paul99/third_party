@@ -24,12 +24,14 @@
  * Red Hat Author(s): Behdad Esfahbod
  */
 
+#ifndef HB_OT_H_IN
+#error "Include <hb-ot.h> instead."
+#endif
+
 #ifndef HB_OT_LAYOUT_H
 #define HB_OT_LAYOUT_H
 
-#include "hb-common.h"
-#include "hb-buffer.h"
-#include "hb-font.h"
+#include "hb.h"
 
 #include "hb-ot-tag.h"
 
@@ -39,6 +41,7 @@ HB_BEGIN_DECLS
 #define HB_OT_TAG_GDEF HB_TAG('G','D','E','F')
 #define HB_OT_TAG_GSUB HB_TAG('G','S','U','B')
 #define HB_OT_TAG_GPOS HB_TAG('G','P','O','S')
+
 
 /*
  * GDEF
@@ -166,19 +169,17 @@ hb_ot_layout_feature_get_lookup_indexes (hb_face_t    *face,
 hb_bool_t
 hb_ot_layout_has_substitution (hb_face_t *face);
 
-/* Should be called before all the substitute_lookup's are done. */
-void
-hb_ot_layout_substitute_start (hb_buffer_t  *buffer);
-
 hb_bool_t
-hb_ot_layout_substitute_lookup (hb_face_t    *face,
-				hb_buffer_t  *buffer,
-				unsigned int  lookup_index,
-				hb_mask_t     mask);
+hb_ot_layout_would_substitute_lookup (hb_face_t            *face,
+				      unsigned int          lookup_index,
+				      const hb_codepoint_t *glyphs,
+				      unsigned int          glyphs_length,
+				      hb_bool_t             zero_context);
 
-/* Should be called after all the substitute_lookup's are done */
 void
-hb_ot_layout_substitute_finish (hb_buffer_t  *buffer);
+hb_ot_layout_substitute_closure_lookup (hb_face_t    *face,
+				        unsigned int  lookup_index,
+				        hb_set_t     *glyphs);
 
 /*
  * GPOS
@@ -186,20 +187,6 @@ hb_ot_layout_substitute_finish (hb_buffer_t  *buffer);
 
 hb_bool_t
 hb_ot_layout_has_positioning (hb_face_t *face);
-
-/* Should be called before all the position_lookup's are done.  Resets positions to zero. */
-void
-hb_ot_layout_position_start (hb_buffer_t  *buffer);
-
-hb_bool_t
-hb_ot_layout_position_lookup (hb_font_t    *font,
-			      hb_buffer_t  *buffer,
-			      unsigned int  lookup_index,
-			      hb_mask_t     mask);
-
-/* Should be called after all the position_lookup's are done */
-void
-hb_ot_layout_position_finish (hb_buffer_t  *buffer);
 
 
 HB_END_DECLS

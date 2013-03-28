@@ -31,7 +31,6 @@
 #include "FontOrientation.h"
 #include "FontRenderingMode.h"
 #include "FontWidthVariant.h"
-#include "TextOrientation.h"
 
 namespace WebCore {
 
@@ -39,9 +38,6 @@ class CachedResourceLoader;
 class FontPlatformData;
 class SVGDocument;
 class SVGFontElement;
-class SharedBuffer;
-struct FontCustomPlatformData;
-
 struct FontCustomPlatformData;
 
 class CachedFont : public CachedResource {
@@ -52,24 +48,24 @@ public:
     virtual void load(CachedResourceLoader*, const ResourceLoaderOptions&);
 
     virtual void didAddClient(CachedResourceClient*);
-    virtual void data(PassRefPtr<SharedBuffer> data, bool allDataReceived);
-    virtual void error(CachedResource::Status);
+    virtual void data(PassRefPtr<ResourceBuffer> data, bool allDataReceived);
 
     virtual void allClientsRemoved();
-
-    void checkNotify();
-
     void beginLoadIfNeeded(CachedResourceLoader* dl);
+    bool stillNeedsLoad() const { return !m_loadInitiated; }
 
     bool ensureCustomFontData();
-    FontPlatformData platformDataFromCustomData(float size, bool bold, bool italic, FontOrientation = Horizontal, TextOrientation = TextOrientationVerticalRight, FontWidthVariant = RegularWidth, FontRenderingMode = NormalRenderingMode);
+    FontPlatformData platformDataFromCustomData(float size, bool bold, bool italic, FontOrientation = Horizontal, FontWidthVariant = RegularWidth, FontRenderingMode = NormalRenderingMode);
 
 #if ENABLE(SVG_FONTS)
     bool ensureSVGFontData();
     SVGFontElement* getSVGFontById(const String&) const;
 #endif
 
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
+
 private:
+    virtual void checkNotify();
     FontCustomPlatformData* m_fontData;
     bool m_loadInitiated;
 
@@ -84,7 +80,7 @@ class CachedFontClient : public CachedResourceClient {
 public:
     virtual ~CachedFontClient() { }
     static CachedResourceClientType expectedType() { return FontType; }
-    virtual CachedResourceClientType resourceClientType() { return expectedType(); }
+    virtual CachedResourceClientType resourceClientType() const { return expectedType(); }
     virtual void fontLoaded(CachedFont*) { }
 };
 

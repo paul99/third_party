@@ -31,13 +31,14 @@
 #ifndef GeolocationPermissionClientQt_h
 #define GeolocationPermissionClientQt_h
 
+#if ENABLE(GEOLOCATION)
+
 #include "Geolocation.h"
-#include "qwebpage.h"
 
 #include <QHash>
 
-class QWebFrame;
-class QWebPage;
+class QWebFrameAdapter;
+class QWebPageAdapter;
 
 namespace WebCore {
 
@@ -46,15 +47,17 @@ public:
     GeolocationPermissionClientQt();
     ~GeolocationPermissionClientQt();
 
-    void requestGeolocationPermissionForFrame(QWebFrame*, Geolocation*);
-    void cancelGeolocationPermissionRequestForFrame(QWebFrame*, Geolocation*);
-    void setPermission(QWebFrame*, QWebPage::PermissionPolicy);
+    void requestGeolocationPermissionForFrame(QWebFrameAdapter*, Geolocation*);
+    void cancelGeolocationPermissionRequestForFrame(QWebFrameAdapter*, Geolocation*);
+    void setPermission(QWebFrameAdapter*, bool /*granted*/);
 
     static GeolocationPermissionClientQt* geolocationPermissionClient();
 private:
-    QHash<QWebFrame*, Geolocation*> m_pendingPermissionRequests;
+    QHash<QWebFrameAdapter*, Geolocation*> m_pendingPermissionRequests;
 };
 
 }
+
+#endif // ENABLE(GEOLOCATION)
 
 #endif

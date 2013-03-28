@@ -35,6 +35,7 @@
 #include "ConsoleMessage.h"
 
 #include "Console.h"
+#include "IdentifiersFactory.h"
 #include "InjectedScript.h"
 #include "InjectedScriptManager.h"
 #include "InspectorFrontend.h"
@@ -42,31 +43,47 @@
 #include "ScriptArguments.h"
 #include "ScriptCallFrame.h"
 #include "ScriptCallStack.h"
+#include "ScriptCallStackFactory.h"
 #include "ScriptValue.h"
+#include <wtf/MainThread.h>
 
 namespace WebCore {
 
-ConsoleMessage::ConsoleMessage(MessageSource s, MessageType t, MessageLevel l, const String& m, const String& u, unsigned li, const String& requestId)
-    : m_source(s)
-    , m_type(t)
-    , m_level(l)
-    , m_message(m)
-    , m_url(u)
-    , m_line(li)
-    , m_repeatCount(1)
-    , m_requestId(requestId)
-{
-}
-
-ConsoleMessage::ConsoleMessage(MessageSource s, MessageType t, MessageLevel l, const String& m, PassRefPtr<ScriptArguments> arguments, PassRefPtr<ScriptCallStack> callStack)
-    : m_source(s)
-    , m_type(t)
-    , m_level(l)
-    , m_message(m)
-    , m_arguments(arguments)
+ConsoleMessage::ConsoleMessage(bool canGenerateCallStack, MessageSource source, MessageType type, MessageLevel level, const String& message, unsigned long requestIdentifier)
+    : m_source(source)
+    , m_type(type)
+    , m_level(level)
+    , m_message(message)
     , m_url()
     , m_line(0)
     , m_repeatCount(1)
+    , m_requestId(IdentifiersFactory::requestId(requestIdentifier))
+{
+    autogenerateMetadata(canGenerateCallStack);
+}
+
+ConsoleMessage::ConsoleMessage(bool canGenerateCallStack, MessageSource source, MessageType type, MessageLevel level, const String& message, const String& url, unsigned line, ScriptState* state, unsigned long requestIdentifier)
+    : m_source(source)
+    , m_type(type)
+    , m_level(level)
+    , m_message(message)
+    , m_url(url)
+    , m_line(line)
+    , m_repeatCount(1)
+    , m_requestId(IdentifiersFactory::requestId(requestIdentifier))
+{
+    autogenerateMetadata(canGenerateCallStack, state);
+}
+
+ConsoleMessage::ConsoleMessage(bool, MessageSource source, MessageType type, MessageLevel level, const String& message, PassRefPtr<ScriptCallStack> callStack, unsigned long requestIdentifier)
+    : m_source(source)
+    , m_type(type)
+    , m_level(level)
+    , m_message(message)
+    , m_arguments(0)
+    , m_line(0)
+    , m_repeatCount(1)
+    , m_requestId(IdentifiersFactory::requestId(requestIdentifier))
 {
     if (callStack && callStack->size()) {
         const ScriptCallFrame& frame = callStack->at(0);
@@ -76,64 +93,90 @@ ConsoleMessage::ConsoleMessage(MessageSource s, MessageType t, MessageLevel l, c
     m_callStack = callStack;
 }
 
-ConsoleMessage::ConsoleMessage(MessageSource s, MessageType t, MessageLevel l, const String& m, const String& responseUrl, const String& requestId)
-    : m_source(s)
-    , m_type(t)
-    , m_level(l)
-    , m_message(m)
-    , m_url(responseUrl)
+ConsoleMessage::ConsoleMessage(bool canGenerateCallStack, MessageSource source, MessageType type, MessageLevel level, const String& message, PassRefPtr<ScriptArguments> arguments, ScriptState* state, unsigned long requestIdentifier)
+    : m_source(source)
+    , m_type(type)
+    , m_level(level)
+    , m_message(message)
+    , m_arguments(arguments)
+    , m_url()
     , m_line(0)
     , m_repeatCount(1)
-    , m_requestId(requestId)
+    , m_requestId(IdentifiersFactory::requestId(requestIdentifier))
 {
+    autogenerateMetadata(canGenerateCallStack, state);
 }
 
 ConsoleMessage::~ConsoleMessage()
 {
 }
 
+void ConsoleMessage::autogenerateMetadata(bool canGenerateCallStack, ScriptState* state)
+{
+    if (m_type == EndGroupMessageType)
+        return;
+
+    if (state)
+        m_callStack = createScriptCallStackForConsole(state);
+    else if (canGenerateCallStack)
+        m_callStack = createScriptCallStack(ScriptCallStack::maxCallStackSizeToCapture, true);
+    else
+        return;
+
+    if (m_callStack && m_callStack->size()) {
+        const ScriptCallFrame& frame = m_callStack->at(0);
+        m_url = frame.sourceURL();
+        m_line = frame.lineNumber();
+        return;
+    }
+
+    m_callStack.clear();
+}
+
 // Keep in sync with inspector/front-end/ConsoleView.js
-static String messageSourceValue(MessageSource source)
+static TypeBuilder::Console::ConsoleMessage::Source::Enum messageSourceValue(MessageSource source)
 {
     switch (source) {
-    case HTMLMessageSource: return "html";
-    case XMLMessageSource: return "xml";
-    case JSMessageSource: return "javascript";
-    case NetworkMessageSource: return "network";
-    case ConsoleAPIMessageSource: return "console-api";
-    case OtherMessageSource: return "other";
+    case HTMLMessageSource: return TypeBuilder::Console::ConsoleMessage::Source::Html;
+    case XMLMessageSource: return TypeBuilder::Console::ConsoleMessage::Source::Xml;
+    case JSMessageSource: return TypeBuilder::Console::ConsoleMessage::Source::Javascript;
+    case NetworkMessageSource: return TypeBuilder::Console::ConsoleMessage::Source::Network;
+    case ConsoleAPIMessageSource: return TypeBuilder::Console::ConsoleMessage::Source::Console_api;
+    case OtherMessageSource: return TypeBuilder::Console::ConsoleMessage::Source::Other;
     }
-    return "other";
+    return TypeBuilder::Console::ConsoleMessage::Source::Other;
 }
 
-static String messageTypeValue(MessageType type)
+static TypeBuilder::Console::ConsoleMessage::Type::Enum messageTypeValue(MessageType type)
 {
     switch (type) {
-    case LogMessageType: return "log";
-    case DirMessageType: return "dir";
-    case DirXMLMessageType: return "dirXML";
-    case TraceMessageType: return "trace";
-    case StartGroupMessageType: return "startGroup";
-    case StartGroupCollapsedMessageType: return "startGroupCollapsed";
-    case EndGroupMessageType: return "endGroup";
-    case AssertMessageType: return "assert";
+    case LogMessageType: return TypeBuilder::Console::ConsoleMessage::Type::Log;
+    case ClearMessageType: return TypeBuilder::Console::ConsoleMessage::Type::Clear;
+    case DirMessageType: return TypeBuilder::Console::ConsoleMessage::Type::Dir;
+    case DirXMLMessageType: return TypeBuilder::Console::ConsoleMessage::Type::Dirxml;
+    case TraceMessageType: return TypeBuilder::Console::ConsoleMessage::Type::Trace;
+    case StartGroupMessageType: return TypeBuilder::Console::ConsoleMessage::Type::StartGroup;
+    case StartGroupCollapsedMessageType: return TypeBuilder::Console::ConsoleMessage::Type::StartGroupCollapsed;
+    case EndGroupMessageType: return TypeBuilder::Console::ConsoleMessage::Type::EndGroup;
+    case AssertMessageType: return TypeBuilder::Console::ConsoleMessage::Type::Assert;
+    case TimingMessageType: return TypeBuilder::Console::ConsoleMessage::Type::Timing;
     }
-    return "log";
+    return TypeBuilder::Console::ConsoleMessage::Type::Log;
 }
 
-static String messageLevelValue(MessageLevel level)
+static TypeBuilder::Console::ConsoleMessage::Level::Enum messageLevelValue(MessageLevel level)
 {
     switch (level) {
-    case TipMessageLevel: return "tip";
-    case LogMessageLevel: return "log";
-    case WarningMessageLevel: return "warning";
-    case ErrorMessageLevel: return "error";
-    case DebugMessageLevel: return "debug";
+    case TipMessageLevel: return TypeBuilder::Console::ConsoleMessage::Level::Tip;
+    case LogMessageLevel: return TypeBuilder::Console::ConsoleMessage::Level::Log;
+    case WarningMessageLevel: return TypeBuilder::Console::ConsoleMessage::Level::Warning;
+    case ErrorMessageLevel: return TypeBuilder::Console::ConsoleMessage::Level::Error;
+    case DebugMessageLevel: return TypeBuilder::Console::ConsoleMessage::Level::Debug;
     }
-    return "log";
+    return TypeBuilder::Console::ConsoleMessage::Level::Log;
 }
 
-void ConsoleMessage::addToFrontend(InspectorFrontend::Console* frontend, InjectedScriptManager* injectedScriptManager)
+void ConsoleMessage::addToFrontend(InspectorFrontend::Console* frontend, InjectedScriptManager* injectedScriptManager, bool generatePreview)
 {
     RefPtr<TypeBuilder::Console::ConsoleMessage> jsonObj = TypeBuilder::Console::ConsoleMessage::create()
         .setSource(messageSourceValue(m_source))
@@ -149,14 +192,14 @@ void ConsoleMessage::addToFrontend(InspectorFrontend::Console* frontend, Injecte
     if (m_arguments && m_arguments->argumentCount()) {
         InjectedScript injectedScript = injectedScriptManager->injectedScriptFor(m_arguments->globalState());
         if (!injectedScript.hasNoValue()) {
-            RefPtr<InspectorArray> jsonArgs = InspectorArray::create();
+            RefPtr<TypeBuilder::Array<TypeBuilder::Runtime::RemoteObject> > jsonArgs = TypeBuilder::Array<TypeBuilder::Runtime::RemoteObject>::create();
             for (unsigned i = 0; i < m_arguments->argumentCount(); ++i) {
-                RefPtr<InspectorValue> inspectorValue = injectedScript.wrapObject(m_arguments->argumentAt(i), "console");
+                RefPtr<TypeBuilder::Runtime::RemoteObject> inspectorValue = injectedScript.wrapObject(m_arguments->argumentAt(i), "console", generatePreview);
                 if (!inspectorValue) {
                     ASSERT_NOT_REACHED();
                     return;
                 }
-                jsonArgs->pushValue(inspectorValue);
+                jsonArgs->addItem(inspectorValue);
             }
             jsonObj->setParameters(jsonArgs);
         }
@@ -176,6 +219,11 @@ bool ConsoleMessage::isEqual(ConsoleMessage* msg) const
     if (m_arguments) {
         if (!m_arguments->isEqual(msg->m_arguments.get()))
             return false;
+        // Never treat objects as equal - their properties might change over time.
+        for (size_t i = 0; i < m_arguments->argumentCount(); ++i) {
+            if (m_arguments->argumentAt(i).isObject())
+                return false;
+        }
     } else if (msg->m_arguments)
         return false;
 
@@ -203,6 +251,13 @@ void ConsoleMessage::windowCleared(DOMWindow* window)
     if (!m_message)
         m_message = "<message collected>";
     m_arguments.clear();
+}
+
+unsigned ConsoleMessage::argumentCount()
+{
+    if (m_arguments)
+        return m_arguments->argumentCount();
+    return 0;
 }
 
 } // namespace WebCore

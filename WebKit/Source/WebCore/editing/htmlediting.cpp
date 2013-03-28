@@ -28,7 +28,8 @@
 
 #include "AXObjectCache.h"
 #include "Document.h"
-#include "EditingText.h"
+#include "Editor.h"
+#include "Frame.h"
 #include "HTMLBRElement.h"
 #include "HTMLDivElement.h"
 #include "HTMLElementFactory.h"
@@ -38,14 +39,17 @@
 #include "HTMLNames.h"
 #include "HTMLObjectElement.h"
 #include "HTMLOListElement.h"
+#include "HTMLParagraphElement.h"
 #include "HTMLUListElement.h"
+#include "NodeTraversal.h"
 #include "PositionIterator.h"
 #include "RenderObject.h"
 #include "Range.h"
-#include "VisibleSelection.h"
+#include "ShadowRoot.h"
 #include "Text.h"
 #include "TextIterator.h"
 #include "VisiblePosition.h"
+#include "VisibleSelection.h"
 #include "visible_units.h"
 #include <wtf/Assertions.h>
 #include <wtf/StdLibExtras.h>
@@ -68,32 +72,28 @@ bool isAtomicNode(const Node *node)
 // could be inside a shadow tree. Only works for non-null values.
 int comparePositions(const Position& a, const Position& b)
 {
-    Node* nodeA = a.deprecatedNode();
-    ASSERT(nodeA);
-    Node* nodeB = b.deprecatedNode();
-    ASSERT(nodeB);
-    int offsetA = a.deprecatedEditingOffset();
-    int offsetB = b.deprecatedEditingOffset();
+    TreeScope* commonScope = commonTreeScope(a.containerNode(), b.containerNode());
 
-    Node* shadowAncestorA = nodeA->shadowAncestorNode();
-    if (shadowAncestorA == nodeA)
-        shadowAncestorA = 0;
-    Node* shadowAncestorB = nodeB->shadowAncestorNode();
-    if (shadowAncestorB == nodeB)
-        shadowAncestorB = 0;
+    ASSERT(commonScope);
+    if (!commonScope)
+        return 0;
+
+    Node* nodeA = commonScope->ancestorInThisScope(a.containerNode());
+    ASSERT(nodeA);
+    bool hasDescendentA = nodeA != a.containerNode();
+    int offsetA = hasDescendentA ? 0 : a.computeOffsetInContainerNode();
+
+    Node* nodeB = commonScope->ancestorInThisScope(b.containerNode());
+    ASSERT(nodeB);
+    bool hasDescendentB = nodeB != b.containerNode();
+    int offsetB = hasDescendentB ? 0 : b.computeOffsetInContainerNode();
 
     int bias = 0;
-    if (shadowAncestorA != shadowAncestorB) {
-        if (shadowAncestorA) {
-            nodeA = shadowAncestorA;
-            offsetA = 0;
-            bias = 1;
-        }
-        if (shadowAncestorB) {
-            nodeB = shadowAncestorB;
-            offsetB = 0;
+    if (nodeA == nodeB) {
+        if (hasDescendentA)
             bias = -1;
-        }
+        else if (hasDescendentB)
+            bias = 1;
     }
 
     ExceptionCode ec;
@@ -145,12 +145,16 @@ Node* lowestEditableAncestor(Node* node)
     return lowestRoot;
 }
 
-bool isEditablePosition(const Position& p, EditableType editableType)
+bool isEditablePosition(const Position& p, EditableType editableType, EUpdateStyle updateStyle)
 {
     Node* node = p.deprecatedNode();
     if (!node)
         return false;
-        
+    if (updateStyle == UpdateStyle)
+        node->document()->updateLayoutIgnorePendingStylesheets();
+    else
+        ASSERT(updateStyle == DoNotUpdateStyle);
+
     if (node->renderer() && node->renderer()->isTable())
         node = node->parentNode();
     
@@ -255,11 +259,15 @@ VisiblePosition firstEditablePositionAfterPositionInRoot(const Position& positio
         return firstPositionInNode(highestRoot);
 
     Position p = position;
-    
-    if (Node* shadowAncestor = p.deprecatedNode()->shadowAncestorNode())
-        if (shadowAncestor != p.deprecatedNode())
-            p = positionAfterNode(shadowAncestor);
-    
+
+    if (position.deprecatedNode()->treeScope() != highestRoot->treeScope()) {
+        Node* shadowAncestor = highestRoot->treeScope()->ancestorInThisScope(p.deprecatedNode());
+        if (!shadowAncestor)
+            return VisiblePosition();
+
+        p = positionAfterNode(shadowAncestor);
+    }
+
     while (p.deprecatedNode() && !isEditablePosition(p) && p.deprecatedNode()->isDescendantOf(highestRoot))
         p = isAtomicNode(p.deprecatedNode()) ? positionInParentAfterNode(p.deprecatedNode()) : nextVisuallyDistinctCandidate(p);
     
@@ -277,9 +285,12 @@ VisiblePosition lastEditablePositionBeforePositionInRoot(const Position& positio
 
     Position p = position;
 
-    if (Node* shadowAncestor = p.deprecatedNode()->shadowAncestorNode()) {
-        if (shadowAncestor != p.deprecatedNode())
-            p = firstPositionInOrBeforeNode(shadowAncestor);
+    if (position.deprecatedNode()->treeScope() != highestRoot->treeScope()) {
+        Node* shadowAncestor = highestRoot->treeScope()->ancestorInThisScope(p.deprecatedNode());
+        if (!shadowAncestor)
+            return VisiblePosition();
+
+        p = firstPositionInOrBeforeNode(shadowAncestor);
     }
     
     while (p.deprecatedNode() && !isEditablePosition(p) && p.deprecatedNode()->isDescendantOf(highestRoot))
@@ -295,7 +306,7 @@ VisiblePosition lastEditablePositionBeforePositionInRoot(const Position& positio
 // Whether or not content before and after this node will collapse onto the same line as it.
 bool isBlock(const Node* node)
 {
-    return node && node->renderer() && !node->renderer()->isInline();
+    return node && node->renderer() && !node->renderer()->isInline() && !node->renderer()->isRubyText();
 }
 
 bool isInline(const Node* node)
@@ -371,8 +382,8 @@ String stringWithRebalancedWhitespace(const String& string, bool startIsStartOfP
 
 bool isTableStructureNode(const Node *node)
 {
-    RenderObject *r = node->renderer();
-    return (r && (r->isTableCell() || r->isTableRow() || r->isTableSection() || r->isTableCol()));
+    RenderObject* renderer = node->renderer();
+    return (renderer && (renderer->isTableCell() || renderer->isTableRow() || renderer->isTableSection() || renderer->isRenderTableCol()));
 }
 
 const String& nonBreakingSpaceString()
@@ -635,12 +646,12 @@ static bool hasARenderedDescendant(Node* node, Node* excludedNode)
 {
     for (Node* n = node->firstChild(); n;) {
         if (n == excludedNode) {
-            n = n->traverseNextSibling(node);
+            n = NodeTraversal::nextSkippingChildren(n, node);
             continue;
         }
         if (n->renderer())
             return true;
-        n = n->traverseNextNode(node);
+        n = NodeTraversal::next(n, node);
     }
     return false;
 }
@@ -845,7 +856,15 @@ bool isEmptyTableCell(const Node* node)
 
 PassRefPtr<HTMLElement> createDefaultParagraphElement(Document* document)
 {
-    return HTMLDivElement::create(document);
+    switch (document->frame()->editor()->defaultParagraphSeparator()) {
+    case EditorParagraphSeparatorIsDiv:
+        return HTMLDivElement::create(document);
+    case EditorParagraphSeparatorIsP:
+        return HTMLParagraphElement::create(document);
+    }
+
+    ASSERT_NOT_REACHED();
+    return 0;
 }
 
 PassRefPtr<HTMLElement> createBreakElement(Document* document)
@@ -1034,7 +1053,7 @@ bool lineBreakExistsAtPosition(const Position& position)
     if (!position.anchorNode()->isTextNode() || !position.anchorNode()->renderer()->style()->preserveNewline())
         return false;
     
-    Text* textNode = static_cast<Text*>(position.anchorNode());
+    Text* textNode = toText(position.anchorNode());
     unsigned offset = position.offsetInContainerNode();
     return offset < textNode->length() && textNode->data()[offset] == '\n';
 }
@@ -1073,20 +1092,19 @@ VisibleSelection selectionForParagraphIteration(const VisibleSelection& original
 // opertion is unreliable. TextIterator's TextIteratorEmitsCharactersBetweenAllVisiblePositions mode needs to be fixed, 
 // or these functions need to be changed to iterate using actual VisiblePositions.
 // FIXME: Deploy these functions everywhere that TextIterators are used to convert between VisiblePositions and indices.
-int indexForVisiblePosition(const VisiblePosition& visiblePosition, RefPtr<Element>& scope)
+ 
+int indexForVisiblePosition(const VisiblePosition& visiblePosition, RefPtr<ContainerNode>& scope)
 {
     if (visiblePosition.isNull())
         return 0;
 
     Position p(visiblePosition.deepEquivalent());
     Document* document = p.anchorNode()->document();
-    Node* shadowRoot = p.anchorNode()->shadowTreeRootNode();
+    ShadowRoot* shadowRoot = p.anchorNode()->containingShadowRoot();
 
-    if (shadowRoot) {
-        // Use the shadow root for form elements, since TextIterators will not enter shadow content.
-        ASSERT(shadowRoot->isElementNode());
-        scope = static_cast<Element*>(shadowRoot);
-    } else
+    if (shadowRoot)
+        scope = shadowRoot;
+    else
         scope = document->documentElement();
 
     RefPtr<Range> range = Range::create(document, firstPositionInNode(scope.get()), p.parentAnchoredEquivalent());
@@ -1094,7 +1112,7 @@ int indexForVisiblePosition(const VisiblePosition& visiblePosition, RefPtr<Eleme
     return TextIterator::rangeLength(range.get(), true);
 }
 
-VisiblePosition visiblePositionForIndex(int index, Element *scope)
+VisiblePosition visiblePositionForIndex(int index, ContainerNode* scope)
 {
     RefPtr<Range> range = TextIterator::rangeFromLocationAndLength(scope, index, 0, true);
     // Check for an invalid index. Certain editing operations invalidate indices because 
@@ -1143,29 +1161,15 @@ bool isRenderedAsNonInlineTableImageOrHR(const Node* node)
 
 bool areIdenticalElements(const Node* first, const Node* second)
 {
-    // check that tag name and all attribute names and values are identical
-
     if (!first->isElementNode() || !second->isElementNode())
         return false;
 
-    if (!toElement(first)->tagQName().matches(toElement(second)->tagQName()))
+    const Element* firstElement = toElement(first);
+    const Element* secondElement = toElement(second);
+    if (!firstElement->hasTagName(secondElement->tagQName()))
         return false;
 
-    NamedNodeMap* firstMap = toElement(first)->attributes();
-    NamedNodeMap* secondMap = toElement(second)->attributes();
-    unsigned firstLength = firstMap->length();
-
-    if (firstLength != secondMap->length())
-        return false;
-
-    for (unsigned i = 0; i < firstLength; i++) {
-        Attribute* attribute = firstMap->attributeItem(i);
-        Attribute* secondAttribute = secondMap->getAttributeItem(attribute->name());
-        if (!secondAttribute || attribute->value() != secondAttribute->value())
-            return false;
-    }
-
-    return true;
+    return firstElement->hasEquivalentAttributes(secondElement);
 }
 
 bool isNonTableCellHTMLBlockElement(const Node* node)

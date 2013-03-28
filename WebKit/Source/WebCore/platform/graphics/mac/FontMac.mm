@@ -71,7 +71,7 @@ static bool hasBrokenCTFontGetVerticalTranslationsForGlyphs()
         isCached = true;
     }
     return result;
-#elif defined(BUILDING_ON_SNOW_LEOPARD)
+#elif !PLATFORM(IOS) && __MAC_OS_X_VERSION_MIN_REQUIRED == 1060
     return true;
 #else
     return false;
@@ -116,10 +116,14 @@ static void showGlyphsWithAdvances(const FloatPoint& point, const SimpleFontData
             }
             CGContextShowGlyphsAtPositions(context, glyphs, positions.data(), count);
             CGContextSetTextMatrix(context, savedMatrix);
-        } else
+        } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
             CGContextShowGlyphsWithAdvances(context, glyphs, advances, count);
+#pragma clang diagnostic pop
+        }
     }
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
     else {
         if (!count)
             return;
@@ -139,6 +143,9 @@ static void showGlyphsWithAdvances(const FloatPoint& point, const SimpleFontData
 
 void Font::drawGlyphs(GraphicsContext* context, const SimpleFontData* font, const GlyphBuffer& glyphBuffer, int from, int numGlyphs, const FloatPoint& point) const
 {
+    if (!font->platformData().size())
+        return;
+
     CGContextRef cgContext = context->platformContext();
 
     bool shouldSmoothFonts = true;
@@ -208,7 +215,11 @@ void Font::drawGlyphs(GraphicsContext* context, const SimpleFontData* font, cons
         matrix = CGAffineTransformConcat(matrix, CGAffineTransformMake(1, 0, -tanf(SYNTHETIC_OBLIQUE_ANGLE * acosf(0) / 90), 1, 0, 0)); 
     CGContextSetTextMatrix(cgContext, matrix);
 
+#if PLATFORM(MAC)
+    wkSetCGFontRenderingMode(cgContext, drawFont, context->shouldSubpixelQuantizeFonts());
+#else
     wkSetCGFontRenderingMode(cgContext, drawFont);
+#endif
     if (drawFont)
         CGContextSetFontSize(cgContext, 1.0f);
     else
@@ -222,7 +233,16 @@ void Font::drawGlyphs(GraphicsContext* context, const SimpleFontData* font, cons
     ColorSpace fillColorSpace = context->fillColorSpace();
     context->getShadow(shadowOffset, shadowBlur, shadowColor, shadowColorSpace);
 
-    bool hasSimpleShadow = context->textDrawingMode() == TextModeFill && shadowColor.isValid() && !shadowBlur && !platformData.isColorBitmapFont() && (!context->shadowsIgnoreTransforms() || context->getCTM().isIdentityOrTranslationOrFlipped()) && !context->isInTransparencyLayer();
+    AffineTransform contextCTM = context->getCTM();
+    float syntheticBoldOffset = font->syntheticBoldOffset();
+    if (syntheticBoldOffset && !contextCTM.isIdentityOrTranslationOrFlipped()) {
+        FloatSize horizontalUnitSizeInDevicePixels = contextCTM.mapSize(FloatSize(1, 0));
+        float horizontalUnitLengthInDevicePixels = sqrtf(horizontalUnitSizeInDevicePixels.width() * horizontalUnitSizeInDevicePixels.width() + horizontalUnitSizeInDevicePixels.height() * horizontalUnitSizeInDevicePixels.height());
+        if (horizontalUnitLengthInDevicePixels)
+            syntheticBoldOffset /= horizontalUnitLengthInDevicePixels;
+    };
+
+    bool hasSimpleShadow = context->textDrawingMode() == TextModeFill && shadowColor.isValid() && !shadowBlur && !platformData.isColorBitmapFont() && (!context->shadowsIgnoreTransforms() || contextCTM.isIdentityOrTranslationOrFlipped()) && !context->isInTransparencyLayer();
     if (hasSimpleShadow) {
         // Paint simple shadows ourselves instead of relying on CG shadows, to avoid losing subpixel antialiasing.
         context->clearShadow();
@@ -232,15 +252,15 @@ void Font::drawGlyphs(GraphicsContext* context, const SimpleFontData* font, cons
         float shadowTextX = point.x() + shadowOffset.width();
         // If shadows are ignoring transforms, then we haven't applied the Y coordinate flip yet, so down is negative.
         float shadowTextY = point.y() + shadowOffset.height() * (context->shadowsIgnoreTransforms() ? -1 : 1);
-        showGlyphsWithAdvances(FloatPoint(shadowTextX, shadowTextY), font, cgContext, glyphBuffer.glyphs(from), glyphBuffer.advances(from), numGlyphs);
-        if (font->syntheticBoldOffset())
-            showGlyphsWithAdvances(FloatPoint(shadowTextX + font->syntheticBoldOffset(), shadowTextY), font, cgContext, glyphBuffer.glyphs(from), glyphBuffer.advances(from), numGlyphs);
+        showGlyphsWithAdvances(FloatPoint(shadowTextX, shadowTextY), font, cgContext, glyphBuffer.glyphs(from), static_cast<const CGSize*>(glyphBuffer.advances(from)), numGlyphs);
+        if (syntheticBoldOffset)
+            showGlyphsWithAdvances(FloatPoint(shadowTextX + syntheticBoldOffset, shadowTextY), font, cgContext, glyphBuffer.glyphs(from), static_cast<const CGSize*>(glyphBuffer.advances(from)), numGlyphs);
         context->setFillColor(fillColor, fillColorSpace);
     }
 
-    showGlyphsWithAdvances(point, font, cgContext, glyphBuffer.glyphs(from), glyphBuffer.advances(from), numGlyphs);
-    if (font->syntheticBoldOffset())
-        showGlyphsWithAdvances(FloatPoint(point.x() + font->syntheticBoldOffset(), point.y()), font, cgContext, glyphBuffer.glyphs(from), glyphBuffer.advances(from), numGlyphs);
+    showGlyphsWithAdvances(point, font, cgContext, glyphBuffer.glyphs(from), static_cast<const CGSize*>(glyphBuffer.advances(from)), numGlyphs);
+    if (syntheticBoldOffset)
+        showGlyphsWithAdvances(FloatPoint(point.x() + syntheticBoldOffset, point.y()), font, cgContext, glyphBuffer.glyphs(from), static_cast<const CGSize*>(glyphBuffer.advances(from)), numGlyphs);
 
     if (hasSimpleShadow)
         context->setShadow(shadowOffset, shadowBlur, shadowColor, shadowColorSpace);

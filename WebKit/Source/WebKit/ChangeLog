@@ -1,3 +1,2490 @@
+2012-12-12  Mark Lam  <mark.lam@apple.com>
+
+        Encapsulate externally used webdatabase APIs in DatabaseManager.
+        https://bugs.webkit.org/show_bug.cgi?id=104741.
+
+        Reviewed by Sam Weinig.
+
+        Use DatabaseManager instead of accessing DatabaseTracker, AbstractDatabase,
+        and DatabaseContext directly. This is to prepare for upcoming webkit2
+        refactoring.
+
+        * WebKit.xcodeproj/project.pbxproj:
+
+2012-12-05  Halton Huo  <halton.huo@intel.com>
+
+        [CMake] Unify coding style for CMake files
+        https://bugs.webkit.org/show_bug.cgi?id=103605
+
+        Reviewed by Laszlo Gombos.
+
+        Update cmake files(.cmake, CMakeLists.txt) with following style rules:
+        1. Indentation
+        1.1 Use spaces, not tabs.
+        1.2 Four spaces as indent.
+        2. Spacing
+        2.1 Place one space between control statements and their parentheses.
+            For eg, if (), else (), elseif (), endif (), foreach (),
+            endforeach (), while (), endwhile (), break ().
+        2.2 Do not place spaces between function and macro statements and
+            their parentheses. For eg, macro(), endmacro(), function(),
+            endfunction().
+        2.3 Do not place spaces between a command or function or macro and its
+            parentheses, or between a parenthesis and its content. For eg,
+            message("testing") not message( "testing") or message ("testing" )
+        2.4 No space at line ending.
+        3. Lowercase when call commands macros and functions. For eg,
+           add_executable() not ADD_EXECUTABLE(), set() not SET().
+
+        * CMakeLists.txt:
+        * PlatformBlackBerry.cmake:
+        * PlatformEfl.cmake:
+        * PlatformWinCE.cmake:
+
+2012-12-03  Pierre Rossi  <pierre.rossi@digia.com>
+
+        [Qt] another stab at fixing the windows build 
+
+        It seems the QT_BUILD_{TARGET}_LIB are not set as they should by qt_module.prf.
+        Define them by hand to be on the safe side.
+
+        * WebKit1.pro:
+
+2012-11-30  Simon Hausmann  <simon.hausmann@digia.com>, Pierre Rossi  <pierre.rossi@digia.com>
+
+        [Qt] Separate Qt WebKit into Qt WebKit and Qt WebKit Widgets
+        https://bugs.webkit.org/show_bug.cgi?id=99314
+
+        Reviewed by Tor Arne Vestbø.
+
+        This big change separates QtWebKit into QtWebKit and QtWebKitWidgets as
+        shared libraries.
+
+        It's a big refactoring that mostly involves moving WebCore dependent
+        code into QtWebKit and accessing it through exported QWebFrameAdapter
+        and QWebPageAdapter classes.
+
+        * WebKit1.pro:
+        * WebKitWidgets.pri: Removed.
+        * WebKitWidgets.pro: Removed.
+
+2012-11-22  Jeff Rogers  <jrogers@rim.com>
+
+        [BlackBerry] Update Web Notifications Implementation
+        https://bugs.webkit.org/show_bug.cgi?id=102621
+
+        Reviewed by George Staikos.
+
+        Reviewed internally by George Staikos and Joe Mason.
+        Internal PR 172120
+        Add new Notification files and remove obsolete ones.
+
+        * PlatformBlackBerry.cmake:
+
+2012-11-22  Simon Hausmann  <simon.hausmann@digia.com>, Pierre Rossi <pierre.rossi@digia.com>
+
+        [Qt] Separate QWidget dependant code into separate WebKitWidgets static library
+        https://bugs.webkit.org/show_bug.cgi?id=102800
+
+        Reviewed by Tor Arne Vestbø.
+
+        This patch separates code that needs to use QWidget related APIs in
+        WebKit/qt/WebCoreSupport and Api from code that doesn't. This means for
+        example FrameLoaderClientQt.cpp remains in the WebKit1 static library,
+        while qwebpage.cpp and qwebframe.cpp become part of the WebKitWidgets
+        static library. WebKit1 is compiled without QT += widgets and therefore
+        any widget related dependency has been moved "up" and out of WebKit1 into
+        the WebKitWidgets library.
+
+        Between the code in WebKit.a and WebKitWidgets.a new adapters and
+        interfaces have been introduced, such as QWebPageAdapter and
+        QWebFrameAdapter. QWebPageAdapter, when used from WebKit1, is a way to
+        call out into the API layer, implemented by QWebPage (QWebPagePrivate).
+        The other way around if QWebPage wants to access WebCore or
+        WebCoreSupport related functionality, it will go through
+        QWebPageAdapater (as base class). The separation in the direction up
+        into the API layer is complete with this patch, no code in WebKit1
+        depends on QtWidgets. The separation the other way around, code in the
+        API layer not using any WebCore types, is not complete yet.
+
+        Some classes such as QWebSettings, QWebElement or
+        DumpRenderTreeSupportQt remain in WebKit1. While they are API layer,
+        they do not depend on widget related Qt APIs and they make much more
+        use of WebCore internal APIs and therefore are easier to keep in
+        WebKit1.
+
+        In the future we plan to place a real shared library boundary between
+        WebKit1 and WebKitWidgets, by keeping the WebKit1 static library as
+        part of the QtWebKit shared library and by turning the WebKitWidgets
+        static library into a shared one.
+
+        * WebKit1.pri:
+        * WebKit1.pro:
+        * WebKitWidgets.pri: Copied from Source/WebKit/WebKit1.pri.
+        * WebKitWidgets.pro: Added.
+
+2012-11-21  Kai Koehne  <kai.koehne@digia.com>
+
+        [Qt] MinGW: Don't add OpenGL library dependencies here
+        https://bugs.webkit.org/show_bug.cgi?id=102924
+
+        Reviewed by Simon Hausmann.
+
+        As the comment suggests the dependency is already for WebCore, so add it there instead.
+
+        * WebKit1.pri:
+
+2012-11-18  Laszlo Gombos  <l.gombos@samsung.com>
+
+        [CMake] Consolidate common input files
+        https://bugs.webkit.org/show_bug.cgi?id=101632
+
+        Reviewed by Rob Buis.
+
+        Consolidate and sort the list of files.
+
+        * PlatformEfl.cmake:
+
+2012-11-12  Timothy Hatcher  <timothy@apple.com>
+
+        Add a dock button to the top right corner of the Web Inspector window (similar to the full screen button).
+
+        https://bugs.webkit.org/show_bug.cgi?id=102025
+
+        Reviewed by Joseph Pecoraro.
+
+        * WebKit.xcodeproj/project.pbxproj: Added Dock.pdf.
+
+2012-11-08  Laszlo Gombos  <l.gombos@samsung.com>
+
+        [EFL] Remove non-variable options from the build system
+        https://bugs.webkit.org/show_bug.cgi?id=101506
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        Remove WTF_USE_FREETYPE and ENABLE_GLIB_SUPPORT cmake variables
+        as these are always set to const 1 and not really configurable.
+
+        * PlatformEfl.cmake:
+
+2012-11-07  Andreas Kling  <akling@apple.com>
+
+        Remove build-webkit dependency on Java SDK for Apple Mac WebKit.
+        <http://webkit.org/b/101492>
+
+        Reviewed by Anders Carlsson.
+
+        * WebKit.xcodeproj/project.pbxproj: Remove WebJavaPlugIn.h
+
+2012-11-06  Laszlo Gombos  <l.gombos@samsung.com>
+
+        [EFL] Simplify the build system
+        https://bugs.webkit.org/show_bug.cgi?id=101392
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        Use WTF_USE_3D_GRAPHICS to guard the inclusion of surfaces and textmap 
+        directories under WebCore/graphics to be consistent with 
+        WebCore/PlatformEfl.cmake.
+
+        * PlatformEfl.cmake:
+
+2012-11-04  Halton Huo  <halton.huo@intel.com>
+
+        [EFL] Use _LIBRARIES instead of _LIBRARY
+        https://bugs.webkit.org/show_bug.cgi?id=101042
+
+        Reviewed by Gyuyoung Kim.
+
+        In CMake Find files, _LIBRARY is intended for internal use, should
+        use _LIBRARIES instead.
+
+        * PlatformEfl.cmake: s/_LIBRARY}/_LIBRARIES}
+
+2012-11-01  Seonae Kim  <sunaeluv.kim@samsung.com>
+
+        [EFL][DRT] Support Geolocation
+        https://bugs.webkit.org/show_bug.cgi?id=97427
+
+        Reviewed by Gyuyoung Kim. 
+
+        Add a mock directory to use GeolocationClientMock in DumpRenderTree.
+
+        * PlatformEfl.cmake:
+
+2012-10-31  Otto Derek Cheung  <otcheung@rim.com>
+
+        [BlackBerry] Adding window.external to our port
+        https://bugs.webkit.org/show_bug.cgi?id=100868
+
+        Reviewed by Rob Buis.
+
+        Adding ExternalExtension classes to the BB cmake file.
+
+        * PlatformBlackBerry.cmake:
+
+2012-10-31  Michał Pakuła vel Rutka  <m.pakula@samsung.com>
+
+        [EFL][DRT] EventSender requires contextClick implementation
+        https://bugs.webkit.org/show_bug.cgi?id=86091
+
+        Reviewed by Gyuyoung Kim.
+
+        Add new unit test file, needed due to ewk API changes.
+
+        * PlatformEfl.cmake:
+
+2012-10-30  Peter Wang  <peter.wang@torchmobile.com.cn>
+
+        [BlackBerry] Clean the code of "JavaScriptDebuggerBlackBerry"
+        https://bugs.webkit.org/show_bug.cgi?id=100724
+
+        Reviewed by Rob Buis.
+
+        Remove the code of JavaScriptDebuggerBlackBerry.
+
+        * PlatformBlackBerry.cmake:
+
+2012-10-28  Mark Rowe  <mrowe@apple.com>
+
+        Remove references to unsupported OS and Xcode versions.
+
+        Reviewed by Anders Carlsson.
+
+        * WebKit.xcodeproj/project.pbxproj:
+
+2012-10-26  Sheriff Bot  <webkit.review.bot@gmail.com>
+
+        Unreviewed, rolling out r132601.
+        http://trac.webkit.org/changeset/132601
+        https://bugs.webkit.org/show_bug.cgi?id=100494
+
+        It broke the Qt build (Requested by Ossy on #webkit).
+
+        * PlatformEfl.cmake:
+
+2012-10-26  Xiaobo Wang  <xbwang@torchmobile.com.cn>
+
+        [BlackBerry] Support pixel tests for BlackBerry DRT
+        https://bugs.webkit.org/show_bug.cgi?id=100210
+
+        Reviewed by Rob Buis.
+
+        Adds a step to build ImageDiff from Qt for DRT. Most of the works are
+        accomplished by Christopher Wells.
+
+        * PlatformBlackBerry.cmake:
+
+2012-10-24  Alexey Proskuryakov  <ap@apple.com>
+
+        Add a strategy for shared workers
+        https://bugs.webkit.org/show_bug.cgi?id=100165
+
+        EFL build fix by Christophe Dumez.
+
+        Reviewed by Brady Eidson.
+
+        * CMakeLists.txt: Add WebCore/workers to include paths.
+
+2012-10-24  Otto Derek Cheung  <otcheung@rim.com>
+
+        [BlackBerry] Rename GeolocationControllerClientBlackBerry to GeolocationClientBlackBerry
+        https://bugs.webkit.org/show_bug.cgi?id=100250
+
+        Reviewed by Rob Buis.
+
+        Rename GeolocationControllerClientBlackBerry to GeolocationClientBlackBerry
+        to prevent confusion.
+
+        PR 230196
+
+        * PlatformBlackBerry.cmake:
+
+2012-10-23  Hyowon Kim  <hw1008.kim@samsung.com>
+
+        [Texmap][EFL] Add AcceleratedCompositingContextEfl to the build system.
+        https://bugs.webkit.org/show_bug.cgi?id=88630
+
+        Reviewed by Gyuyoung Kim.
+
+        * PlatformEfl.cmake: Add the AcceleratedCompositingContextEfl.cpp file
+        and INCLUDE paths for TEXTURE_MAPPER_GL.
+
+2012-10-18  Kangil Han  <kangil.han@samsung.com>
+
+        [EFL] Add unit test for ewk_frame_source_get.
+        https://bugs.webkit.org/show_bug.cgi?id=95984
+
+        Reviewed by Gyuyoung Kim.
+
+        Add test_ewk_frame.cpp for unit test.
+
+        * PlatformEfl.cmake:
+
+2012-10-15  David Kilzer  <ddkilzer@apple.com>
+
+        Move framework and library linking into WebKit.xcconfig
+        <http://webkit.org/b/99284>
+
+        Reviewed by Mark Rowe.
+
+        * WebKit.xcodeproj/project.pbxproj: Remove frameworks and
+        libraries from Xcode project file.
+
+2012-10-15  Christophe Dumez  <christophe.dumez@intel.com>
+
+        [EFL][WK2] Implement Favicons API
+        https://bugs.webkit.org/show_bug.cgi?id=99087
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        Remove ewk_util.cpp from PlatformEfl.cmake now that its
+        code has been moved to WebCore to be reused in WK2.
+
+        * PlatformEfl.cmake:
+
+2012-10-15  Dongwoo Joshua Im  <dw.im@samsung.com>
+
+        [EFL] Set the basepath of the File System API.
+        https://bugs.webkit.org/show_bug.cgi?id=98344
+
+        Reviewed by Gyuyoung Kim.
+
+        Set the basepath of the File System API using the internal setter function.
+
+        * PlatformEfl.cmake: Add new include path.
+
+2012-10-15  Ryuan Choi  <ryuan.choi@samsung.com>
+
+        [EFL] Share resources installed for inspector
+        https://bugs.webkit.org/show_bug.cgi?id=98991
+
+        Reviewed by Gyuyoung Kim.
+
+        * PlatformEfl.cmake:
+        Extracted build scripts which install resources to WebKit/PlatformEfl.cmake.
+
+2012-10-15  George Staikos  <staikos@webkit.org>
+
+        [BlackBerry] Adapt to Platform API changes in string handling
+        https://bugs.webkit.org/show_bug.cgi?id=99248
+
+        Reviewed by Yong Li.
+
+        Convert usage of WebString, char* and std::string to BlackBerry::Platform::String.
+
+        * PlatformBlackBerry.cmake:
+
+2012-10-13  Jakob Petsovits  <jpetsovits@rim.com>
+
+        [BlackBerry] Fetch blit rects from a viewport accessor
+        https://bugs.webkit.org/show_bug.cgi?id=98581
+        RIM PR 173292
+
+        Reviewed by George Staikos.
+        Internally reviewed by Arvid Nilsson.
+
+        Add new ViewportAccessor files to the build.
+        See Source/WebKit/blackberry/ChangeLog for the
+        verbose commit message.
+
+        * PlatformBlackBerry.cmake:
+
+2012-10-12  Sheriff Bot  <webkit.review.bot@gmail.com>
+
+        Unreviewed, rolling out r131189.
+        http://trac.webkit.org/changeset/131189
+        https://bugs.webkit.org/show_bug.cgi?id=99187
+
+        Made inspector http tests crash on WK2. (Requested by rakuco
+        on #webkit).
+
+        * PlatformEfl.cmake:
+
+2012-10-12  Ryuan Choi  <ryuan.choi@samsung.com>
+
+        [EFL] Share resources installed for inspector
+        https://bugs.webkit.org/show_bug.cgi?id=98991
+
+        Reviewed by Gyuyoung Kim.
+
+        * PlatformEfl.cmake:
+        Extracted build scripts which install resources to WebKit/PlatformEfl.cmake.
+
+2012-10-11  Chris Guan  <chris.guan@torchmobile.com.cn>
+
+        [Blackberry] makes NavigatorContentUtils work
+        https://bugs.webkit.org/show_bug.cgi?id=99022
+
+        Reviewed by Rob Buis.
+
+        Because r126735 renamed RegisterProtocolHandler API to NavigatorContentUtils, So we
+        need add Modules/navigatorcontentutils into WebKit_INCLUDE_DIRECTORIES.
+
+        * PlatformBlackBerry.cmake:
+
+2012-10-10  Konrad Piascik  <kpiascik@rim.com>
+
+        [BlackBerry] Install inspector files into staging directory.
+        https://bugs.webkit.org/show_bug.cgi?id=98930
+
+        Reviewed by Rob Buis.
+
+        Internally reviewed by Ming Xie.
+        Install the web inspector resources into the staging directory to make it easier to flash to device.
+
+        * PlatformBlackBerry.cmake:
+
+2012-10-09  Simon Hausmann  <simon.hausmann@digia.com>
+
+        [Qt] Fix build with QtMultimedia
+
+        Reviewed by Tor Arne Vestbø.
+
+        * WebKit1.pri: WK1 needs QtMultimediaWidgets for QVideoWidget and friends.
+
+2012-10-08  Simon Hausmann  <simon.hausmann@digia.com>
+
+        [Qt] Make RenderThemeQStyle/ScrollbarThemeQStyle compile without QStyle/QtWidgets
+        https://bugs.webkit.org/show_bug.cgi?id=98268
+
+        Reviewed by Tor Arne Vestbø.
+
+        * WebKit1.pro: Add new files to the build.
+
+2012-10-04  Rob Buis  <rbuis@rim.com>
+
+        [BlackBerry] Sync up CMake files
+        https://bugs.webkit.org/show_bug.cgi?id=98442
+
+        Reviewed by Gyuyoung Kim.
+
+        Amongst others use InspectorOverlayBlackBerry.
+
+        * PlatformBlackBerry.cmake:
+
+2012-10-05  Simon Hausmann  <simon.hausmann@digia.com>
+
+        Unreviewed, rolling out r130495.
+        http://trac.webkit.org/changeset/130495
+        https://bugs.webkit.org/show_bug.cgi?id=98268
+
+        Made WK2 tests crash....
+
+        * WebKit1.pro:
+
+2012-10-05  Simon Hausmann  <simon.hausmann@digia.com>
+
+        [Qt] Make RenderThemeQStyle/ScrollbarThemeQStyle compile without QStyle/QtWidgets
+        https://bugs.webkit.org/show_bug.cgi?id=98268
+
+        Reviewed by Tor Arne Vestbø.
+
+        * WebKit1.pro: Add new files to the build.
+
+2012-10-04  Konrad Piascik  <kpiascik@rim.com>
+
+        [BlackBerry] Update how we compile inspector front-end javascript.
+        https://bugs.webkit.org/show_bug.cgi?id=98413
+
+        Reviewed by Rob Buis.
+
+        No longer cat all JavaScript together, instead use the lazy init and
+        only append our custom changes script to the end of inspectorBB.html.
+
+        * PlatformBlackBerry.cmake:
+
+2012-10-03  Ryuan Choi  <ryuan.choi@samsung.com>
+
+        [EFL] Default.edj should be generated although ENABLE_WEBKIT disabled.
+        https://bugs.webkit.org/show_bug.cgi?id=97753
+
+        Reviewed by Laszlo Gombos.
+
+        default.edj is used in both webkit/efl and webkit2/efl.
+        However, it has been generated only when ENABLE_WEBKIT is enabled.
+
+        This patch separates the script which generates default.edj
+        from source/webkit/platformefl.cmake.
+
+        * PlatformEfl.cmake: Extracted codes which is related to default.edj.
+
+2012-10-03  Otto Derek Cheung  <otcheung@rim.com>
+
+        [BlackBerry] Implementing the NetworkInfo API for BB port
+        https://bugs.webkit.org/show_bug.cgi?id=98273
+
+        Reviewed by Rob Buis.
+
+        Adding new classes to support NetworkInfo API in the
+        BlackBerry Port.
+
+        * PlatformBlackBerry.cmake:
+
+2012-10-02  Krzysztof Czech  <k.czech@samsung.com>
+
+        [EFL] Add file EWKTestEnvironment.cpp to build system.
+        https://bugs.webkit.org/show_bug.cgi?id=94925
+
+        Reviewed by Gyuyoung Kim.
+
+        Change is related to modifications in wk1 unit tests.
+
+        * PlatformEfl.cmake:
+
+2012-09-27  Anders Carlsson  <andersca@apple.com>
+
+        Get rid of more unused WK1 plug-in code
+        https://bugs.webkit.org/show_bug.cgi?id=97835
+
+        Reviewed by Mark Rowe.
+
+        Remove WebNetscapeDeprecatedFunctions.c and WebNetscapeDeprecatedFunctions.h from the Xcode project.
+
+        * WebKit.xcodeproj/project.pbxproj:
+
+2012-09-27  Christophe Dumez  <christophe.dumez@intel.com>
+
+        [EFL][CMAKE] Default theme files are outdated in PlatformEfl.cmake
+        https://bugs.webkit.org/show_bug.cgi?id=97769
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        Update Default theme files in PlatformEfl.cmake so that
+        changes to those files are properly picked up by CMake
+        when building incrementally.
+
+        * PlatformEfl.cmake:
+
+2012-09-24  Arvid Nilsson  <anilsson@rim.com>
+
+        [BlackBerry] Add cookie database API
+        https://bugs.webkit.org/show_bug.cgi?id=97102
+
+        Reviewed by Antonio Gomes.
+
+        Add cookie database file to build system.
+
+        Reviewed internally by Otto D. Cheung.
+
+        * PlatformBlackBerry.cmake:
+
+2012-09-21  Arvid Nilsson  <anilsson@rim.com>
+
+        [BlackBerry] Remove obsolete compositing surface code
+        https://bugs.webkit.org/show_bug.cgi?id=97314
+
+        Reviewed by Antonio Gomes.
+
+        Remove compositing surface code from build system.
+
+        PR 208038.
+
+        * PlatformBlackBerry.cmake:
+
+2012-09-14  Tor Arne Vestbø  <tor.arne.vestbo@nokia.com>
+
+        [Qt] Make force_static_libs_as_shared work on Mac OS
+
+        We had to move a few LIBS += around that were in the wrong place,
+        and not caught when everything was just linked into the final
+        QtWebKit library.
+
+        Reviewed by Simon Hausmann.
+
+        * WebKit1.pri: Move multimedia-stuff to WebCore, to share with WK2
+
+2012-09-11  Raphael Kubo da Costa  <rakuco@webkit.org>
+
+        [EFL] Rewrite the EFL-related Find modules
+        https://bugs.webkit.org/show_bug.cgi?id=95237
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        * PlatformEfl.cmake: Stop setting the LINK_FLAGS property and add
+        libraries and include directories for each Enlightenment
+        Foundation Library used by the port.
+
+2012-09-11  Tor Arne Vestbø  <tor.arne.vestbo@nokia.com>
+
+        [Qt] Add a configure step to the Qt build system
+
+        This allows building the Qt port using just 'qmake WebKit.pro'. Using
+        the build-webkit script is still supported, and will add slightly more
+        logic to the build, such as detecting the need for clean or incremental
+        builds.
+
+        Internally, the build system now uses a new variable, WEBKIT_CONFIG, for
+        all things related to configuring the build, such as use/have/enable flags,
+        and these are translated to defines in default_post. Project files should
+        no longer check contains(DEFINES,...) to detect features, but use the new
+        enable?(), use?(), and have?() functions. The no_webkit1 and no_webkit2
+        options have been translated into WEBKIT_CONFIG options as well, and can
+        be checked using build?().
+
+        Reviewed by Simon Hausmann.
+
+        * WebKit1.pri:
+        * WebKit1.pro:
+
+2012-09-06  Crystal Zhang  <haizhang@rim.com>
+
+        [BlackBerry]  Implement a color picker
+        https://bugs.webkit.org/show_bug.cgi?id=96001
+
+        Reviewed by Rob Buis.
+
+        Add color picker files into building system.
+
+        * PlatformBlackBerry.cmake:
+
+2012-09-06  Simon Hausmann  <simon.hausmann@nokia.com>
+
+        [Qt] Fix build with ANGLE on platforms that provide EGL/GLESv2
+        https://bugs.webkit.org/show_bug.cgi?id=95965
+
+        Reviewed by Tor Arne Vestbø.
+
+        Depend on ANGLE if necessary, due to the use WebCore types that pull in ANGLE
+        headers (GraphicsContext3D.h in particular).
+
+        * WebKit1.pro:
+
+2012-09-04  Michał Pakuła vel Rutka  <m.pakula@samsung.com>
+
+        [EFL] Context menu restore.
+        https://bugs.webkit.org/show_bug.cgi?id=74179
+
+        Reviewed by Gyuyoung Kim.
+
+        Adds context menu support for EFL port using non-CROSS_PLATFORM_CONTEXT_MENUS
+        approach, the same as used in WebKit2.
+
+        * PlatformEfl.cmake: Added ContextMenuClientEfl.cpp file to sources list.
+
+2012-08-29  Ryuan Choi  <ryuan.choi@samsung.com>
+
+        [EFL] Move several files to remove webkit1 dependency from WebCore.
+        https://bugs.webkit.org/show_bug.cgi?id=95264
+
+        Reviewed by Gyuyoung Kim.
+
+        * PlatformEfl.cmake: Added files which is moved.
+
+2012-08-28  Thiago Marcos P. Santos  <thiago.santos@intel.com>
+
+        [EFL] Rename knob images to thumb on the default theme
+        https://bugs.webkit.org/show_bug.cgi?id=95186
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        Updated buildsystem after renaming theme images.
+
+        * PlatformEfl.cmake:
+
+2012-08-27  Mikhail Pozdnyakov  <mikhail.pozdnyakov@intel.com>
+
+        Rename RegisterProtocolHandler API to NavigatorContentUtils
+        https://bugs.webkit.org/show_bug.cgi?id=94920
+
+        Reviewed by Adam Barth.
+
+        Modified PlatformEfl.cmake so that it includes the renamed files.
+
+        * PlatformEfl.cmake:
+
+2012-08-20  Dominik Röttsches  <dominik.rottsches@intel.com>
+
+        [EFL] Get rid of pango backend support once harfbuzz-ng is working
+        https://bugs.webkit.org/show_bug.cgi?id=92102
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        Removing pango-specific includes and libraries.
+
+        * PlatformEfl.cmake: Pango sections removed.
+
+2012-08-17  Rob Buis  <rbuis@rim.com>
+
+        [BlackBerry] Remove some shared libraries from linking
+        https://bugs.webkit.org/show_bug.cgi?id=94253
+
+        Reviewed by Yong Li.
+
+        Remove some shared libraries.
+
+        * PlatformBlackBerry.cmake:
+
+2012-08-15  Ryosuke Niwa  <rniwa@webkit.org>
+
+        Update manual tests and comments to refer to TestRunner instead of LayoutTestController
+        https://bugs.webkit.org/show_bug.cgi?id=94168
+
+        Reviewed by Kent Tamura.
+
+        * PlatformBlackBerry.cmake:
+
+2012-08-14  Christophe Dumez  <christophe.dumez@intel.com>
+
+        [EFL] undefined reference to 'g_type_init' with gold linker
+        https://bugs.webkit.org/show_bug.cgi?id=93935
+
+        Unreviewed build fix. Link against glib-gobject to
+        fix linking error with gold linker.
+
+        * PlatformEfl.cmake:
+
+2012-08-11  Raphael Kubo da Costa  <rakuco@webkit.org>
+
+        [CMake] Rewrite FindLibSoup2.cmake.
+        https://bugs.webkit.org/show_bug.cgi?id=93191
+
+        Reviewed by Rob Buis.
+
+        * PlatformEfl.cmake: Use LIBSOUP_FOO instead of LIBSOUP24_FOO.
+
+2012-08-13  Raphael Kubo da Costa  <rakuco@webkit.org>
+
+        [CMake] Remove glib-related Find modules and write single new one instead.
+        https://bugs.webkit.org/show_bug.cgi?id=93786
+
+        Reviewed by Rob Buis.
+
+        * PlatformEfl.cmake: Use GLIB_* instead of Glib_*.
+
+2012-08-12  Loïc Yhuel  <loic.yhuel@softathome.com>
+
+        [Qt] Make it possible to build without QtTest/QtPrintSupport
+        https://bugs.webkit.org/show_bug.cgi?id=93492
+
+        Reviewed by Tor Arne Vestbø.
+
+        * WebKit1.pri: Optional printsupport
+
+2012-08-10  Joshua Netterfield  <jnetterfield@rim.com>
+
+        [WebGL] Add support for EXT_robustness
+        https://bugs.webkit.org/show_bug.cgi?id=93379
+
+        Reviewed by George Staikos.
+
+        RIM PR# 147510
+        Internally reviewed by Arvid Nilsson.
+
+        * CMakeLists.txt: Build system adaptation.
+
+2012-08-10  Benjamin C Meyer  <bmeyer@rim.com>
+
+        Introduce JavaScriptVariant object.
+        https://bugs.webkit.org/show_bug.cgi?id=93644
+
+        The JavaScriptVariant can be used for functions that return results from
+        JavaScript such as executeJavaScript or functions that take arguments
+        to pass a variable to JavaScript and they want to make sure the type
+        is correct.
+
+        Convert executeJavaScriptFunction() to use this data type as the
+        example, other functions will be converted in the future.
+
+        PR 14929
+
+        Internally reviewed by Joe Mason
+        Reviewed by Adam Treat
+
+        * PlatformBlackBerry.cmake:
+
+2012-08-10  Gyuyoung Kim  <gyuyoung.kim@samsung.com>
+
+        [BlackBerry] Fix wrong include path for notifications.
+        https://bugs.webkit.org/show_bug.cgi?id=93714
+
+        Reviewed by Rob Buis.
+
+        * PlatformBlackBerry.cmake: Change path from notifications to Modules/notifications.
+
+2012-08-08  Antonio Gomes  <agomes@rim.com>
+
+        [BlackBerry] Tie up the scrolling machinery to the graphics tree when applicable for in-region scroll
+        https://bugs.webkit.org/show_bug.cgi?id=93482
+
+        Reviewed by Rob Buis.
+
+        * PlatformBlackBerry.cmake: Build system adaptation.
+
+2012-08-07  Ryuan Choi  <ryuan.choi@samsung.com>
+
+        [EFL] Remove PlatformTouchEventEfl and PlatformTouchPointEfl
+        https://bugs.webkit.org/show_bug.cgi?id=93270
+
+        Reviewed by Eric Seidel.
+
+        * PlatformEfl.cmake: Added ewk_touch_event.cpp
+
+2012-08-07  Konrad Piascik  <kpiascik@rim.com>
+
+        [BlackBerry] InspectorOverlay class duplicated in WebCore
+        https://bugs.webkit.org/show_bug.cgi?id=93124
+
+        Reviewed by Rob Buis.
+
+        Updated InspectorOverlay build path.
+
+        * PlatformBlackBerry.cmake:
+
+2012-08-07  No'am Rosenthal  <noam.rosenthal@nokia.com>
+
+        [Qt] Make it possible to build without QtQuick
+
+        Reviewed by Simon Hausmann.
+
+        * WebKit1.pri:
+
+2012-07-19  Simon Hausmann  <simon.hausmann@nokia.com>
+
+        [Qt] Remove Qt 4 specific code paths
+        https://bugs.webkit.org/show_bug.cgi?id=88161
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        * WebKit.pri:
+        * WebKit1.pri:
+        * WebKit1.pro:
+
+2012-08-07  Mikhail Pozdnyakov  <mikhail.pozdnyakov@intel.com>
+
+        CUSTOM_SCHEME_HANDLER flag should depend on REGISTER_PROTOCOL_HANDLER
+        https://bugs.webkit.org/show_bug.cgi?id=93081
+
+        Reviewed by Adam Barth.
+
+        Modified PlatformEfl.cmake so that CUSTOM_SCHEME_HANDLER flag cannot act without REGISTER_PROTOCOL_HANDLER being set.
+
+        * PlatformEfl.cmake:
+
+2012-08-01  Antonio Gomes  <agomes@rim.com>
+
+        [BlackBerry] Implement InRegionScroller class as a in-region scroll controller
+        https://bugs.webkit.org/show_bug.cgi?id=92889
+        PR #186587
+
+        Reviewed by Yong Li.
+
+        Internally reviewed by Arvid Nilsson.
+
+        * PlatformBlackBerry.cmake: Added InRegionScroller.cpp|h to the build system.
+
+2012-07-30  Simon Hausmann  <simon.hausmann@nokia.com>
+
+        Unreviewed Qt/Mac build fix: Use libWebKitSystemInterfaceMountainLion.a
+        on Mountain Lion.
+
+        * WebKit1.pri:
+
+2012-07-27  Thiago Marcos P. Santos  <thiago.santos@intel.com>
+
+        [EFL] WebKit API unit tests needs a timeout
+        https://bugs.webkit.org/show_bug.cgi?id=92496
+
+        Reviewed by Antonio Gomes.
+
+        Added the same timeout value that we have for WebKit2.
+
+        * PlatformEfl.cmake:
+
+2012-07-27  Dominik Röttsches  <dominik.rottsches@intel.com>
+
+        [Cairo] Add complex font drawing using HarfbuzzNG
+        https://bugs.webkit.org/show_bug.cgi?id=91864
+
+        Reviewed by Simon Hausmann and Martin Robinson.
+
+        Adding includes for harfbuzz folders.
+
+        * CMakeLists.txt:
+
+2012-07-26  Christophe Dumez  <christophe.dumez@intel.com>
+
+        [EFL][WK2] Implement Network Information provider
+        https://bugs.webkit.org/show_bug.cgi?id=92343
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        WebKit EFL not longer needs to link against EEZE
+        library since the Network Information provider
+        was moved to WebCore.
+
+        * CMakeLists.txt:
+        * PlatformEfl.cmake:
+
+2012-07-26  Zoltan Nyul  <zoltan.nyul@intel.com>
+
+        [EFL] EFL port should use XDG paths
+        https://bugs.webkit.org/show_bug.cgi?id=91719
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        Add efreet library to get the xdg paths.
+
+        * PlatformEfl.cmake:
+
+2012-07-25  Kihong Kwon  <kihong.kwon@samsung.com>
+
+        [EFL] Add File Chooser API
+        https://bugs.webkit.org/show_bug.cgi?id=91957
+
+        Reviewed by Hajime Morita.
+
+        Add ewk_file_chooser source and header.
+
+        * PlatformEfl.cmake:
+
+2012-07-22  Kent Tamura  <tkent@chromium.org>
+
+        Rename ENABLE_METER_TAG and ENABLE_PROGRESS_TAG to ENABLE_METER_ELEMENT and ENABLE_PROGRESS_ELEMENT respectively
+        https://bugs.webkit.org/show_bug.cgi?id=91941
+
+        Reviewed by Kentaro Hara.
+
+        A flag name for an elmement should be ENABLE_*_ELEMENT.
+
+        * PlatformEfl.cmake:
+
+2012-07-20  Christophe Dumez  <christophe.dumez@intel.com>
+
+        [EFL] Proxy configuration should honor the no_proxy environment variable
+        https://bugs.webkit.org/show_bug.cgi?id=91747
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        Add WebCore/platform/network/soup to INCLUDE paths.
+
+        * PlatformEfl.cmake:
+
+2012-07-18  Yong Li  <yoli@rim.com>
+
+        [BlackBerry] Move about: URL handling out of WebCore
+        https://bugs.webkit.org/show_bug.cgi?id=91541
+
+        Reviewed by Rob Buis.
+
+        AboutData.cpp is moved from WebCoreSupport to WebKitSupport.
+
+        * PlatformBlackBerry.cmake:
+
+2012-07-18  Thiago Marcos P. Santos  <thiago.santos@intel.com>
+
+        [CMake] Make gtest a shared library
+        https://bugs.webkit.org/show_bug.cgi?id=90973
+
+        Reviewed by Daniel Bates.
+
+        No need to link with gtest dependencies now since it is a shared library.
+
+        * PlatformEfl.cmake:
+
+2012-07-17  Ryuan Choi  <ryuan.choi@samsung.com>
+
+        [EFL] Move codes related to theme setting from Widget to RenderTheme
+        https://bugs.webkit.org/show_bug.cgi?id=89842
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        * CMakeLists.txt: Added html/shadow to WebKit_INCLUDE_DIRECTORIES.
+
+2012-07-16  Gyuyoung Kim  <gyuyoung.kim@samsung.com>
+
+        Add RegisterProtocolHandlerClient to the Modules/protocolhandler
+        https://bugs.webkit.org/show_bug.cgi?id=90940
+
+        Reviewed by Hajime Morita.
+
+        As a step to let protocol handler be moved to the modules, RegisterProtocolHandlerClient needs
+        to be added to the Modules/protocolhandler. Because ChromeClient has some virtual functions for
+        protocol handlers, virtual functions should be moved to RegisterProtocolHandlerClient.
+
+        * PlatformEfl.cmake: Add RegisterProtocolHandlerEfl files and include path.
+
+2012-07-16  Joshua Netterfield  <jnetterfield@rim.com>
+
+        [BlackBerry] Upstream WebGL Code
+        https://bugs.webkit.org/show_bug.cgi?id=91143
+
+        Reviewed by Rob Buis.
+
+        This patch includes BlackBerry-specific fixes for anti-aliasing, logging, and shader compilation.
+
+        * PlatformBlackBerry.cmake: Define WTF_USE_OPENGL_ES_2 on WebGL-enabled builds.
+
+2012-07-16  Frederik Gladhorn  <frederik.gladhorn@nokia.com>
+
+        Add accessible for QWebView.
+        https://bugs.webkit.org/show_bug.cgi?id=91073
+
+        Reviewed by Simon Hausmann.
+
+        Add classes to enable accessibility on the widget level.
+
+        * WebKit.pri:
+        * WebKit1.pro:
+
+2012-07-15  Gyuyoung Kim  <gyuyoung.kim@samsung.com>
+
+        [EFL] Move files guarded by #ifdef to existing file list.
+        https://bugs.webkit.org/show_bug.cgi?id=91336
+
+        Reviewed by Ryosuke Niwa.
+
+        Some EFL files are already guared by #ifdef. So, cmake files doesn't need to guard
+        them again. In addition, some files are missing #ifdef guard its header files. 
+
+        * PlatformEfl.cmake:
+
+2012-07-13  Thiago Marcos P. Santos  <thiago.santos@intel.com>
+
+        [CMake] Proper handling of ENABLE_API_TESTS build option
+        https://bugs.webkit.org/show_bug.cgi?id=91221
+
+        Reviewed by Rob Buis.
+
+        Build unit tests only if ENABLE_API_TESTS is set.
+
+        * PlatformEfl.cmake:
+
+2012-07-12  Simon Hausmann  <simon.hausmann@nokia.com>
+
+        Typo in path in generate-webkitversion.pl
+        https://bugs.webkit.org/show_bug.cgi?id=90883
+
+        Reviewed by Mark Rowe.
+
+        Correct default path to version config file. In practice it wasn't a problem because only the Qt
+        build system seems to use the script right now and passes the path to the version file as a
+        command line parameter.
+
+        * scripts/generate-webkitversion.pl:
+
+2012-07-11  Crystal Zhang  <haizhang@rim.com>
+
+        [BlackBerry] Implement Date/Time picker
+        https://bugs.webkit.org/show_bug.cgi?id=90911
+
+        Reviewed by Rob Buis.
+
+        Add files into make file.
+
+        * PlatformBlackBerry.cmake:
+
+2012-07-09  Christophe Dumez  <christophe.dumez@intel.com>
+
+        [EFL] Battery status code needs refactoring to be reused in WebKit2
+        https://bugs.webkit.org/show_bug.cgi?id=90760
+
+        Reviewed by Hajime Morita.
+
+        Add BatteryClientEfl to PlatformEfl.cmake.
+
+        * PlatformEfl.cmake:
+
+2012-07-08  Kihong Kwon  <kihong.kwon@samsung.com>
+
+        [EFL] Change notifications directory path of WebKit_INCLUDE_DIRECTORIES in the PlatformEfl.cmake
+        https://bugs.webkit.org/show_bug.cgi?id=90650
+
+        Reviewed by Laszlo Gombos.
+
+        Change directory path for including notifications of WebCore
+        from WebCore/notifications to WebCore/Modules/notifications
+
+        * PlatformEfl.cmake:
+
+2012-07-07  Thiago Marcos P. Santos  <thiago.santos@intel.com>
+
+        [EFL][CMake] Remove non-existent include directory
+        https://bugs.webkit.org/show_bug.cgi?id=90605
+
+        Reviewed by Kentaro Hara.
+
+        * PlatformEfl.cmake:
+
+2012-07-06  Thiago Marcos P. Santos  <thiago.santos@intel.com>
+
+        [EFL][CMake] Move gtest sources to an upper level
+        https://bugs.webkit.org/show_bug.cgi?id=90602
+
+        Reviewed by Chang Shu.
+
+        Removed gtest since it is now built as a separated component.
+        This will allow us to share it with WebKit 2 API tests.
+
+        * PlatformEfl.cmake:
+
+2012-07-06  Seokju Kwon  <seokju.kwon@samsung.com>
+
+        [EFL] Add Web Inspector to WebKit-EFL
+        https://bugs.webkit.org/show_bug.cgi?id=83865
+
+        Reviewed by Pavel Feldman.
+
+        EFL port implementation for Web Inspector.
+        Prepare Web Inspector resources.
+
+        * PlatformEfl.cmake:
+
+2012-07-05  Kihong Kwon  <kihong.kwon@samsung.com>
+
+        [EFL] Change class name from NotificationClientEfl to NotificationPresenterClientEfl.
+        https://bugs.webkit.org/show_bug.cgi?id=90542
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        NotificationClientEfl.cpp is changed to NotificationPresenterClientEfl.cpp
+        to be in line with other ports(qt, chromium, gtk).
+
+        * PlatformEfl.cmake:
+
+2012-07-04  Tor Arne Vestbø  <tor.arne.vestbo@nokia.com>
+
+        [Qt] Remove a few un-needed load(features) after r121777
+
+        The features are computed by configure.pro and cached in .qmake.cache.
+
+        Reviewed by Jocelyn Turcotte.
+
+        * WebKit1.pro:
+
+2012-07-04  Tor Arne Vestbø  <tor.arne.vestbo@nokia.com>
+
+        [Qt] Fix broken OR-operator in project file
+
+        Qmake expects |, not ||. The result was that the block was entered, even
+        if none of the two defines were set to 1.
+
+        Reviewed by Jocelyn Turcotte.
+
+        * WebKit1.pri:
+
+2012-07-03  Christophe Dumez  <christophe.dumez@intel.com>
+
+        [EFL] Move BatteryClientEfl from WebKit to WebCore
+        https://bugs.webkit.org/show_bug.cgi?id=90063
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        Move BatteryClientEfl class from WebKit to WebCore
+        so that it can be reused in WebKit2.
+
+        * PlatformEfl.cmake:
+
+2012-07-02  Xiaobo Wang  <xbwang@torchmobile.com.cn>
+
+        [BlackBerry] Use PUBLIC_BUILD to enable/disable DRT
+        https://bugs.webkit.org/show_bug.cgi?id=90271
+
+        Reviewed by George Staikos.
+
+        RIM PR #154707
+
+        Currently DRT code will be compiled only if ENABLE_DRT is set, and it's not
+        defined by default.
+        We should enable DRT by default unless PUBLIC_BUILD is set. In this way we don't
+        need to rebuild webkit before running DRT.
+
+        * PlatformBlackBerry.cmake:
+
+2012-07-02  Thiago Marcos P. Santos  <thiago.santos@intel.com>
+
+        [EFL][CMake] Integrate API unit tests with CTest
+        https://bugs.webkit.org/show_bug.cgi?id=87251
+
+        Reviewed by Daniel Bates.
+
+        Add every test to the test runner build target.
+
+        * PlatformEfl.cmake:
+
+2012-07-02  Gyuyoung Kim  <gyuyoung.kim@samsung.com>
+
+        [EFL] Rename NotificationPresenterEfl with NotificationClientEfl
+        https://bugs.webkit.org/show_bug.cgi?id=90370
+
+        Reviewed by Csaba Osztrogonác.
+
+        Bug 80488 renamed NotificationPresenter with NotificationClient. So, EFL port needs to adjust
+        it as well.
+
+        * PlatformEfl.cmake:
+
+2012-06-29  Krzysztof Czech  <k.czech@samsung.com>
+
+        [EFL] Add support for Unit Tests, based on the gtest library.
+        https://bugs.webkit.org/show_bug.cgi?id=68509
+
+        Reviewed by Chang Shu.
+
+        Add configuration for building gtest library, testing framework and unit tests.
+
+        * PlatformEfl.cmake:
+
+2012-06-27  Sheriff Bot  <webkit.review.bot@gmail.com>
+
+        Unreviewed, rolling out r121398.
+        http://trac.webkit.org/changeset/121398
+        https://bugs.webkit.org/show_bug.cgi?id=90136
+
+        broke efl build (Requested by ryuan on #webkit).
+
+        * PlatformEfl.cmake:
+
+2012-06-27  Krzysztof Czech  <k.czech@samsung.com>
+
+        [EFL] Add support for Unit Tests, based on the gtest library.
+        https://bugs.webkit.org/show_bug.cgi?id=68509
+
+        Reviewed by Chang Shu.
+
+        Add configuration for building gtest library, testing framework and unit tests.
+
+        * PlatformEfl.cmake:
+
+2012-06-26  Simon Hausmann  <simon.hausmann@nokia.com>
+
+        [Qt][Win] Symbols are not exported in QtWebKit5.dll
+        https://bugs.webkit.org/show_bug.cgi?id=88873
+
+        Reviewed by Tor Arne Vestbø.
+
+        * api.pri: Remove MAKEDLL setting done now in win32/default_post.prf.
+
+2012-06-25  Simon Hausmann  <simon.hausmann@nokia.com>
+
+        Unreviewed build fix: Don't do QT += widgets with Qt 4
+
+        * WebKit1.pro: This is already done in WebKit1.pri.
+
+2012-06-25  Simon Hausmann  <simon.hausmann@nokia.com>
+
+        [Qt] Make it possible to build WebKit without QtWidgets
+        https://bugs.webkit.org/show_bug.cgi?id=78109
+
+        Reviewed by Tor Arne Vestbø.
+
+        Moved WebKit1 sources into a separate static library. Only WK1
+        depends on QtWidgets.
+
+        * WebKit1.pri: Added.
+        * WebKit1.pro: Added.
+
+2012-06-25  Gyuyoung Kim  <gyuyoung.kim@samsung.com>
+
+        [EFL] Implement Network Information API
+        https://bugs.webkit.org/show_bug.cgi?id=87067
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        * PlatformEfl.cmake: Add dependency of eeze library.
+
+2012-06-22  Joshua Netterfield  <jnetterfield@rim.com>
+
+        [BlackBerry] Sanitize GLSL code using ANGLE.
+
+        BlackBerry port does not sanitize GLSL code with ANGLE
+        https://bugs.webkit.org/show_bug.cgi?id=89583
+
+        Reviewed by Rob Buis.
+
+        * PlatformBlackBerry.cmake: Add ANGLE sources to BlackBerry builds.
+
+2012-06-19  Csaba Osztrogonác  <ossy@webkit.org>
+
+        [CMake] Unreviewed speculative buildfix after r120786.
+
+        * CMakeLists.txt:
+
+2012-06-13  Robin Cao  <robin.cao@torchmobile.com.cn>
+
+        [BlackBerry] Enable MEDIA_STREAM by default
+        https://bugs.webkit.org/show_bug.cgi?id=88849
+
+        Reviewed by Antonio Gomes.
+
+        * PlatformBlackBerry.cmake:
+
+2012-06-12  Christophe Dumez  <christophe.dumez@intel.com>
+
+        [EFL] Enable SHADOW_DOM flag
+        https://bugs.webkit.org/show_bug.cgi?id=87732
+
+        Reviewed by Kentaro Hara.
+
+        Add WebCore/bindings/generic to include directories so
+        that we can include RuntimeEnabledFeatures.h.
+
+        * CMakeLists.txt:
+
+2012-06-04  Tor Arne Vestbø  <tor.arne.vestbo@nokia.com>
+
+        [Qt] Don't use WebKit HAVE() macro in public Qt headers
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        * WebKit.pri:
+
+2012-06-04  Tomasz Morawski  <t.morawski@samsung.com>
+
+        [EFL] Refactor ewk_view_context_paint code.
+        https://bugs.webkit.org/show_bug.cgi?id=85588
+
+        Reviewed by Hajime Morita.
+
+        Added new ewk_paint_context.cpp file to source list.
+
+        * PlatformEfl.cmake:
+
+2012-06-01  Christophe Dumez  <christophe.dumez@intel.com>
+
+        [EFL] EFL's LayoutTestController needs to implement deliverWebIntent
+        https://bugs.webkit.org/show_bug.cgi?id=86865
+
+        Reviewed by Adam Barth.
+
+        Add "${WEBCORE_DIR}/dom/default" to include directories in
+        CMakeLists.txt.
+
+        * CMakeLists.txt:
+
+2012-06-01  Sudarsana Nagineni  <sudarsana.nagineni@linux.intel.com>
+
+        [EFL] Implement PlatformStrategies
+        https://bugs.webkit.org/show_bug.cgi?id=86946
+
+        Reviewed by Carlos Garcia Campos.
+
+        * PlatformEfl.cmake: Add PlatformStrategiesEfl file to the build
+        system.
+
+2012-05-31  Gyuyoung Kim  <gyuyoung.kim@samsung.com>
+
+        [CMAKE][EFL] Remove unneeded include path
+        https://bugs.webkit.org/show_bug.cgi?id=87927 
+
+        Reviewed by Kenneth Rohde Christiansen.
+
+        Though *wtf* directory was moved to Source/WTF, PlatformEfl.cmake is still including the previous
+        path. In addition, files on EFL port are using <wtf/gobject/XXX> directly in #include line.
+        So, EFL port doesn't need to include ${JAVASCRIPTCORE_DIR}/wtf/gobject path anymore.
+
+        * PlatformEfl.cmake: Remove '${JAVASCRIPTCORE_DIR}/wtf/gobject' path from include path list.
+
+2012-05-30  Konrad Piascik  <kpiascik@rim.com>
+
+        [BlackBerry] Add an Accelerated Compositing layer for Web Inspector DOM highlight.
+        https://bugs.webkit.org/show_bug.cgi?id=81001
+
+        Reviewed by Antonio Gomes
+        
+        Added new InspectorOverlay class
+
+        * PlatformBlackBerry.cmake:
+
+2012-05-29  Arvid Nilsson  <anilsson@rim.com>
+
+        [BlackBerry] WebKit-side implementation of SelectionOverlay
+        https://bugs.webkit.org/show_bug.cgi?id=87605
+
+        Reviewed by Rob Buis.
+
+        Add SelectionOverlay to the build system.
+
+        PR #160263
+
+        * PlatformBlackBerry.cmake:
+
+2012-05-29  Arvid Nilsson  <anilsson@rim.com>
+
+        [BlackBerry] WebOverlay API
+        https://bugs.webkit.org/show_bug.cgi?id=87603
+
+        Reviewed by Rob Buis.
+
+        Add WebOverlay related files to the build system.
+
+        PR #156812
+
+        * PlatformBlackBerry.cmake:
+
+2012-05-28  Arvid Nilsson  <anilsson@rim.com>
+
+        [BlackBerry] Add a default tap highlight
+        https://bugs.webkit.org/show_bug.cgi?id=87569
+
+        Reviewed by Rob Buis.
+
+        Add DefaultTapHighlight to the build system
+
+        Reviewed internally by Mike Lattanzio and Mike Fenton.
+
+        PR #154329
+
+        * PlatformBlackBerry.cmake:
+
+2012-05-24  Crystal Zhang  <haizhang@rim.com>
+
+        [BlackBerry] Implement select popup and remove old hook to air popup
+        https://bugs.webkit.org/show_bug.cgi?id=87419
+
+        Reviewed by Rob Buis.
+
+        Add new files to make file.
+
+        * PlatformBlackBerry.cmake:
+
+2012-05-24  Raphael Kubo da Costa  <rakuco@webkit.org>
+
+        [EFL] Unreviewed, unbreak `make install' after r117046.
+
+        * PlatformEfl.cmake: Remove ewk_auth_soup.h from the list of
+        installed headers, since it has been made private and renamed.
+
+2012-05-22  Dongwoo Im  <dw.im@samsung.com>
+
+        [EFL] Implements the registerProtocolHandler method and option.
+        https://bugs.webkit.org/show_bug.cgi?id=73638
+
+        Reviewed by Andreas Kling.
+
+        The registerProtocolHandler() method allows Web sites to register themselves
+        as possible handlers for particular schemes.
+
+        http://dev.w3.org/html5/spec/Overview.html#dom-navigator-registerprotocolhandler
+
+        * PlatformEfl.cmake: Adds the new file into the source list.
+
+2012-05-21  Christophe Dumez  <christophe.dumez@intel.com>
+
+        [EFL] Minor style fixes in web intents code are needed
+        https://bugs.webkit.org/show_bug.cgi?id=86986
+
+        Reviewed by Adam Barth.
+
+        Fix minor ordering issues in CMake files.
+
+        * CMakeLists.txt:
+        * PlatformEfl.cmake:
+
+2012-05-18  Christophe Dumez  <christophe.dumez@intel.com>
+
+        [EFL] Add simple implementation of Web Intents
+        https://bugs.webkit.org/show_bug.cgi?id=86354
+
+        Reviewed by Eric Seidel.
+
+        Add new ewk_intent.* and ewk_intent_request.* files to CMake.
+
+        * CMakeLists.txt:
+        * PlatformEfl.cmake:
+
+2012-05-17  Thiago Marcos P. Santos  <thiago.santos@intel.com>
+
+        [EFL] Add API for Web Database handling
+        https://bugs.webkit.org/show_bug.cgi?id=85178
+
+        Reviewed by Antonio Gomes.
+
+        Added the new Web Database API to the buildsystem.
+
+        * PlatformEfl.cmake:
+
+2012-05-17  Thiago Marcos P. Santos  <thiago.santos@intel.com>
+
+        [EFL] Fix link error caused by not directly linking with edbus
+        https://bugs.webkit.org/show_bug.cgi?id=86747
+
+        Unreviewed build fix.
+
+        * PlatformEfl.cmake:
+
+2012-05-16  Kihong Kwon  <kihong.kwon@samsung.com>
+
+        [EFL] Support for Battery Status API on the WebKit-Efl
+        https://bugs.webkit.org/show_bug.cgi?id=83254
+
+        Reviewed by Chang Shu.
+
+        Add e_ukit library and include directory to get battery status of device.
+
+        * PlatformEfl.cmake:
+
+2012-05-15  Tomasz Morawski  <t.morawski@samsung.com>
+
+        [EFL] Split ewk_private.h file to multiple private files.
+        https://bugs.webkit.org/show_bug.cgi?id=84572
+
+        Reviewed by Antonio Gomes.
+
+        * PlatformEfl.cmake: Removed ewk_logging.h file from EWebKit_HEADERS.
+
+2012-05-10  Sam D  <dsam2912@gmail.com>
+
+        Web Inspector: rename InspectorBackendStub.js to InspectorBackendCommands.js
+        https://bugs.webkit.org/show_bug.cgi?id=72306
+
+        Changed name for InspectorBackendStub.js to
+        InspectorBackendCommands.js
+
+        Reviewed by Yury Semikhatsky.
+
+        * PlatformBlackBerry.cmake:
+
+2012-05-08  Crystal Zhang  <haizhang@rim.com>
+
+        [BlackBerry] Implement a popup client for HTML controls
+        https://bugs.webkit.org/show_bug.cgi?id=85670
+
+        Reviewed by Rob Buis.
+
+        Add popup client file to build system.
+        
+        * PlatformBlackBerry.cmake:
+
+2012-05-08  Raphael Kubo da Costa  <rakuco@webkit.org>
+
+        [CMake] Rewrite FindGStreamer.cmake.
+        https://bugs.webkit.org/show_bug.cgi?id=85857
+
+        Reviewed by Daniel Bates.
+
+        We are currently kind of duplicating the same
+        FindGStreamer-Foo.cmake file whenever a new GStreamer plugin needs
+        to be found. Besides this approach not scaling very well, it
+        relies on pkg-config for version checking, uses the LibFindMacros
+        package that we should deprecate and all the find files could be
+        merged into one, with users using the COMPONENTS feature of the
+        FIND_PACKAGE() call to find the desired plugins.
+
+        FindGStreamer.cmake has then been rewritten to take all that into
+        account:
+        - The LibFindMacros.cmake package is not used anymore.
+        - Version check is performed in the CMake file itself by parsing
+        the gstversion.h header.
+        - All GStreamer plugins are searched and the COMPONENTS keyword
+        used in the FIND_PACKAGE() call is used to check which plugins are
+        required.
+        - The plugins-base and base GStreamer plugins are not searched, as
+        they were not used anywhere in the build system.
+
+        * PlatformEfl.cmake: Update GStreamer-related variable names.
+
+2012-05-08  Jonathan Dong  <jonathan.dong@torchmobile.com.cn>
+
+        [BlackBerry] AutofillManager implementation upstream
+        https://bugs.webkit.org/show_bug.cgi?id=85576
+
+        Reviewed by Rob Buis.
+
+        Added WebKit/blackberry/WebCoreSupport/AutofillManager.cpp
+        into building system of BlackBerry porting.
+
+        * PlatformBlackBerry.cmake:
+
+2012-05-03  Jer Noble  <jer.noble@apple.com>
+
+        Move WebKitFullScreenListener into its own file.
+        https://bugs.webkit.org/show_bug.cgi?id=85640
+
+        Reviewed by Maciej Stachowiak .
+
+        Pull WebKitFullScreenListener into its own file.
+
+        * WebKit.xcodeproj/project.pbxproj:
+
+2012-05-03  Raphael Kubo da Costa  <rakuco@webkit.org>
+
+        [CMake] Rewrite FindCairo.cmake.
+        https://bugs.webkit.org/show_bug.cgi?id=84895
+
+        Reviewed by Daniel Bates.
+
+        The old approach relied on pkg-config for finding Cairo (which
+        introduced a dependency on pkg-config that could be avoided), used
+        the LibFindMacros code that we should probably remove in the
+        future and did not use the FindPackageHandleStandardArguments
+        module.
+
+        Change all that by rewriting the module.
+        - Use the pkg-config output optionally instead of requiring it
+        like LibFindMacros did.
+        - Remove the implicit dependency on FreeType which often found it
+        the wrong way via pkg-config and without considering
+        CMAKE_PREFIX_PATH.
+        - Retrieve the Cairo version by looking at cairo-version.h instead
+        of relying on pkg-config. It requires some additional code for
+        checking if the desired version has been found, but that will not
+        be needed once we start depending on CMake 2.8.3 or later.
+
+        The only downside is that FPHSA sets <UPPERCASED_NAME>_FOUND
+        instead of <Name>_FOUND, and to keep things consistent
+        Cairo_LIBRARIES and Cairo_INCLUDE_DIRS have become CAIRO_LIBRARIES
+        and CAIRO_INCLUDE_DIRS.
+
+        * PlatformEfl.cmake: Use CAIRO_FOO instead of Cairo_FOO.
+
+2012-04-26  Christophe Dumez  <christophe.dumez@intel.com>
+
+        [EFL] Enable VIDEO_TRACK feature
+        https://bugs.webkit.org/show_bug.cgi?id=84830
+
+        Reviewed by Gustavo Noronha Silva.
+
+        Enable VIDEO_TRACK feature by default for EFL port.
+
+        * PlatformEfl.cmake:
+
+2012-04-20  Mike Lattanzio  <mlattanzio@rim.com>
+
+        [BlackBerry] Expose WebViewportArguments to WebPageClient
+        https://bugs.webkit.org/show_bug.cgi?id=84471
+
+        Reviewed by Antonio Gomes.
+
+        * PlatformBlackBerry.cmake:
+
+2012-04-20  Thiago Marcos P. Santos  <thiago.santos@intel.com>
+
+        [EFL] Add Security Origin API
+        https://bugs.webkit.org/show_bug.cgi?id=84023
+
+        Reviewed by Antonio Gomes.
+
+        * PlatformEfl.cmake:
+
+2012-04-10  Patrick Gansterer  <paroga@webkit.org>
+
+        [CMake] Enable USE_FOLDERS property
+        https://bugs.webkit.org/show_bug.cgi?id=83571
+
+        Reviewed by Daniel Bates.
+
+        Setting the FOLDER property on targets gives more structure 
+        to the generated Visual Studio solutions.
+        This does not affect other CMake generators.
+
+        * CMakeLists.txt:
+
+2012-04-07  Patrick Gansterer  <paroga@webkit.org>
+
+        [CMake] Cleanup WTF include directories
+        https://bugs.webkit.org/show_bug.cgi?id=82716
+
+        Reviewed by Eric Seidel.
+
+        * CMakeLists.txt:
+
+2012-04-07  Rob Buis  <rbuis@rim.com>
+
+        [BlackBerry] Add Battery Status API support
+        https://bugs.webkit.org/show_bug.cgi?id=82615
+
+        Reviewed by George Staikos.
+
+        Add BatteryClientBlackBerry.cpp to the build.
+
+        * PlatformBlackBerry.cmake:
+
+2012-04-06  Charles Wei  <charles.wei@torchmobile.com.cn>
+
+        [BlackBerry] Build fix to match the latest WebCore change
+        https://bugs.webkit.org/show_bug.cgi?id=83358
+
+        Reviewed by Rob Buis.
+
+        * PlatformBlackBerry.cmake:
+
+2012-04-05  George Staikos  <staikos@webkit.org>
+
+        Add the vibration client for BlackBerry.
+        https://bugs.webkit.org/show_bug.cgi?id=83340
+
+        Reviewed by Rob Buis.
+
+        * PlatformBlackBerry.cmake:
+
+2012-04-05  Jia Pu  <jpu@apple.com>
+
+        Move correction panel related functions from EditorClient into separated AlternativeTextClient class.
+        https://bugs.webkit.org/show_bug.cgi?id=82970
+
+        Reviewed by Enrica Casucci.
+
+        See WebCore/ChangeLog for details.
+
+        * WebKit.xcodeproj/project.pbxproj:
+
+2012-04-01  Gyuyoung Kim  <gyuyoung.kim@samsung.com>
+
+        Support the Network Information API
+        https://bugs.webkit.org/show_bug.cgi?id=73528
+
+        Reviewed by Adam Barth.
+
+        * PlatformEfl.cmake: Add dummy NetworkInfoClientEfl.cpp files in order to support network information API.
+
+2012-03-30  Eli Fidler  <efidler@rim.com>
+
+        Enable OpenType Sanitizer for BlackBerry port.
+        https://bugs.webkit.org/show_bug.cgi?id=82782
+
+        Reviewed by Eric Seidel.
+
+        * PlatformBlackBerry.cmake: add libots to link
+
+2012-03-22  Raphael Kubo da Costa  <rakuco@FreeBSD.org>
+
+        [CMake] Unreviewed build fix after r111778.
+
+        * CMakeLists.txt: Replace ${JAVASCRIPTCORE_DIR}/wtf includes with
+        ${WTF_DIR}/wtf ones.
+
+2012-03-22  Hyowon Kim  <hw1008.kim@samsung.com>
+
+        [EFL] Add PageClientEfl to WebCoreSupport.
+        https://bugs.webkit.org/show_bug.cgi?id=80748
+
+        Reviewed by Noam Rosenthal.
+
+        * PlatformEfl.cmake: Add WebCore/platform/graphics/efl to the include path
+        and PageClientEfl.cpp to the source list.
+
+2012-03-20  Eric Seidel  <eric@webkit.org>
+
+        Move wtf/Platform.h from JavaScriptCore to Source/WTF/wtf
+        https://bugs.webkit.org/show_bug.cgi?id=80911
+
+        Reviewed by Adam Barth.
+
+        * CMakeLists.txt: Look for headers in Source/WTF.
+
+2012-03-20  Charles Wei  <charles.wei@torchmobile.com.cn>
+
+        [BlackBerry] Remove OutOfMemoryHandler from the build system
+        https://bugs.webkit.org/show_bug.cgi?id=81649
+
+        Remove OutOfMemoryHandler, and change GLES2Context to WebKitSupport,
+        in the build system for BlackBerry porting.
+
+        Reviewed by Rob Buis.
+
+        * PlatformBlackBerry.cmake:
+
+2012-03-16  Kihong Kwon  <kihong.kwon@samsung.com>
+
+        Support for Battery Status API
+        https://bugs.webkit.org/show_bug.cgi?id=62698
+
+        Add include directory and file.
+        http://www.w3.org/TR/battery-status/
+
+        Reviewed by Adam Barth.
+
+        * PlatformEfl.cmake:
+
+2012-03-11  Timothy Hatcher  <timothy@apple.com>
+
+        Update how the Web Inspector resources are loaded.
+
+        https://bugs.webkit.org/show_bug.cgi?id=80798
+        rdar://problem/10359959
+
+        Reviewed by Brian Weinstein.
+
+        * WebKit.xcodeproj/project.pbxproj: Add a framework.
+
+2012-03-06  Raphael Kubo da Costa  <kubo@profusion.mobi>
+
+        [CMake] Make the removal of transitive library dependencies work with CMake < 2.8.7.
+        https://bugs.webkit.org/show_bug.cgi?id=80469
+
+        Reviewed by Antonio Gomes.
+
+        * CMakeLists.txt: Manually set the LINK_INTERFACE_LIBRARIES target
+        property on the library being created.
+
+2012-03-06  Raphael Kubo da Costa  <kubo@profusion.mobi>
+
+        [EFL] Unreviewed; fix the build after r109877.
+
+        * CMakeLists.txt: Add WebCore/Modules/webdatabase to the list of
+        include directories so that #include'ing DatabaseDetails.h and
+        friends still works.
+
+2012-03-04  Jonathan Dong  <jonathan.dong@torchmobile.com.cn>
+
+        [BlackBerry] upstream CredentialManager and CredentialTransformData implementation
+        https://bugs.webkit.org/show_bug.cgi?id=80107
+
+        Reviewed by Antonio Gomes.
+
+        Initial upstream of CredentialManager.[h|cpp] and
+        CredentialTransformData.[h|cpp].
+        No new test.
+
+        * PlatformBlackBerry.cmake:
+
+2012-03-04  Raphael Kubo da Costa  <kubo@profusion.mobi>
+
+        [CMake] Libraries are installed to /usr/lib and not /usr/lib64 on x86_64
+        https://bugs.webkit.org/show_bug.cgi?id=71507
+
+        Reviewed by Antonio Gomes.
+
+        * CMakeLists.txt: Use ${LIB_INSTALL_DIR} instead of hardcoding "lib".
+
+2012-02-24  Grzegorz Czajkowski  <g.czajkowski@samsung.com>
+
+        [EFL][DRT] Implement setValueForUser and setAutofilled.
+        https://bugs.webkit.org/show_bug.cgi?id=79237
+
+        Reviewed by Andreas Kling.
+
+        Adds the main directory of WebKit's source to find headers of JavaScriptCore.
+
+        * PlatformEfl.cmake:
+
+2012-02-23  Patrick Gansterer  <paroga@webkit.org>
+
+        [CMake] Add WEBKIT_INCLUDE_CONFIG_FILES_IF_EXISTS macro
+        https://bugs.webkit.org/show_bug.cgi?id=79371
+
+        Reviewed by Daniel Bates.
+
+        * CMakeLists.txt:
+        * PlatformBlackBerry.cmake: Renamed from Source/WebKit/blackberry/CMakeListsBlackBerry.txt.
+        * PlatformEfl.cmake: Renamed from Source/WebKit/efl/CMakeListsEfl.txt.
+        * PlatformWinCE.cmake: Renamed from Source/WebKit/wince/CMakeListsWinCE.txt.
+
+2012-02-20  Filip Pizlo  <fpizlo@apple.com>
+
+        JSC should be a triple-tier VM
+        https://bugs.webkit.org/show_bug.cgi?id=75812
+        <rdar://problem/10079694>
+
+        Reviewed by Gavin Barraclough.
+
+        Changed EFL's build system to include a new directory in JavaScriptCore.
+        
+        * CMakeLists.txt:
+
+2012-02-21  Jon Lee  <jonlee@apple.com>
+
+        Bring notifications support to WK1 mac: showing, canceling, removing notifications
+        https://bugs.webkit.org/show_bug.cgi?id=78783
+        <rdar://problem/10610578>
+
+        Reviewed by Anders Carlsson.
+
+        * WebKit.xcodeproj/project.pbxproj: Added new files.
+
+2012-02-21  Adam Roben  <aroben@apple.com>
+
+        Roll out r108309, r108323, and r108326
+
+        They broke the 32-bit Lion build.
+
+        Original bugs is <http://webkit.org/b/75812> <rdar://problem/10079694>.
+
+        * CMakeLists.txt:
+
+2012-02-16  Leo Yang  <leo.yang@torchmobile.com.cn>
+
+        [BlackBerry] Adapt to the removal of WebStringIml.h
+        https://bugs.webkit.org/show_bug.cgi?id=78784
+
+        Reviewed by Antonio Gomes.
+
+        blackberry/WebCoreSupport/WebStringImpl.h which hasn't been upstreamed
+        has been removed internally. We should adapt to this removal for the
+        upstreamed part of the BlackBerry port. Actually WebStringImpl is not necessary
+        because it just inherits from WTF::StringImpl but adding nothing.
+
+        * blackberry/Api/WebString.cpp:
+        (BlackBerry::WebKit::WebString::WebString):
+        (BlackBerry::WebKit::WebString::equalIgnoringCase):
+        * blackberry/Api/WebString.h:
+        (WTF):
+
+2012-02-16  Nima Ghanavatian  <nghanavatian@rim.com>
+
+        [BlackBerry] Style clean-up in WebPageCompositor
+        https://bugs.webkit.org/show_bug.cgi?id=78738
+
+        Reviewed by Rob Buis.
+
+        No new functionality, no new tests.
+
+        * blackberry/WebKitSupport/WebPageCompositor.cpp:
+        (BlackBerry::WebKit::WebPageCompositor::drawLayers):
+        * blackberry/WebKitSupport/WebPageCompositor.h:
+        (WebKit):
+
+2012-02-16  Patrick Gansterer  <paroga@webkit.org>
+
+        [CMake] Add missing include directories.
+
+        * CMakeLists.txt:
+
+2012-02-15  Leo Yang  <leo.yang@torchmobile.com.cn>
+
+        [BlackBerry] Remove ResourceHolderImpl.cpp from build system
+        https://bugs.webkit.org/show_bug.cgi?id=78779
+
+        Reviewed by George Staikos.
+
+        blackberry/Api/ResourceHolderImpl.cpp which hasn't been upstreamed
+        has been removed internally. So remove it from the build system.
+
+        * blackberry/CMakeListsBlackBerry.txt:
+
+2012-02-15  Leo Yang  <leo.yang@torchmobile.com.cn>
+
+        [BlackBerry] Upstream WebPageGroupLoadDeferrer.{h, cpp}
+        https://bugs.webkit.org/show_bug.cgi?id=78770
+
+        Reviewed by Rob Buis.
+
+        Initial upstreaming, no new tests.
+
+        * blackberry/Api/WebPageGroupLoadDeferrer.cpp: Added.
+        * blackberry/Api/WebPageGroupLoadDeferrer.h: Added.
+
+2012-02-15  Konrad Piascik  <kpiascik@rim.com>
+
+        [BlackBerry] Upstream BlackBerry specific Web Inspector resources
+        https://bugs.webkit.org/show_bug.cgi?id=78727
+
+        Reviewed by Rob Buis.
+
+        * blackberry/WebCoreSupport/inspectorBB.html: Added.
+        * blackberry/WebCoreSupport/inspectorBB.js: Added.
+        ():
+        (InspectorFrontendHost.copyText):
+
+2012-02-15  Mike Fenton  <mifenton@rim.com>
+
+        Initial upstreaming of EditorClientBlackBerry
+        https://bugs.webkit.org/show_bug.cgi?id=78730
+
+        Reviewed by Rob Buis.
+
+        Initial upstreaming, no new tests.
+
+        * blackberry/WebCoreSupport/EditorClientBlackBerry.cpp: Added.
+        (WebCore):
+        (WebCore::EditorClientBlackBerry::EditorClientBlackBerry):
+        (WebCore::EditorClientBlackBerry::pageDestroyed):
+        (WebCore::EditorClientBlackBerry::shouldDeleteRange):
+        (WebCore::EditorClientBlackBerry::shouldShowDeleteInterface):
+        (WebCore::EditorClientBlackBerry::smartInsertDeleteEnabled):
+        (WebCore::EditorClientBlackBerry::isSelectTrailingWhitespaceEnabled):
+        (WebCore::EditorClientBlackBerry::enableSpellChecking):
+        (WebCore::EditorClientBlackBerry::shouldSpellCheckFocusedField):
+        (WebCore::EditorClientBlackBerry::isContinuousSpellCheckingEnabled):
+        (WebCore::EditorClientBlackBerry::toggleContinuousSpellChecking):
+        (WebCore::EditorClientBlackBerry::isGrammarCheckingEnabled):
+        (WebCore::EditorClientBlackBerry::toggleGrammarChecking):
+        (WebCore::EditorClientBlackBerry::spellCheckerDocumentTag):
+        (WebCore::EditorClientBlackBerry::shouldBeginEditing):
+        (WebCore::EditorClientBlackBerry::shouldEndEditing):
+        (WebCore::EditorClientBlackBerry::shouldInsertNode):
+        (WebCore::EditorClientBlackBerry::shouldInsertText):
+        (WebCore::EditorClientBlackBerry::shouldChangeSelectedRange):
+        (WebCore::EditorClientBlackBerry::shouldApplyStyle):
+        (WebCore::EditorClientBlackBerry::shouldMoveRangeAfterDelete):
+        (WebCore::EditorClientBlackBerry::didBeginEditing):
+        (WebCore::EditorClientBlackBerry::respondToChangedContents):
+        (WebCore::EditorClientBlackBerry::respondToChangedSelection):
+        (WebCore::EditorClientBlackBerry::didEndEditing):
+        (WebCore::EditorClientBlackBerry::respondToSelectionAppearanceChange):
+        (WebCore::EditorClientBlackBerry::didWriteSelectionToPasteboard):
+        (WebCore::EditorClientBlackBerry::didSetSelectionTypesForPasteboard):
+        (WebCore::EditorClientBlackBerry::registerCommandForUndo):
+        (WebCore::EditorClientBlackBerry::registerCommandForRedo):
+        (WebCore::EditorClientBlackBerry::clearUndoRedoOperations):
+        (WebCore::EditorClientBlackBerry::canUndo):
+        (WebCore::EditorClientBlackBerry::canRedo):
+        (WebCore::EditorClientBlackBerry::canCopyCut):
+        (WebCore::EditorClientBlackBerry::canPaste):
+        (WebCore::EditorClientBlackBerry::undo):
+        (WebCore::EditorClientBlackBerry::redo):
+        (KeyDownEntry):
+        (KeyPressEntry):
+        (WebCore::EditorClientBlackBerry::interpretKeyEvent):
+        (WebCore::EditorClientBlackBerry::handleKeyboardEvent):
+        (WebCore::EditorClientBlackBerry::handleInputMethodKeydown):
+        (WebCore::EditorClientBlackBerry::textFieldDidBeginEditing):
+        (WebCore::EditorClientBlackBerry::textFieldDidEndEditing):
+        (WebCore::EditorClientBlackBerry::textDidChangeInTextField):
+        (WebCore::EditorClientBlackBerry::doTextFieldCommandFromEvent):
+        (WebCore::EditorClientBlackBerry::textWillBeDeletedInTextField):
+        (WebCore::EditorClientBlackBerry::textDidChangeInTextArea):
+        (WebCore::EditorClientBlackBerry::ignoreWordInSpellDocument):
+        (WebCore::EditorClientBlackBerry::learnWord):
+        (WebCore::EditorClientBlackBerry::checkSpellingOfString):
+        (WebCore::EditorClientBlackBerry::getAutoCorrectSuggestionForMisspelledWord):
+        (WebCore::EditorClientBlackBerry::checkGrammarOfString):
+        (WebCore::EditorClientBlackBerry::requestCheckingOfString):
+        (WebCore::EditorClientBlackBerry::textChecker):
+        (WebCore::EditorClientBlackBerry::updateSpellingUIWithGrammarString):
+        (WebCore::EditorClientBlackBerry::updateSpellingUIWithMisspelledWord):
+        (WebCore::EditorClientBlackBerry::showSpellingUI):
+        (WebCore::EditorClientBlackBerry::spellingUIIsShowing):
+        (WebCore::EditorClientBlackBerry::getGuessesForWord):
+        (WebCore::EditorClientBlackBerry::willSetInputMethodState):
+        (WebCore::EditorClientBlackBerry::setInputMethodState):
+        * blackberry/WebCoreSupport/EditorClientBlackBerry.h: Added.
+        (WebKit):
+        (WebCore):
+        (EditorClientBlackBerry):
+
+2012-02-15  Leo Yang  <leo.yang@torchmobile.com.cn>
+
+        [BlackBerry] Upstream WebPageClient.h
+        https://bugs.webkit.org/show_bug.cgi?id=78660
+
+        Reviewed by Antonio Gomes.
+
+        Initial upstreaming, no new tests.
+
+        * blackberry/Api/BackingStore.cpp: Add #include <BlackBerryPlatformWindow.h> because this inclusion
+        is being removed from WebPageClient.h.
+        * blackberry/Api/WebPageClient.h: Added.
+        * blackberry/WebCoreSupport/ChromeClientBlackBerry.cpp: Add #include <BlackBerryPlatformWindow.h>
+        because this inclusion is being removed from WebPageClient.h.
+
+2012-02-15  Rob Buis  <rbuis@rim.com>
+
+        [BlackBerry] Upstream remaining classes in Api
+        https://bugs.webkit.org/show_bug.cgi?id=78644
+
+        Reviewed by Antonio Gomes.
+
+        No functionalities changed, no new tests.
+
+        * blackberry/Api/ActiveNodeContext.h: Renamed from Source/WebKit/blackberry/Api/BlackBerryContext.h.
+
+2012-02-14  Nima Ghanavatian  <nghanavatian@rim.com>
+
+        [BlackBerry] Upstreaming WebSettings code
+        https://bugs.webkit.org/show_bug.cgi?id=78633
+
+        Reviewed by Rob Buis.
+
+        Initial upstreaming, no new tests.
+
+        * blackberry/Api/WebSettings.cpp: Added.
+        * blackberry/Api/WebSettings.h: Added.
+        * blackberry/Api/WebSettings_p.h: Added.
+
+2012-02-14  Nima Ghanavatian  <nghanavatian@rim.com>
+
+        [BlackBerry] Upstreaming DOMSupport files
+        https://bugs.webkit.org/show_bug.cgi?id=78607
+
+        Reviewed by Rob Buis.
+
+        Initial upstreaming, no new tests.
+
+        * blackberry/WebKitSupport/DOMSupport.cpp: Added.
+        * blackberry/WebKitSupport/DOMSupport.h: Added.
+
+2012-02-14  Jeff Rogers  <jrogers@rim.com>
+
+        [BlackBerry] Remove OpenVG references
+        https://bugs.webkit.org/show_bug.cgi?id=78623
+
+        Reviewed by Rob Buis.
+
+        Removed references to USE(OPENVG) and the related code.
+
+        * blackberry/Api/BackingStore.cpp:
+        (BlackBerry::WebKit::BackingStorePrivate::BackingStorePrivate):
+        (BlackBerry::WebKit::BackingStorePrivate::repaint):
+        (BlackBerry::WebKit::BackingStorePrivate::renderContents):
+        (BlackBerry::WebKit::BackingStore::createSurface):
+        * blackberry/Api/BackingStore_p.h:
+
+2012-02-14  Andy Chen  <andchen@rim.com>
+
+        Initial upstreaming for find-in-page for BlackBerry port
+        https://bugs.webkit.org/show_bug.cgi?id=78615
+
+        Create a new class InPageSearchManager for find-in-page and
+        remove the functions in SelectionHandler
+
+        Reviewed by Rob Buis.
+
+        * blackberry/CMakeListsBlackBerry.txt:
+        * blackberry/WebKitSupport/InPageSearchManager.cpp: Added.
+        (BlackBerry::WebKit::InPageSearchManager::InPageSearchManager):
+        (BlackBerry::WebKit::InPageSearchManager::~InPageSearchManager):
+        (BlackBerry::WebKit::InPageSearchManager::findNextString):
+        (BlackBerry::WebKit::InPageSearchManager::clearTextMatches):
+        (BlackBerry::WebKit::InPageSearchManager::setMarkerActive):
+        * blackberry/WebKitSupport/InPageSearchManager.h: Added.
+        * blackberry/WebKitSupport/SelectionHandler.cpp:
+        * blackberry/WebKitSupport/SelectionHandler.h:
+
+2012-02-14  Jacky Jiang  <zhajiang@rim.com>
+
+        [BlackBerry] Upstream BlackBerry WebCoreSupport FrameLoaderClientBlackBerry class
+        https://bugs.webkit.org/show_bug.cgi?id=78275
+
+        Reviewed by Rob Buis.
+
+        Initial upstream, no new tests.
+
+        * blackberry/WebCoreSupport/FrameLoaderClientBlackBerry.cpp: Added.
+        * blackberry/WebCoreSupport/FrameLoaderClientBlackBerry.h: Added.
+
+2012-02-14  Lianghui Chen  <liachen@rim.com>
+
+        Separate mimetype and file extension mapping API from WebKit/blackberry/Api/WebKitTextCodec and complete it.
+        https://bugs.webkit.org/show_bug.cgi?id=78605
+
+        Reviewed by Rob Buis.
+
+        Now the MIME type and file extension mapping API are in WebKitMIMETypeConverter.
+
+        * blackberry/Api/WebKitMIMETypeConverter.cpp: Added.
+        (WebKit):
+        (BlackBerry::WebKit::getExtensionForMimeType):
+        (BlackBerry::WebKit::getMimeTypeForExtension):
+        * blackberry/Api/WebKitMIMETypeConverter.h: Added.
+        (WebKit):
+        * blackberry/Api/WebKitTextCodec.cpp:
+        * blackberry/Api/WebKitTextCodec.h:
+        * blackberry/CMakeListsBlackBerry.txt:
+
+2012-02-14  Ed Baker  <edbaker@rim.com>
+
+        [BlackBerry] Dragging a selection handle outside of the content bounding box does not update the selection range correctly
+        https://bugs.webkit.org/show_bug.cgi?id=78608
+
+        Ensure that when selection handles leave the content bounding box that
+        the handle not being dragged remains fixed. Do not applying padding to
+        a direction that would cause the selection to shrink when performing
+        the handle direction detection.
+
+        Reviewed by Rob Buis.
+
+        * blackberry/WebKitSupport/SelectionHandler.cpp:
+        (BlackBerry::WebKit::directionOfPointRelativeToRect):
+        (BlackBerry::WebKit::SelectionHandler::extendSelectionToFieldBoundary):
+        (BlackBerry::WebKit::SelectionHandler::clipPointToFocusNode):
+        (BlackBerry::WebKit::SelectionHandler::setSelection):
+        * blackberry/WebKitSupport/SelectionHandler.h:
+
+2012-02-14  Rob Buis  <rbuis@rim.com>
+
+        [BlackBerry] Upstream remaining classes in Api
+        https://bugs.webkit.org/show_bug.cgi?id=78644
+
+        Reviewed by Antonio Gomes.
+
+        Initial upstream, no new tests.
+
+        * blackberry/Api/BlackBerryContext.h: Added.
+        * blackberry/Api/BlackBerryGlobal.cpp: Added.
+        * blackberry/Api/BlackBerryGlobal.h: Added.
+        * blackberry/Api/Version.cpp: Added.
+        * blackberry/Api/Version.h: Added.
+
+2012-02-14  Rob Buis  <rbuis@rim.com>
+
+        [BlackBerry] Upstream backing store related classes
+        https://bugs.webkit.org/show_bug.cgi?id=78517
+
+        Reviewed by Antonio Gomes.
+
+        Initial upstream, no new tests.
+
+        * blackberry/WebKitSupport/BackingStoreClient.cpp: Added.
+        * blackberry/WebKitSupport/BackingStoreClient.h: Added.
+        * blackberry/WebKitSupport/BackingStoreCompositingSurface.cpp: Added.
+        * blackberry/WebKitSupport/BackingStoreCompositingSurface.h: Added.
+        * blackberry/WebKitSupport/BackingStoreTile.cpp: Added.
+        * blackberry/WebKitSupport/BackingStoreTile.h: Added.
+
+2012-02-13  Nima Ghanavatian  <nghanavatian@rim.com>
+
+        Initial upstreaming of selection handling code for BlackBerry port
+        https://bugs.webkit.org/show_bug.cgi?id=78136
+
+        Reviewed by Rob Buis.
+
+        Initial upstreaming, no new tests.
+
+        * blackberry/WebKitSupport/SelectionHandler.cpp: Added.
+        * blackberry/WebKitSupport/SelectionHandler.h: Added.
+
+2012-02-10  Mike Fenton  <mifenton@rim.com>
+
+        BlackBerry Port - Input focus is suppressed during XHR loads
+        https://bugs.webkit.org/show_bug.cgi?id=78368
+
+        Allow JS to trigger the VKB and input focus when XHR scripting
+        is active.
+
+        This switching the loaded state to checking the webpages loaded state
+        which is only updated after initial load.   When additional loading
+        events happen for XHR, it remains false and focus events function.
+
+        Also add detailed FocusLog's to shouldAcceptInputFocus.
+
+        Reviewed by Rob Buis.
+
+        * blackberry/WebKitSupport/InputHandler.cpp:
+        (BlackBerry::WebKit::InputHandler::shouldAcceptInputFocus):
+
+2012-02-10  Mike Fenton  <mifenton@rim.com>
+
+        BlackBerry Port - JS focus on blur can cause recursion
+        https://bugs.webkit.org/show_bug.cgi?id=78368
+
+        Prevent JS recursion of blur/focus by allowing focus
+        if we are already trying to prevent focus.
+
+        Reviewed by Rob Buis.
+
+        * blackberry/WebKitSupport/InputHandler.cpp:
+        (BlackBerry::WebKit::InputHandler::InputHandler):
+        (BlackBerry::WebKit::InputHandler::shouldAcceptInputFocus):
+        (BlackBerry::WebKit::InputHandler::setElementFocused):
+        * blackberry/WebKitSupport/InputHandler.h:
+        (InputHandler):
+
+2012-02-10  Rob Buis  <rbuis@rim.com>
+
+        [BlackBerry] Upstream graphics helper classes in WebKitSupport
+        https://bugs.webkit.org/show_bug.cgi?id=78278
+
+        Reviewed by Antonio Gomes.
+
+        Initial upstream, no new tests.
+
+        * blackberry/WebKitSupport/RenderQueue.cpp: Added.
+        * blackberry/WebKitSupport/RenderQueue.h: Added.
+
+2012-02-10  Rob Buis  <rbuis@rim.com>
+
+        [BlackBerry] Upstream graphics helper classes in WebKitSupport
+        https://bugs.webkit.org/show_bug.cgi?id=78278
+
+        Reviewed by Antonio Gomes.
+
+        Initial upstream, no new tests.
+
+        * blackberry/WebKitSupport/SurfacePool.cpp: Added.
+        * blackberry/WebKitSupport/SurfacePool.h: Added.
+        * blackberry/WebKitSupport/TileIndex.h: Added.
+        * blackberry/WebKitSupport/TileIndexHash.h: Added.
+
+2012-02-09  Leo Yang  <leo.yang@torchmobile.com.cn>
+
+        [BlackBerry] Upstream JavaScriptDebuggerBlackBerry.{h, cpp}
+        https://bugs.webkit.org/show_bug.cgi?id=78203
+
+        Reviewed by Rob Buis.
+
+        Initial upstream, no new tests.
+
+        * blackberry/WebCoreSupport/JavaScriptDebuggerBlackBerry.cpp: Added.
+        * blackberry/WebCoreSupport/JavaScriptDebuggerBlackBerry.h: Added.
+
+2012-02-09  Rob Buis  <rbuis@rim.com>
+
+        [BlackBerry] Upstream BlackBerry WebKitSupport WebPageCompositor class
+        https://bugs.webkit.org/show_bug.cgi?id=78276
+
+        Reviewed by Antonio Gomes.
+
+        Initial upstream, no new tests.
+
+        * blackberry/WebKitSupport/WebPageCompositor.cpp: Added.
+        * blackberry/WebKitSupport/WebPageCompositor.h: Added.
+
+2012-02-08  Jacky Jiang  <zhajiang@rim.com>
+
+        [BlackBerry] Upstream BlackBerry WebCoreSupport FrameNetworkingContextBlackBerry and IconDatabaseClientBlackBerry classes
+        https://bugs.webkit.org/show_bug.cgi?id=78049
+
+        Reviewed by Rob Buis.
+
+        Initial upstream, no new tests.
+
+        * blackberry/WebCoreSupport/FrameNetworkingContextBlackBerry.cpp: Added.
+        * blackberry/WebCoreSupport/FrameNetworkingContextBlackBerry.h: Added.
+        * blackberry/WebCoreSupport/IconDatabaseClientBlackBerry.cpp: Added.
+        * blackberry/WebCoreSupport/IconDatabaseClientBlackBerry.h: Added.
+
+2012-02-08  Leo Yang  <leo.yang@torchmobile.com.cn>
+
+        [BlackBerry] Upstream InspectorClientBlackBerry.{h, cpp}
+        https://bugs.webkit.org/show_bug.cgi?id=78082
+
+        Reviewed by Rob Buis.
+
+        Initial upstream, no new tests.
+
+        * blackberry/WebCoreSupport/InspectorClientBlackBerry.cpp: Added.
+        * blackberry/WebCoreSupport/InspectorClientBlackBerry.h: Added.
+
+2012-02-08  Leo Yang  <leo.yang@torchmobile.com.cn>
+
+        [BlackBerry] Remove EditCommandBlackBerry.cpp from build system
+        https://bugs.webkit.org/show_bug.cgi?id=78078
+
+        Reviewed by Rob Buis.
+
+        WebKit/blackberry/WebCoreSupport/EditCommandBlackBerry.cpp which hasn't
+        been upstreamed has been removed from the BlackBerry porting internally.
+        So we should remove it from the build system.
+
+        * blackberry/CMakeListsBlackBerry.txt:
+
+2012-02-08  Rob Buis  <rbuis@rim.com>
+
+        [BlackBerry] Upstream DumpRenderTreeBlackBerry
+        https://bugs.webkit.org/show_bug.cgi?id=78042
+
+        Reviewed by Antonio Gomes.
+
+        Add abstract interface for our DumpRenderTree solution.
+
+        * blackberry/Api/DumpRenderTreeClient.h: Added.
+
+2012-02-08  Nima Ghanavatian  <nghanavatian@rim.com>
+
+        Initial upstreaming of input handling for BlackBerry port
+        https://bugs.webkit.org/show_bug.cgi?id=77992
+
+        Reviewed by Rob Buis.
+
+        * blackberry/WebKitSupport/InputHandler.cpp: Added.
+        * blackberry/WebKitSupport/InputHandler.h: Added.
+
+2012-02-07  Robert Kroeger  <rjkroege@chromium.org>
+
+        [chromium] Remove no longer necessary Chromium gesture recognizer code.
+        https://bugs.webkit.org/show_bug.cgi?id=77492
+
+        Reviewed by Adam Barth.
+
+        * blackberry/WebCoreSupport/AboutDataEnableFeatures.in:
+
+2012-02-07  Leo Yang  <leo.yang@torchmobile.com.cn>
+
+        [BlackBerry] Upstream ChromeClientBlackBerry.{h, cpp}
+        https://bugs.webkit.org/show_bug.cgi?id=77843
+
+        Reviewed by Rob Buis.
+
+        Initial upstream, no new tests.
+
+        * blackberry/WebCoreSupport/ChromeClientBlackBerry.cpp: Added.
+        * blackberry/WebCoreSupport/ChromeClientBlackBerry.h: Added.
+
+2012-02-07  Rob Buis  <rbuis@rim.com>
+
+        [BlackBerry] Upstream DumpRenderTreeSupport
+        https://bugs.webkit.org/show_bug.cgi?id=77991
+
+        Reviewed by Antonio Gomes.
+
+        No functionalities changed, no new tests.
+
+        * blackberry/WebKitSupport/DumpRenderTreeSupport.cpp: Added.
+        (toGeolocationClientMock):
+        (DumpRenderTreeSupport::DumpRenderTreeSupport):
+        (DumpRenderTreeSupport::~DumpRenderTreeSupport):
+        (DumpRenderTreeSupport::javaScriptObjectsCount):
+        (DumpRenderTreeSupport::garbageCollectorCollect):
+        (DumpRenderTreeSupport::garbageCollectorCollectOnAlternateThread):
+        (DumpRenderTreeSupport::setLinksIncludedInFocusChain):
+        (DumpRenderTreeSupport::linksIncludedInFocusChain):
+        (DumpRenderTreeSupport::dumpConfigurationForViewport):
+        (DumpRenderTreeSupport::numberOfPendingGeolocationPermissionRequests):
+        (DumpRenderTreeSupport::resetGeolocationMock):
+        (DumpRenderTreeSupport::setMockGeolocationError):
+        (DumpRenderTreeSupport::setMockGeolocationPermission):
+        (DumpRenderTreeSupport::setMockGeolocationPosition):
+        (DumpRenderTreeSupport::scalePageBy):
+        (DumpRenderTreeSupport::computedStyleIncludingVisitedInfo):
+        * blackberry/WebKitSupport/DumpRenderTreeSupport.h: Added.
+        (WebKit):
+        (WebCore):
+        (WTF):
+        (DumpRenderTreeSupport):
+
+2012-02-07  Jacky Jiang  <zhajiang@rim.com>
+
+        [BlackBerry] Upstream BlackBerry WebCoreSupport DeviceOrientationClientBlackBerry and DeviceMotionClientBlackBerry classes
+        https://bugs.webkit.org/show_bug.cgi?id=77993
+
+        Reviewed by Rob Buis.
+
+        Initial upstream, no new tests.
+
+        * blackberry/WebCoreSupport/DeviceMotionClientBlackBerry.cpp: Added.
+        * blackberry/WebCoreSupport/DeviceMotionClientBlackBerry.h: Added.
+        * blackberry/WebCoreSupport/DeviceOrientationClientBlackBerry.cpp: Added.
+        * blackberry/WebCoreSupport/DeviceOrientationClientBlackBerry.h: Added.
+
+2012-02-06  Leo Yang  <leo.yang@torchmobile.com.cn>
+
+        [BlackBerry] Use WebPagePrivate instead of WebPage in GeolocationControllerClientBlackBerry
+        https://bugs.webkit.org/show_bug.cgi?id=77927
+
+        Reviewed by Antonio Gomes.
+
+        WebKit/blackberry/Api/WebPage which has a d pointer is designed for public API.
+        GeolocationControllerClientBlackBerry in WebKit/blackberry/WebCoreSupport should
+        use the d pointer directly because the client is internal implementation.
+
+        No functionalities changed, no new tests.
+
+        * blackberry/WebCoreSupport/GeolocationControllerClientBlackBerry.cpp:
+        (GeolocationControllerClientBlackBerry::GeolocationControllerClientBlackBerry):
+        (GeolocationControllerClientBlackBerry::requestPermission):
+        (GeolocationControllerClientBlackBerry::cancelPermissionRequest):
+        (GeolocationControllerClientBlackBerry::onLocationUpdate):
+        (GeolocationControllerClientBlackBerry::onLocationError):
+        * blackberry/WebCoreSupport/GeolocationControllerClientBlackBerry.h:
+        (WebKit):
+        (GeolocationControllerClientBlackBerry):
+
+2012-02-06  Robin Cao  <robin.cao@torchmobile.com.cn>
+
+        [BlackBerry] Remove unused variable in BackingStore
+        https://bugs.webkit.org/show_bug.cgi?id=77851
+
+        Reviewed by Kentaro Hara.
+
+        * blackberry/Api/BackingStore.cpp:
+        (BlackBerry::WebKit::BackingStorePrivate::blitContents):
+
+2012-02-04  Jacky Jiang  <zhajiang@rim.com>
+
+        [BlackBerry] Upstream BlackBerry WebCoreSupport ClientExtension and GeolocationControllerClientBlackBerry classes
+        https://bugs.webkit.org/show_bug.cgi?id=77751
+
+        Reviewed by Rob Buis.
+
+        Initial upstream, no new tests.
+
+        * blackberry/WebCoreSupport/ClientExtension.cpp: Added.
+        * blackberry/WebCoreSupport/ClientExtension.h: Added.
+        * blackberry/WebCoreSupport/GeolocationControllerClientBlackBerry.cpp: Added.
+        * blackberry/WebCoreSupport/GeolocationControllerClientBlackBerry.h: Added.
+
 2012-01-11  Jacky Jiang  <zhajiang@rim.com>
 
         [BlackBerry] ASSERT failure in BackingStorePrivate::blitVisibleContents()

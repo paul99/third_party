@@ -27,12 +27,16 @@
 #define TransformationMatrix_h
 
 #include "FloatPoint.h"
+#include "FloatPoint3D.h"
 #include "IntPoint.h"
 #include <string.h> //for memcpy
 #include <wtf/FastAllocBase.h>
 
 #if USE(CA)
 typedef struct CATransform3D CATransform3D;
+#endif
+#if USE(CLUTTER)
+typedef struct _CoglMatrix CoglMatrix;
 #endif
 #if USE(CG)
 typedef struct CGAffineTransform CGAffineTransform;
@@ -41,6 +45,7 @@ typedef struct CGAffineTransform CGAffineTransform;
 #elif PLATFORM(OPENVG)
 #include "VGUtils.h"
 #elif PLATFORM(QT)
+#include <QMatrix4x4>
 #include <QTransform>
 #elif USE(SKIA)
 #include <SkMatrix.h>
@@ -48,7 +53,7 @@ typedef struct CGAffineTransform CGAffineTransform;
 #include <wx/graphics.h>
 #endif
 
-#if PLATFORM(WIN) || (PLATFORM(QT) && OS(WINDOWS)) || (PLATFORM(WX) && OS(WINDOWS))
+#if PLATFORM(WIN) || (PLATFORM(GTK) && OS(WINDOWS)) || (PLATFORM(QT) && OS(WINDOWS)) || (PLATFORM(WX) && OS(WINDOWS))
 #if COMPILER(MINGW) && !COMPILER(MINGW64)
 typedef struct _XFORM XFORM;
 #else
@@ -60,16 +65,21 @@ namespace WebCore {
 
 class AffineTransform;
 class IntRect;
-class FloatPoint3D;
+class LayoutRect;
 class FloatRect;
 class FloatQuad;
 
 class TransformationMatrix {
     WTF_MAKE_FAST_ALLOCATED;
 public:
+#if CPU(APPLE_ARMV7S)
+    typedef double Matrix4[4][4] __attribute__((aligned (16)));
+#else
     typedef double Matrix4[4][4];
+#endif
 
     TransformationMatrix() { makeIdentity(); }
+    TransformationMatrix(const AffineTransform& t);
     TransformationMatrix(const TransformationMatrix& t) { *this = t; }
     TransformationMatrix(double a, double b, double c, double d, double e, double f) { setMatrix(a, b, c, d, e, f); }
     TransformationMatrix(double m11, double m12, double m13, double m14,
@@ -82,6 +92,7 @@ public:
 
 #if PLATFORM(QT)
     TransformationMatrix(const QTransform&);
+    TransformationMatrix(const QMatrix4x4&);
 #endif
 
     void setMatrix(double a, double b, double c, double d, double e, double f)
@@ -146,6 +157,7 @@ public:
     // Rounds the resulting mapped rectangle out. This is helpful for bounding
     // box computations but may not be what is wanted in other contexts.
     IntRect mapRect(const IntRect&) const;
+    LayoutRect mapRect(const LayoutRect&) const;
 
     // If the matrix has 3D components, the z component of the result is
     // dropped, effectively projecting the quad into the z=0 plane
@@ -158,10 +170,10 @@ public:
     // with the destination plane.
     FloatPoint projectPoint(const FloatPoint&, bool* clamped = 0) const;
     // Projects the four corners of the quad
-    FloatQuad projectQuad(const FloatQuad&) const;
+    FloatQuad projectQuad(const FloatQuad&,  bool* clamped = 0) const;
     // Projects the four corners of the quad and takes a bounding box,
     // while sanitizing values created when the w component is negative.
-    IntRect clampedBoundsOfProjectedQuad(const FloatQuad&) const;
+    LayoutRect clampedBoundsOfProjectedQuad(const FloatQuad&) const;
 
     double m11() const { return m_matrix[0][0]; }
     void setM11(double f) { m_matrix[0][0] = f; }
@@ -319,6 +331,9 @@ public:
     TransformationMatrix(const CATransform3D&);
     operator CATransform3D() const;
 #endif
+#if USE(CLUTTER)
+    operator CoglMatrix() const;
+#endif
 #if USE(CG)
     TransformationMatrix(const CGAffineTransform&);
     operator CGAffineTransform() const;
@@ -328,13 +343,14 @@ public:
     operator VGMatrix() const;
 #elif PLATFORM(QT)
     operator QTransform() const;
+    operator QMatrix4x4() const;
 #elif USE(SKIA)
     operator SkMatrix() const;
 #elif PLATFORM(WX) && USE(WXGC)
     operator wxGraphicsMatrix() const;
 #endif
 
-#if PLATFORM(WIN) || (PLATFORM(QT) && OS(WINDOWS)) || (PLATFORM(WX) && OS(WINDOWS))
+#if PLATFORM(WIN) || (PLATFORM(GTK) && OS(WINDOWS)) || (PLATFORM(QT) && OS(WINDOWS)) || (PLATFORM(WX) && OS(WINDOWS))
     operator XFORM() const;
 #endif
 
@@ -354,18 +370,33 @@ public:
     typedef float FloatMatrix4[16];
     void toColumnMajorFloatArray(FloatMatrix4& result) const;
 
-    void toGLMatrix(float *outMatrix) const {
-        for (int i = 0; i < 4; i++)
-            for (int j = 0; j < 4; j++)
-                outMatrix[i * 4 + j] = m_matrix[i][j];
-    }
+    // A local-space layer is implicitly defined at the z = 0 plane, with its front side
+    // facing the positive z-axis (i.e. a camera looking along the negative z-axis sees
+    // the front side of the layer). This function checks if the transformed layer's back
+    // face would be visible to a camera looking along the negative z-axis in the target space.
+    bool isBackFaceVisible() const;
 
 private:
     // multiply passed 2D point by matrix (assume z=0)
     void multVecMatrix(double x, double y, double& dstX, double& dstY) const;
+    FloatPoint internalMapPoint(const FloatPoint& sourcePoint) const
+    {
+        double resultX;
+        double resultY;
+        multVecMatrix(sourcePoint.x(), sourcePoint.y(), resultX, resultY);
+        return FloatPoint(static_cast<float>(resultX), static_cast<float>(resultY));
+    }
 
     // multiply passed 3D point by matrix
     void multVecMatrix(double x, double y, double z, double& dstX, double& dstY, double& dstZ) const;
+    FloatPoint3D internalMapPoint(const FloatPoint3D& sourcePoint) const
+    {
+        double resultX;
+        double resultY;
+        double resultZ;
+        multVecMatrix(sourcePoint.x(), sourcePoint.y(), sourcePoint.z(), resultX, resultY, resultZ);
+        return FloatPoint3D(static_cast<float>(resultX), static_cast<float>(resultY), static_cast<float>(resultZ));
+    }
 
     void setMatrix(const Matrix4 m)
     {

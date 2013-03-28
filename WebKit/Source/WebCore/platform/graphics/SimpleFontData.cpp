@@ -32,6 +32,7 @@
 
 #include "Font.h"
 #include "FontCache.h"
+#include "OpenTypeVerticalData.h"
 
 #include <wtf/MathExtras.h>
 #include <wtf/UnusedParam.h>
@@ -39,6 +40,9 @@
 using namespace std;
 
 namespace WebCore {
+
+const float smallCapsFontSizeMultiplier = 0.7f;
+const float emphasisMarkFontSizeMultiplier = 0.5f;
 
 SimpleFontData::SimpleFontData(const FontPlatformData& platformData, bool isCustomFont, bool isLoading, bool isTextOrientationFallback)
     : m_maxCharWidth(-1)
@@ -49,11 +53,20 @@ SimpleFontData::SimpleFontData(const FontPlatformData& platformData, bool isCust
     , m_isLoading(isLoading)
     , m_isTextOrientationFallback(isTextOrientationFallback)
     , m_isBrokenIdeographFallback(false)
+#if ENABLE(OPENTYPE_VERTICAL)
+    , m_verticalData(0)
+#endif
     , m_hasVerticalGlyphs(false)
 {
     platformInit();
     platformGlyphInit();
     platformCharWidthInit();
+#if ENABLE(OPENTYPE_VERTICAL)
+    if (platformData.orientation() == Vertical && !isTextOrientationFallback) {
+        m_verticalData = platformData.verticalData();
+        m_hasVerticalGlyphs = m_verticalData.get() && m_verticalData->hasVerticalMetrics();
+    }
+#endif
 }
 
 SimpleFontData::SimpleFontData(PassOwnPtr<AdditionalFontData> fontData, float fontSize, bool syntheticBold, bool syntheticItalic)
@@ -64,12 +77,14 @@ SimpleFontData::SimpleFontData(PassOwnPtr<AdditionalFontData> fontData, float fo
     , m_isLoading(false)
     , m_isTextOrientationFallback(false)
     , m_isBrokenIdeographFallback(false)
+#if ENABLE(OPENTYPE_VERTICAL)
+    , m_verticalData(0)
+#endif
     , m_hasVerticalGlyphs(false)
 {
     m_fontData->initializeFontData(this, fontSize);
 }
 
-#if !(PLATFORM(QT) && !HAVE(QRAWFONT))
 // Estimates of avgCharWidth and maxCharWidth for platforms that don't support accessing these values from the font.
 void SimpleFontData::initCharWidths()
 {
@@ -130,7 +145,6 @@ void SimpleFontData::platformGlyphInit()
     m_missingGlyphData.fontData = this;
     m_missingGlyphData.glyph = 0;
 }
-#endif
 
 SimpleFontData::~SimpleFontData()
 {
@@ -139,7 +153,9 @@ SimpleFontData::~SimpleFontData()
 #endif
         platformDestroy();
 
-    if (!isCustomFont())
+    if (isCustomFont())
+        GlyphPageTreeNode::pruneTreeCustomFontData(this);
+    else
         GlyphPageTreeNode::pruneTreeFontData(this);
 }
 
@@ -148,41 +164,67 @@ const SimpleFontData* SimpleFontData::fontDataForCharacter(UChar32) const
     return this;
 }
 
+Glyph SimpleFontData::glyphForCharacter(UChar32 character) const
+{
+    GlyphPageTreeNode* node = GlyphPageTreeNode::getRootChild(this, character / GlyphPage::size);
+    return node->page() ? node->page()->glyphAt(character % GlyphPage::size) : 0;
+}
+
 bool SimpleFontData::isSegmented() const
 {
     return false;
 }
 
-SimpleFontData* SimpleFontData::verticalRightOrientationFontData() const
+PassRefPtr<SimpleFontData> SimpleFontData::verticalRightOrientationFontData() const
 {
     if (!m_derivedFontData)
         m_derivedFontData = DerivedFontData::create(isCustomFont());
     if (!m_derivedFontData->verticalRightOrientation) {
         FontPlatformData verticalRightPlatformData(m_platformData);
         verticalRightPlatformData.setOrientation(Horizontal);
-        m_derivedFontData->verticalRightOrientation = adoptPtr(new SimpleFontData(verticalRightPlatformData, isCustomFont(), false, true));
+        m_derivedFontData->verticalRightOrientation = create(verticalRightPlatformData, isCustomFont(), false, true);
     }
-    return m_derivedFontData->verticalRightOrientation.get();
+    return m_derivedFontData->verticalRightOrientation;
 }
 
-SimpleFontData* SimpleFontData::uprightOrientationFontData() const
+PassRefPtr<SimpleFontData> SimpleFontData::uprightOrientationFontData() const
 {
     if (!m_derivedFontData)
         m_derivedFontData = DerivedFontData::create(isCustomFont());
     if (!m_derivedFontData->uprightOrientation)
-        m_derivedFontData->uprightOrientation = adoptPtr(new SimpleFontData(m_platformData, isCustomFont(), false, true));
-    return m_derivedFontData->uprightOrientation.get();
+        m_derivedFontData->uprightOrientation = create(m_platformData, isCustomFont(), false, true);
+    return m_derivedFontData->uprightOrientation;
 }
 
-SimpleFontData* SimpleFontData::brokenIdeographFontData() const
+PassRefPtr<SimpleFontData> SimpleFontData::smallCapsFontData(const FontDescription& fontDescription) const
+{
+    if (!m_derivedFontData)
+        m_derivedFontData = DerivedFontData::create(isCustomFont());
+    if (!m_derivedFontData->smallCaps)
+        m_derivedFontData->smallCaps = createScaledFontData(fontDescription, smallCapsFontSizeMultiplier);
+
+    return m_derivedFontData->smallCaps;
+}
+
+PassRefPtr<SimpleFontData> SimpleFontData::emphasisMarkFontData(const FontDescription& fontDescription) const
+{
+    if (!m_derivedFontData)
+        m_derivedFontData = DerivedFontData::create(isCustomFont());
+    if (!m_derivedFontData->emphasisMark)
+        m_derivedFontData->emphasisMark = createScaledFontData(fontDescription, emphasisMarkFontSizeMultiplier);
+
+    return m_derivedFontData->emphasisMark;
+}
+
+PassRefPtr<SimpleFontData> SimpleFontData::brokenIdeographFontData() const
 {
     if (!m_derivedFontData)
         m_derivedFontData = DerivedFontData::create(isCustomFont());
     if (!m_derivedFontData->brokenIdeograph) {
-        m_derivedFontData->brokenIdeograph = adoptPtr(new SimpleFontData(m_platformData, isCustomFont(), false));
+        m_derivedFontData->brokenIdeograph = create(m_platformData, isCustomFont(), false);
         m_derivedFontData->brokenIdeograph->m_isBrokenIdeographFallback = true;
     }
-    return m_derivedFontData->brokenIdeograph.get();
+    return m_derivedFontData->brokenIdeograph;
 }
 
 #ifndef NDEBUG
@@ -217,6 +259,21 @@ SimpleFontData::DerivedFontData::~DerivedFontData()
         GlyphPageTreeNode::pruneTreeCustomFontData(verticalRightOrientation.get());
     if (uprightOrientation)
         GlyphPageTreeNode::pruneTreeCustomFontData(uprightOrientation.get());
+#if PLATFORM(MAC)
+    if (compositeFontReferences) {
+        CFDictionaryRef dictionary = CFDictionaryRef(compositeFontReferences.get());
+        CFIndex count = CFDictionaryGetCount(dictionary);
+        if (count > 0) {
+            Vector<SimpleFontData*, 2> stash(count);
+            SimpleFontData** fonts = stash.data();
+            CFDictionaryGetKeysAndValues(dictionary, 0, (const void **)fonts);
+            while (count-- > 0 && *fonts) {
+                OwnPtr<SimpleFontData> afont = adoptPtr(*fonts++);
+                GlyphPageTreeNode::pruneTreeCustomFontData(afont.get());
+            }
+        }
+    }
+#endif
 }
 
 } // namespace WebCore

@@ -28,105 +28,92 @@
 
 #include "V8ArrayBufferViewCustom.h"
 #include "V8Binding.h"
-#include "V8BindingMacros.h"
 #include "V8DataView.h"
-#include "V8Proxy.h"
 
 namespace WebCore {
 
-v8::Handle<v8::Value> V8DataView::constructorCallback(const v8::Arguments& args)
+v8::Handle<v8::Value> V8DataView::constructorCallbackCustom(const v8::Arguments& args)
 {
-    INC_STATS("DOM.DataView.Constructor");
-
-    if (!args.IsConstructCall())
-        return throwError("DOM object constructor cannot be called as a function", V8Proxy::TypeError);
-
-    if (ConstructorMode::current() == ConstructorMode::WrapExistingObject)
-        return args.Holder();
-
     if (!args.Length()) {
         // see constructWebGLArray -- we don't seem to be able to distingish between
         // 'new DataView()' and the call used to construct the cached DataView object.
         RefPtr<DataView> dataView = DataView::create(0);
-        V8DOMWrapper::setDOMWrapper(args.Holder(), &info, dataView.get());
-        return toV8(dataView.release(), args.Holder());
+        v8::Handle<v8::Object> wrapper = args.Holder();
+        V8DOMWrapper::associateObjectWithWrapper(dataView.release(), &info, wrapper);
+        return wrapper;
     }
     if (args[0]->IsNull() || !V8ArrayBuffer::HasInstance(args[0]))
-        return V8Proxy::throwTypeError();
+        return throwTypeError(0, args.GetIsolate());
     return constructWebGLArrayWithArrayBufferArgument<DataView, char>(args, &info, v8::kExternalByteArray, false);
 }
 
-v8::Handle<v8::Value> toV8(DataView* impl)
+// FIXME: Don't need this override.
+v8::Handle<v8::Object> wrap(DataView* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
 {
-    if (!impl)
-        return v8::Null();
-    return V8DataView::wrap(impl);
+    ASSERT(impl);
+    return V8DataView::createWrapper(impl, creationContext, isolate);
 }
 
 v8::Handle<v8::Value> V8DataView::getInt8Callback(const v8::Arguments& args)
 {
     INC_STATS("DOM.DataView.getInt8");
     if (args.Length() < 1)
-        return throwError("Not enough arguments", V8Proxy::TypeError);
+        return throwNotEnoughArgumentsError(args.GetIsolate());
 
     DataView* imp = V8DataView::toNative(args.Holder());
     ExceptionCode ec = 0;
-    EXCEPTION_BLOCK(unsigned, byteOffset, toUInt32(args[0]));
+    V8TRYCATCH(unsigned, byteOffset, toUInt32(args[0]));
     int8_t result = imp->getInt8(byteOffset, ec);
-    if (UNLIKELY(ec)) {
-        V8Proxy::setDOMException(ec);
-        return v8::Handle<v8::Value>();
-    }
-    return v8::Integer::New(result);
+    if (UNLIKELY(ec))
+        return setDOMException(ec, args.GetIsolate());
+    return v8Integer(result, args.GetIsolate());
 }
 
 v8::Handle<v8::Value> V8DataView::getUint8Callback(const v8::Arguments& args)
 {
     INC_STATS("DOM.DataView.getUint8");
     if (args.Length() < 1)
-        return throwError("Not enough arguments", V8Proxy::TypeError);
+        return throwNotEnoughArgumentsError(args.GetIsolate());
 
     DataView* imp = V8DataView::toNative(args.Holder());
     ExceptionCode ec = 0;
-    EXCEPTION_BLOCK(unsigned, byteOffset, toUInt32(args[0]));
+    V8TRYCATCH(unsigned, byteOffset, toUInt32(args[0]));
     uint8_t result = imp->getUint8(byteOffset, ec);
-    if (UNLIKELY(ec)) {
-        V8Proxy::setDOMException(ec);
-        return v8::Handle<v8::Value>();
-    }
-    return v8::Integer::New(result);
+    if (UNLIKELY(ec))
+        return setDOMException(ec, args.GetIsolate());
+    return v8Integer(result, args.GetIsolate());
 }
 
 v8::Handle<v8::Value> V8DataView::setInt8Callback(const v8::Arguments& args)
 {
     INC_STATS("DOM.DataView.setInt8");
     if (args.Length() < 2)
-        return throwError("Not enough arguments", V8Proxy::TypeError);
+        return throwNotEnoughArgumentsError(args.GetIsolate());
 
     DataView* imp = V8DataView::toNative(args.Holder());
     ExceptionCode ec = 0;
-    EXCEPTION_BLOCK(unsigned, byteOffset, toUInt32(args[0]));
-    EXCEPTION_BLOCK(int, value, toInt32(args[1]));
+    V8TRYCATCH(unsigned, byteOffset, toUInt32(args[0]));
+    V8TRYCATCH(int, value, toInt32(args[1]));
     imp->setInt8(byteOffset, static_cast<int8_t>(value), ec);
     if (UNLIKELY(ec))
-        V8Proxy::setDOMException(ec);
-    return v8::Handle<v8::Value>();
+        return setDOMException(ec, args.GetIsolate());
+    return v8Undefined();
 }
 
 v8::Handle<v8::Value> V8DataView::setUint8Callback(const v8::Arguments& args)
 {
     INC_STATS("DOM.DataView.setUint8");
     if (args.Length() < 2)
-        return throwError("Not enough arguments", V8Proxy::TypeError);
+        return throwNotEnoughArgumentsError(args.GetIsolate());
 
     DataView* imp = V8DataView::toNative(args.Holder());
     ExceptionCode ec = 0;
-    EXCEPTION_BLOCK(unsigned, byteOffset, toUInt32(args[0]));
-    EXCEPTION_BLOCK(int, value, toInt32(args[1]));
+    V8TRYCATCH(unsigned, byteOffset, toUInt32(args[0]));
+    V8TRYCATCH(int, value, toInt32(args[1]));
     imp->setUint8(byteOffset, static_cast<uint8_t>(value), ec);
     if (UNLIKELY(ec))
-        V8Proxy::setDOMException(ec);
-    return v8::Handle<v8::Value>();
+        return setDOMException(ec, args.GetIsolate());
+    return v8Undefined();
 }
 
 } // namespace WebCore

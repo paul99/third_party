@@ -24,40 +24,29 @@
 
 #include "FontPlatformData.h"
 #include "SharedBuffer.h"
-#include <QFontDatabase>
 #include <QStringList>
 
 namespace WebCore {
 
-FontCustomPlatformData::~FontCustomPlatformData()
+FontPlatformData FontCustomPlatformData::fontPlatformData(int size, bool bold, bool italic, FontOrientation, FontWidthVariant, FontRenderingMode)
 {
-    QFontDatabase::removeApplicationFont(m_handle);
-}
-
-FontPlatformData FontCustomPlatformData::fontPlatformData(int size, bool bold, bool italic, FontOrientation, TextOrientation, FontWidthVariant, FontRenderingMode)
-{
-    QFont font;
-    font.setFamily(QFontDatabase::applicationFontFamilies(m_handle)[0]);
-    font.setPixelSize(size);
-    if (bold)
-        font.setWeight(QFont::Bold);
-    font.setItalic(italic);
-
-    return FontPlatformData(font);
+    Q_ASSERT(m_rawFont.isValid());
+    m_rawFont.setPixelSize(qreal(size));
+    return FontPlatformData(m_rawFont);
 }
 
 FontCustomPlatformData* createFontCustomPlatformData(SharedBuffer* buffer)
 {
     ASSERT_ARG(buffer, buffer);
 
-    int id = QFontDatabase::addApplicationFontFromData(QByteArray(buffer->data(), buffer->size()));
-    if (id == -1)
+    const QByteArray fontData(buffer->data(), buffer->size());
+    // Pixel size doesn't matter at this point, it is set in FontCustomPlatformData::fontPlatformData.
+    QRawFont rawFont(fontData, /*pixelSize = */0, QFont::PreferDefaultHinting);
+    if (!rawFont.isValid())
         return 0;
 
-    Q_ASSERT(QFontDatabase::applicationFontFamilies(id).size() > 0);
-
     FontCustomPlatformData *data = new FontCustomPlatformData;
-    data->m_handle = id;
+    data->m_rawFont = rawFont;
     return data;
 }
 

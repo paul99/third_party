@@ -27,6 +27,7 @@
 #define WebIDBIndex_h
 
 #include "WebExceptionCode.h"
+#include "WebIDBKeyPath.h"
 #include "WebIDBTransaction.h"
 #include "platform/WebString.h"
 
@@ -41,37 +42,11 @@ class WebIDBIndex {
 public:
     virtual ~WebIDBIndex() { }
 
-    virtual WebString name() const
-    {
-        WEBKIT_ASSERT_NOT_REACHED();
-        return WebString();
-    }
-    virtual WebString storeName() const
-    {
-        WEBKIT_ASSERT_NOT_REACHED();
-        return WebString();
-    }
-    virtual WebString keyPath() const
-    {
-        WEBKIT_ASSERT_NOT_REACHED();
-        return WebString();
-    }
-    virtual bool unique() const
-    {
-        WEBKIT_ASSERT_NOT_REACHED();
-        return false;
-    }
-    virtual bool multiEntry() const
-    {
-        WEBKIT_ASSERT_NOT_REACHED();
-        return false;
-    }
-
     virtual void openObjectCursor(const WebIDBKeyRange&, unsigned short direction, WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
     virtual void openKeyCursor(const WebIDBKeyRange&, unsigned short direction, WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
     virtual void count(const WebIDBKeyRange&, WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
-    virtual void getObject(const WebIDBKey&, WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
-    virtual void getKey(const WebIDBKey&, WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
+    virtual void getObject(const WebIDBKeyRange&, WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
+    virtual void getKey(const WebIDBKeyRange&, WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
 
 protected:
     WebIDBIndex() {}

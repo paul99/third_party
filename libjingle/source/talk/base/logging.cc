@@ -43,8 +43,11 @@ static const char kLibjingle[] = "libjingle";
 static const int kMaxLogLineSize = 1024 - 60;
 #endif  // OSX || ANDROID
 
-#include <iostream>
+#include <time.h>
+
+#include <ostream>
 #include <iomanip>
+#include <limits.h>
 #include <vector>
 
 #include "talk/base/logging.h"
@@ -113,19 +116,20 @@ LogMessage::StreamList LogMessage::streams_;
 // Boolean options default to false (0)
 bool LogMessage::thread_, LogMessage::timestamp_;
 
-// Program start time
-uint32 LogMessage::start_ = StartTime();
-
 // If we're in diagnostic mode, we'll be explicitly set that way; default=false.
 bool LogMessage::is_diagnostic_mode_ = false;
 
 LogMessage::LogMessage(const char* file, int line, LoggingSeverity sev,
                        LogErrorContext err_ctx, int err, const char* module)
-    : severity_(sev) {
+    : severity_(sev),
+      warn_slow_logs_delay_(WARN_SLOW_LOGS_DELAY) {
   // Android's logging facility keeps track of timestamp and thread.
 #ifndef ANDROID
   if (timestamp_) {
-    uint32 time = TimeSince(start_);
+    uint32 time = TimeSince(LogStartTime());
+    // Also ensure WallClockStartTime is initialized, so that it matches
+    // LogStartTime.
+    WallClockStartTime();
     print_stream_ << "[" << std::setfill('0') << std::setw(3) << (time / 1000)
                   << ":" << std::setw(3) << (time % 1000) << std::setfill(' ')
                   << "] ";
@@ -197,6 +201,7 @@ LogMessage::~LogMessage() {
     OutputToDebug(str, severity_);
   }
 
+  uint32 before = Time();
   // Must lock streams_ before accessing
   CritScope cs(&crit_);
   for (StreamList::iterator it = streams_.begin(); it != streams_.end(); ++it) {
@@ -204,6 +209,27 @@ LogMessage::~LogMessage() {
       OutputToStream(it->first, str);
     }
   }
+  uint32 delay = TimeSince(before);
+  if (delay >= warn_slow_logs_delay_) {
+    LogMessage slow_log_warning =
+        talk_base::LogMessage(__FILE__, __LINE__, LS_WARNING);
+    // If our warning is slow, we don't want to warn about it, because
+    // that would lead to inifinite recursion.  So, give a really big
+    // number for the delay threshold.
+    slow_log_warning.warn_slow_logs_delay_ = UINT_MAX;
+    slow_log_warning.stream() << "Slow log: took " << delay << "ms to write "
+                              << str.size() << " bytes.";
+  }
+}
+
+uint32 LogMessage::LogStartTime() {
+  static const uint32 g_start = Time();
+  return g_start;
+}
+
+uint32 LogMessage::WallClockStartTime() {
+  static const uint32 g_start_wallclock = time(NULL);
+  return g_start_wallclock;
 }
 
 void LogMessage::LogContext(int min_sev) {
@@ -216,10 +242,6 @@ void LogMessage::LogThreads(bool on) {
 
 void LogMessage::LogTimestamps(bool on) {
   timestamp_ = on;
-}
-
-void LogMessage::ResetTimestamps() {
-  start_ = Time();
 }
 
 void LogMessage::LogToDebug(int min_sev) {
@@ -419,8 +441,9 @@ void LogMessage::OutputToDebug(const std::string& str,
     // This handles dynamically allocated consoles, too.
     if (HANDLE error_handle = ::GetStdHandle(STD_ERROR_HANDLE)) {
       log_to_stderr = false;
-      unsigned long written;  // NOLINT
-      ::WriteFile(error_handle, str.data(), str.size(), &written, 0);
+      DWORD written = 0;
+      ::WriteFile(error_handle, str.data(), static_cast<DWORD>(str.size()),
+                  &written, 0);
     }
   }
 #endif  // WIN32
@@ -434,8 +457,8 @@ void LogMessage::OutputToDebug(const std::string& str,
     case LS_SENSITIVE:
       __android_log_write(ANDROID_LOG_INFO, kLibjingle, "SENSITIVE");
       if (log_to_stderr) {
-        std::cerr << "SENSITIVE";
-        std::cerr.flush();
+        fprintf(stderr, "SENSITIVE");
+        fflush(stderr);
       }
       return;
     case LS_VERBOSE:
@@ -475,8 +498,8 @@ void LogMessage::OutputToDebug(const std::string& str,
   }
 #endif  // ANDROID
   if (log_to_stderr) {
-    std::cerr << str;
-    std::cerr.flush();
+    fprintf(stderr, "%s", str.c_str());
+    fflush(stderr);
   }
 }
 

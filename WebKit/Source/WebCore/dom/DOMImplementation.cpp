@@ -27,6 +27,7 @@
 
 #include "ContentType.h"
 #include "CSSStyleSheet.h"
+#include "ContextFeatures.h"
 #include "DocumentType.h"
 #include "Element.h"
 #include "ExceptionCode.h"
@@ -48,6 +49,7 @@
 #include "RegularExpression.h"
 #include "SecurityOrigin.h"
 #include "Settings.h"
+#include "StyleSheetContents.h"
 #include "TextDocument.h"
 #include "ThreadGlobalData.h"
 #include "XMLNames.h"
@@ -66,6 +68,24 @@ static void addString(FeatureSet& set, const char* string)
 {
     set.add(string);
 }
+
+#if ENABLE(VIDEO)
+class DOMImplementationSupportsTypeClient : public MediaPlayerSupportsTypeClient {
+public:
+    DOMImplementationSupportsTypeClient(bool needsHacks, const String& host)
+        : m_needsHacks(needsHacks)
+        , m_host(host)
+    {
+    }
+
+private:
+    virtual bool mediaPlayerNeedsSiteSpecificHacks() const OVERRIDE { return m_needsHacks; }
+    virtual String mediaPlayerDocumentHost() const OVERRIDE { return m_host; }
+
+    bool m_needsHacks;
+    String m_host;
+};
+#endif
 
 #if ENABLE(SVG)
 
@@ -128,7 +148,7 @@ static bool isSVG11Feature(const String &feature, const String &version)
         addString(svgFeatures, "Style");
         addString(svgFeatures, "ViewportAttribute");
         addString(svgFeatures, "Shape");
-//      addString(svgFeatures, "Text"); // requires altGlyph, bug 6426
+        addString(svgFeatures, "Text");
         addString(svgFeatures, "BasicText");
         addString(svgFeatures, "PaintAttribute");
         addString(svgFeatures, "BasicPaintAttribute");
@@ -143,7 +163,7 @@ static bool isSVG11Feature(const String &feature, const String &version)
         addString(svgFeatures, "BasicClip");
         addString(svgFeatures, "Mask");
 #if ENABLE(FILTERS)
-//      addString(svgFeatures, "Filter");
+        addString(svgFeatures, "Filter");
         addString(svgFeatures, "BasicFilter");
 #endif
         addString(svgFeatures, "DocumentEventsAttribute");
@@ -153,7 +173,7 @@ static bool isSVG11Feature(const String &feature, const String &version)
         addString(svgFeatures, "Hyperlinking");
         addString(svgFeatures, "XlinkAttribute");
         addString(svgFeatures, "ExternalResourcesRequired");
-//      addString(svgFeatures, "View"); // buggy <view> support, bug 16962
+        addString(svgFeatures, "View");
         addString(svgFeatures, "Script");
         addString(svgFeatures, "Animation"); 
 #if ENABLE(SVG_FONTS)
@@ -276,6 +296,7 @@ PassRefPtr<Document> DOMImplementation::createDocument(const String& namespaceUR
         doc = Document::create(0, KURL());
 
     doc->setSecurityOrigin(m_document->securityOrigin());
+    doc->setContextFeatures(m_document->contextFeatures());
 
     RefPtr<Node> documentElement;
     if (!qualifiedName.isEmpty()) {
@@ -294,11 +315,10 @@ PassRefPtr<Document> DOMImplementation::createDocument(const String& namespaceUR
         return 0;
     }
 
-    // FIXME: Shouldn't this call appendChild instead?
     if (doctype)
-        doc->parserAddChild(doctype);
+        doc->appendChild(doctype);
     if (documentElement)
-        doc->parserAddChild(documentElement.release());
+        doc->appendChild(documentElement.release());
 
     return doc.release();
 }
@@ -307,15 +327,15 @@ PassRefPtr<CSSStyleSheet> DOMImplementation::createCSSStyleSheet(const String&, 
 {
     // FIXME: Title should be set.
     // FIXME: Media could have wrong syntax, in which case we should generate an exception.
-    RefPtr<CSSStyleSheet> sheet = CSSStyleSheet::create();
-    sheet->setMedia(MediaList::createAllowingDescriptionSyntax(sheet.get(), media));
-    return sheet.release();
+    RefPtr<CSSStyleSheet> sheet = CSSStyleSheet::create(StyleSheetContents::create());
+    sheet->setMediaQueries(MediaQuerySet::createAllowingDescriptionSyntax(media));
+    return sheet;
 }
 
 static const char* const validXMLMIMETypeChars = "[0-9a-zA-Z_\\-+~!$\\^{}|.%'`#&*]"; // per RFCs: 3023, 2045
 
-XMLMIMETypeRegExp::XMLMIMETypeRegExp() :
-    m_regex(adoptPtr(new RegularExpression(WTF::makeString("^", validXMLMIMETypeChars, "+/", validXMLMIMETypeChars, "+\\+xml$"), TextCaseSensitive)))
+XMLMIMETypeRegExp::XMLMIMETypeRegExp()
+    : m_regex(adoptPtr(new RegularExpression(WTF::makeString("^", validXMLMIMETypeChars, "+/", validXMLMIMETypeChars, "+\\+xml$"), TextCaseSensitive)))
 {
 }
 
@@ -351,8 +371,10 @@ PassRefPtr<HTMLDocument> DOMImplementation::createHTMLDocument(const String& tit
     RefPtr<HTMLDocument> d = HTMLDocument::create(0, KURL());
     d->open();
     d->write("<!doctype html><html><body></body></html>");
-    d->setTitle(title);
+    if (!title.isNull())
+        d->setTitle(title);
     d->setSecurityOrigin(m_document->securityOrigin());
+    d->setContextFeatures(m_document->contextFeatures());
     return d.release();
 }
 
@@ -364,57 +386,45 @@ PassRefPtr<Document> DOMImplementation::createDocument(const String& type, Frame
     // Plugins cannot take HTML and XHTML from us, and we don't even need to initialize the plugin database for those.
     if (type == "text/html")
         return HTMLDocument::create(frame, url);
-
-    // Plugins cannot take text/plain from us either.
-    if (type == "text/plain")
-        return TextDocument::create(frame, url);
-
     if (type == "application/xhtml+xml")
         return Document::createXHTML(frame, url);
 
 #if ENABLE(FTPDIR)
-    // Plugins cannot take FTP from us either.
+    // Plugins cannot take FTP from us either
     if (type == "application/x-ftp-directory")
         return FTPDirectoryDocument::create(frame, url);
 #endif
 
-    // PDF is the only image type for which a plugin can override built-in support.
-    if (Image::supportsType(type) && type != "application/pdf" && type != "text/pdf")
-        return ImageDocument::create(frame, url);
-
-#if ENABLE(VIDEO)
-     // Check to see if the type can be played by our MediaPlayer, if so create a MediaDocument as
-     // this can not be taken by plugins either.
-     if (MediaPlayer::supportsType(ContentType(type)))
-         return MediaDocument::create(frame, url);
-#endif
-
-    // The plugin database is initialized at this point if plugins are enabled
-    // which is non-zero overhead.
     PluginData* pluginData = 0;
     if (frame && frame->page() && frame->loader()->subframeLoader()->allowPlugins(NotAboutToInstantiatePlugin))
         pluginData = frame->page()->pluginData();
 
-    // At this point anything that can be supported can be overridden by plugins.
-    if (pluginData && pluginData->supportsMimeType(type))
+    // PDF is one image type for which a plugin can override built-in support.
+    // We do not want QuickTime to take over all image types, obviously.
+    if ((type == "application/pdf" || type == "text/pdf") && pluginData && pluginData->supportsMimeType(type))
         return PluginDocument::create(frame, url);
-
-    // Handle PDF for instance if it was not handled by a plugin.
     if (Image::supportsType(type))
         return ImageDocument::create(frame, url);
 
-    // Handle a text document was not handled by a plugin.
+#if ENABLE(VIDEO)
+     // Check to see if the type can be played by our MediaPlayer, if so create a MediaDocument
+    // Key system is not applicable here.
+    DOMImplementationSupportsTypeClient client(frame && frame->settings() && frame->settings()->needsSiteSpecificQuirks(), url.host());
+    if (MediaPlayer::supportsType(ContentType(type), String(), url, &client))
+         return MediaDocument::create(frame, url);
+#endif
+
+    // Everything else except text/plain can be overridden by plugins. In particular, Adobe SVG Viewer should be used for SVG, if installed.
+    // Disallowing plug-ins to use text/plain prevents plug-ins from hijacking a fundamental type that the browser is expected to handle,
+    // and also serves as an optimization to prevent loading the plug-in database in the common case.
+    if (type != "text/plain" && pluginData && pluginData->supportsMimeType(type)) 
+        return PluginDocument::create(frame, url);
     if (isTextMIMEType(type))
         return TextDocument::create(frame, url);
 
 #if ENABLE(SVG)
-    if (type == "image/svg+xml") {
-#if ENABLE(DASHBOARD_SUPPORT)    
-        Settings* settings = frame ? frame->settings() : 0;
-        if (!settings || !settings->usesDashboardBackwardCompatibilityMode())
-#endif
-            return SVGDocument::create(frame, url);
-    }
+    if (type == "image/svg+xml")
+        return SVGDocument::create(frame, url);
 #endif
     if (isXMLMIMEType(type))
         return Document::create(frame, url);

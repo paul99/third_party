@@ -21,6 +21,8 @@
 #ifndef WebContextMenu_h
 #define WebContextMenu_h
 
+#if ENABLE(CONTEXT_MENUS)
+
 #include "WebContextMenuItemData.h"
 
 #include <wtf/PassRefPtr.h>
@@ -41,13 +43,16 @@ public:
 
     void show();
     void itemSelected(const WebContextMenuItemData&);
+    Vector<WebContextMenuItemData> items() const;
 
 private:
     WebContextMenu(WebPage*);
-    
+    void menuItemsWithUserData(Vector<WebContextMenuItemData>&, RefPtr<APIObject>&) const;
+
     WebPage* m_page;
 };
 
 } // namespace WebKit
 
+#endif // ENABLE(CONTEXT_MENUS)
 #endif // WebPopupMenu_h

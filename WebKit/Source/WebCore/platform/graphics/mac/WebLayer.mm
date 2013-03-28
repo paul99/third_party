@@ -32,9 +32,11 @@
 #import "GraphicsContext.h"
 #import "GraphicsLayerCA.h"
 #import "PlatformCALayer.h"
-#import <objc/objc-runtime.h>
+#import "ThemeMac.h"
+#import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 #import <wtf/UnusedParam.h>
+#import "WebCoreSystemInterface.h"
 
 @interface CALayer(WebCoreCALayerPrivate)
 - (void)reloadValueForKeyPath:(NSString *)keyPath;
@@ -76,20 +78,66 @@ void drawLayerContents(CGContextRef context, CALayer *layer, WebCore::PlatformCA
     
     // It's important to get the clip from the context, because it may be significantly
     // smaller than the layer bounds (e.g. tiled layers)
-    CGRect clipBounds = CGContextGetClipBoundingBox(context);
+    FloatRect clipBounds = CGContextGetClipBoundingBox(context);
+
+    // Set the focus ring clip rect which needs to be in base coordinates.
+    AffineTransform transform = CGContextGetCTM(context);
+    ThemeMac::setFocusRingClipRect(transform.mapRect(clipBounds));
+
+#if PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
+    const float wastedSpaceThreshold = 0.75f;
+    const unsigned maxRectsToPaint = 5;
+
+    double clipArea = clipBounds.width() * clipBounds.height();
+    __block double totalRectArea = 0;
+    __block unsigned rectCount = 0;
+    __block Vector<FloatRect, maxRectsToPaint> dirtyRects;
+    
+    wkCALayerEnumerateRectsBeingDrawnWithBlock(layer, context, ^(CGRect rect) {
+        if (++rectCount > maxRectsToPaint)
+            return;
+
+        totalRectArea += rect.size.width * rect.size.height;
+        dirtyRects.append(rect);
+    });
+
+    if (rectCount < maxRectsToPaint && totalRectArea < clipArea * wastedSpaceThreshold) {
+        for (unsigned i = 0; i < rectCount; ++i) {
+            const FloatRect& currentRect = dirtyRects[i];
+            
+            GraphicsContextStateSaver stateSaver(graphicsContext);
+            graphicsContext.clip(currentRect);
+            
+            layerContents->platformCALayerPaintContents(graphicsContext, enclosingIntRect(currentRect));
+        }
+    } else {
+        // CGContextGetClipBoundingBox() gives us the bounds of the dirty region, so clipBounds
+        // encompasses all the dirty rects.
+        layerContents->platformCALayerPaintContents(graphicsContext, enclosingIntRect(clipBounds));
+    }
+
+#else
     IntRect clip(enclosingIntRect(clipBounds));
     layerContents->platformCALayerPaintContents(graphicsContext, clip);
+#endif
+
+    ThemeMac::setFocusRingClipRect(FloatRect());
 
     [NSGraphicsContext restoreGraphicsState];
 
     // Re-fetch the layer owner, since <rdar://problem/9125151> indicates that it might have been destroyed during painting.
     layerContents = platformLayer->owner();
     ASSERT(layerContents);
-    if (platformLayer->layerType() != PlatformCALayer::LayerTypeTileCacheLayer && layerContents && layerContents->platformCALayerShowRepaintCounter()) {
+
+    // Always update the repain count so that it's accurate even if the count itself is not shown. This will be useful
+    // for the Web Inspector feeding this information through the LayerTreeAgent. 
+    int repaintCount = layerContents->platformCALayerIncrementRepaintCount();
+
+    if (!platformLayer->usesTileCacheLayer() && layerContents && layerContents->platformCALayerShowRepaintCounter(platformLayer)) {
         bool isTiledLayer = [layer isKindOfClass:[CATiledLayer class]];
 
         char text[16]; // that's a lot of repaints
-        snprintf(text, sizeof(text), "%d", layerContents->platformCALayerIncrementRepaintCount());
+        snprintf(text, sizeof(text), "%d", repaintCount);
 
         CGRect indicatorBox = layerBounds;
         indicatorBox.size.width = 12 + 10 * strlen(text);
@@ -111,12 +159,15 @@ void drawLayerContents(CGContextRef context, CALayer *layer, WebCore::PlatformCA
         else
             CGContextSetRGBFillColor(context, 1, 1, 1, 1);
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
         CGContextSetTextMatrix(context, CGAffineTransformMakeScale(1, -1));
         CGContextSelectFont(context, "Helvetica", 22, kCGEncodingMacRoman);
         CGContextShowTextAtPoint(context, indicatorBox.origin.x + 5, indicatorBox.origin.y + 22, text, strlen(text));
-        
+#pragma clang diagnostic pop
+
         CGContextEndTransparencyLayer(context);
-        CGContextRestoreGState(context);        
+        CGContextRestoreGState(context);
     }
 
     CGContextRestoreGState(context);
@@ -154,7 +205,7 @@ void drawLayerContents(CGContextRef context, CALayer *layer, WebCore::PlatformCA
 
             [super setNeedsDisplayInRect:dirtyRect];
 
-            if (layerOwner->platformCALayerShowRepaintCounter()) {
+            if (layerOwner->platformCALayerShowRepaintCounter(platformLayer)) {
                 CGRect bounds = [self bounds];
                 CGRect indicatorRect = CGRectMake(bounds.origin.x, bounds.origin.y, 52, 27);
                 if (layerOwner->platformCALayerContentsOrientation() == WebCore::GraphicsLayer::CompositingCoordinatesBottomUp)
@@ -194,14 +245,14 @@ void drawLayerContents(CGContextRef context, CALayer *layer, WebCore::PlatformCA
     CGRect aBounds = [self bounds];
     CGPoint aPos = [self position];
 
-    NSString* selfString = [NSString stringWithFormat:@"%@<%@ 0x%08x> \"%@\" bounds(%.1f, %.1f, %.1f, %.1f) pos(%.1f, %.1f), sublayers=%d masking=%d",
+    NSString* selfString = [NSString stringWithFormat:@"%@<%@ 0x%p> \"%@\" bounds(%.1f, %.1f, %.1f, %.1f) pos(%.1f, %.1f), sublayers=%lu masking=%d",
             inPrefix,
             [self class],
             self,
             [self name],
             aBounds.origin.x, aBounds.origin.y, aBounds.size.width, aBounds.size.height, 
             aPos.x, aPos.y,
-            [[self sublayers] count],
+            static_cast<unsigned long>([[self sublayers] count]),
             [self masksToBounds]];
     
     NSMutableString* curDesc = [NSMutableString stringWithString:selfString];

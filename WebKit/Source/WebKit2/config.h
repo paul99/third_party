@@ -59,28 +59,7 @@ static const type& name() \
     return name##Value; \
 }
 
-#if PLATFORM(MAC)
-
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
-#define ENABLE_WEB_PROCESS_SANDBOX 1
-#endif
-
-#define ENABLE_PLUGIN_PROCESS 1
-
-#if PLATFORM(MAC)
-#define ENABLE_MEMORY_SAMPLER 1
-#endif
-
-#import <CoreGraphics/CoreGraphics.h>
-
-#ifdef __OBJC__
-#import <Cocoa/Cocoa.h>
-#endif
-
-
-#include <WebCore/EmptyProtocolDefinitions.h>
-
-#elif defined(WIN32) || defined(_WIN32)
+#if defined(WIN32) || defined(_WIN32)
 
 #ifndef _WIN32_WINNT
 #define _WIN32_WINNT 0x0500
@@ -103,7 +82,9 @@ static const type& name() \
 #define _WINSOCKAPI_ /* Prevent inclusion of winsock.h in windows.h */
 #endif
 
+#if !PLATFORM(QT)
 #include <WebCore/config.h>
+#endif
 #include <windows.h>
 
 #if USE(CG)
@@ -127,11 +108,19 @@ static const type& name() \
 #define PLUGIN_ARCHITECTURE_MAC 1
 #elif PLATFORM(WIN)
 #define PLUGIN_ARCHITECTURE_WIN 1
-#elif PLATFORM(GTK) && (OS(UNIX) && !OS(MAC_OS_X))
+#elif (PLATFORM(GTK) || PLATFORM(EFL)) && (OS(UNIX) && !OS(MAC_OS_X))
 #define PLUGIN_ARCHITECTURE_X11 1
+#elif PLATFORM(QT)
+// Qt handles this features.prf
 #else
 #define PLUGIN_ARCHITECTURE_UNSUPPORTED 1
 #endif
 #endif
 
 #define PLUGIN_ARCHITECTURE(ARCH) (defined PLUGIN_ARCHITECTURE_##ARCH && PLUGIN_ARCHITECTURE_##ARCH)
+
+#ifndef ENABLE_INSPECTOR_SERVER
+#if ENABLE(INSPECTOR) && (PLATFORM(QT) || PLATFORM(GTK) || PLATFORM(EFL))
+#define ENABLE_INSPECTOR_SERVER 1
+#endif
+#endif

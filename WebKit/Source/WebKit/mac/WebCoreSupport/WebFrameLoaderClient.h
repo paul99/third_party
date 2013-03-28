@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006, 2007, 2008, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2008, 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -71,7 +71,7 @@ private:
     virtual void detachedFromParent2() OVERRIDE;
     virtual void detachedFromParent3() OVERRIDE;
 
-    virtual void download(WebCore::ResourceHandle*, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&) OVERRIDE;
+    virtual void convertMainResourceLoadToDownload(WebCore::MainResourceLoader*, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&) OVERRIDE;
 
     virtual void assignIdentifierToInitialRequest(unsigned long identifier, WebCore::DocumentLoader*, const WebCore::ResourceRequest&) OVERRIDE;
 
@@ -108,8 +108,7 @@ private:
     virtual void dispatchDidFailLoad(const WebCore::ResourceError&) OVERRIDE;
     virtual void dispatchDidFinishDocumentLoad() OVERRIDE;
     virtual void dispatchDidFinishLoad() OVERRIDE;
-    virtual void dispatchDidFirstLayout() OVERRIDE;
-    virtual void dispatchDidFirstVisuallyNonEmptyLayout() OVERRIDE;
+    virtual void dispatchDidLayout(WebCore::LayoutMilestones) OVERRIDE;
 
     virtual WebCore::Frame* dispatchCreatePage(const WebCore::NavigationAction&) OVERRIDE;
     virtual void dispatchShow() OVERRIDE;
@@ -124,10 +123,9 @@ private:
 
     virtual void dispatchUnableToImplementPolicy(const WebCore::ResourceError&) OVERRIDE;
 
-    virtual void dispatchWillSendSubmitEvent(WebCore::HTMLFormElement*) OVERRIDE { }
+    virtual void dispatchWillSendSubmitEvent(PassRefPtr<WebCore::FormState>) OVERRIDE { }
     virtual void dispatchWillSubmitForm(WebCore::FramePolicyFunction, PassRefPtr<WebCore::FormState>) OVERRIDE;
 
-    virtual void dispatchDidLoadMainResource(WebCore::DocumentLoader*) OVERRIDE;
     virtual void revertToProvisionalState(WebCore::DocumentLoader*) OVERRIDE;
     virtual void setMainDocumentError(WebCore::DocumentLoader*, const WebCore::ResourceError&) OVERRIDE;
     virtual bool dispatchDidLoadResourceFromMemoryCache(WebCore::DocumentLoader*, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&, int length) OVERRIDE;
@@ -198,10 +196,9 @@ private:
 
     virtual PassRefPtr<WebCore::Frame> createFrame(const WebCore::KURL& url, const WTF::String& name, WebCore::HTMLFrameOwnerElement*,
                                         const WTF::String& referrer, bool allowsScrolling, int marginWidth, int marginHeight) OVERRIDE;
-    virtual void didTransferChildFrameToNewDocument(WebCore::Page* oldPage) OVERRIDE;
-    virtual void transferLoadingResourceFromPage(WebCore::ResourceLoader*, const WebCore::ResourceRequest&, WebCore::Page* oldPage);
     virtual PassRefPtr<WebCore::Widget> createPlugin(const WebCore::IntSize&, WebCore::HTMLPlugInElement*, const WebCore::KURL&, const Vector<WTF::String>&,
                                           const Vector<WTF::String>&, const WTF::String&, bool) OVERRIDE;
+    virtual void recreatePlugin(WebCore::Widget*) OVERRIDE;
     virtual void redirectDataToPlugin(WebCore::Widget* pluginWidget) OVERRIDE;
     
     virtual PassRefPtr<WebCore::Widget> createJavaAppletWidget(const WebCore::IntSize&, WebCore::HTMLAppletElement*, const WebCore::KURL& baseURL,
@@ -222,10 +219,6 @@ private:
     virtual void didPerformFirstNavigation() const OVERRIDE;
 
     virtual void registerForIconNotification(bool listen) OVERRIDE;
-
-#if ENABLE(JAVA_BRIDGE)
-    virtual jobject javaApplet(NSView*) OVERRIDE;
-#endif
 
 #if PLATFORM(MAC)
     virtual RemoteAXObjectRef accessibilityRemoteObject() OVERRIDE { return 0; }

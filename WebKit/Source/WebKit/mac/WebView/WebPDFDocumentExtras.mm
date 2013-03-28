@@ -26,12 +26,11 @@
 #import "WebPDFDocumentExtras.h"
 
 #import "WebTypesInternal.h"
-#import <JavaScriptCore/Vector.h>
-#import <JavaScriptCore/RetainPtr.h>
+#import <wtf/Vector.h>
+#import <wtf/RetainPtr.h>
 #import <PDFKit/PDFDocument.h>
-#import <objc/objc-runtime.h>
 
-#ifdef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED == 1050
 @interface PDFDocument (Internal)
 - (CGPDFDocumentRef)documentRef;
 @end

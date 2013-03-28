@@ -19,7 +19,8 @@
 #ifndef HistoryItemViewState_h
 #define HistoryItemViewState_h
 
-#include "PlatformString.h"
+#include <BlackBerryPlatformString.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -28,6 +29,9 @@ struct HistoryItemViewState {
     HistoryItemViewState()
         : orientation(0)
         , scale(1)
+        , minimumScale(-1.0)
+        , maximumScale(-1.0)
+        , isUserScalable(true)
         , isZoomToFitScale(false)
         , shouldReflowBlock(false)
         , shouldSaveViewState(true)
@@ -36,10 +40,14 @@ struct HistoryItemViewState {
 
     int orientation;
     double scale;
+    double minimumScale;
+    double maximumScale;
+    bool isUserScalable;
     bool isZoomToFitScale;
     bool shouldReflowBlock;
     bool shouldSaveViewState;
     String networkToken;
+    BlackBerry::Platform::String webPageClientState;
 };
 
 } // namespace WebCore

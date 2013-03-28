@@ -58,19 +58,17 @@ namespace WebCore {
             const char* sourceLimit, int32_t* offsets, bool flush, UErrorCode& err);
 
         TextEncoding m_encoding;
-        unsigned m_numBufferedBytes;
-        unsigned char m_bufferedBytes[16]; // bigger than any single multi-byte character
         mutable UConverter* m_converterICU;
         mutable bool m_needsGBKFallbacks;
     };
 
     struct ICUConverterWrapper {
+        WTF_MAKE_NONCOPYABLE(ICUConverterWrapper); WTF_MAKE_FAST_ALLOCATED;
+    public:
         ICUConverterWrapper() : converter(0) { }
         ~ICUConverterWrapper();
 
         UConverter* converter;
-
-        WTF_MAKE_NONCOPYABLE(ICUConverterWrapper);
     };
 
 } // namespace WebCore

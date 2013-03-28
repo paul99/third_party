@@ -32,6 +32,7 @@
 #import "EnvironmentUtilities.h"
 #import "NetscapePluginModule.h"
 #import "PluginProcess.h"
+#import <Foundation/NSUserDefaults.h>
 #import <WebCore/RunLoop.h>
 #import <WebKitSystemInterface.h>
 #import <mach/mach_error.h>
@@ -78,14 +79,27 @@ int PluginProcessMain(const CommandLine& commandLine)
     mach_port_t serverPort;
     kern_return_t kr = bootstrap_look_up(bootstrap_port, serviceName.utf8().data(), &serverPort);
     if (kr) {
-        fprintf(stderr, "bootstrap_look_up result: %s (%x)\n", mach_error_string(kr), kr);
+        WTFLogAlways("bootstrap_look_up result: %s (%x)\n", mach_error_string(kr), kr);
         return EXIT_FAILURE;
     }
 
     String localization = commandLine["localization"];
-    RetainPtr<CFStringRef> cfLocalization(AdoptCF, CFStringCreateWithCharacters(0, reinterpret_cast<const UniChar*>(localization.characters()), localization.length()));
-    if (cfLocalization)
+    if (!localization.isEmpty()) {
+        RetainPtr<CFStringRef> cfLocalization(AdoptCF, CFStringCreateWithCharacters(0, reinterpret_cast<const UniChar*>(localization.characters()), localization.length()));
         WKSetDefaultLocalization(cfLocalization.get());
+    }
+
+#if defined(__i386__)
+    {
+        NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+
+        NSDictionary *defaults = [[NSDictionary alloc] initWithObjectsAndKeys:[NSNumber numberWithBool:YES], @"AppleMagnifiedMode", nil];
+        [[NSUserDefaults standardUserDefaults] registerDefaults:defaults];
+        [defaults release];
+
+        [pool drain];
+    }
+#endif
 
 #if !SHOW_CRASH_REPORTER
     // Installs signal handlers that exit on a crash so that CrashReporter does not show up.
@@ -103,11 +117,16 @@ int PluginProcessMain(const CommandLine& commandLine)
     WTF::initializeMainThread();
     RunLoop::initializeMainRunLoop();
 
-    // Initialize the shim.
+#if defined(__i386__)
+    // Initialize the shim for 32-bit only.
     PluginProcess::shared().initializeShim();
-    
+#endif
+
+    // Initialize Cocoa overrides. 
+    PluginProcess::shared().initializeCocoaOverrides();
+
     // Initialize the plug-in process connection.
-    PluginProcess::shared().initialize(serverPort, RunLoop::main());
+    PluginProcess::shared().initialize(CoreIPC::Connection::Identifier(serverPort), RunLoop::main());
 
     [NSApplication sharedApplication];
 

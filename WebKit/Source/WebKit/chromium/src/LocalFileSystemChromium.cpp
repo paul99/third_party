@@ -33,15 +33,13 @@
 
 #if ENABLE(FILE_SYSTEM)
 
-#include "AsyncFileSystem.h"
 #include "CrossThreadTask.h"
 #include "Document.h"
 #include "ErrorCallback.h"
 #include "FileSystemCallback.h"
 #include "FileSystemCallbacks.h"
-#include "PlatformString.h"
+#include "FileSystemType.h"
 #include "WebFileError.h"
-#include "platform/WebFileSystem.h"
 #include "WebFileSystemCallbacksImpl.h"
 #include "WebFrameClient.h"
 #include "WebFrameImpl.h"
@@ -51,7 +49,9 @@
 #include "WorkerContext.h"
 #include "WorkerFileSystemCallbacksBridge.h"
 #include "WorkerThread.h"
+#include <public/WebFileSystem.h>
 #include <wtf/Threading.h>
+#include <wtf/text/WTFString.h>
 
 using namespace WebKit;
 
@@ -108,7 +108,8 @@ public:
 
 private:
     AllowFileSystemMainThreadBridge(WebCore::WorkerLoaderProxy* workerLoaderProxy, const String& mode, WebCommonWorkerClient* commonClient)
-        : m_workerLoaderProxy(workerLoaderProxy)
+        : m_result(false)
+        , m_workerLoaderProxy(workerLoaderProxy)
     {
         WebWorkerBase::dispatchTaskToMainThread(createCallbackTask(&allowFileSystemTask, mode, AllowCrossThreadAccess(commonClient), this));
     }
@@ -152,7 +153,7 @@ bool allowFileSystemForWorker(WebCommonWorkerClient* commonClient)
     return bridge->result();
 }
 
-void openFileSystemForWorker(WebCommonWorkerClient* commonClient, WebFileSystem::Type type, long long size, bool create, WebFileSystemCallbacks* callbacks, bool synchronous)
+void openFileSystemForWorker(WebCommonWorkerClient* commonClient, WebFileSystem::Type type, long long size, bool create, WebFileSystemCallbacks* callbacks, FileSystemSynchronousType synchronousType)
 {
     WorkerScriptController* controller = WorkerScriptController::controllerForContext();
     WorkerContext* workerContext = controller->workerContext();
@@ -167,7 +168,7 @@ void openFileSystemForWorker(WebCommonWorkerClient* commonClient, WebFileSystem:
     RefPtr<WorkerFileSystemCallbacksBridge> bridge = WorkerFileSystemCallbacksBridge::create(workerLoaderProxy, workerContext, callbacks);
     bridge->postOpenFileSystemToMainThread(commonClient, type, size, create, mode);
 
-    if (synchronous) {
+    if (synchronousType == SynchronousFileSystem) {
         if (runLoop.runInMode(workerContext, mode) == MessageQueueTerminated)
             bridge->stop();
     }
@@ -182,7 +183,12 @@ static void openFileSystemNotAllowed(ScriptExecutionContext*, PassOwnPtr<AsyncFi
     callbacks->didFail(WebKit::WebFileErrorAbort);
 }
 
-static void openFileSystemHelper(ScriptExecutionContext* context, AsyncFileSystem::Type type, PassOwnPtr<AsyncFileSystemCallbacks> callbacks, bool synchronous, long long size, CreationFlag create)
+static void deleteFileSystemNotAllowed(ScriptExecutionContext*, PassOwnPtr<AsyncFileSystemCallbacks> callbacks)
+{
+    callbacks->didFail(WebKit::WebFileErrorAbort);
+}
+
+static void openFileSystemHelper(ScriptExecutionContext* context, FileSystemType type, PassOwnPtr<AsyncFileSystemCallbacks> callbacks, FileSystemSynchronousType synchronousType, long long size, CreationFlag create)
 {
     bool allowed = true;
     ASSERT(context);
@@ -193,7 +199,7 @@ static void openFileSystemHelper(ScriptExecutionContext* context, AsyncFileSyste
         if (webView->permissionClient() && !webView->permissionClient()->allowFileSystem(webFrame))
             allowed = false;
         else
-            webFrame->client()->openFileSystem(webFrame, static_cast<WebFileSystem::Type>(type), size, create == CreateIfNotPresent, new WebFileSystemCallbacksImpl(callbacks, type));
+            webFrame->client()->openFileSystem(webFrame, static_cast<WebFileSystem::Type>(type), size, create == CreateIfNotPresent, new WebFileSystemCallbacksImpl(callbacks));
     } else {
 #if ENABLE(WORKERS)
         WorkerContext* workerContext = static_cast<WorkerContext*>(context);
@@ -202,7 +208,7 @@ static void openFileSystemHelper(ScriptExecutionContext* context, AsyncFileSyste
         if (!allowFileSystemForWorker(webWorker->commonClient()))
             allowed = false;
         else
-            openFileSystemForWorker(webWorker->commonClient(), static_cast<WebFileSystem::Type>(type), size, create == CreateIfNotPresent, new WebFileSystemCallbacksImpl(callbacks, type, context, synchronous), synchronous);
+            openFileSystemForWorker(webWorker->commonClient(), static_cast<WebFileSystem::Type>(type), size, create == CreateIfNotPresent, new WebFileSystemCallbacksImpl(callbacks, context, synchronousType), synchronousType);
 
 #else
         ASSERT_NOT_REACHED();
@@ -215,14 +221,30 @@ static void openFileSystemHelper(ScriptExecutionContext* context, AsyncFileSyste
     }
 }
 
-void LocalFileSystem::readFileSystem(ScriptExecutionContext* context, AsyncFileSystem::Type type, PassOwnPtr<AsyncFileSystemCallbacks> callbacks, bool synchronous)
+void LocalFileSystem::readFileSystem(ScriptExecutionContext* context, FileSystemType type, PassOwnPtr<AsyncFileSystemCallbacks> callbacks, FileSystemSynchronousType synchronousType)
 {
-    openFileSystemHelper(context, type, callbacks, synchronous, 0, OpenExisting);
+    openFileSystemHelper(context, type, callbacks, synchronousType, 0, OpenExisting);
 }
 
-void LocalFileSystem::requestFileSystem(ScriptExecutionContext* context, AsyncFileSystem::Type type, long long size, PassOwnPtr<AsyncFileSystemCallbacks> callbacks, bool synchronous)
+void LocalFileSystem::requestFileSystem(ScriptExecutionContext* context, FileSystemType type, long long size, PassOwnPtr<AsyncFileSystemCallbacks> callbacks, FileSystemSynchronousType synchronousType)
 {
-    openFileSystemHelper(context, type, callbacks, synchronous, size, CreateIfNotPresent);
+    openFileSystemHelper(context, type, callbacks, synchronousType, size, CreateIfNotPresent);
+}
+
+void LocalFileSystem::deleteFileSystem(ScriptExecutionContext* context, FileSystemType type, PassOwnPtr<AsyncFileSystemCallbacks> callbacks)
+{
+    ASSERT(context);
+    ASSERT(context->isDocument());
+
+    Document* document = static_cast<Document*>(context);
+    WebFrameImpl* webFrame = WebFrameImpl::fromFrame(document->frame());
+    WebKit::WebViewImpl* webView = webFrame->viewImpl();
+    if (webView->permissionClient() && !webView->permissionClient()->allowFileSystem(webFrame)) {
+        context->postTask(createCallbackTask(&deleteFileSystemNotAllowed, callbacks));
+        return;
+    }
+
+    webFrame->client()->deleteFileSystem(webFrame, static_cast<WebFileSystem::Type>(type), new WebFileSystemCallbacksImpl(callbacks));
 }
 
 } // namespace WebCore

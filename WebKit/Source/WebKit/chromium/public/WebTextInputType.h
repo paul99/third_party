@@ -43,27 +43,24 @@ enum WebTextInputType {
     // Input caret is in a specific input field, and input method may be used
     // only if it's suitable for the specific input field.
     WebTextInputTypePassword,
-
-    // FIXME: Add more text input types when necessary, eg. Number,
-    // Date, Email, URL, etc.
     WebTextInputTypeSearch,
     WebTextInputTypeEmail,
     WebTextInputTypeNumber,
     WebTextInputTypeTelephone,
     WebTextInputTypeURL,
 
-#if defined(ANDROID)
-    WebTextInputTypeTextArea,
+    // FIXME: Remove these types once Date like types are not
+    // seen as Text. For now they also exist in WebTextInputType
     WebTextInputTypeDate,
     WebTextInputTypeDateTime,
     WebTextInputTypeDateTimeLocal,
     WebTextInputTypeMonth,
     WebTextInputTypeTime,
     WebTextInputTypeWeek,
+    WebTextInputTypeTextArea,
 
     // Input caret is in a contenteditable node (not an INPUT field).
-    WebTextInputTypeContentEditable
-#endif
+    WebTextInputTypeContentEditable,
 };
 
 } // namespace WebKit

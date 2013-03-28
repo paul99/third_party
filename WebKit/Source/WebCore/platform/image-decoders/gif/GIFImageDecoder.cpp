@@ -27,11 +27,8 @@
 #include "GIFImageDecoder.h"
 
 #include "GIFImageReader.h"
+#include "PlatformInstrumentation.h"
 #include <wtf/PassOwnPtr.h>
-
-#if PLATFORM(CHROMIUM)
-#include "TraceEvent.h"
-#endif
 
 namespace WebCore {
 
@@ -130,8 +127,11 @@ ImageFrame* GIFImageDecoder::frameBufferAtIndex(size_t index)
         return 0;
 
     ImageFrame& frame = m_frameBufferCache[index];
-    if (frame.status() != ImageFrame::FrameComplete)
+    if (frame.status() != ImageFrame::FrameComplete) {
+        PlatformInstrumentation::willDecodeImage("GIF");
         decode(index + 1, GIFFullQuery);
+        PlatformInstrumentation::didDecodeImage();
+    }
     return &frame;
 }
 
@@ -230,12 +230,13 @@ bool GIFImageDecoder::haveDecodedRow(unsigned frameIndex, unsigned char* rowBuff
     if ((buffer.status() == ImageFrame::FrameEmpty) && !initFrameBuffer(frameIndex))
         return false;
 
+    ImageFrame::PixelData* currentAddress = buffer.getAddr(xBegin, yBegin);
     // Write one row's worth of data into the frame.  
     for (int x = xBegin; x < xEnd; ++x) {
         const unsigned char sourceValue = *(rowBuffer + (m_scaled ? m_scaledColumns[x] : x) - frameReader->x_offset);
         if ((!frameReader->is_transparent || (sourceValue != frameReader->tpixel)) && (sourceValue < colorMapSize)) {
             const size_t colorIndex = static_cast<size_t>(sourceValue) * 3;
-            buffer.setRGBA(x, yBegin, colorMap[colorIndex], colorMap[colorIndex + 1], colorMap[colorIndex + 2], 255);
+            buffer.setRGBA(currentAddress, colorMap[colorIndex], colorMap[colorIndex + 1], colorMap[colorIndex + 2], 255);
         } else {
             m_currentBufferSawAlpha = true;
             // We may or may not need to write transparent pixels to the buffer.
@@ -246,8 +247,9 @@ bool GIFImageDecoder::haveDecodedRow(unsigned frameIndex, unsigned char* rowBuff
             // beyond the first, or the initial passes will "show through" the
             // later ones.
             if (writeTransparentPixels)
-                buffer.setRGBA(x, yBegin, 0, 0, 0, 0);
+                buffer.setRGBA(currentAddress, 0, 0, 0, 0);
         }
+        ++currentAddress;
     }
 
     // Tell the frame to copy the row data if need be.
@@ -314,9 +316,6 @@ void GIFImageDecoder::gifComplete()
 
 void GIFImageDecoder::decode(unsigned haltAtFrame, GIFQuery query)
 {
-#if PLATFORM(CHROMIUM)
-    TRACE_EVENT("GIFImageDecoder::decode", this, 0);
-#endif
     if (failed())
         return;
 

@@ -31,8 +31,10 @@
 #ifndef WebDocument_h
 #define WebDocument_h
 
+#include "WebDraggableRegion.h"
 #include "WebNode.h"
 #include "WebSecurityOrigin.h"
+#include "platform/WebReferrerPolicy.h"
 #include "platform/WebVector.h"
 
 #if WEBKIT_IMPLEMENTATION
@@ -77,6 +79,7 @@ public:
     WEBKIT_EXPORT WebSecurityOrigin securityOrigin() const;
 
     WEBKIT_EXPORT WebString encoding() const;
+    WEBKIT_EXPORT WebString contentLanguage() const;
 
     // The url of the OpenSearch Desription Document (if any).
     WEBKIT_EXPORT WebURL openSearchDescriptionURL() const;
@@ -94,6 +97,7 @@ public:
     WEBKIT_EXPORT WebString title() const;
     WEBKIT_EXPORT WebNodeCollection all();
     WEBKIT_EXPORT void forms(WebVector<WebFormElement>&) const;
+    WEBKIT_EXPORT void images(WebVector<WebElement>&);
     WEBKIT_EXPORT WebURL completeURL(const WebString&) const;
     WEBKIT_EXPORT WebElement getElementById(const WebString&) const;
     WEBKIT_EXPORT WebNode focusedNode() const;
@@ -101,6 +105,8 @@ public:
     WEBKIT_EXPORT void cancelFullScreen();
     WEBKIT_EXPORT WebElement fullScreenElement() const;
     WEBKIT_EXPORT WebDOMEvent createEvent(const WebString& eventType);
+    WEBKIT_EXPORT WebReferrerPolicy referrerPolicy() const;
+    WEBKIT_EXPORT WebElement createElement(const WebString& tagName);
 
     // Accessibility support. These methods should only be called on the
     // top-level document, because one accessibility cache spans all of
@@ -116,6 +122,8 @@ public:
     // WebView::addUserStyleSheet which inserts styles for the lifetime of the
     // WebView.
     WEBKIT_EXPORT void insertUserStyleSheet(const WebString& sourceCode, UserStyleLevel);
+
+    WEBKIT_EXPORT WebVector<WebDraggableRegion> draggableRegions() const;
 
 #if WEBKIT_IMPLEMENTATION
     WebDocument(const WTF::PassRefPtr<WebCore::Document>&);

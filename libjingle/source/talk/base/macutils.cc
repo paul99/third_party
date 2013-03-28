@@ -1,6 +1,6 @@
 /*
  * libjingle
- * Copyright 2007--2009, Google Inc.
+ * Copyright 2007 Google Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -44,9 +44,8 @@ bool ToUtf8(const CFStringRef str16, std::string* str8) {
                                                     kCFStringEncodingUTF8)
                   + 1;
   scoped_array<char> buffer(new char[maxlen]);
-  if (!buffer.get()
-      || !CFStringGetCString(str16, buffer.get(), maxlen,
-                             kCFStringEncodingUTF8))
+  if (!buffer || !CFStringGetCString(str16, buffer.get(), maxlen,
+                                     kCFStringEncodingUTF8))
     return false;
   str8->assign(buffer.get());
   return true;
@@ -85,14 +84,6 @@ void DecodeFourChar(UInt32 fc, std::string* out) {
   out->append(ss.str());
 }
 
-std::string DecodeEvent(EventRef event) {
-  std::string str;
-  DecodeFourChar(::GetEventClass(event), &str);
-  str.push_back(':');
-  DecodeFourChar(::GetEventKind(event), &str);
-  return str;
-}
-
 static bool GetGestalt(OSType ostype, int* value) {
   ASSERT(NULL != value);
   SInt32 native_value;
@@ -126,10 +117,12 @@ MacOSVersionName GetOSVersionName() {
   int major = 0, minor = 0, bugfix = 0;
   if (!GetOSVersion(&major, &minor, &bugfix))
     return kMacOSUnknown;
-  if (major > 10)
+  if (major > 10) {
     return kMacOSNewer;
-  if ((major < 10) || (minor < 3))
+  }
+  if ((major < 10) || (minor < 3)) {
     return kMacOSOlder;
+  }
   switch (minor) {
     case 3:
       return kMacOSPanther;
@@ -137,6 +130,12 @@ MacOSVersionName GetOSVersionName() {
       return kMacOSTiger;
     case 5:
       return kMacOSLeopard;
+    case 6:
+      return kMacOSSnowLeopard;
+    case 7:
+      return kMacOSLion;
+    case 8:
+      return kMacOSMountainLion;
   }
   return kMacOSNewer;
 }
@@ -153,6 +152,13 @@ bool GetQuickTimeVersion(std::string* out) {
 }
 
 bool RunAppleScript(const std::string& script) {
+  // TODO(thaloun): Add a .mm file that contains something like this:
+  // NSString source from script
+  // NSAppleScript* appleScript = [[NSAppleScript alloc] initWithSource:&source]
+  // if (appleScript != nil) {
+  //   [appleScript executeAndReturnError:nil]
+  //   [appleScript release]
+#ifndef CARBON_DEPRECATED
   ComponentInstance component = NULL;
   AEDesc script_desc;
   AEDesc result_data;
@@ -213,8 +219,12 @@ bool RunAppleScript(const std::string& script) {
   }
   CloseComponent(component);
   return true;
+#else
+  // TODO(thaloun): Support applescripts with the NSAppleScript API.
+  return false;
+#endif  // CARBON_DEPRECATED
 }
-#endif
+#endif  // OSX
 
 ///////////////////////////////////////////////////////////////////////////////
 

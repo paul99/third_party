@@ -26,6 +26,8 @@
 #ifndef NetscapePlugin_h
 #define NetscapePlugin_h
 
+#if ENABLE(NETSCAPE_PLUGIN_API)
+
 #include "NetscapePluginModule.h"
 #include "Plugin.h"
 #include <WebCore/AffineTransform.h>
@@ -51,6 +53,9 @@ public:
     virtual ~NetscapePlugin();
 
     static PassRefPtr<NetscapePlugin> fromNPP(NPP);
+
+    // In-process NetscapePlugins don't support asynchronous initialization.
+    virtual bool isBeingAsynchronouslyInitialized() const { return false; }
 
 #if PLATFORM(MAC)
     NPError setDrawingModel(NPDrawingModel);
@@ -101,8 +106,6 @@ public:
     NPObject* windowScriptNPObject();
     NPObject* pluginElementNPObject();
 
-    bool tryToShortCircuitInvoke(NPObject*, NPIdentifier methodName, const NPVariant* arguments, uint32_t argumentCount, bool& returnValue, NPVariant& result);
-
     void cancelStreamLoad(NetscapePluginStream*);
     void removePluginStream(NetscapePluginStream*);
 
@@ -143,6 +146,7 @@ private:
     NetscapePlugin(PassRefPtr<NetscapePluginModule> pluginModule);
 
     void callSetWindow();
+    void callSetWindowInvisible();
     bool shouldLoadSrcURL();
     NetscapePluginStream* streamFromID(uint64_t streamID);
     void stopAllStreams();
@@ -175,6 +179,7 @@ private:
     virtual PlatformLayer* pluginLayer();
 #endif
     virtual bool isTransparent();
+    virtual bool wantsWheelEvents() OVERRIDE;
     virtual void geometryDidChange(const WebCore::IntSize& pluginSize, const WebCore::IntRect& clipRect, const WebCore::AffineTransform& pluginToRootViewTransform);
     virtual void visibilityDidChange();
     virtual void frameDidFinishLoading(uint64_t requestID);
@@ -198,6 +203,14 @@ private:
     virtual bool handleContextMenuEvent(const WebMouseEvent&);
     virtual bool handleKeyboardEvent(const WebKeyboardEvent&);
     virtual void setFocus(bool);
+
+    virtual bool handleEditingCommand(const String& commandName, const String& argument) OVERRIDE;
+    virtual bool isEditingCommandEnabled(const String&) OVERRIDE;
+
+    virtual bool shouldAllowScripting() OVERRIDE;
+    
+    virtual bool handlesPageScaleFactor() OVERRIDE;
+
     virtual NPObject* pluginScriptableNPObject();
 
 #if PLATFORM(MAC)
@@ -207,12 +220,16 @@ private:
 
     virtual uint64_t pluginComplexTextInputIdentifier() const;
     virtual void sendComplexTextInput(const String& textInput);
+    virtual void setLayerHostingMode(LayerHostingMode) OVERRIDE;
 
     void pluginFocusOrWindowFocusChanged();
     void setComplexTextInputEnabled(bool);
+
+    void updatePluginLayer();
 #endif
 
     virtual void contentsScaleFactorChanged(float);
+    virtual void storageBlockingStateChanged(bool);
     virtual void privateBrowsingStateChanged(bool);
     virtual bool getFormValue(String& formValue);
     virtual bool handleScroll(WebCore::ScrollDirection, WebCore::ScrollGranularity);
@@ -222,15 +239,22 @@ private:
     bool supportsSnapshotting() const;
 
     // Convert the given point from plug-in coordinates to root view coordinates.
-    WebCore::IntPoint convertToRootView(const WebCore::IntPoint&) const;
+    virtual WebCore::IntPoint convertToRootView(const WebCore::IntPoint&) const OVERRIDE;
 
     // Convert the given point from root view coordinates to plug-in coordinates. Returns false if the point can't be
     // converted (if the transformation matrix isn't invertible).
     bool convertFromRootView(const WebCore::IntPoint& pointInRootViewCoordinates, WebCore::IntPoint& pointInPluginCoordinates);
 
+    void updateNPNPrivateMode();
+
 #if PLUGIN_ARCHITECTURE(WIN)
     static BOOL WINAPI hookedTrackPopupMenu(HMENU, UINT uFlags, int x, int y, int nReserved, HWND, const RECT*);
     void scheduleWindowedGeometryUpdate();
+#endif
+
+#if PLUGIN_ARCHITECTURE(X11)
+    bool platformPostInitializeWindowed(bool needsXEmbed, uint64_t windowID);
+    bool platformPostInitializeWindowless();
 #endif
 
     uint64_t m_nextRequestID;
@@ -262,7 +286,9 @@ private:
     bool m_isWindowed;
     bool m_isTransparent;
     bool m_inNPPNew;
-    bool m_loadManually;
+    bool m_shouldUseManualLoader;
+    bool m_hasCalledSetWindow;
+
     RefPtr<NetscapePluginStream> m_manualStream;
     Vector<bool, 8> m_popupEnabledStates;
 
@@ -293,9 +319,12 @@ private:
 
         WebCore::RunLoop::Timer<Timer> m_timer;
     };
-    typedef HashMap<unsigned, Timer*> TimerMap;
+    typedef HashMap<unsigned, OwnPtr<Timer> > TimerMap;
     TimerMap m_timers;
     unsigned m_nextTimerID;
+
+    bool m_privateBrowsingState;
+    bool m_storageBlockingState;
 
 #if PLUGIN_ARCHITECTURE(MAC)
     NPDrawingModel m_drawingModel;
@@ -303,6 +332,7 @@ private:
 
     RetainPtr<PlatformLayer> m_pluginLayer;
     bool m_pluginReturnsNonretainedLayer;
+    LayerHostingMode m_layerHostingMode;
 
     NPCocoaEvent* m_currentMouseEvent;
 
@@ -341,6 +371,9 @@ private:
 #elif PLUGIN_ARCHITECTURE(X11)
     Pixmap m_drawable;
     Display* m_pluginDisplay;
+#if PLATFORM(GTK)
+    GtkWidget* m_platformPluginWidget;
+#endif
 
 public: // Need to call it in the NPN_GetValue browser callback.
     static Display* x11HostDisplay();
@@ -348,5 +381,7 @@ public: // Need to call it in the NPN_GetValue browser callback.
 };
 
 } // namespace WebKit
+
+#endif // ENABLE(NETSCAPE_PLUGIN_API)
 
 #endif // NetscapePlugin_h

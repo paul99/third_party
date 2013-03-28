@@ -20,16 +20,17 @@
 #include "config.h"
 #include "qwebhistory.h"
 #include "qwebhistory_p.h"
-#include "qwebframe_p.h"
 
 #include "BackForwardListImpl.h"
+#include "Frame.h"
 #include "IconDatabaseBase.h"
 #include "Image.h"
 #include "IntSize.h"
 #include "KURL.h"
 #include "Page.h"
 #include "PageGroup.h"
-#include "PlatformString.h"
+#include <QWebPageAdapter.h>
+#include <wtf/text/WTFString.h>
 
 #include <QSharedData>
 #include <QDebug>
@@ -53,13 +54,13 @@ enum {
   the functions used to access them.
 
   \table
-  \header \o Function      \o Description
-  \row    \o title()       \o The page title.
-  \row    \o url()         \o The location of the page.
-  \row    \o originalUrl() \o The URL used to access the page.
-  \row    \o lastVisited() \o The date and time of the user's last visit to the page.
-  \row    \o icon()        \o The icon associated with the page that was provided by the server.
-  \row    \o userData()    \o The user specific data that was stored with the history item.
+  \header \li Function      \li Description
+  \row    \li title()       \li The page title.
+  \row    \li url()         \li The location of the page.
+  \row    \li originalUrl() \li The URL used to access the page.
+  \row    \li lastVisited() \li The date and time of the user's last visit to the page.
+  \row    \li icon()        \li The icon associated with the page that was provided by the server.
+  \row    \li userData()    \li The user specific data that was stored with the history item.
   \endtable
 
   \note QWebHistoryItem objects are value based, but \e{explicitly shared}. Changing
@@ -158,7 +159,7 @@ QDateTime QWebHistoryItem::lastVisited() const
 QIcon QWebHistoryItem::icon() const
 {
     if (d->item)
-        return *WebCore::iconDatabase().synchronousIconForPageURL(d->item->url(), WebCore::IntSize(16, 16))->nativeImageForCurrentFrame();
+        return *WebCore::iconDatabase().synchronousNativeIconForPageURL(d->item->url(), WebCore::IntSize(16, 16));
 
     return QIcon();
 }
@@ -552,9 +553,9 @@ QDataStream& operator>>(QDataStream& source, QWebHistory& history)
     return source;
 }
 
-QWebPagePrivate* QWebHistoryPrivate::page()
+QWebPageAdapter* QWebHistoryPrivate::page()
 {
-    return QWebFramePrivate::kit(static_cast<WebCore::BackForwardListImpl*>(lst)->page()->mainFrame())->page()->handle();
+    return QWebPageAdapter::kit(static_cast<WebCore::BackForwardListImpl*>(lst)->page());
 }
 
 WebCore::HistoryItem* QWebHistoryItemPrivate::core(const QWebHistoryItem* q)

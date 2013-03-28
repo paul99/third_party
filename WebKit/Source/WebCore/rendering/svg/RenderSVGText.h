@@ -36,35 +36,33 @@ class RenderSVGInlineText;
 class RenderSVGText : public RenderSVGBlock {
 public:
     RenderSVGText(SVGTextElement*);
+    virtual ~RenderSVGText();
 
     virtual bool isChildAllowed(RenderObject*, RenderStyle*) const;
 
     void setNeedsPositioningValuesUpdate() { m_needsPositioningValuesUpdate = true; }
     virtual void setNeedsTransformUpdate() { m_needsTransformUpdate = true; }
+    void setNeedsTextMetricsUpdate() { m_needsTextMetricsUpdate = true; }
     virtual FloatRect repaintRectInLocalCoordinates() const;
 
     static RenderSVGText* locateRenderSVGTextAncestor(RenderObject*);
     static const RenderSVGText* locateRenderSVGTextAncestor(const RenderObject*);
 
     bool needsReordering() const { return m_needsReordering; }
-
-    // Call this method when either the children of a DOM text element have changed, or the length of
-    // the text in any child element has changed.
-    void invalidateTextPositioningElements();
-
-    void layoutAttributesChanged(RenderObject*);
-    void layoutAttributesWillBeDestroyed(RenderSVGInlineText*, Vector<SVGTextLayoutAttributes*>& affectedAttributes);
-    void rebuildLayoutAttributes(bool performFullRebuild = false);
-    void rebuildLayoutAttributes(Vector<SVGTextLayoutAttributes*>& affectedAttributes);
-
     Vector<SVGTextLayoutAttributes*>& layoutAttributes() { return m_layoutAttributes; }
+
+    void subtreeChildWasAdded(RenderObject*);
+    void subtreeChildWillBeRemoved(RenderObject*, Vector<SVGTextLayoutAttributes*, 2>& affectedAttributes);
+    void subtreeChildWasRemoved(const Vector<SVGTextLayoutAttributes*, 2>& affectedAttributes);
+    void subtreeStyleDidChange(RenderSVGInlineText*);
+    void subtreeTextDidChange(RenderSVGInlineText*);
 
 private:
     virtual const char* renderName() const { return "RenderSVGText"; }
     virtual bool isSVGText() const { return true; }
 
     virtual void paint(PaintInfo&, const LayoutPoint&);
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction);
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) OVERRIDE;
     virtual bool nodeAtFloatPoint(const HitTestRequest&, HitTestResult&, const FloatPoint& pointInParent, HitTestAction);
     virtual VisiblePosition positionForPoint(const LayoutPoint&);
 
@@ -73,12 +71,15 @@ private:
 
     virtual void absoluteQuads(Vector<FloatQuad>&, bool* wasFixed) const;
 
-    virtual LayoutRect clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer) const;
-    virtual void computeRectForRepaint(RenderBoxModelObject* repaintContainer, LayoutRect&, bool fixed = false) const;
-    virtual void computeFloatRectForRepaint(RenderBoxModelObject* repaintContainer, FloatRect&, bool fixed = false) const;
+    virtual LayoutRect clippedOverflowRectForRepaint(const RenderLayerModelObject* repaintContainer) const OVERRIDE;
+    virtual void computeRectForRepaint(const RenderLayerModelObject* repaintContainer, LayoutRect&, bool fixed = false) const OVERRIDE;
+    virtual void computeFloatRectForRepaint(const RenderLayerModelObject* repaintContainer, FloatRect&, bool fixed = false) const OVERRIDE;
 
-    virtual void mapLocalToContainer(RenderBoxModelObject* repaintContainer, bool useTransforms, bool fixed, TransformState&, bool* wasFixed = 0) const;
+    virtual void mapLocalToContainer(const RenderLayerModelObject* repaintContainer, TransformState&, MapCoordinatesFlags = ApplyContainerFlip, bool* wasFixed = 0) const OVERRIDE;
+    virtual const RenderObject* pushMappingToContainer(const RenderLayerModelObject* ancestorToStopAt, RenderGeometryMap&) const OVERRIDE;
     virtual void addChild(RenderObject* child, RenderObject* beforeChild = 0);
+    virtual void removeChild(RenderObject*) OVERRIDE;
+    virtual void willBeDestroyed() OVERRIDE;
 
     virtual FloatRect objectBoundingBox() const { return frameRect(); }
     virtual FloatRect strokeBoundingBox() const;
@@ -90,9 +91,12 @@ private:
     virtual RenderBlock* firstLineBlock() const;
     virtual void updateFirstLetter();
 
+    bool shouldHandleSubtreeMutations() const;
+
     bool m_needsReordering : 1;
     bool m_needsPositioningValuesUpdate : 1;
     bool m_needsTransformUpdate : 1;
+    bool m_needsTextMetricsUpdate : 1;
     AffineTransform m_localTransform;
     SVGTextLayoutAttributesBuilder m_layoutAttributesBuilder;
     Vector<SVGTextLayoutAttributes*> m_layoutAttributes;

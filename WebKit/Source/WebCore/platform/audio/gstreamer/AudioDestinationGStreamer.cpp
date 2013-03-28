@@ -24,7 +24,7 @@
 
 #include "AudioChannel.h"
 #include "AudioSourceProvider.h"
-#include "GOwnPtr.h"
+#include <wtf/gobject/GOwnPtr.h>
 #include "GRefPtrGStreamer.h"
 #include "WebKitWebAudioSourceGStreamer.h"
 #include <gst/gst.h>
@@ -36,9 +36,9 @@ namespace WebCore {
 // needs to handle this number of frames per cycle as well.
 const unsigned framesToPull = 128;
 
-PassOwnPtr<AudioDestination> AudioDestination::create(AudioSourceProvider& provider, float sampleRate)
+PassOwnPtr<AudioDestination> AudioDestination::create(AudioIOCallback& callback, float sampleRate)
 {
-    return adoptPtr(new AudioDestinationGStreamer(provider, sampleRate));
+    return adoptPtr(new AudioDestinationGStreamer(callback, sampleRate));
 }
 
 float AudioDestination::hardwareSampleRate()
@@ -51,23 +51,18 @@ static void onGStreamerWavparsePadAddedCallback(GstElement* element, GstPad* pad
     destination->finishBuildingPipelineAfterWavParserPadReady(pad);
 }
 
-AudioDestinationGStreamer::AudioDestinationGStreamer(AudioSourceProvider& provider, float sampleRate)
-    : m_provider(provider)
-    , m_renderBus(2, framesToPull, true)
+AudioDestinationGStreamer::AudioDestinationGStreamer(AudioIOCallback& callback, float sampleRate)
+    : m_callback(callback)
+    , m_renderBus(2, framesToPull, false)
     , m_sampleRate(sampleRate)
     , m_isPlaying(false)
 {
-    static bool gstInitialized = false;
-    if (!gstInitialized)
-        gstInitialized = gst_init_check(0, 0, 0);
-    ASSERT_WITH_MESSAGE(gstInitialized, "GStreamer initialization failed");
-
     m_pipeline = gst_pipeline_new("play");
 
     GstElement* webkitAudioSrc = reinterpret_cast<GstElement*>(g_object_new(WEBKIT_TYPE_WEB_AUDIO_SRC,
                                                                             "rate", sampleRate,
                                                                             "bus", &m_renderBus,
-                                                                            "provider", &m_provider,
+                                                                            "provider", &m_callback,
                                                                             "frames", framesToPull, NULL));
 
     GstElement* wavParser = gst_element_factory_make("wavparse", 0);

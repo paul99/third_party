@@ -34,10 +34,10 @@
 #include "BlobData.h"
 #include "BlobRegistry.h"
 #include "BlobStorageData.h"
-#include "PlatformString.h"
 #include <wtf/HashMap.h>
 #include <wtf/text/CString.h>
 #include <wtf/text/StringHash.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 
@@ -50,16 +50,18 @@ class ResourceResponse;
 
 // BlobRegistryImpl is not thread-safe. It should only be called from main thread.
 class BlobRegistryImpl : public BlobRegistry {
+    WTF_MAKE_FAST_ALLOCATED;
 public:
     virtual ~BlobRegistryImpl() { }
 
     virtual void registerBlobURL(const KURL&, PassOwnPtr<BlobData>);
     virtual void registerBlobURL(const KURL&, const KURL& srcURL);
     virtual void unregisterBlobURL(const KURL&);
-    virtual PassRefPtr<ResourceHandle> createResourceHandle(const ResourceRequest&, ResourceHandleClient*);
     virtual bool loadResourceSynchronously(const ResourceRequest&, ResourceError&, ResourceResponse&, Vector<char>& data);
 
     PassRefPtr<BlobStorageData> getBlobDataFromURL(const KURL&) const;
+
+    PassRefPtr<ResourceHandle> createResourceHandle(const ResourceRequest&, ResourceHandleClient*);
 
 private:
     bool shouldLoadResource(const ResourceRequest& request) const;

@@ -26,6 +26,8 @@
 #import "config.h"
 #import "NetscapePluginModule.h"
 
+#if ENABLE(NETSCAPE_PLUGIN_API)
+
 #import "PluginProcessProxy.h"
 #import <WebCore/WebCoreNSStringExtras.h>
 #import <wtf/HashSet.h>
@@ -91,14 +93,11 @@ static bool getPluginArchitecture(CFBundleRef bundle, PluginModuleInfo& plugin)
 
 static RetainPtr<CFDictionaryRef> contentsOfPropertyListAtURL(CFURLRef propertyListURL)
 {
-    CFDataRef propertyListData;
-    CFURLCreateDataAndPropertiesFromResource(kCFAllocatorDefault, propertyListURL, &propertyListData, 0, 0, 0);
+    RetainPtr<NSData> propertyListData = adoptNS([[NSData alloc] initWithContentsOfURL:(NSURL *)propertyListURL]);
     if (!propertyListData)
         return 0;
 
-    RetainPtr<CFPropertyListRef> propertyList(AdoptCF, CFPropertyListCreateWithData(kCFAllocatorDefault, propertyListData, kCFPropertyListImmutable, 0, 0));
-    CFRelease(propertyListData);
-
+    RetainPtr<CFPropertyListRef> propertyList(AdoptCF, CFPropertyListCreateWithData(kCFAllocatorDefault, (CFDataRef)propertyListData.get(), kCFPropertyListImmutable, 0, 0));
     if (!propertyList)
         return 0;
 
@@ -353,11 +352,10 @@ static bool getPluginInfoFromCarbonResources(CFBundleRef bundle, PluginModuleInf
 
 bool NetscapePluginModule::getPluginInfo(const String& pluginPath, PluginModuleInfo& plugin)
 {
-    RetainPtr<CFStringRef> bundlePath(AdoptCF, pluginPath.createCFString());
-    RetainPtr<CFURLRef> bundleURL(AdoptCF, CFURLCreateWithFileSystemPath(kCFAllocatorDefault, bundlePath.get(), kCFURLPOSIXPathStyle, false));
+    RetainPtr<CFURLRef> bundleURL = adoptCF(CFURLCreateWithFileSystemPath(kCFAllocatorDefault, pluginPath.createCFString().get(), kCFURLPOSIXPathStyle, false));
     
     // Try to initialize the bundle.
-    RetainPtr<CFBundleRef> bundle(AdoptCF, CFBundleCreate(kCFAllocatorDefault, bundleURL.get()));
+    RetainPtr<CFBundleRef> bundle = adoptCF(CFBundleCreate(kCFAllocatorDefault, bundleURL.get()));
     if (!bundle)
         return false;
     
@@ -396,11 +394,9 @@ bool NetscapePluginModule::getPluginInfo(const String& pluginPath, PluginModuleI
 
 bool NetscapePluginModule::createPluginMIMETypesPreferences(const String& pluginPath)
 {
-    RetainPtr<CFStringRef> bundlePath(AdoptCF, pluginPath.createCFString());
-    RetainPtr<CFURLRef> bundleURL(AdoptCF, CFURLCreateWithFileSystemPath(kCFAllocatorDefault, bundlePath.get(), kCFURLPOSIXPathStyle, false));
+    RetainPtr<CFURLRef> bundleURL = adoptCF(CFURLCreateWithFileSystemPath(kCFAllocatorDefault, pluginPath.createCFString().get(), kCFURLPOSIXPathStyle, false));
     
-    // Try to initialize the bundle.
-    RetainPtr<CFBundleRef> bundle(AdoptCF, CFBundleCreate(kCFAllocatorDefault, bundleURL.get()));
+    RetainPtr<CFBundleRef> bundle = adoptCF(CFBundleCreate(kCFAllocatorDefault, bundleURL.get()));
     if (!bundle)
         return false;
 
@@ -469,17 +465,14 @@ void NetscapePluginModule::determineQuirks()
         // Flash supports snapshotting.
         m_pluginQuirks.add(PluginQuirks::SupportsSnapshotting);
 
-        // We can short circuit some NPRuntime calls during initialization.
-        m_pluginQuirks.add(PluginQuirks::CanShortCircuitSomeNPRuntimeCallsDuringInitialization);
-
         // Flash returns a retained Core Animation layer.
         m_pluginQuirks.add(PluginQuirks::ReturnsRetainedCoreAnimationLayer);
     }
 
     if (plugin.bundleIdentifier == "com.microsoft.SilverlightPlugin") {
         // Silverlight doesn't explicitly opt into transparency, so we'll do it whenever
-        // there's a 'background' attribute.
-        m_pluginQuirks.add(PluginQuirks::MakeTransparentIfBackgroundAttributeExists);
+        // there's a 'background' attribute that's set to a transparent color.
+        m_pluginQuirks.add(PluginQuirks::MakeOpaqueUnlessTransparentSilverlightBackgroundAttributeExists);
 
         // Silverlight has a workaround for a leak in Safari 2. This workaround is
         // applied when the user agent does not contain "Version/3" so we append it
@@ -521,6 +514,13 @@ void NetscapePluginModule::determineQuirks()
         m_pluginQuirks.add(PluginQuirks::AllowHalfBakedQuickDrawSupport);
     }
 #endif
+
+    if (plugin.bundleIdentifier == "com.adobe.acrobat.pdfviewerNPAPI") {
+        // The Adobe Reader plug-in wants wheel events.
+        m_pluginQuirks.add(PluginQuirks::WantsWheelEvents);
+    }
 }
 
 } // namespace WebKit
+
+#endif // ENABLE(NETSCAPE_PLUGIN_API)

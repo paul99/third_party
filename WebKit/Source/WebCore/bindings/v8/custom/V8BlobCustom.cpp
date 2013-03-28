@@ -31,22 +31,94 @@
 #include "config.h"
 #include "Blob.h"
 
+#include "Dictionary.h"
+#include "V8ArrayBuffer.h"
+#include "V8ArrayBufferView.h"
+#include "V8Binding.h"
 #include "V8Blob.h"
 #include "V8File.h"
-#include "V8Proxy.h"
+#include "V8Utilities.h"
+#include "WebKitBlobBuilder.h"
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
 
-v8::Handle<v8::Value> toV8(Blob* impl)
+v8::Handle<v8::Object> wrap(Blob* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
 {
-    if (!impl)
-        return v8::Null();
-
+    ASSERT(impl);
     if (impl->isFile())
-        return toV8(static_cast<File*>(impl));
+        return wrap(toFile(impl), creationContext, isolate);
+    return V8Blob::createWrapper(impl, creationContext, isolate);
+}
 
-    return V8Blob::wrap(impl);
+v8::Handle<v8::Value> V8Blob::constructorCallbackCustom(const v8::Arguments& args)
+{
+    ScriptExecutionContext* context = getScriptExecutionContext();
+
+    if (!args.Length()) {
+        RefPtr<Blob> blob = Blob::create();
+        return toV8(blob.get(), args.Holder(), args.GetIsolate());
+    }
+
+    v8::Local<v8::Value> firstArg = args[0];
+    if (!firstArg->IsArray())
+        return throwTypeError("First argument of the constructor is not of type Array", args.GetIsolate());
+
+    String type;
+    String endings = ASCIILiteral("transparent");
+
+    if (args.Length() > 1) {
+        if (!args[1]->IsObject())
+            return throwTypeError("Second argument of the constructor is not of type Object", args.GetIsolate());
+
+        V8TRYCATCH(Dictionary, dictionary, Dictionary(args[1], args.GetIsolate()));
+
+        V8TRYCATCH(bool, containsEndings, dictionary.get("endings", endings));
+        if (containsEndings) {
+            if (endings != "transparent" && endings != "native")
+                return throwTypeError("The endings property must be either \"transparent\" or \"native\"", args.GetIsolate());
+        }
+
+        V8TRYCATCH(bool, containsType, dictionary.get("type", type));
+        UNUSED_PARAM(containsType);
+        if (!type.containsOnlyASCII())
+            return throwError(v8SyntaxError, "type must consist of ASCII characters", args.GetIsolate());
+        type.makeLower();
+    }
+
+    ASSERT(endings == "transparent" || endings == "native");
+
+    BlobBuilder blobBuilder;
+
+    V8TRYCATCH(v8::Local<v8::Array>, blobParts, v8::Local<v8::Array>::Cast(firstArg));
+    uint32_t length = blobParts->Length();
+
+    for (uint32_t i = 0; i < length; ++i) {
+        v8::Local<v8::Value> item = blobParts->Get(v8::Uint32::New(i));
+        ASSERT(!item.IsEmpty());
+#if ENABLE(BLOB)
+        if (V8ArrayBuffer::HasInstance(item)) {
+            ArrayBuffer* arrayBuffer = V8ArrayBuffer::toNative(v8::Handle<v8::Object>::Cast(item));
+            ASSERT(arrayBuffer);
+            blobBuilder.append(context, arrayBuffer);
+        } else if (V8ArrayBufferView::HasInstance(item)) {
+            ArrayBufferView* arrayBufferView = V8ArrayBufferView::toNative(v8::Handle<v8::Object>::Cast(item));
+            ASSERT(arrayBufferView);
+            blobBuilder.append(arrayBufferView);
+        } else
+#endif
+        if (V8Blob::HasInstance(item)) {
+            Blob* blob = V8Blob::toNative(v8::Handle<v8::Object>::Cast(item));
+            ASSERT(blob);
+            blobBuilder.append(blob);
+        } else {
+            V8TRYCATCH(String, stringValue, toWebCoreString(item));
+            blobBuilder.append(stringValue, endings);
+        }
+    }
+
+    RefPtr<Blob> blob = blobBuilder.getBlob(type);
+    return toV8(blob.get(), args.Holder(), args.GetIsolate());
 }
 
 } // namespace WebCore

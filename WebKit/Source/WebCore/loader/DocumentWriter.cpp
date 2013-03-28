@@ -58,6 +58,7 @@ DocumentWriter::DocumentWriter(Frame* frame)
     : m_frame(frame)
     , m_hasReceivedSomeData(false)
     , m_encodingWasChosenByUser(false)
+    , m_state(NotStartedWritingState)
 {
 }
 
@@ -124,10 +125,16 @@ void DocumentWriter::begin(const KURL& urlReference, bool dispatch, Document* ow
 
     // FIXME: Do we need to consult the content security policy here about blocked plug-ins?
 
-    bool resetScripting = !(m_frame->loader()->stateMachine()->isDisplayingInitialEmptyDocument() && m_frame->document()->isSecureTransitionTo(url));
-    m_frame->loader()->clear(resetScripting, resetScripting);
+    bool shouldReuseDefaultView = m_frame->loader()->stateMachine()->isDisplayingInitialEmptyDocument() && m_frame->document()->isSecureTransitionTo(url);
+    if (shouldReuseDefaultView)
+        document->takeDOMWindowFrom(m_frame->document());
+    else
+        document->createDOMWindow();
+
+    m_frame->loader()->clear(document.get(), !shouldReuseDefaultView, !shouldReuseDefaultView);
     clear();
-    if (resetScripting)
+
+    if (!shouldReuseDefaultView)
         m_frame->script()->updatePlatformScriptObjects();
 
     m_frame->loader()->setOutgoingReferrer(url);
@@ -140,9 +147,6 @@ void DocumentWriter::begin(const KURL& urlReference, bool dispatch, Document* ow
         document->setSecurityOrigin(ownerDocument->securityOrigin());
     }
 
-    m_frame->domWindow()->setURL(document->url());
-    m_frame->domWindow()->setSecurityOrigin(document->securityOrigin());
-
     m_frame->loader()->didBeginDocument(dispatch);
 
     document->implicitOpen();
@@ -154,6 +158,8 @@ void DocumentWriter::begin(const KURL& urlReference, bool dispatch, Document* ow
 
     if (m_frame->view() && m_frame->loader()->client()->hasHTMLView())
         m_frame->view()->setContentsSize(IntSize());
+
+    m_state = StartedWritingState;
 }
 
 TextResourceDecoder* DocumentWriter::createDecoderIfNeeded()
@@ -203,21 +209,26 @@ void DocumentWriter::reportDataReceived()
 
 void DocumentWriter::addData(const char* bytes, size_t length)
 {
+    // Check that we're inside begin()/end().
+    // FIXME: Change these to ASSERT once https://bugs.webkit.org/show_bug.cgi?id=80427 has
+    // been resolved.
+    if (m_state == NotStartedWritingState)
+        CRASH();
+    if (m_state == FinishedWritingState)
+        CRASH();
+
+    ASSERT(m_parser);
     m_parser->appendBytes(this, bytes, length);
 }
 
 void DocumentWriter::end()
 {
-    m_frame->loader()->didEndDocument();
-    endIfNotLoadingMainResource();
-}
+    ASSERT(m_frame->page());
+    ASSERT(m_frame->document());
 
-void DocumentWriter::endIfNotLoadingMainResource()
-{
-    // FIXME: This isn't really the check we should be doing. We should re-work
-    // how we end parsing to match the model in HTML5.
-    if (m_frame->loader()->isLoadingMainResource() || !m_frame->page() || !m_frame->document())
-        return;
+    // The parser is guaranteed to be released after this point. begin() would
+    // have to be called again before we can start writing more data.
+    m_state = FinishedWritingState;
 
     // http://bugs.webkit.org/show_bug.cgi?id=10854
     // The frame's last ref may be removed and it can be deleted by checkCompleted(), 
@@ -236,14 +247,13 @@ void DocumentWriter::endIfNotLoadingMainResource()
 
 void DocumentWriter::setEncoding(const String& name, bool userChosen)
 {
-    m_frame->loader()->willSetEncoding();
     m_encoding = name;
     m_encodingWasChosenByUser = userChosen;
 }
 
 void DocumentWriter::setDocumentWasLoadedAsPartOfNavigation()
 {
-    ASSERT(!m_parser->isStopped());
+    ASSERT(m_parser && !m_parser->isStopped());
     m_parser->setDocumentWasLoadedAsPartOfNavigation();
 }
 

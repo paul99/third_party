@@ -27,6 +27,7 @@
 #include "HTMLNames.h"
 #include "RenderTextFragment.h"
 #include "RenderTheme.h"
+#include "StyleInheritedData.h"
 
 namespace WebCore {
 
@@ -59,7 +60,11 @@ void RenderButton::addChild(RenderObject* newChild, RenderObject* beforeChild)
 
 void RenderButton::removeChild(RenderObject* oldChild)
 {
-    if (oldChild == m_inner || !m_inner) {
+    // m_inner should be the only child, but checking for direct children who
+    // are not m_inner prevents security problems when that assumption is
+    // violated.
+    if (oldChild == m_inner || !m_inner || oldChild->parent() == this) {
+        ASSERT(oldChild == m_inner || !m_inner);
         RenderDeprecatedFlexibleBox::removeChild(oldChild);
         m_inner = 0;
     } else
@@ -117,14 +122,6 @@ void RenderButton::updateFromElement()
     }
 }
 
-bool RenderButton::canHaveChildren() const
-{
-    // Input elements can't have children, but button elements can.  We'll
-    // write the code assuming any other button types that might emerge in the future
-    // can also have children.
-    return !node()->hasTagName(inputTag);
-}
-
 void RenderButton::setText(const String& str)
 {
     if (str.isEmpty()) {
@@ -148,12 +145,12 @@ String RenderButton::text() const
     return m_buttonText ? m_buttonText->text() : 0;
 }
 
-void RenderButton::updateBeforeAfterContent(PseudoId type)
+bool RenderButton::canHaveGeneratedChildren() const
 {
-    if (m_inner)
-        m_inner->children()->updateBeforeAfterContent(m_inner, type, this);
-    else
-        children()->updateBeforeAfterContent(this, type);
+    // Input elements can't have generated children, but button elements can. We'll
+    // write the code assuming any other button types that might emerge in the future
+    // can also have children.
+    return !node()->hasTagName(inputTag);
 }
 
 LayoutRect RenderButton::controlClipRect(const LayoutPoint& additionalOffset) const

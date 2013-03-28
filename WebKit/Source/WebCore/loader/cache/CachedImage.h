@@ -24,15 +24,15 @@
 #define CachedImage_h
 
 #include "CachedResource.h"
-#include "CachedResourceClient.h"
-#include "SVGImageCache.h"
 #include "ImageObserver.h"
 #include "IntRect.h"
-#include "Timer.h"
+#include "LayoutSize.h"
+#include "SVGImageCache.h"
 #include <wtf/Vector.h>
 
 namespace WebCore {
 
+class CachedImageClient;
 class CachedResourceLoader;
 class FloatSize;
 class MemoryCache;
@@ -52,6 +52,7 @@ public:
     Image* image(); // Returns the nullImage() if the image is not available yet.
     Image* imageForRenderer(const RenderObject*); // Returns the nullImage() if the image is not available yet.
     bool hasImage() const { return m_image.get(); }
+    bool currentFrameHasAlpha(const RenderObject*); // Side effect: ensures decoded image is in cache, therefore should only be called when about to draw the image.
 
     std::pair<Image*, float> brokenImage(float deviceScaleFactor) const; // Returns an image and the image's resolution scale factor.
     bool willPaintBrokenImage() const; 
@@ -64,16 +65,16 @@ public:
     bool imageHasRelativeHeight() const;
     
     // This method takes a zoom multiplier that can be used to increase the natural size of the image by the zoom.
-    IntSize imageSizeForRenderer(const RenderObject*, float multiplier); // returns the size of the complete image.
+    LayoutSize imageSizeForRenderer(const RenderObject*, float multiplier); // returns the size of the complete image.
     void computeIntrinsicDimensions(Length& intrinsicWidth, Length& intrinsicHeight, FloatSize& intrinsicRatio);
 
-    void removeClientForRenderer(RenderObject*);
     virtual void didAddClient(CachedResourceClient*);
-    
+    virtual void didRemoveClient(CachedResourceClient*);
+
     virtual void allClientsRemoved();
     virtual void destroyDecodedData();
 
-    virtual void data(PassRefPtr<SharedBuffer> data, bool allDataReceived);
+    virtual void data(PassRefPtr<ResourceBuffer> data, bool allDataReceived);
     virtual void error(CachedResource::Status);
     virtual void setResponse(const ResourceResponse&);
     
@@ -81,8 +82,7 @@ public:
     virtual bool shouldIgnoreHTTPStatusCodeErrors() const { return true; }
 
     virtual bool isImage() const { return true; }
-    bool stillNeedsLoad() const { return !errorOccurred() && status() == Unknown && !isLoading(); }
-    void load();
+    virtual bool stillNeedsLoad() const OVERRIDE { return !errorOccurred() && status() == Unknown && !isLoading(); }
 
     // ImageObserver
     virtual void decodedSizeChanged(const Image* image, int delta);
@@ -91,6 +91,8 @@ public:
     virtual bool shouldPauseAnimation(const Image*);
     virtual void animationAdvanced(const Image*);
     virtual void changedInRect(const Image*, const IntRect&);
+
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
 
 private:
     Image* lookupOrCreateImageForRenderer(const RenderObject*);
@@ -102,7 +104,6 @@ private:
     size_t maximumDecodedImageSize();
     // If not null, changeRect is the changed part of the image.
     void notifyObservers(const IntRect* changeRect = 0);
-    void decodedDataDeletionTimerFired(Timer<CachedImage>*);
     virtual PurgePriority purgePriority() const { return PurgeFirst; }
     void checkShouldPaintBrokenImage();
 
@@ -110,25 +111,7 @@ private:
 #if ENABLE(SVG)
     OwnPtr<SVGImageCache> m_svgImageCache;
 #endif
-    Timer<CachedImage> m_decodedDataDeletionTimer;
     bool m_shouldPaintBrokenImage;
-};
-
-class CachedImageClient : public CachedResourceClient {
-public:
-    virtual ~CachedImageClient() { }
-    static CachedResourceClientType expectedType() { return ImageType; }
-    virtual CachedResourceClientType resourceClientType() { return expectedType(); }
-
-    // Called whenever a frame of an image changes, either because we got more data from the network or
-    // because we are animating. If not null, the IntRect is the changed rect of the image.
-    virtual void imageChanged(CachedImage*, const IntRect* = 0) { }
-
-    // Called to find out if this client wants to actually display the image. Used to tell when we
-    // can halt animation. Content nodes that hold image refs for example would not render the image,
-    // but RenderImages would (assuming they have visibility: visible and their render tree isn't hidden
-    // e.g., in the b/f cache or in a background tab).
-    virtual bool willRenderImage(CachedImage*) { return false; }
 };
 
 }

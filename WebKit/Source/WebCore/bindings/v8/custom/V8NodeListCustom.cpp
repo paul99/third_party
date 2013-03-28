@@ -31,10 +31,11 @@
 #include "config.h"
 #include "V8NodeList.h" 
 
+#include "LiveNodeList.h"
 #include "NodeList.h"
 #include "V8Binding.h"
+#include "V8GCController.h"
 #include "V8Node.h"
-#include "V8Proxy.h"
 
 #include <wtf/RefPtr.h>
 #include <wtf/StdLibExtras.h>
@@ -45,18 +46,30 @@ v8::Handle<v8::Value> V8NodeList::namedPropertyGetter(v8::Local<v8::String> name
 {
     INC_STATS("DOM.NodeList.NamedPropertyGetter");
     NodeList* list = V8NodeList::toNative(info.Holder());
-    AtomicString key = v8ValueToAtomicWebCoreString(name);
+    AtomicString key = toWebCoreAtomicString(name);
 
     // Length property cannot be overridden.
-    DEFINE_STATIC_LOCAL(const AtomicString, length, ("length"));
+    DEFINE_STATIC_LOCAL(const AtomicString, length, ("length", AtomicString::ConstructFromLiteral));
     if (key == length)
-        return v8::Integer::New(list->length());
+        return v8Integer(list->length(), info.GetIsolate());
 
-    RefPtr<Node> result = list->itemWithName(key);
+    RefPtr<Node> result = list->namedItem(key);
     if (!result)
-        return notHandledByInterceptor();
+        return v8Undefined();
 
-    return toV8(result.release());
+    return toV8(result.release(), info.Holder(), info.GetIsolate());
+}
+
+void* V8NodeList::opaqueRootForGC(void* object, v8::Persistent<v8::Object> wrapper)
+{
+    ASSERT(V8NodeList::HasInstance(wrapper));
+    NodeList* impl = static_cast<NodeList*>(object);
+    if (!impl->isLiveNodeList())
+        return object;
+    Node* owner = static_cast<LiveNodeList*>(impl)->ownerNode();
+    if (!owner)
+        return object;
+    return V8GCController::opaqueRootForGC(owner);
 }
 
 } // namespace WebCore

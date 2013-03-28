@@ -41,7 +41,6 @@
 #include "ExceptionCode.h"
 #include "MemoryCache.h"
 #include "MessageEvent.h"
-#include "PlatformString.h"
 #include "ResourceError.h"
 #include "ResourceRequest.h"
 #include "ResourceResponse.h"
@@ -51,6 +50,7 @@
 #include "SerializedScriptValue.h"
 #include "TextResourceDecoder.h"
 #include "ThreadableLoader.h"
+#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
@@ -88,7 +88,7 @@ PassRefPtr<EventSource> EventSource::create(ScriptExecutionContext* context, con
         return 0;
     }
 
-    if (!context->contentSecurityPolicy()->allowConnectFromSource(fullURL)) {
+    if (!context->contentSecurityPolicy()->allowConnectToSource(fullURL)) {
         // FIXME: Should this be throwing an exception?
         ec = SECURITY_ERR;
         return 0;
@@ -98,6 +98,7 @@ PassRefPtr<EventSource> EventSource::create(ScriptExecutionContext* context, con
 
     source->setPendingActivity(source.get());
     source->connect();
+    source->suspendIfNeeded();
 
     return source.release();
 }
@@ -209,20 +210,22 @@ void EventSource::didReceiveResponse(unsigned long, const ResourceResponse& resp
         // If we have a charset, the only allowed value is UTF-8 (case-insensitive).
         responseIsValid = charset.isEmpty() || equalIgnoringCase(charset, "UTF-8");
         if (!responseIsValid) {
-            String message = "EventSource's response has a charset (\"";
-            message += charset;
-            message += "\") that is not UTF-8. Aborting the connection.";
+            StringBuilder message;
+            message.appendLiteral("EventSource's response has a charset (\"");
+            message.append(charset);
+            message.appendLiteral("\") that is not UTF-8. Aborting the connection.");
             // FIXME: We are missing the source line.
-            scriptExecutionContext()->addConsoleMessage(JSMessageSource, LogMessageType, ErrorMessageLevel, message);
+            scriptExecutionContext()->addConsoleMessage(JSMessageSource, ErrorMessageLevel, message.toString());
         }
     } else {
         // To keep the signal-to-noise ratio low, we only log 200-response with an invalid MIME type.
         if (statusCode == 200 && !mimeTypeIsValid) {
-            String message = "EventSource's response has a MIME type (\"";
-            message += response.mimeType();
-            message += "\") that is not \"text/event-stream\". Aborting the connection.";
+            StringBuilder message;
+            message.appendLiteral("EventSource's response has a MIME type (\"");
+            message.append(response.mimeType());
+            message.appendLiteral("\") that is not \"text/event-stream\". Aborting the connection.");
             // FIXME: We are missing the source line.
-            scriptExecutionContext()->addConsoleMessage(JSMessageSource, LogMessageType, ErrorMessageLevel, message);
+            scriptExecutionContext()->addConsoleMessage(JSMessageSource, ErrorMessageLevel, message.toString());
         }
     }
 
@@ -314,6 +317,11 @@ void EventSource::parseEventStream()
 
         parseEventStreamLine(bufPos, fieldLength, lineLength);
         bufPos += lineLength + 1;
+
+        // EventSource.close() might've been called by one of the message event handlers.
+        // Per spec, no further messages should be fired after that.
+        if (m_state == CLOSED)
+            break;
     }
 
     if (bufPos == bufSize)

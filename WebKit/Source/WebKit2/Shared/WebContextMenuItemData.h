@@ -26,6 +26,8 @@
 #ifndef WebContextMenuItemData_h
 #define WebContextMenuItemData_h
 
+#if ENABLE(CONTEXT_MENUS)
+
 #include <WebCore/ContextMenuItem.h>
 #include <wtf/text/WTFString.h>
 
@@ -61,7 +63,7 @@ public:
     APIObject* userData() const;
     void setUserData(APIObject*);
     
-    void encode(CoreIPC::ArgumentEncoder*) const;
+    void encode(CoreIPC::ArgumentEncoder&) const;
     static bool decode(CoreIPC::ArgumentDecoder*, WebContextMenuItemData&);
 
 private:
@@ -79,4 +81,5 @@ Vector<WebCore::ContextMenuItem> coreItems(const Vector<WebContextMenuItemData>&
 
 } // namespace WebKit
 
+#endif // ENABLE(CONTEXT_MENUS)
 #endif // WebContextMenuItemData_h

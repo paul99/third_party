@@ -27,8 +27,7 @@
 #ifndef MarkupTokenBase_h
 #define MarkupTokenBase_h
 
-#include "NamedNodeMap.h"
-#include <wtf/PassOwnPtr.h>
+#include "ElementAttributeData.h"
 #include <wtf/Vector.h>
 
 #ifndef NDEBUG
@@ -37,8 +36,18 @@
 
 namespace WebCore {
 
+static inline Attribute* findAttributeInVector(Vector<Attribute>& attributes, const QualifiedName& name)
+{
+    for (unsigned i = 0; i < attributes.size(); ++i) {
+        if (attributes.at(i).name().matches(name))
+            return &attributes.at(i);
+    }
+    return 0;
+}
+
+
 class DoctypeDataBase {
-    WTF_MAKE_NONCOPYABLE(DoctypeDataBase);
+    WTF_MAKE_NONCOPYABLE(DoctypeDataBase); WTF_MAKE_FAST_ALLOCATED;
 public:
     DoctypeDataBase()
         : m_hasPublicIdentifier(false)
@@ -88,6 +97,7 @@ public:
         m_range.m_end = 0;
         m_baseOffset = 0;
         m_data.clear();
+        m_orAllData = 0;
     }
 
     bool isUninitialized() { return m_type == TypeSet::Uninitialized; }
@@ -121,10 +131,10 @@ public:
         m_attributes.clear();
 
         m_data.append(character);
+        m_orAllData |= character;
     }
 
-    template<typename T>
-    void beginEndTag(T characters)
+    void beginEndTag(LChar character)
     {
         ASSERT(m_type == TypeSet::Uninitialized);
         m_type = TypeSet::EndTag;
@@ -132,7 +142,18 @@ public:
         m_currentAttribute = 0;
         m_attributes.clear();
 
-        m_data.append(characters);
+        m_data.append(character);
+    }
+
+    void beginEndTag(const Vector<LChar, 32>& characters)
+    {
+        ASSERT(m_type == TypeSet::Uninitialized);
+        m_type = TypeSet::EndTag;
+        m_selfClosing = false;
+        m_currentAttribute = 0;
+        m_attributes.clear();
+
+        m_data.appendVector(characters);
     }
 
     // Starting a character token works slightly differently than starting
@@ -161,13 +182,26 @@ public:
         ASSERT(character);
         beginDOCTYPE();
         m_data.append(character);
+        m_orAllData |= character;
     }
 
-    template<typename T>
-    void appendToCharacter(T characters)
+    void appendToCharacter(char character)
     {
         ASSERT(m_type == TypeSet::Character);
-        m_data.append(characters);
+        m_data.append(character);
+    }
+
+    void appendToCharacter(UChar character)
+    {
+        ASSERT(m_type == TypeSet::Character);
+        m_data.append(character);
+        m_orAllData |= character;
+    }
+
+    void appendToCharacter(const Vector<LChar, 32>& characters)
+    {
+        ASSERT(m_type == TypeSet::Character);
+        m_data.appendVector(characters);
     }
 
     void appendToComment(UChar character)
@@ -175,6 +209,7 @@ public:
         ASSERT(character);
         ASSERT(m_type == TypeSet::Comment);
         m_data.append(character);
+        m_orAllData |= character;
     }
 
     void addNewAttribute()
@@ -265,6 +300,7 @@ public:
     {
         ASSERT(m_type == TypeSet::Character);
         m_data.clear();
+        m_orAllData = 0;
     }
 
     void eraseValueOfAttribute(size_t i)
@@ -283,6 +319,11 @@ public:
     {
         ASSERT(m_type == TypeSet::Comment);
         return m_data;
+    }
+
+    bool isAll8BitData() const
+    {
+        return (m_orAllData <= 0xff);
     }
 
     // FIXME: Distinguish between a missing public identifer and an empty one.
@@ -340,15 +381,25 @@ protected:
     }
 #endif // NDEBUG
 
-    inline void appendToName(UChar character)
+    void appendToName(UChar character)
     {
         ASSERT(character);
         m_data.append(character);
+        m_orAllData |= character;
     }
-    
-    inline const DataVector& name() const
+
+    const DataVector& name() const
     {
         return m_data;
+    }
+
+    String nameString() const
+    {
+        if (!m_data.size())
+            return emptyString();
+        if (isAll8BitData())
+            return String::make8BitFrom16BitSource(m_data.data(), m_data.size());
+        return String(m_data.data(), m_data.size());
     }
 
     // FIXME: I'm not sure what the final relationship between MarkupTokenBase and
@@ -361,6 +412,7 @@ protected:
     typename Attribute::Range m_range; // Always starts at zero.
     int m_baseOffset;
     DataVector m_data;
+    UChar m_orAllData;
 
     // For DOCTYPE
     OwnPtr<DoctypeData> m_doctypeData;
@@ -387,7 +439,7 @@ public:
             ASSERT_NOT_REACHED();
             break;
         case Token::Type::DOCTYPE:
-            m_name = AtomicString(token->name().data(), token->name().size());
+            m_name = AtomicString(token->nameString());
             m_doctypeData = token->m_doctypeData.release();
             break;
         case Token::Type::EndOfFile:
@@ -395,24 +447,30 @@ public:
         case Token::Type::StartTag:
         case Token::Type::EndTag: {
             m_selfClosing = token->selfClosing();
-            m_name = AtomicString(token->name().data(), token->name().size());
+            m_name = AtomicString(token->nameString());
             initializeAttributes(token->attributes());
             break;
         }
         case Token::Type::Comment:
-            m_data = String(token->comment().data(), token->comment().size());
+            if (token->isAll8BitData())
+                m_data = String::make8BitFrom16BitSource(token->comment().data(), token->comment().size());
+            else
+                m_data = String(token->comment().data(), token->comment().size());
             break;
         case Token::Type::Character:
             m_externalCharacters = &token->characters();
+            m_isAll8BitData = token->isAll8BitData();
             break;
         default:
             break;
         }
     }
 
-    AtomicMarkupTokenBase(typename Token::Type::Type type, AtomicString name, PassOwnPtr<NamedNodeMap> attributes = nullptr)
+    AtomicMarkupTokenBase(typename Token::Type::Type type, const AtomicString& name, const Vector<Attribute>& attributes = Vector<Attribute>())
         : m_type(type)
         , m_name(name)
+        , m_externalCharacters(0)
+        , m_isAll8BitData(false)
         , m_attributes(attributes)
     {
         ASSERT(usesName());
@@ -441,27 +499,30 @@ public:
     Attribute* getAttributeItem(const QualifiedName& attributeName)
     {
         ASSERT(usesAttributes());
-        if (!m_attributes)
-            return 0;
-        return m_attributes->getAttributeItem(attributeName);
+        return findAttributeInVector(m_attributes, attributeName);
     }
 
-    NamedNodeMap* attributes() const
+    Vector<Attribute>& attributes()
     {
         ASSERT(usesAttributes());
-        return m_attributes.get();
+        return m_attributes;
     }
 
-    PassOwnPtr<NamedNodeMap> takeAttributes()
+    const Vector<Attribute>& attributes() const
     {
         ASSERT(usesAttributes());
-        return m_attributes.release();
+        return m_attributes;
     }
 
     const typename Token::DataVector& characters() const
     {
         ASSERT(m_type == Token::Type::Character);
         return *m_externalCharacters;
+    }
+
+    bool isAll8BitData() const
+    {
+        return m_isAll8BitData;
     }
 
     const String& comment() const
@@ -482,6 +543,12 @@ public:
     {
         ASSERT(m_type == Token::Type::DOCTYPE);
         return m_doctypeData->m_systemIdentifier;
+    }
+
+    void clearExternalCharacters()
+    {
+        m_externalCharacters = 0;
+        m_isAll8BitData = false;
     }
 
 protected:
@@ -509,6 +576,7 @@ protected:
     // FIXME: Add a mechanism for "internalizing" the characters when the
     //        HTMLToken is destructed.
     const typename Token::DataVector* m_externalCharacters;
+    bool m_isAll8BitData;
 
     // For DOCTYPE
     OwnPtr<typename Token::DoctypeData> m_doctypeData;
@@ -516,7 +584,7 @@ protected:
     // For StartTag and EndTag
     bool m_selfClosing;
 
-    OwnPtr<NamedNodeMap> m_attributes;
+    Vector<Attribute> m_attributes;
 };
 
 template<typename Token>
@@ -526,8 +594,8 @@ inline void AtomicMarkupTokenBase<Token>::initializeAttributes(const typename To
     if (!size)
         return;
 
-    m_attributes = NamedNodeMap::create();
-    m_attributes->reserveInitialCapacity(size);
+    m_attributes.clear();
+    m_attributes.reserveInitialCapacity(size);
     for (size_t i = 0; i < size; ++i) {
         const typename Token::Attribute& attribute = attributes[i];
         if (attribute.m_name.isEmpty())
@@ -540,8 +608,10 @@ inline void AtomicMarkupTokenBase<Token>::initializeAttributes(const typename To
         ASSERT(attribute.m_valueRange.m_start);
         ASSERT(attribute.m_valueRange.m_end);
 
-        String value(attribute.m_value.data(), attribute.m_value.size());
-        m_attributes->insertAttribute(Attribute::createMapped(nameForAttribute(attribute), value), false);
+        AtomicString value(attribute.m_value.data(), attribute.m_value.size());
+        const QualifiedName& name = nameForAttribute(attribute);
+        if (!findAttributeInVector(m_attributes, name))
+            m_attributes.append(Attribute(name, value));
     }
 }
 

@@ -30,11 +30,11 @@
 
 #include "CachedResourceLoader.h"
 #include "Document.h"
-#include "InputType.h"
 #include "HTMLDocumentParser.h"
 #include "HTMLTokenizer.h"
 #include "HTMLNames.h"
 #include "HTMLParserIdioms.h"
+#include "InputTypeNames.h"
 #include "LinkRelAttribute.h"
 #include "MediaList.h"
 #include "MediaQueryEvaluator.h"
@@ -43,11 +43,9 @@ namespace WebCore {
 
 using namespace HTMLNames;
 
-namespace {
-
 class PreloadTask {
 public:
-    PreloadTask(const HTMLToken& token)
+    explicit PreloadTask(const HTMLToken& token)
         : m_tagName(token.name().data(), token.name().size())
         , m_linkIsStyleSheet(false)
         , m_linkMediaAttributeIsScreen(true)
@@ -61,13 +59,14 @@ public:
         if (m_tagName != imgTag
             && m_tagName != inputTag
             && m_tagName != linkTag
-            && m_tagName != scriptTag)
+            && m_tagName != scriptTag
+            && m_tagName != baseTag)
             return;
 
         for (HTMLToken::AttributeList::const_iterator iter = attributes.begin();
              iter != attributes.end(); ++iter) {
             AtomicString attributeName(iter->m_name.data(), iter->m_name.size());
-            String attributeValue(iter->m_value.data(), iter->m_value.size());
+            String attributeValue = StringImpl::create8BitIfPossible(iter->m_value.data(), iter->m_value.size());
 
             if (attributeName == charsetAttr)
                 m_charset = attributeValue;
@@ -75,6 +74,8 @@ public:
             if (m_tagName == scriptTag || m_tagName == imgTag) {
                 if (attributeName == srcAttr)
                     setUrlToLoad(attributeValue);
+                else if (attributeName == crossoriginAttr && !attributeValue.isNull())
+                    m_crossOriginMode = stripLeadingAndTrailingHTMLSpaces(attributeValue);
             } else if (m_tagName == linkTag) {
                 if (attributeName == hrefAttr)
                     setUrlToLoad(attributeValue);
@@ -87,6 +88,9 @@ public:
                     setUrlToLoad(attributeValue);
                 else if (attributeName == typeAttr)
                     m_inputIsImage = equalIgnoringCase(attributeValue, InputTypeNames::image());
+            } else if (m_tagName == baseTag) {
+                if (attributeName == hrefAttr)
+                    m_baseElementHref = stripLeadingAndTrailingHTMLSpaces(attributeValue);
             }
         }
     }
@@ -101,13 +105,13 @@ public:
     {
         if (attributeValue.isEmpty())
             return true;
-        RefPtr<MediaList> mediaList = MediaList::createAllowingDescriptionSyntax(attributeValue);
+        RefPtr<MediaQuerySet> mediaQueries = MediaQuerySet::createAllowingDescriptionSyntax(attributeValue);
     
         // Only preload screen media stylesheets. Used this way, the evaluator evaluates to true for any 
         // rules containing complex queries (full evaluation is possible but it requires a frame and a style selector which
         // may be problematic here).
         MediaQueryEvaluator mediaQueryEvaluator("screen");
-        return mediaQueryEvaluator.eval(mediaList.get());
+        return mediaQueryEvaluator.eval(mediaQueries.get());
     }
 
     void setUrlToLoad(const String& attributeValue)
@@ -119,15 +123,18 @@ public:
         m_urlToLoad = stripLeadingAndTrailingHTMLSpaces(attributeValue);
     }
 
-    void preload(Document* document, bool scanningBody)
+    void preload(Document* document, bool scanningBody, const KURL& baseURL)
     {
         if (m_urlToLoad.isEmpty())
             return;
 
         CachedResourceLoader* cachedResourceLoader = document->cachedResourceLoader();
-        ResourceRequest request = document->completeURL(m_urlToLoad);
-        if (m_tagName == scriptTag)
+        CachedResourceRequest request(ResourceRequest(document->completeURL(m_urlToLoad, baseURL)));
+        request.setInitiator(tagName());
+        if (m_tagName == scriptTag) {
+            request.mutableResourceRequest().setAllowCookies(crossOriginModeAllowsCookies());
             cachedResourceLoader->preload(CachedResource::Script, request, m_charset, scanningBody);
+        }
         else if (m_tagName == imgTag || (m_tagName == inputTag && m_inputIsImage))
             cachedResourceLoader->preload(CachedResource::ImageResource, request, String(), scanningBody);
         else if (m_tagName == linkTag && m_linkIsStyleSheet && m_linkMediaAttributeIsScreen) 
@@ -135,17 +142,24 @@ public:
     }
 
     const AtomicString& tagName() const { return m_tagName; }
+    const String& baseElementHref() const { return m_baseElementHref; }
 
 private:
+
+    bool crossOriginModeAllowsCookies()
+    {
+        return m_crossOriginMode.isNull() || equalIgnoringCase(m_crossOriginMode, "use-credentials");
+    }
+
     AtomicString m_tagName;
     String m_urlToLoad;
     String m_charset;
+    String m_baseElementHref;
+    String m_crossOriginMode;
     bool m_linkIsStyleSheet;
     bool m_linkMediaAttributeIsScreen;
     bool m_inputIsImage;
 };
-
-} // namespace
 
 HTMLPreloadScanner::HTMLPreloadScanner(Document* document)
     : m_document(document)
@@ -163,6 +177,9 @@ void HTMLPreloadScanner::appendToEnd(const SegmentedString& source)
 
 void HTMLPreloadScanner::scan()
 {
+    // When we start scanning, our best prediction of the baseElementURL is the real one!
+    m_predictedBaseElementURL = m_document->baseElementURL();
+
     // FIXME: We should save and re-use these tokens in HTMLDocumentParser if
     // the pending script doesn't end up calling document.write.
     while (m_tokenizer->nextToken(m_source, m_token)) {
@@ -194,12 +211,23 @@ void HTMLPreloadScanner::processToken()
     if (task.tagName() == styleTag)
         m_inStyle = true;
 
-    task.preload(m_document, scanningBody());
+    if (task.tagName() == baseTag)
+        updatePredictedBaseElementURL(KURL(m_document->url(), task.baseElementHref()));
+
+    task.preload(m_document, scanningBody(), m_predictedBaseElementURL.isEmpty() ? m_document->baseURL() : m_predictedBaseElementURL);
 }
 
 bool HTMLPreloadScanner::scanningBody() const
 {
     return m_document->body() || m_bodySeen;
+}
+
+void HTMLPreloadScanner::updatePredictedBaseElementURL(const KURL& baseElementURL)
+{
+    // The first <base> element is the one that wins.
+    if (!m_predictedBaseElementURL.isEmpty())
+        return;
+    m_predictedBaseElementURL = baseElementURL;
 }
 
 }

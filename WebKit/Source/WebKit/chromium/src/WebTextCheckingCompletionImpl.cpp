@@ -31,41 +31,34 @@
 #include "config.h"
 #include "WebTextCheckingCompletionImpl.h"
 
+#include "EditorClientImpl.h"
 #include "SpellChecker.h"
 #include "TextCheckerClient.h"
 #include "WebTextCheckingResult.h"
-#include "platform/WebVector.h"
+#include <public/WebVector.h>
 #include <wtf/Assertions.h>
 
 using namespace WebCore;
 
 namespace WebKit {
 
-static TextCheckingType toCoreCheckingType(WebTextCheckingResult::Error error)
-{
-    if (error == WebTextCheckingResult::ErrorSpelling)
-        return TextCheckingTypeSpelling;
-    ASSERT(error == WebTextCheckingResult::ErrorGrammar);
-    return TextCheckingTypeGrammar;
-}
-
 static Vector<TextCheckingResult> toCoreResults(const WebVector<WebTextCheckingResult>& results)
 {
     Vector<TextCheckingResult> coreResults;
-    for (size_t i = 0; i < results.size(); ++i) { 
-        TextCheckingResult coreResult;
-        coreResult.type = toCoreCheckingType(results[i].error);
-        coreResult.location = results[i].position;
-        coreResult.length = results[i].length;
-        coreResults.append(coreResult);
-    }
-
+    for (size_t i = 0; i < results.size(); ++i)
+        coreResults.append(results[i]);
     return coreResults;
 }
 
 void WebTextCheckingCompletionImpl::didFinishCheckingText(const WebVector<WebTextCheckingResult>& results)
 {
-    m_spellChecker->didCheck(m_identifier, toCoreResults(results));
+    m_request->didSucceed(toCoreResults(results));
+    delete this;
+}
+
+void WebTextCheckingCompletionImpl::didCancelCheckingText()
+{
+    m_request->didCancel();
     delete this;
 }
 

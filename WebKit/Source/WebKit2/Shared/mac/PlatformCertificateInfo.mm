@@ -49,14 +49,14 @@ PlatformCertificateInfo::PlatformCertificateInfo(CFArrayRef certificateChain)
 {
 }
 
-void PlatformCertificateInfo::encode(CoreIPC::ArgumentEncoder* encoder) const
+void PlatformCertificateInfo::encode(CoreIPC::ArgumentEncoder& encoder) const
 {
     if (!m_certificateChain) {
-        encoder->encodeBool(false);
+        encoder << false;
         return;
     }
 
-    encoder->encodeBool(true);
+    encoder << true;
     CoreIPC::encode(encoder, m_certificateChain.get());
 }
 

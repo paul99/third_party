@@ -41,6 +41,8 @@ namespace WebCore {
         typedef CachedResource* CachedResourceHandleBase::*UnspecifiedBoolType;
         operator UnspecifiedBoolType() const { return m_resource ? &CachedResourceHandleBase::m_resource : 0; }
 
+        void reportMemoryUsage(MemoryObjectInfo*) const;
+
     protected:
         CachedResourceHandleBase() : m_resource(0) {}
         CachedResourceHandleBase(CachedResource* res) { m_resource = res; if (m_resource) m_resource->registerHandle(this); }
@@ -61,12 +63,15 @@ namespace WebCore {
         CachedResourceHandle() { }
         CachedResourceHandle(R* res) : CachedResourceHandleBase(res) { }
         CachedResourceHandle(const CachedResourceHandle<R>& o) : CachedResourceHandleBase(o) { }
+        template<typename U> CachedResourceHandle(const CachedResourceHandle<U>& o) : CachedResourceHandleBase(o.get()) { }
 
         R* get() const { return reinterpret_cast<R*>(CachedResourceHandleBase::get()); }
         R* operator->() const { return get(); }
                
         CachedResourceHandle& operator=(R* res) { setResource(res); return *this; } 
         CachedResourceHandle& operator=(const CachedResourceHandle& o) { setResource(o.get()); return *this; }
+        template<typename U> CachedResourceHandle& operator=(const CachedResourceHandle<U>& o) { setResource(o.get()); return *this; }
+
         bool operator==(const CachedResourceHandleBase& o) const { return get() == o.get(); }
         bool operator!=(const CachedResourceHandleBase& o) const { return get() != o.get(); }
     };

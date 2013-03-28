@@ -29,9 +29,10 @@
  */
 
 #include "config.h"
-#include "InspectorClient.h"
 
 #if ENABLE(INSPECTOR)
+
+#include "InspectorClient.h"
 
 #include "Frame.h"
 #include "Page.h"
@@ -54,9 +55,7 @@ bool InspectorClient::doDispatchMessageOnFrontendPage(Page* frontendPage, const 
     if (!scriptController)
         return false;
 
-    String dispatchToFrontend("WebInspector.dispatchMessageFromBackend(");
-    dispatchToFrontend += message;
-    dispatchToFrontend += ");";
+    String dispatchToFrontend = "InspectorFrontendAPI.dispatchMessageAsync(" + message + ");";
 
     // FIXME: This should execute the script in the appropriate world.
     scriptController->evaluate(ScriptSourceCode(dispatchToFrontend));

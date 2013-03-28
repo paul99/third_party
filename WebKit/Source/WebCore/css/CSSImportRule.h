@@ -1,7 +1,7 @@
 /*
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2006, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2002, 2006, 2008, 2012 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -23,64 +23,35 @@
 #define CSSImportRule_h
 
 #include "CSSRule.h"
-#include "CachedResourceHandle.h"
-#include "CachedStyleSheetClient.h"
-#include "MediaList.h"
-#include "PlatformString.h"
 
 namespace WebCore {
 
 class CachedCSSStyleSheet;
 class MediaList;
+class MediaQuerySet;
+class StyleRuleImport;
 
 class CSSImportRule : public CSSRule {
 public:
-    static PassRefPtr<CSSImportRule> create(CSSStyleSheet* parent, const String& href, PassRefPtr<MediaList> media)
-    {
-        return adoptRef(new CSSImportRule(parent, href, media));
-    }
+    static PassRefPtr<CSSImportRule> create(StyleRuleImport* rule, CSSStyleSheet* sheet) { return adoptRef(new CSSImportRule(rule, sheet)); }
+    
+    virtual ~CSSImportRule();
 
-    ~CSSImportRule();
+    virtual CSSRule::Type type() const OVERRIDE { return IMPORT_RULE; }
+    virtual String cssText() const OVERRIDE;
+    virtual void reattach(StyleRuleBase*) OVERRIDE;
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
 
-    String href() const { return m_strHref; }
-    MediaList* media() const { return m_lstMedia.get(); }
-    CSSStyleSheet* styleSheet() const { return m_styleSheet.get(); }
-
-    String cssText() const;
-
-    // Not part of the CSSOM
-    bool isLoading() const;
-
-    void addSubresourceStyleURLs(ListHashSet<KURL>& urls);
-
-    void requestStyleSheet();
+    String href() const;
+    MediaList* media() const;
+    CSSStyleSheet* styleSheet() const;
 
 private:
-    // NOTE: We put the CachedStyleSheetClient in a member instead of inheriting from it
-    // to avoid adding a vptr to CSSImportRule.
-    class ImportedStyleSheetClient : public CachedStyleSheetClient {
-    public:
-        ImportedStyleSheetClient(CSSImportRule* ownerRule) : m_ownerRule(ownerRule) { }
-        virtual ~ImportedStyleSheetClient() { }
-        virtual void setCSSStyleSheet(const String& href, const KURL& baseURL, const String& charset, const CachedCSSStyleSheet* sheet)
-        {
-            m_ownerRule->setCSSStyleSheet(href, baseURL, charset, sheet);
-        }
-    private:
-        CSSImportRule* m_ownerRule;
-    };
+    CSSImportRule(StyleRuleImport*, CSSStyleSheet*);
 
-    void setCSSStyleSheet(const String& href, const KURL& baseURL, const String& charset, const CachedCSSStyleSheet*);
-    friend class ImportedStyleSheetClient;
-
-    CSSImportRule(CSSStyleSheet* parent, const String& href, PassRefPtr<MediaList>);
-
-    ImportedStyleSheetClient m_styleSheetClient;
-    String m_strHref;
-    RefPtr<MediaList> m_lstMedia;
-    RefPtr<CSSStyleSheet> m_styleSheet;
-    CachedResourceHandle<CachedCSSStyleSheet> m_cachedSheet;
-    bool m_loading;
+    RefPtr<StyleRuleImport> m_importRule;
+    mutable RefPtr<MediaList> m_mediaCSSOMWrapper;
+    mutable RefPtr<CSSStyleSheet> m_styleSheetCSSOMWrapper;
 };
 
 } // namespace WebCore

@@ -33,6 +33,7 @@
 
 #include "InspectorClient.h"
 #include "InspectorController.h"
+#include "InspectorFrontendChannel.h"
 #include <wtf/OwnPtr.h>
 
 namespace WebKit {
@@ -41,14 +42,15 @@ class WebDevToolsAgentClient;
 class WebDevToolsAgentImpl;
 class WebViewImpl;
 
-class InspectorClientImpl : public WebCore::InspectorClient {
+class InspectorClientImpl : public WebCore::InspectorClient,
+                            public WebCore::InspectorFrontendChannel {
 public:
     InspectorClientImpl(WebViewImpl*);
     ~InspectorClientImpl();
 
     // InspectorClient methods:
     virtual void inspectorDestroyed();
-    virtual void openInspectorFrontend(WebCore::InspectorController*);
+    virtual WebCore::InspectorFrontendChannel* openInspectorFrontend(WebCore::InspectorController*);
     virtual void closeInspectorFrontend();
     virtual void bringFrontendToFront();
 
@@ -57,12 +59,31 @@ public:
 
     virtual bool sendMessageToFrontend(const WTF::String&);
 
+    virtual bool supportsInspectorStateUpdates() const { return true; }
     virtual void updateInspectorStateCookie(const WTF::String&);
 
     virtual bool canClearBrowserCache();
     virtual void clearBrowserCache();
     virtual bool canClearBrowserCookies();
     virtual void clearBrowserCookies();
+
+    virtual bool canMonitorMainThread();
+
+    virtual bool canOverrideDeviceMetrics();
+    virtual void overrideDeviceMetrics(int, int, float, bool);
+    virtual void autoZoomPageToFitWidth();
+
+    virtual bool overridesShowPaintRects();
+    virtual void setShowPaintRects(bool);
+
+    virtual bool canShowFPSCounter();
+    virtual void setShowFPSCounter(bool);
+
+    virtual bool supportsFrameInstrumentation();
+
+    virtual void getAllocatedObjects(HashSet<const void*>&);
+    virtual void dumpUncountedAllocatedObjects(const HashMap<const void*, size_t>&);
+
 private:
     WebDevToolsAgentImpl* devToolsAgent();
 

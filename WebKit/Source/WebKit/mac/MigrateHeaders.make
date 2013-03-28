@@ -112,7 +112,6 @@ all : \
     $(PUBLIC_HEADERS_DIR)/DOMHTMLInputElement.h \
     $(PRIVATE_HEADERS_DIR)/DOMHTMLInputElementPrivate.h \
     $(INTERNAL_HEADERS_DIR)/DOMHTMLInputElementInternal.h \
-    $(PUBLIC_HEADERS_DIR)/DOMHTMLIsIndexElement.h \
     $(PUBLIC_HEADERS_DIR)/DOMHTMLLIElement.h \
     $(PUBLIC_HEADERS_DIR)/DOMHTMLLabelElement.h \
     $(PUBLIC_HEADERS_DIR)/DOMHTMLLegendElement.h \
@@ -153,6 +152,7 @@ all : \
     $(PUBLIC_HEADERS_DIR)/DOMNamedNodeMap.h \
     $(PUBLIC_HEADERS_DIR)/DOMNode.h \
     $(INTERNAL_HEADERS_DIR)/DOMNodeInternal.h \
+    $(PRIVATE_HEADERS_DIR)/DOMNodePrivate.h \
     $(PUBLIC_HEADERS_DIR)/DOMNodeFilter.h \
     $(PUBLIC_HEADERS_DIR)/DOMNodeIterator.h \
     $(PUBLIC_HEADERS_DIR)/DOMNodeList.h \
@@ -463,6 +463,8 @@ all : \
     $(INTERNAL_HEADERS_DIR)/DOMSVGUseElementInternal.h \
     $(PRIVATE_HEADERS_DIR)/DOMSVGViewElement.h \
     $(INTERNAL_HEADERS_DIR)/DOMSVGViewElementInternal.h \
+    $(PRIVATE_HEADERS_DIR)/DOMSVGViewSpec.h \
+    $(INTERNAL_HEADERS_DIR)/DOMSVGViewSpecInternal.h \
     $(PRIVATE_HEADERS_DIR)/DOMSVGZoomAndPan.h \
     $(PRIVATE_HEADERS_DIR)/DOMSVGZoomEvent.h \
     $(INTERNAL_HEADERS_DIR)/DOMSVGZoomEventInternal.h \

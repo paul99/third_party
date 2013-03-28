@@ -32,6 +32,7 @@ public:
     ~QWebPreferences();
 
     Q_PROPERTY(bool autoLoadImages READ autoLoadImages WRITE setAutoLoadImages NOTIFY autoLoadImagesChanged FINAL)
+    Q_PROPERTY(bool fullScreenEnabled READ fullScreenEnabled WRITE setFullScreenEnabled NOTIFY fullScreenEnabledChanged FINAL)
     Q_PROPERTY(bool javascriptEnabled READ javascriptEnabled WRITE setJavascriptEnabled NOTIFY javascriptEnabledChanged FINAL)
     Q_PROPERTY(bool pluginsEnabled READ pluginsEnabled WRITE setPluginsEnabled NOTIFY pluginsEnabledChanged FINAL)
     Q_PROPERTY(bool offlineWebApplicationCacheEnabled READ offlineWebApplicationCacheEnabled WRITE setOfflineWebApplicationCacheEnabled NOTIFY offlineWebApplicationCacheEnabledChanged FINAL)
@@ -40,6 +41,13 @@ public:
     Q_PROPERTY(bool privateBrowsingEnabled READ privateBrowsingEnabled WRITE setPrivateBrowsingEnabled NOTIFY privateBrowsingEnabledChanged FINAL)
     Q_PROPERTY(bool dnsPrefetchEnabled READ dnsPrefetchEnabled WRITE setDnsPrefetchEnabled NOTIFY dnsPrefetchEnabledChanged FINAL)
     Q_PROPERTY(bool navigatorQtObjectEnabled READ navigatorQtObjectEnabled WRITE setNavigatorQtObjectEnabled NOTIFY navigatorQtObjectEnabledChanged FINAL)
+    Q_PROPERTY(bool frameFlatteningEnabled READ frameFlatteningEnabled WRITE setFrameFlatteningEnabled NOTIFY frameFlatteningEnabledChanged FINAL)
+    Q_PROPERTY(bool developerExtrasEnabled READ developerExtrasEnabled WRITE setDeveloperExtrasEnabled NOTIFY developerExtrasEnabledChanged FINAL)
+    Q_PROPERTY(bool webGLEnabled READ webGLEnabled WRITE setWebGLEnabled NOTIFY webGLEnabledChanged FINAL)
+    Q_PROPERTY(bool webAudioEnabled READ webAudioEnabled WRITE setWebAudioEnabled NOTIFY webAudioEnabledChanged FINAL)
+    Q_PROPERTY(bool scrollAnimatorEnabled READ scrollAnimatorEnabled WRITE setScrollAnimatorEnabled NOTIFY scrollAnimatorEnabledChanged FINAL)
+    Q_PROPERTY(bool caretBrowsingEnabled READ caretBrowsingEnabled WRITE setCaretBrowsingEnabled NOTIFY caretBrowsingEnabledChanged FINAL)
+    Q_PROPERTY(bool notificationsEnabled READ notificationsEnabled WRITE setNotificationsEnabled NOTIFY notificationsEnabledChanged FINAL)
 
     Q_PROPERTY(QString standardFontFamily READ standardFontFamily WRITE setStandardFontFamily NOTIFY standardFontFamilyChanged FINAL)
     Q_PROPERTY(QString fixedFontFamily READ fixedFontFamily WRITE setFixedFontFamily NOTIFY fixedFontFamilyChanged FINAL)
@@ -54,6 +62,9 @@ public:
 
     bool autoLoadImages() const;
     void setAutoLoadImages(bool enable);
+
+    bool fullScreenEnabled() const;
+    void setFullScreenEnabled(bool enable);
 
     bool javascriptEnabled() const;
     void setJavascriptEnabled(bool enable);
@@ -78,6 +89,27 @@ public:
 
     bool navigatorQtObjectEnabled() const;
     void setNavigatorQtObjectEnabled(bool);
+
+    bool frameFlatteningEnabled() const;
+    void setFrameFlatteningEnabled(bool enable);
+
+    bool developerExtrasEnabled() const;
+    void setDeveloperExtrasEnabled(bool enable);
+
+    bool webGLEnabled() const;
+    void setWebGLEnabled(bool enable);
+
+    bool webAudioEnabled() const;
+    void setWebAudioEnabled(bool enable);
+
+    bool scrollAnimatorEnabled() const;
+    void setScrollAnimatorEnabled(bool enable);
+
+    bool caretBrowsingEnabled() const;
+    void setCaretBrowsingEnabled(bool enable);
+
+    bool notificationsEnabled() const;
+    void setNotificationsEnabled(bool enable);
 
     QString standardFontFamily() const;
     void setStandardFontFamily(const QString& family);
@@ -109,6 +141,7 @@ public:
 Q_SIGNALS:
     void autoLoadImagesChanged();
     void pluginsEnabledChanged();
+    void fullScreenEnabledChanged();
     void javascriptEnabledChanged();
     void offlineWebApplicationCacheEnabledChanged();
     void localStorageEnabledChanged();
@@ -116,6 +149,13 @@ Q_SIGNALS:
     void privateBrowsingEnabledChanged();
     void dnsPrefetchEnabledChanged();
     void navigatorQtObjectEnabledChanged();
+    void frameFlatteningEnabledChanged();
+    void developerExtrasEnabledChanged();
+    void webGLEnabledChanged();
+    void webAudioEnabledChanged();
+    void scrollAnimatorEnabledChanged();
+    void caretBrowsingEnabledChanged();
+    void notificationsEnabledChanged();
 
     void standardFontFamilyChanged();
     void fixedFontFamilyChanged();

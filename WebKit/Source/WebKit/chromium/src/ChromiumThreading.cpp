@@ -29,18 +29,15 @@
  */
 
 #include "config.h"
+
+#include <public/Platform.h>
 #include <wtf/chromium/ChromiumThreading.h>
-
-#include "WebKit.h"
-#include "platform/WebKitPlatformSupport.h"
-
-#include <wtf/MainThread.h>
 
 namespace WTF {
 
 void ChromiumThreading::callOnMainThread(void (*func)(void*), void* context)
 {
-    WebKit::webKitPlatformSupport()->callOnMainThread(func, context);
+    WebKit::Platform::current()->callOnMainThread(func, context);
 }
 
 }  // namespace WTF

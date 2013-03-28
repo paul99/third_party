@@ -52,7 +52,7 @@ PassRefPtr<HTMLOutputElement> HTMLOutputElement::create(const QualifiedName& tag
 
 const AtomicString& HTMLOutputElement::formControlType() const
 {
-    DEFINE_STATIC_LOCAL(const AtomicString, output, ("output"));
+    DEFINE_STATIC_LOCAL(const AtomicString, output, ("output", AtomicString::ConstructFromLiteral));
     return output;
 }
 
@@ -61,22 +61,12 @@ bool HTMLOutputElement::supportsFocus() const
     return Node::supportsFocus() && !disabled();
 }
 
-bool HTMLOutputElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+void HTMLOutputElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
-    if (attrName == HTMLNames::dirAttr) {
-        result = eBDI;
-        return true;
-    }
-
-    return HTMLElement::mapToEntry(attrName, result);
-}
-
-void HTMLOutputElement::parseMappedAttribute(Attribute* attr)
-{
-    if (attr->name() == HTMLNames::forAttr)
-        setFor(attr->value());
+    if (name == HTMLNames::forAttr)
+        setFor(value);
     else
-        HTMLFormControlElement::parseMappedAttribute(attr);
+        HTMLFormControlElement::parseAttribute(name, value);
 }
 
 DOMSettableTokenList* HTMLOutputElement::htmlFor() const
@@ -91,6 +81,8 @@ void HTMLOutputElement::setFor(const String& value)
 
 void HTMLOutputElement::childrenChanged(bool createdByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
 {
+    HTMLFormControlElement::childrenChanged(createdByParser, beforeChange, afterChange, childCountDelta);
+
     if (createdByParser || m_isSetTextContentInProgress) {
         m_isSetTextContentInProgress = false;
         return;
@@ -98,7 +90,6 @@ void HTMLOutputElement::childrenChanged(bool createdByParser, Node* beforeChange
 
     if (m_isDefaultValueMode)
         m_defaultValue = textContent();
-    HTMLFormControlElement::childrenChanged(createdByParser, beforeChange, afterChange, childCountDelta);
 }
 
 void HTMLOutputElement::reset()

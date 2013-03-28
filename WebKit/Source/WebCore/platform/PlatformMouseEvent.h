@@ -28,6 +28,9 @@
 
 #include "IntPoint.h"
 #include "PlatformEvent.h"
+#if OS(WINDOWS)
+#include "WindowsExtras.h"
+#endif
 
 #if PLATFORM(GTK)
 typedef struct _GdkEventButton GdkEventButton;
@@ -40,20 +43,6 @@ typedef struct _Evas_Event_Mouse_Up Evas_Event_Mouse_Up;
 typedef struct _Evas_Event_Mouse_Move Evas_Event_Mouse_Move;
 #endif
 
-#if PLATFORM(QT)
-QT_BEGIN_NAMESPACE
-class QInputEvent;
-class QGraphicsSceneMouseEvent;
-QT_END_NAMESPACE
-#endif
-
-#if PLATFORM(WIN)
-typedef struct HWND__* HWND;
-typedef unsigned UINT;
-typedef unsigned WPARAM;
-typedef long LPARAM;
-#endif
-
 #if PLATFORM(WX)
 class wxMouseEvent;
 #endif
@@ -62,6 +51,10 @@ namespace WebCore {
     
     // These button numbers match the ones used in the DOM API, 0 through 2, except for NoButton which isn't specified.
     enum MouseButton { NoButton = -1, LeftButton, MiddleButton, RightButton };
+
+#if PLATFORM(BLACKBERRY)
+    enum MouseInputMethod { PointingDevice, TouchScreen };
+#endif
     
     class PlatformMouseEvent : public PlatformEvent {
     public:
@@ -106,8 +99,8 @@ namespace WebCore {
         
 
 #if PLATFORM(GTK) 
-        PlatformMouseEvent(GdkEventButton*);
-        PlatformMouseEvent(GdkEventMotion*);
+        explicit PlatformMouseEvent(GdkEventButton*);
+        explicit PlatformMouseEvent(GdkEventMotion*);
         void setClickCount(int count) { m_clickCount = count; }
 #endif
 
@@ -122,11 +115,6 @@ namespace WebCore {
         int eventNumber() const { return m_eventNumber; }
 #endif
 
-#if PLATFORM(QT)
-        PlatformMouseEvent(QInputEvent*, int clickCount);
-        PlatformMouseEvent(QGraphicsSceneMouseEvent*, int clickCount);
-#endif
-
 #if PLATFORM(WIN)
         PlatformMouseEvent(HWND, UINT, WPARAM, LPARAM, bool didActivateWebView = false);
         void setClickCount(int count) { m_clickCount = count; }
@@ -137,6 +125,10 @@ namespace WebCore {
         PlatformMouseEvent(const wxMouseEvent&, const wxPoint& globalPoint, int clickCount);
 #endif
 
+#if PLATFORM(BLACKBERRY)
+        PlatformMouseEvent(const IntPoint& eventPosition, const IntPoint& globalPosition, const PlatformEvent::Type, int clickCount, MouseButton, bool shiftKey, bool ctrlKey, bool altKey, MouseInputMethod = PointingDevice);
+        MouseInputMethod inputMethod() const { return m_inputMethod; }
+#endif
     protected:
         IntPoint m_position;
         IntPoint m_globalPosition;
@@ -151,6 +143,8 @@ namespace WebCore {
         int m_eventNumber;
 #elif PLATFORM(WIN)
         bool m_didActivateWebView;
+#elif PLATFORM(BLACKBERRY)
+        MouseInputMethod m_inputMethod;
 #endif
     };
 

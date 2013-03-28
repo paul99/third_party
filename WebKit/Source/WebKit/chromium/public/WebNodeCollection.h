@@ -46,13 +46,15 @@ class WebNodeCollection {
 public:
     ~WebNodeCollection() { reset(); }
 
-    WebNodeCollection() : m_private(0) { }
+    WebNodeCollection() : m_private(0), m_current(0) { }
     WebNodeCollection(const WebNodeCollection& n) : m_private(0) { assign(n); }
     WebNodeCollection& operator=(const WebNodeCollection& n)
     {
         assign(n);
         return *this;
     }
+
+    bool isNull() const { return !m_private; }
 
     WEBKIT_EXPORT void reset();
     WEBKIT_EXPORT void assign(const WebNodeCollection&);
@@ -68,6 +70,7 @@ public:
 private:
     void assign(WebCore::HTMLCollection*);
     WebCore::HTMLCollection* m_private;
+    mutable unsigned m_current;
 };
 
 } // namespace WebKit

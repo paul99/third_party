@@ -33,6 +33,9 @@ public:
     typedef typename SVGPropertyTraits<PropertyType>::ListItemType ListItemType;
     typedef SVGPropertyTearOff<ListItemType> ListItemTearOff;
 
+    using Base::m_role;
+    using Base::m_values;
+
     static PassRefPtr<SVGStaticListPropertyTearOff<PropertyType> > create(SVGElement* contextElement, PropertyType& values)
     {
         ASSERT(contextElement);
@@ -42,70 +45,71 @@ public:
     // SVGList API
     void clear(ExceptionCode& ec)
     {
-        Base::clearValues(m_values, ec);
-    }
-
-    unsigned numberOfItems() const
-    {
-        return Base::numberOfItemsValues(m_values);
+        Base::clearValues(ec);
     }
 
     ListItemType initialize(const ListItemType& newItem, ExceptionCode& ec)
     {
-        return Base::initializeValues(m_values, newItem, ec);
+        return Base::initializeValues(newItem, ec);
     }
 
     ListItemType getItem(unsigned index, ExceptionCode& ec)
     {
-        return Base::getItemValues(m_values, index, ec);
+        return Base::getItemValues(index, ec);
     }
 
     ListItemType insertItemBefore(const ListItemType& newItem, unsigned index, ExceptionCode& ec)
     {
-        return Base::insertItemBeforeValues(m_values, newItem, index, ec);
+        return Base::insertItemBeforeValues(newItem, index, ec);
     }
 
     ListItemType replaceItem(const ListItemType& newItem, unsigned index, ExceptionCode& ec)
     {
-        return Base::replaceItemValues(m_values, newItem, index, ec);
+        return Base::replaceItemValues(newItem, index, ec);
     }
 
     ListItemType removeItem(unsigned index, ExceptionCode& ec)
     {
-        return Base::removeItemValues(m_values, index, ec);
+        return Base::removeItemValues(index, ec);
     }
 
     ListItemType appendItem(const ListItemType& newItem, ExceptionCode& ec)
     {
-        return Base::appendItemValues(m_values, newItem, ec);
+        return Base::appendItemValues(newItem, ec);
     }
 
 private:
     SVGStaticListPropertyTearOff(SVGElement* contextElement, PropertyType& values)
-        : SVGListProperty<PropertyType>(UndefinedRole)
+        : SVGListProperty<PropertyType>(UndefinedRole, values, 0)
         , m_contextElement(contextElement)
-        , m_values(values)
     {
+    }
+
+    virtual bool isReadOnly() const
+    {
+        return m_role == AnimValRole;
     }
 
     virtual void commitChange()
     {
-        m_values.commitChange(m_contextElement.get());
+        ASSERT(m_values);
+        m_values->commitChange(m_contextElement.get());
     }
 
-    virtual void processIncomingListItemValue(const ListItemType&, unsigned*)
+    virtual bool processIncomingListItemValue(const ListItemType&, unsigned*)
     {
         // no-op for static lists
+        return true;
     }
 
-    virtual void processIncomingListItemWrapper(RefPtr<ListItemTearOff>&, unsigned*)
+    virtual bool processIncomingListItemWrapper(RefPtr<ListItemTearOff>&, unsigned*)
     {
         ASSERT_NOT_REACHED();
+        return true;
     }
 
 private:
     RefPtr<SVGElement> m_contextElement;
-    PropertyType& m_values;
 };
 
 }

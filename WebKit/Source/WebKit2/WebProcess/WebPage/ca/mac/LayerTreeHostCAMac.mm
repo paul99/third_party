@@ -26,10 +26,11 @@
 #import "config.h"
 #import "LayerTreeHostCAMac.h"
 
+#import "LayerHostingContext.h"
+#import "WebPage.h"
 #import "WebProcess.h"
 #import <QuartzCore/CATransaction.h>
 #import <WebCore/GraphicsLayer.h>
-#import <WebKitSystemInterface.h>
 
 using namespace WebCore;
 
@@ -54,17 +55,24 @@ LayerTreeHostCAMac::LayerTreeHostCAMac(WebPage* webPage)
 
 LayerTreeHostCAMac::~LayerTreeHostCAMac()
 {
-    ASSERT(!m_remoteLayerClient);
+    ASSERT(!m_layerHostingContext);
 }
 
-void LayerTreeHostCAMac::platformInitialize(LayerTreeContext& layerTreeContext)
+void LayerTreeHostCAMac::platformInitialize()
 {
-    mach_port_t serverPort = WebProcess::shared().compositingRenderServerPort();
-    m_remoteLayerClient = WKCARemoteLayerClientMakeWithServerPort(serverPort);
+    switch (m_webPage->layerHostingMode()) {
+    case LayerHostingModeDefault:
+        m_layerHostingContext = LayerHostingContext::createForPort(WebProcess::shared().compositingRenderServerPort());
+        break;
+#if HAVE(LAYER_HOSTING_IN_WINDOW_SERVER)
+    case LayerHostingModeInWindowServer:
+        m_layerHostingContext = LayerHostingContext::createForWindowServer();        
+        break;
+#endif
+    }
 
-    WKCARemoteLayerClientSetLayer(m_remoteLayerClient.get(), rootLayer()->platformLayer());
-
-    layerTreeContext.contextID = WKCARemoteLayerClientGetClientId(m_remoteLayerClient.get());
+    m_layerHostingContext->setRootLayer(rootLayer()->platformLayer());
+    m_layerTreeContext.contextID = m_layerHostingContext->contextID();
 }
 
 void LayerTreeHostCAMac::scheduleLayerFlush()
@@ -84,8 +92,8 @@ void LayerTreeHostCAMac::invalidate()
 {
     m_layerFlushScheduler.invalidate();
 
-    WKCARemoteLayerClientInvalidate(m_remoteLayerClient.get());
-    m_remoteLayerClient = nullptr;
+    m_layerHostingContext->invalidate();
+    m_layerHostingContext = nullptr;
 
     LayerTreeHostCA::invalidate();
 }
@@ -120,11 +128,7 @@ void LayerTreeHostCAMac::resumeRendering()
 
 bool LayerTreeHostCAMac::flushLayers()
 {
-    // This gets called outside of the normal event loop so wrap in an autorelease pool
-    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     performScheduledLayerFlush();
-    [pool drain];
-
     return true;
 }
 
@@ -139,6 +143,35 @@ bool LayerTreeHostCAMac::flushPendingLayerChanges()
         return false;
 
     return LayerTreeHostCA::flushPendingLayerChanges();
+}
+
+void LayerTreeHostCAMac::setLayerHostingMode(LayerHostingMode layerHostingMode)
+{
+    if (layerHostingMode == m_layerHostingContext->layerHostingMode())
+        return;
+
+    // The mode has changed.
+
+    // First, invalidate the old hosting context.
+    m_layerHostingContext->invalidate();
+    m_layerHostingContext = nullptr;
+
+    // Create a new context and set it up.
+    switch (layerHostingMode) {
+    case LayerHostingModeDefault:
+        m_layerHostingContext = LayerHostingContext::createForPort(WebProcess::shared().compositingRenderServerPort());
+        break;
+#if HAVE(LAYER_HOSTING_IN_WINDOW_SERVER)
+    case LayerHostingModeInWindowServer:
+        m_layerHostingContext = LayerHostingContext::createForWindowServer();        
+        break;
+#endif
+    }
+
+    m_layerHostingContext->setRootLayer(rootLayer()->platformLayer());
+    m_layerTreeContext.contextID = m_layerHostingContext->contextID();
+
+    scheduleLayerFlush();
 }
 
 } // namespace WebKit

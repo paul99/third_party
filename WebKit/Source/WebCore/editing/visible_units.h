@@ -26,7 +26,9 @@
 #ifndef visible_units_h
 #define visible_units_h
 
+#include "EditingBehaviorTypes.h"
 #include "EditingBoundary.h"
+#include "TextBreakIterator.h"
 #include "TextDirection.h"
 
 namespace WebCore {
@@ -41,8 +43,8 @@ VisiblePosition startOfWord(const VisiblePosition &, EWordSide = RightWordIfOnBo
 VisiblePosition endOfWord(const VisiblePosition &, EWordSide = RightWordIfOnBoundary);
 VisiblePosition previousWordPosition(const VisiblePosition &);
 VisiblePosition nextWordPosition(const VisiblePosition &);
-VisiblePosition rightWordPosition(const VisiblePosition&);
-VisiblePosition leftWordPosition(const VisiblePosition&);
+VisiblePosition rightWordPosition(const VisiblePosition&, bool skipsSpaceWhenMovingRight);
+VisiblePosition leftWordPosition(const VisiblePosition&, bool skipsSpaceWhenMovingRight);
 bool isStartOfWord(const VisiblePosition&);
 
 // sentences
@@ -93,6 +95,7 @@ bool isEndOfDocument(const VisiblePosition &);
 // editable content
 VisiblePosition startOfEditableContent(const VisiblePosition&);
 VisiblePosition endOfEditableContent(const VisiblePosition&);
+bool isEndOfEditableOrNonEditableContent(const VisiblePosition&);
 
 } // namespace WebCore
 

@@ -32,7 +32,6 @@ namespace JSC {
     class JSGlobalObject;
     class JSValue;
     class SourceProvider;
-    class UString;
 
     class JS_EXPORT_PRIVATE Debugger {
     public:
@@ -41,15 +40,17 @@ namespace JSC {
         void attach(JSGlobalObject*);
         virtual void detach(JSGlobalObject*);
 
-        virtual void sourceParsed(ExecState*, SourceProvider*, int errorLineNumber, const UString& errorMessage) = 0;
-        virtual void exception(const DebuggerCallFrame&, intptr_t sourceID, int lineNumber, bool hasHandler) = 0;
-        virtual void atStatement(const DebuggerCallFrame&, intptr_t sourceID, int lineNumber) = 0;
-        virtual void callEvent(const DebuggerCallFrame&, intptr_t sourceID, int lineNumber) = 0;
-        virtual void returnEvent(const DebuggerCallFrame&, intptr_t sourceID, int lineNumber) = 0;
+        virtual void sourceParsed(ExecState*, SourceProvider*, int errorLineNumber, const WTF::String& errorMessage) = 0;
 
-        virtual void willExecuteProgram(const DebuggerCallFrame&, intptr_t sourceID, int lineNumber) = 0;
-        virtual void didExecuteProgram(const DebuggerCallFrame&, intptr_t sourceID, int lineNumber) = 0;
-        virtual void didReachBreakpoint(const DebuggerCallFrame&, intptr_t sourceID, int lineNumber) = 0;
+        virtual void exception(const DebuggerCallFrame&, intptr_t, int, int, bool) = 0;
+        virtual void atStatement(const DebuggerCallFrame&, intptr_t, int, int) = 0;
+        virtual void callEvent(const DebuggerCallFrame&, intptr_t, int, int) = 0;
+        virtual void returnEvent(const DebuggerCallFrame&, intptr_t, int, int) = 0;
+
+        virtual void willExecuteProgram(const DebuggerCallFrame&, intptr_t, int, int) = 0;
+        virtual void didExecuteProgram(const DebuggerCallFrame&, intptr_t, int, int) = 0;
+        virtual void didReachBreakpoint(const DebuggerCallFrame&, intptr_t, int, int) = 0;
+
 
         void recompileAllJSFunctions(JSGlobalData*);
 
@@ -58,7 +59,7 @@ namespace JSC {
     };
 
     // This function exists only for backwards compatibility with existing WebScriptDebugger clients.
-    JS_EXPORT_PRIVATE JSValue evaluateInGlobalCallFrame(const UString&, JSValue& exception, JSGlobalObject*);
+    JS_EXPORT_PRIVATE JSValue evaluateInGlobalCallFrame(const WTF::String&, JSValue& exception, JSGlobalObject*);
 
 } // namespace JSC
 

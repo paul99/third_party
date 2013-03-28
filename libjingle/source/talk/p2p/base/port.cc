@@ -30,28 +30,17 @@
 #include <algorithm>
 #include <vector>
 
+#include "talk/base/base64.h"
+#include "talk/base/crc32.h"
 #include "talk/base/helpers.h"
 #include "talk/base/logging.h"
+#include "talk/base/messagedigest.h"
 #include "talk/base/scoped_ptr.h"
+#include "talk/base/stringencode.h"
 #include "talk/base/stringutils.h"
 #include "talk/p2p/base/common.h"
 
 namespace {
-
-// The length of time we wait before timing out readability on a connection.
-const uint32 CONNECTION_READ_TIMEOUT = 30 * 1000;   // 30 seconds
-
-// The length of time we wait before timing out writability on a connection.
-const uint32 CONNECTION_WRITE_TIMEOUT = 15 * 1000;  // 15 seconds
-
-// The length of time we wait before we become unwritable.
-const uint32 CONNECTION_WRITE_CONNECT_TIMEOUT = 5 * 1000;  // 5 seconds
-
-// The number of pings that must fail to respond before we become unwritable.
-const uint32 CONNECTION_WRITE_CONNECT_FAILURES = 5;
-
-// This is the length of time that we wait for a ping response to come back.
-const int CONNECTION_RESPONSE_TIMEOUT = 5 * 1000;   // 5 seconds
 
 // Determines whether we have seen at least the given maximum number of
 // pings fail to have a response.
@@ -82,6 +71,27 @@ inline bool TooLongWithoutResponse(
   return pings_since_last_response[0] + maximum_time < now;
 }
 
+// GICE(ICEPROTO_GOOGLE) requires different username for RTP and RTCP.
+// This function generates a different username by +1 on the last character of
+// the given username (|rtp_ufrag|).
+std::string GetRtcpUfragFromRtpUfrag(const std::string& rtp_ufrag) {
+  ASSERT(!rtp_ufrag.empty());
+  if (rtp_ufrag.empty()) {
+    return rtp_ufrag;
+  }
+  // Change the last character to the one next to it in the base64 table.
+  char new_last_char;
+  if (!talk_base::Base64::GetNextBase64Char(rtp_ufrag[rtp_ufrag.size() - 1],
+                                            &new_last_char)) {
+    // Should not be here.
+    ASSERT(false);
+  }
+  std::string rtcp_ufrag = rtp_ufrag;
+  rtcp_ufrag[rtcp_ufrag.size() - 1] = new_last_char;
+  ASSERT(rtcp_ufrag != rtp_ufrag);
+  return rtcp_ufrag;
+}
+
 // We will restrict RTT estimates (when used for determining state) to be
 // within a reasonable range.
 const uint32 MINIMUM_RTT = 100;   // 0.1 seconds
@@ -108,6 +118,10 @@ const uint32 MSG_DELETE = 1;
 
 namespace cricket {
 
+const char LOCAL_PORT_TYPE[] = "local";
+const char STUN_PORT_TYPE[] = "stun";
+const char RELAY_PORT_TYPE[] = "relay";
+
 static const char* const PROTO_NAMES[] = { "udp", "tcp", "ssltcp" };
 
 const char* ProtoToString(ProtocolType proto) {
@@ -116,7 +130,7 @@ const char* ProtoToString(ProtocolType proto) {
 
 bool StringToProto(const char* value, ProtocolType* proto) {
   for (size_t i = 0; i <= PROTO_LAST; ++i) {
-    if (strcmp(PROTO_NAMES[i], value) == 0) {
+    if (_stricmp(PROTO_NAMES[i], value) == 0) {
       *proto = static_cast<ProtocolType>(i);
       return true;
     }
@@ -124,24 +138,65 @@ bool StringToProto(const char* value, ProtocolType* proto) {
   return false;
 }
 
+Port::Port(talk_base::Thread* thread, talk_base::Network* network,
+           const talk_base::IPAddress& ip,
+           const std::string& username_fragment, const std::string& password)
+    : thread_(thread),
+      factory_(NULL),
+      type_preference_(0),
+      send_retransmit_count_attribute_(false),
+      network_(network),
+      ip_(ip),
+      min_port_(0),
+      max_port_(0),
+      component_(ICE_CANDIDATE_COMPONENT_DEFAULT),
+      generation_(0),
+      ice_username_fragment_(username_fragment),
+      password_(password),
+      lifetime_(LT_PRESTART),
+      enable_port_packets_(false),
+      ice_protocol_(ICEPROTO_GOOGLE),
+      role_(ROLE_UNKNOWN),
+      tiebreaker_(0),
+      shared_socket_(true) {
+  Construct();
+}
+
 Port::Port(talk_base::Thread* thread, const std::string& type,
-           talk_base::PacketSocketFactory* factory, talk_base::Network* network,
-           const talk_base::IPAddress& ip, int min_port, int max_port)
+           const uint32 preference, talk_base::PacketSocketFactory* factory,
+           talk_base::Network* network, const talk_base::IPAddress& ip,
+           int min_port, int max_port, const std::string& username_fragment,
+           const std::string& password)
     : thread_(thread),
       factory_(factory),
       type_(type),
+      type_preference_(preference),
+      send_retransmit_count_attribute_(false),
       network_(network),
       ip_(ip),
       min_port_(min_port),
       max_port_(max_port),
+      component_(ICE_CANDIDATE_COMPONENT_DEFAULT),
       generation_(0),
-      preference_(-1),
+      ice_username_fragment_(username_fragment),
+      password_(password),
       lifetime_(LT_PRESTART),
-      enable_port_packets_(false) {
+      enable_port_packets_(false),
+      ice_protocol_(ICEPROTO_GOOGLE),
+      role_(ROLE_UNKNOWN),
+      tiebreaker_(0),
+      shared_socket_(false) {
   ASSERT(factory_ != NULL);
+  Construct();
+}
 
-  set_username_fragment(talk_base::CreateRandomString(16));
-  set_password(talk_base::CreateRandomString(16));
+void Port::Construct() {
+  // If the username_fragment and password are empty, we should just create one.
+  if (ice_username_fragment_.empty()) {
+    ASSERT(password_.empty());
+    ice_username_fragment_ = talk_base::CreateRandomString(ICE_UFRAG_LENGTH);
+    password_ = talk_base::CreateRandomString(ICE_PWD_LENGTH);
+  }
   LOG_J(LS_INFO, this) << "Port created";
 }
 
@@ -169,23 +224,46 @@ Connection* Port::GetConnection(const talk_base::SocketAddress& remote_addr) {
     return NULL;
 }
 
+// Foundation:  An arbitrary string that is the same for two candidates
+//   that have the same type, base IP address, protocol (UDP, TCP,
+//   etc.), and STUN or TURN server.  If any of these are different,
+//   then the foundation will be different.  Two candidate pairs with
+//   the same foundation pairs are likely to have similar network
+//   characteristics.  Foundations are used in the frozen algorithm.
+std::string Port::ComputeFoundation(
+    const std::string& type,
+    const std::string& protocol,
+    const talk_base::SocketAddress& base_address) const {
+  std::ostringstream ost;
+  ost << type << base_address.ipaddr().ToString() << protocol;
+  return talk_base::ToString<uint32>(talk_base::ComputeCrc32(ost.str()));
+}
+
 void Port::AddAddress(const talk_base::SocketAddress& address,
+                      const talk_base::SocketAddress& base_address,
                       const std::string& protocol,
+                      const std::string& type,
+                      uint32 type_preference,
                       bool final) {
   Candidate c;
-  c.set_name(name_);
-  c.set_type(type_);
+  c.set_id(talk_base::CreateRandomString(8));
+  c.set_component(component_);
+  c.set_type(type);
   c.set_protocol(protocol);
   c.set_address(address);
-  c.set_preference(preference_);
-  c.set_username(username_frag_);
+  c.set_priority(c.GetPriority(type_preference));
+  c.set_username(username_fragment());
   c.set_password(password_);
   c.set_network_name(network_->name());
   c.set_generation(generation_);
+  c.set_related_address(related_address_);
+  c.set_foundation(ComputeFoundation(type, protocol, base_address));
   candidates_.push_back(c);
+  SignalCandidateReady(this, c);
 
-  if (final)
+  if (final) {
     SignalAddressReady(this);
+  }
 }
 
 void Port::AddConnection(Connection* conn) {
@@ -195,7 +273,8 @@ void Port::AddConnection(Connection* conn) {
 }
 
 void Port::OnReadPacket(
-    const char* data, size_t size, const talk_base::SocketAddress& addr) {
+    const char* data, size_t size, const talk_base::SocketAddress& addr,
+    ProtocolType proto) {
   // If the user has enabled port packets, just hand this over.
   if (enable_port_packets_) {
     SignalReadPacket(this, data, size, addr);
@@ -204,15 +283,22 @@ void Port::OnReadPacket(
 
   // If this is an authenticated STUN request, then signal unknown address and
   // send back a proper binding response.
-  StunMessage* msg;
+  talk_base::scoped_ptr<IceMessage> msg;
   std::string remote_username;
-  if (!GetStunMessage(data, size, addr, &msg, &remote_username)) {
+  if (!GetStunMessage(data, size, addr, msg.accept(), &remote_username)) {
     LOG_J(LS_ERROR, this) << "Received non-STUN packet from unknown address ("
                           << addr.ToString() << ")";
   } else if (!msg) {
     // STUN message handled already
   } else if (msg->type() == STUN_BINDING_REQUEST) {
-    SignalUnknownAddress(this, addr, msg, remote_username, false);
+    // Check for role conflicts.
+    if (IceProtocol() == ICEPROTO_RFC5245 &&
+        !MaybeIceRoleConflict(addr, msg.get(), remote_username)) {
+      LOG(LS_INFO) << "Received conflicting role from the peer.";
+      return;
+    }
+
+    SignalUnknownAddress(this, addr, proto, msg.get(), remote_username, false);
   } else {
     // NOTE(tschmelcher): STUN_BINDING_RESPONSE is benign. It occurs if we
     // pruned a connection for this port while it had STUN requests in flight,
@@ -223,13 +309,12 @@ void Port::OnReadPacket(
                             << msg->type() << ") from unknown address ("
                             << addr.ToString() << ")";
     }
-    delete msg;
   }
 }
 
 bool Port::GetStunMessage(const char* data, size_t size,
                           const talk_base::SocketAddress& addr,
-                          StunMessage** out_msg, std::string* out_username) {
+                          IceMessage** out_msg, std::string* out_username) {
   // NOTE: This could clearly be optimized to avoid allocating any memory.
   //       However, at the data rates we'll be looking at on the client side,
   //       this probably isn't worth worrying about.
@@ -238,82 +323,80 @@ bool Port::GetStunMessage(const char* data, size_t size,
   *out_msg = NULL;
   out_username->clear();
 
+  // Don't bother parsing the packet if we can tell it's not STUN.
+  // In ICE mode, all STUN packets will have a valid fingerprint.
+  if (ice_protocol_ == ICEPROTO_RFC5245 &&
+    !StunMessage::ValidateFingerprint(data, size)) {
+    return false;
+  }
+
   // Parse the request message.  If the packet is not a complete and correct
   // STUN message, then ignore it.
-  talk_base::scoped_ptr<StunMessage> stun_msg(new StunMessage());
+  talk_base::scoped_ptr<IceMessage> stun_msg(new IceMessage());
   talk_base::ByteBuffer buf(data, size);
   if (!stun_msg->Read(&buf) || (buf.Length() > 0)) {
     return false;
   }
 
-  // The packet must include a username that either begins or ends with our
-  // fragment.  It should begin with our fragment if it is a request and it
-  // should end with our fragment if it is a response.
-  const StunByteStringAttribute* username_attr =
-      stun_msg->GetByteString(STUN_ATTR_USERNAME);
-
-  int remote_frag_len = (username_attr ? username_attr->length() : 0);
-  remote_frag_len -= static_cast<int>(username_frag_.size());
-
   if (stun_msg->type() == STUN_BINDING_REQUEST) {
-    if (remote_frag_len < 0) {
-      // Username not present or corrupted, don't reply.
-      LOG_J(LS_ERROR, this) << "Received STUN request without username from "
-                            << addr.ToString();
-      return true;
-    } else if (std::memcmp(username_attr->bytes(), username_frag_.c_str(),
-                           username_frag_.size()) != 0) {
-      LOG_J(LS_ERROR, this) << "Received STUN request with bad local username "
-                            << std::string(username_attr->bytes(),
-                                           username_attr->length())
-                            << " from "
-                            << addr.ToString();
+    // Check for the presence of USERNAME and MESSAGE-INTEGRITY (if ICE) first.
+    // If not present, fail with a 400 Bad Request.
+    if (!stun_msg->GetByteString(STUN_ATTR_USERNAME) ||
+        (ice_protocol_ == ICEPROTO_RFC5245 &&
+            !stun_msg->GetByteString(STUN_ATTR_MESSAGE_INTEGRITY))) {
+      LOG_J(LS_ERROR, this) << "Received STUN request without username/M-I "
+                            << "from " << addr.ToString();
       SendBindingErrorResponse(stun_msg.get(), addr, STUN_ERROR_BAD_REQUEST,
                                STUN_ERROR_REASON_BAD_REQUEST);
       return true;
     }
 
-    out_username->assign(username_attr->bytes() + username_frag_.size(),
-                         username_attr->bytes() + username_attr->length());
-  } else if ((stun_msg->type() == STUN_BINDING_RESPONSE)
-      || (stun_msg->type() == STUN_BINDING_ERROR_RESPONSE)) {
-    if (remote_frag_len < 0) {
-      LOG_J(LS_ERROR, this) << "Received STUN response without username from "
-                            << addr.ToString();
-      // Do not send error response to a response
-      return true;
-    } else if (std::memcmp(username_attr->bytes() + remote_frag_len,
-                           username_frag_.c_str(),
-                           username_frag_.size()) != 0) {
-      LOG_J(LS_ERROR, this) << "Received STUN response with bad local username "
-                            << std::string(username_attr->bytes(),
-                                           username_attr->length())
-                            << " from "
-                            << addr.ToString();
-      // Do not send error response to a response
+    // If the username is bad or unknown, fail with a 401 Unauthorized.
+    std::string local_ufrag;
+    std::string remote_ufrag;
+    if (!ParseStunUsername(stun_msg.get(), &local_ufrag, &remote_ufrag) ||
+        local_ufrag != username_fragment()) {
+      LOG_J(LS_ERROR, this) << "Received STUN request with bad local username "
+                            << local_ufrag << " from " << addr.ToString();
+      SendBindingErrorResponse(stun_msg.get(), addr, STUN_ERROR_UNAUTHORIZED,
+                               STUN_ERROR_REASON_UNAUTHORIZED);
       return true;
     }
 
-    out_username->assign(username_attr->bytes(),
-                         username_attr->bytes() + remote_frag_len);
-
+    // If ICE, and the MESSAGE-INTEGRITY is bad, fail with a 401 Unauthorized
+    if (ice_protocol_ == ICEPROTO_RFC5245 &&
+        !stun_msg->ValidateMessageIntegrity(data, size, password_)) {
+      LOG_J(LS_ERROR, this) << "Received STUN request with bad M-I "
+                            << "from " << addr.ToString();
+      SendBindingErrorResponse(stun_msg.get(), addr, STUN_ERROR_UNAUTHORIZED,
+                               STUN_ERROR_REASON_UNAUTHORIZED);
+      return true;
+    }
+    out_username->assign(remote_ufrag);
+  } else if ((stun_msg->type() == STUN_BINDING_RESPONSE) ||
+             (stun_msg->type() == STUN_BINDING_ERROR_RESPONSE)) {
     if (stun_msg->type() == STUN_BINDING_ERROR_RESPONSE) {
       if (const StunErrorCodeAttribute* error_code = stun_msg->GetErrorCode()) {
         LOG_J(LS_ERROR, this) << "Received STUN binding error:"
-                              << " class="
-                              << static_cast<int>(error_code->error_class())
-                              << " number="
-                              << static_cast<int>(error_code->number())
+                              << " class=" << error_code->eclass()
+                              << " number=" << error_code->number()
                               << " reason='" << error_code->reason() << "'"
                               << " from " << addr.ToString();
         // Return message to allow error-specific processing
       } else {
         LOG_J(LS_ERROR, this) << "Received STUN binding error without a error "
                               << "code from " << addr.ToString();
-        // Drop corrupt message
         return true;
       }
     }
+    // NOTE: Username should not be used in verifying response messages.
+    out_username->clear();
+  } else if (stun_msg->type() == STUN_BINDING_INDICATION) {
+    LOG_J(LS_VERBOSE, this) << "Received STUN binding indication:"
+                            << " from " << addr.ToString();
+    out_username->clear();
+    // No stun attributes will be verified, if it's stun indication message.
+    // Returning from end of the this method.
   } else {
     LOG_J(LS_ERROR, this) << "Received STUN packet with invalid type ("
                           << stun_msg->type() << ") from " << addr.ToString();
@@ -323,6 +406,127 @@ bool Port::GetStunMessage(const char* data, size_t size,
   // Return the STUN message found.
   *out_msg = stun_msg.release();
   return true;
+}
+
+bool Port::IsCompatibleAddress(const talk_base::SocketAddress& addr) {
+  int family = ip().family();
+  // We use single-stack sockets, so families must match.
+  if (addr.family() != family) {
+    return false;
+  }
+  // Link-local IPv6 ports can only connect to other link-local IPv6 ports.
+  if (family == AF_INET6 && (IPIsPrivate(ip()) != IPIsPrivate(addr.ipaddr()))) {
+    return false;
+  }
+  return true;
+}
+
+bool Port::ParseStunUsername(const StunMessage* stun_msg,
+                             std::string* local_ufrag,
+                             std::string* remote_ufrag) const {
+  // The packet must include a username that either begins or ends with our
+  // fragment.  It should begin with our fragment if it is a request and it
+  // should end with our fragment if it is a response.
+  local_ufrag->clear();
+  remote_ufrag->clear();
+  const StunByteStringAttribute* username_attr =
+        stun_msg->GetByteString(STUN_ATTR_USERNAME);
+  if (username_attr == NULL)
+    return false;
+
+  const std::string username_attr_str = username_attr->GetString();
+  if (ice_protocol_ == ICEPROTO_RFC5245) {
+    size_t colon_pos = username_attr_str.find(":");
+    if (colon_pos != std::string::npos) {  // RFRAG:LFRAG
+      *local_ufrag = username_attr_str.substr(0, colon_pos);
+      *remote_ufrag = username_attr_str.substr(
+          colon_pos + 1, username_attr_str.size());
+    } else {
+      return false;
+    }
+  } else if (ice_protocol_ == ICEPROTO_GOOGLE) {
+    int remote_frag_len = username_attr_str.size();
+    remote_frag_len -= static_cast<int>(username_fragment().size());
+    if (remote_frag_len < 0)
+      return false;
+
+    *local_ufrag = username_attr_str.substr(0, username_fragment().size());
+    *remote_ufrag = username_attr_str.substr(
+        username_fragment().size(), username_attr_str.size());
+  }
+  return true;
+}
+
+bool Port::MaybeIceRoleConflict(
+    const talk_base::SocketAddress& addr, IceMessage* stun_msg,
+    const std::string& remote_ufrag) {
+  // Validate ICE_CONTROLLING or ICE_CONTROLLED attributes.
+  bool ret = true;
+  TransportRole remote_ice_role = ROLE_UNKNOWN;
+  uint64 remote_tiebreaker = 0;
+  const StunUInt64Attribute* stun_attr =
+      stun_msg->GetUInt64(STUN_ATTR_ICE_CONTROLLING);
+  if (stun_attr) {
+    remote_ice_role = ROLE_CONTROLLING;
+    remote_tiebreaker = stun_attr->value();
+  }
+
+  // If |remote_ufrag| is same as port local username fragment and
+  // tie breaker value received in the ping message matches port
+  // tiebreaker value this must be a loopback call.
+  // We will treat this as valid scenario.
+  if (remote_ice_role == ROLE_CONTROLLING &&
+      username_fragment() == remote_ufrag &&
+      remote_tiebreaker == Tiebreaker()) {
+    return true;
+  }
+
+  stun_attr = stun_msg->GetUInt64(STUN_ATTR_ICE_CONTROLLED);
+  if (stun_attr) {
+    remote_ice_role = ROLE_CONTROLLED;
+    remote_tiebreaker = stun_attr->value();
+  }
+
+  switch (role_) {
+    case ROLE_CONTROLLING:
+      if (ROLE_CONTROLLING == remote_ice_role) {
+        if (remote_tiebreaker >= tiebreaker_) {
+          SignalRoleConflict();
+        } else {
+          // Send Role Conflict (487) error response.
+          SendBindingErrorResponse(stun_msg, addr,
+              STUN_ERROR_ROLE_CONFLICT, STUN_ERROR_REASON_ROLE_CONFLICT);
+          ret = false;
+        }
+      }
+      break;
+    case ROLE_CONTROLLED:
+      if (ROLE_CONTROLLED == remote_ice_role) {
+        if (remote_tiebreaker < tiebreaker_) {
+          SignalRoleConflict();
+        } else {
+          // Send Role Conflict (487) error response.
+          SendBindingErrorResponse(stun_msg, addr,
+              STUN_ERROR_ROLE_CONFLICT, STUN_ERROR_REASON_ROLE_CONFLICT);
+          ret = false;
+        }
+      }
+      break;
+    default:
+      ASSERT(false);
+  }
+  return ret;
+}
+
+void Port::CreateStunUsername(const std::string& remote_username,
+                              std::string* stun_username_attr_str) const {
+  stun_username_attr_str->clear();
+  *stun_username_attr_str = remote_username;
+  if (ice_protocol_ == ICEPROTO_RFC5245) {
+    // Connectivity checks from L->R will have username RFRAG:LFRAG.
+    stun_username_attr_str->append(":");
+  }
+  stun_username_attr_str->append(username_fragment());
 }
 
 void Port::SendBindingResponse(StunMessage* request,
@@ -342,20 +546,36 @@ void Port::SendBindingResponse(StunMessage* request,
   StunMessage response;
   response.SetType(STUN_BINDING_RESPONSE);
   response.SetTransactionID(request->transaction_id());
+  const StunUInt32Attribute* retransmit_attr =
+      request->GetUInt32(STUN_ATTR_RETRANSMIT_COUNT);
+  if (retransmit_attr) {
+    // Inherit the incoming retransmit value in the response so the other side
+    // can see our view of lost pings.
+    response.AddAttribute(new StunUInt32Attribute(
+        STUN_ATTR_RETRANSMIT_COUNT, retransmit_attr->value()));
 
-  StunByteStringAttribute* username2_attr =
-      StunAttribute::CreateByteString(STUN_ATTR_USERNAME);
-  username2_attr->CopyBytes(username_attr->bytes(), username_attr->length());
-  response.AddAttribute(username2_attr);
+    if (retransmit_attr->value() > CONNECTION_WRITE_CONNECT_FAILURES) {
+      LOG_J(LS_INFO, this)
+          << "Received a remote ping with high retransmit count: "
+          << retransmit_attr->value();
+    }
+  }
 
-  StunAddressAttribute* addr_attr =
-      StunAttribute::CreateAddress(STUN_ATTR_MAPPED_ADDRESS);
-  addr_attr->SetPort(addr.port());
-  addr_attr->SetIP(addr.ipaddr());
-  response.AddAttribute(addr_attr);
+  // Only GICE messages have USERNAME and MAPPED-ADDRESS in the response.
+  // ICE messages use XOR-MAPPED-ADDRESS, and add MESSAGE-INTEGRITY.
+  if (ice_protocol_ == ICEPROTO_RFC5245) {
+    response.AddAttribute(
+        new StunXorAddressAttribute(STUN_ATTR_XOR_MAPPED_ADDRESS, addr));
+    response.AddMessageIntegrity(password_);
+    response.AddFingerprint();
+  } else if (ice_protocol_ == ICEPROTO_GOOGLE) {
+    response.AddAttribute(
+        new StunAddressAttribute(STUN_ATTR_MAPPED_ADDRESS, addr));
+    response.AddAttribute(new StunByteStringAttribute(
+        STUN_ATTR_USERNAME, username_attr->GetString()));
+  }
 
   // Send the response message.
-  // NOTE: If we wanted to, this is where we would add the HMAC.
   talk_base::ByteBuffer buf;
   response.Write(&buf);
   if (SendTo(buf.Data(), buf.Length(), addr, false) < 0) {
@@ -376,33 +596,40 @@ void Port::SendBindingErrorResponse(StunMessage* request,
                                     int error_code, const std::string& reason) {
   ASSERT(request->type() == STUN_BINDING_REQUEST);
 
-  // Retrieve the username from the request. If it didn't have one, we
-  // shouldn't be responding at all.
-  const StunByteStringAttribute* username_attr =
-      request->GetByteString(STUN_ATTR_USERNAME);
-  ASSERT(username_attr != NULL);
-  if (username_attr == NULL) {
-    // No valid username, skip the response.
-    return;
-  }
-
   // Fill in the response message.
   StunMessage response;
   response.SetType(STUN_BINDING_ERROR_RESPONSE);
   response.SetTransactionID(request->transaction_id());
 
-  StunByteStringAttribute* username2_attr =
-      StunAttribute::CreateByteString(STUN_ATTR_USERNAME);
-  username2_attr->CopyBytes(username_attr->bytes(), username_attr->length());
-  response.AddAttribute(username2_attr);
-
+  // When doing GICE, we need to write out the error code incorrectly to
+  // maintain backwards compatiblility.
   StunErrorCodeAttribute* error_attr = StunAttribute::CreateErrorCode();
-  error_attr->SetErrorCode(error_code);
+  if (ice_protocol_ == ICEPROTO_RFC5245) {
+    error_attr->SetCode(error_code);
+  } else if (ice_protocol_ == ICEPROTO_GOOGLE) {
+    error_attr->SetClass(error_code / 256);
+    error_attr->SetNumber(error_code % 256);
+  }
   error_attr->SetReason(reason);
   response.AddAttribute(error_attr);
 
+  if (ice_protocol_ == ICEPROTO_RFC5245) {
+    // Per Section 10.1.2, certain error cases don't get a MESSAGE-INTEGRITY,
+    // because we don't have enough information to determine the shared secret.
+    if (error_code != STUN_ERROR_BAD_REQUEST &&
+        error_code != STUN_ERROR_UNAUTHORIZED)
+      response.AddMessageIntegrity(password_);
+    response.AddFingerprint();
+  } else if (ice_protocol_ == ICEPROTO_GOOGLE) {
+    // GICE responses include a username, if one exists.
+    const StunByteStringAttribute* username_attr =
+        request->GetByteString(STUN_ATTR_USERNAME);
+    if (username_attr)
+      response.AddAttribute(new StunByteStringAttribute(
+          STUN_ATTR_USERNAME, username_attr->GetString()));
+  }
+
   // Send the response message.
-  // NOTE: If we wanted to, this is where we would add the HMAC.
   talk_base::ByteBuffer buf;
   response.Write(&buf);
   SendTo(buf.Data(), buf.Length(), addr, false);
@@ -419,7 +646,8 @@ void Port::OnMessage(talk_base::Message *pmsg) {
 
 std::string Port::ToString() const {
   std::stringstream ss;
-  ss << "Port[" << name_ << ":" << generation_ << ":" << type_
+  ss << "Port[" << content_name_ << ":" << component_
+     << ":" << generation_ << ":" << type_
      << ":" << network_->ToString() << "]";
   return ss.str();
 }
@@ -465,10 +693,22 @@ void Port::CheckTimeout() {
   }
 }
 
+const std::string Port::username_fragment() const {
+  if (ice_protocol_ == ICEPROTO_GOOGLE &&
+      component_ == ICE_CANDIDATE_COMPONENT_RTCP) {
+    // In GICE mode, we should adjust username fragment for rtcp component.
+    return GetRtcpUfragFromRtpUfrag(ice_username_fragment_);
+  } else {
+    return ice_username_fragment_;
+  }
+}
+
 // A ConnectionRequest is a simple STUN ping used to determine writability.
 class ConnectionRequest : public StunRequest {
  public:
-  explicit ConnectionRequest(Connection* connection) : connection_(connection) {
+  explicit ConnectionRequest(Connection* connection)
+      : StunRequest(new IceMessage()),
+        connection_(connection) {
   }
 
   virtual ~ConnectionRequest() {
@@ -476,12 +716,52 @@ class ConnectionRequest : public StunRequest {
 
   virtual void Prepare(StunMessage* request) {
     request->SetType(STUN_BINDING_REQUEST);
-    StunByteStringAttribute* username_attr =
-        StunAttribute::CreateByteString(STUN_ATTR_USERNAME);
-    std::string username = connection_->remote_candidate().username();
-    username.append(connection_->port()->username_fragment());
-    username_attr->CopyBytes(username.c_str(), username.size());
-    request->AddAttribute(username_attr);
+    std::string username;
+    connection_->port()->CreateStunUsername(
+        connection_->remote_candidate().username(), &username);
+    request->AddAttribute(
+        new StunByteStringAttribute(STUN_ATTR_USERNAME, username));
+
+    // connection_ already holds this ping, so subtract one from count.
+    if (connection_->port()->send_retransmit_count_attribute()) {
+      request->AddAttribute(new StunUInt32Attribute(STUN_ATTR_RETRANSMIT_COUNT,
+          connection_->pings_since_last_response_.size() - 1));
+    }
+
+    // Adding ICE-specific attributes to the STUN request message.
+    if (connection_->port()->IceProtocol() == ICEPROTO_RFC5245) {
+      // Adding ICE_CONTROLLED or ICE_CONTROLLING attribute based on the role.
+      if (connection_->port()->Role() == ROLE_CONTROLLING) {
+        request->AddAttribute(new StunUInt64Attribute(
+            STUN_ATTR_ICE_CONTROLLING, connection_->port()->Tiebreaker()));
+        // Since we are trying aggressive nomination, sending USE-CANDIDATE
+        // attribute in every ping.
+        // Adding USE-CANDIDATE attribute, if the flag is set to true.
+        request->AddAttribute(new StunByteStringAttribute(
+            STUN_ATTR_USE_CANDIDATE));
+      } else if (connection_->port()->Role() == ROLE_CONTROLLED) {
+        request->AddAttribute(new StunUInt64Attribute(
+            STUN_ATTR_ICE_CONTROLLED, connection_->port()->Tiebreaker()));
+      } else {
+        ASSERT(false);
+      }
+
+      // Adding PRIORITY Attribute.
+      // Changing the type preference to Peer Reflexive and local preference
+      // and component id information is unchanged from the original priority.
+      // priority = (2^24)*(type preference) +
+      //           (2^8)*(local preference) +
+      //           (2^0)*(256 - component ID)
+      uint32 prflx_priority = ICE_TYPE_PREFERENCE_PRFLX << 24 |
+          (connection_->local_candidate().priority() & 0x00FFFFFF);
+      request->AddAttribute(
+          new StunUInt32Attribute(STUN_ATTR_PRIORITY, prflx_priority));
+
+      // Adding Message Integrity attribute.
+      request->AddMessageIntegrity(connection_->remote_candidate().password());
+      // Adding Fingerprint.
+      request->AddFingerprint();
+    }
   }
 
   virtual void OnResponse(StunMessage* response) {
@@ -505,6 +785,7 @@ class ConnectionRequest : public StunRequest {
 
  private:
   Connection* connection_;
+  bool use_candidate_;
 };
 
 //
@@ -514,11 +795,14 @@ class ConnectionRequest : public StunRequest {
 Connection::Connection(Port* port, size_t index,
                        const Candidate& remote_candidate)
   : port_(port), local_candidate_index_(index),
-    remote_candidate_(remote_candidate), read_state_(STATE_READ_TIMEOUT),
-    write_state_(STATE_WRITE_CONNECT), connected_(true), pruned_(false),
+    remote_candidate_(remote_candidate), read_state_(STATE_READ_INIT),
+    write_state_(STATE_WRITE_INIT), connected_(true), pruned_(false),
     requests_(port->thread()), rtt_(DEFAULT_RTT),
     last_ping_sent_(0), last_ping_received_(0), last_data_received_(0),
-    reported_(false) {
+    last_ping_response_received_(0), reported_(false), nominated_(false),
+    state_(STATE_WAITING) {
+  // All of our connections start in WAITING state.
+  // TODO(mallinath) - Start connections from STATE_FROZEN.
   // Wire up to send stun packets
   requests_.SignalSendPacket.connect(this, &Connection::OnSendStunPacket);
   LOG_J(LS_INFO, this) << "Connection created";
@@ -528,8 +812,33 @@ Connection::~Connection() {
 }
 
 const Candidate& Connection::local_candidate() const {
-  ASSERT(local_candidate_index_ < port_->candidates().size());
-  return port_->candidates()[local_candidate_index_];
+  ASSERT(local_candidate_index_ < port_->Candidates().size());
+  return port_->Candidates()[local_candidate_index_];
+}
+
+uint64 Connection::priority() const {
+  uint64 priority = 0;
+  // RFC 5245 - 5.7.2.  Computing Pair Priority and Ordering Pairs
+  // Let G be the priority for the candidate provided by the controlling
+  // agent.  Let D be the priority for the candidate provided by the
+  // controlled agent.
+  // pair priority = 2^32*MIN(G,D) + 2*MAX(G,D) + (G>D?1:0)
+  TransportRole role = port_->Role();
+  if (role != ROLE_UNKNOWN) {
+    uint32 g = 0;
+    uint32 d = 0;
+    if (role == ROLE_CONTROLLING) {
+      g = local_candidate().priority();
+      d = remote_candidate_.priority();
+    } else {
+      g = remote_candidate_.priority();
+      d = local_candidate().priority();
+    }
+    priority = talk_base::_min(g, d);
+    priority = priority << 32;
+    priority += 2 * talk_base::_max(g, d) + (g > d ? 1 : 0);
+  }
+  return priority;
 }
 
 void Connection::set_read_state(ReadState value) {
@@ -552,6 +861,14 @@ void Connection::set_write_state(WriteState value) {
   }
 }
 
+void Connection::set_state(State state) {
+  State old_state = state_;
+  state_ = state;
+  if (state != old_state) {
+    LOG_J(LS_VERBOSE, this) << "set_state";
+  }
+}
+
 void Connection::set_connected(bool value) {
   bool old_value = connected_;
   connected_ = value;
@@ -568,10 +885,10 @@ void Connection::OnSendStunPacket(const void* data, size_t size,
 }
 
 void Connection::OnReadPacket(const char* data, size_t size) {
-  StunMessage* msg;
-  std::string remote_username;
+  talk_base::scoped_ptr<IceMessage> msg;
+  std::string remote_ufrag;
   const talk_base::SocketAddress& addr(remote_candidate_.address());
-  if (!port_->GetStunMessage(data, size, addr, &msg, &remote_username)) {
+  if (!port_->GetStunMessage(data, size, addr, msg.accept(), &remote_ufrag)) {
     // The packet did not parse as a valid STUN message
 
     // If this connection is readable, then pass along the packet.
@@ -584,8 +901,11 @@ void Connection::OnReadPacket(const char* data, size_t size) {
       SignalReadPacket(this, data, size);
 
       // If timed out sending writability checks, start up again
-      if (!pruned_ && (write_state_ == STATE_WRITE_TIMEOUT))
-        set_write_state(STATE_WRITE_CONNECT);
+      if (!pruned_ && (write_state_ == STATE_WRITE_TIMEOUT)) {
+        LOG(LS_WARNING) << "Received a data packet on a timed-out Connection. "
+                        << "Resetting state to STATE_WRITE_INIT.";
+        set_write_state(STATE_WRITE_INIT);
+      }
     } else {
       // Not readable means the remote address hasn't sent a valid
       // binding request yet.
@@ -594,54 +914,82 @@ void Connection::OnReadPacket(const char* data, size_t size) {
         << "Received non-STUN packet from an unreadable connection.";
     }
   } else if (!msg) {
-    // The packet was STUN, but was already handled internally.
-  } else if (remote_username != remote_candidate_.username()) {
-    // The packet had the right local username, but the remote username was
-    // not the right one for the remote address.
-    if (msg->type() == STUN_BINDING_REQUEST) {
-      LOG_J(LS_ERROR, this) << "Received STUN request with bad remote username "
-                            << remote_username;
-      port_->SendBindingErrorResponse(msg, addr, STUN_ERROR_BAD_REQUEST,
-                                      STUN_ERROR_REASON_BAD_REQUEST);
-    } else if (msg->type() == STUN_BINDING_RESPONSE ||
-               msg->type() == STUN_BINDING_ERROR_RESPONSE) {
-      LOG_J(LS_ERROR, this) << "Received STUN response with bad remote username"
-                            " " << remote_username;
-    }
-    delete msg;
+    // The packet was STUN, but failed a check and was handled internally.
   } else {
-    // The packet is STUN, with the right username.
+    // The packet is STUN and passed the Port checks.
+    // Perform our own checks to ensure this packet is valid.
     // If this is a STUN request, then update the readable bit and respond.
     // If this is a STUN response, then update the writable bit.
-
     switch (msg->type()) {
-    case STUN_BINDING_REQUEST:
-      // Incoming, validated stun request from remote peer.
-      // This call will also set the connection readable.
+      case STUN_BINDING_REQUEST:
+        if (remote_ufrag == remote_candidate_.username()) {
+          // Check for role conflicts.
+          if (port_->IceProtocol() == ICEPROTO_RFC5245 &&
+              !port_->MaybeIceRoleConflict(addr, msg.get(), remote_ufrag)) {
+            // Received conflicting role from the peer.
+            LOG(LS_INFO) << "Received conflicting role from the peer.";
+            return;
+          }
 
-      port_->SendBindingResponse(msg, addr);
+          // Incoming, validated stun request from remote peer.
+          // This call will also set the connection readable.
+          port_->SendBindingResponse(msg.get(), addr);
 
-      // If timed out sending writability checks, start up again
-      if (!pruned_ && (write_state_ == STATE_WRITE_TIMEOUT))
-        set_write_state(STATE_WRITE_CONNECT);
-      break;
+          // If timed out sending writability checks, start up again
+          if (!pruned_ && (write_state_ == STATE_WRITE_TIMEOUT))
+            set_write_state(STATE_WRITE_INIT);
 
-    case STUN_BINDING_RESPONSE:
-    case STUN_BINDING_ERROR_RESPONSE:
+          if ((port_->IceProtocol() == ICEPROTO_RFC5245) &&
+              (port_->Role() == ROLE_CONTROLLED)) {
+            const StunByteStringAttribute* use_candidate_attr =
+                msg->GetByteString(STUN_ATTR_USE_CANDIDATE);
+            if (use_candidate_attr)
+              SignalUseCandidate(this);
+          }
+        } else {
+          // The packet had the right local username, but the remote username
+          // was not the right one for the remote address.
+          LOG_J(LS_ERROR, this)
+            << "Received STUN request with bad remote username "
+            << remote_ufrag;
+          port_->SendBindingErrorResponse(msg.get(), addr,
+                                          STUN_ERROR_UNAUTHORIZED,
+                                          STUN_ERROR_REASON_UNAUTHORIZED);
+
+        }
+        break;
+
       // Response from remote peer. Does it match request sent?
       // This doesn't just check, it makes callbacks if transaction
-      // id's match
-      requests_.CheckResponse(msg);
-      break;
+      // id's match.
+      case STUN_BINDING_RESPONSE:
+      case STUN_BINDING_ERROR_RESPONSE:
+        if (port_->IceProtocol() == ICEPROTO_GOOGLE ||
+            msg->ValidateMessageIntegrity(
+                data, size, remote_candidate().password())) {
+          requests_.CheckResponse(msg.get());
+        }
+        // Otherwise silently discard the response message.
+        break;
 
-    default:
-      ASSERT(false);
-      break;
+      // Remote end point sent an STUN indication instead of regular
+      // binding request. In this case |last_ping_received_| will be updated.
+      // Otherwise we can mark connection to read timeout. No response will be
+      // sent in this scenario.
+      case STUN_BINDING_INDICATION:
+        if (port_->IceProtocol() == ICEPROTO_RFC5245 &&
+            read_state_ == STATE_READABLE) {
+          ReceivedPing();
+        } else {
+          LOG_J(LS_WARNING, this) << "Received STUN binding indication "
+                                  << "from an unreadable connection.";
+        }
+        break;
+
+      default:
+        ASSERT(false);
+        break;
     }
-
-    // Done with the message; delete
-
-    delete msg;
   }
 }
 
@@ -677,12 +1025,19 @@ void Connection::UpdateState(uint32 now) {
   //
   // Since we don't know how many pings the other side has attempted, the best
   // test we can do is a simple window.
-
+  // If other side has not sent ping after connection has become readable, use
+  // |last_data_received_| as the indication.
   if ((read_state_ == STATE_READABLE) &&
-      (last_ping_received_ + CONNECTION_READ_TIMEOUT <= now)) {
+      (last_ping_received_ + CONNECTION_READ_TIMEOUT <= now) &&
+      (last_data_received_ + CONNECTION_READ_TIMEOUT <= now)) {
     LOG_J(LS_INFO, this) << "Unreadable after "
                          << now - last_ping_received_
-                         << " ms without a ping, rtt=" << rtt;
+                         << " ms without a ping,"
+                         << " ms since last received response="
+                         << now - last_ping_response_received_
+                         << " ms since last received data="
+                         << now - last_data_received_
+                         << " rtt=" << rtt;
     set_read_state(STATE_READ_TIMEOUT);
   }
 
@@ -713,10 +1068,11 @@ void Connection::UpdateState(uint32 now) {
                          << " ms since last received data="
                          << now - last_data_received_
                          << " rtt=" << rtt;
-    set_write_state(STATE_WRITE_CONNECT);
+    set_write_state(STATE_WRITE_UNRELIABLE);
   }
 
-  if ((write_state_ == STATE_WRITE_CONNECT) &&
+  if ((write_state_ == STATE_WRITE_UNRELIABLE ||
+       write_state_ == STATE_WRITE_INIT) &&
       TooLongWithoutResponse(pings_since_last_response_,
                              CONNECTION_WRITE_TIMEOUT,
                              now)) {
@@ -734,6 +1090,7 @@ void Connection::Ping(uint32 now) {
   ConnectionRequest *req = new ConnectionRequest(this);
   LOG_J(LS_VERBOSE, this) << "Sending STUN ping " << req->id() << " at " << now;
   requests_.Send(req);
+  state_ = STATE_INPROGRESS;
 }
 
 void Connection::ReceivedPing() {
@@ -746,28 +1103,40 @@ std::string Connection::ToString() const {
     '-',  // not connected (false)
     'C',  // connected (true)
   };
-  const char READ_STATE_ABBREV[2] = {
+  const char READ_STATE_ABBREV[3] = {
+    '-',  // STATE_READ_INIT
     'R',  // STATE_READABLE
-    '-',  // STATE_READ_TIMEOUT
+    'x',  // STATE_READ_TIMEOUT
   };
-  const char WRITE_STATE_ABBREV[3] = {
+  const char WRITE_STATE_ABBREV[4] = {
     'W',  // STATE_WRITABLE
-    'w',  // STATE_WRITE_CONNECT
-    '-',  // STATE_WRITE_TIMEOUT
+    'w',  // STATE_WRITE_UNRELIABLE
+    '-',  // STATE_WRITE_INIT
+    'x',  // STATE_WRITE_TIMEOUT
+  };
+  const std::string ICESTATE[4] = {
+    "W",  // STATE_WAITING
+    "I",  // STATE_INPROGRESS
+    "S",  // STATE_SUCCEEDED
+    "F"   // STATE_FAILED
   };
   const Candidate& local = local_candidate();
   const Candidate& remote = remote_candidate();
   std::stringstream ss;
-  ss << "Conn[" << local.name() << ":" << local.generation()
+  ss << "Conn[" << port_->content_name()
+     << ":" << local.id() << ":" << local.component()
+     << ":" << local.generation()
      << ":" << local.type() << ":" << local.protocol()
      << ":" << local.address().ToString()
-     << "->" << remote.name() << ":" << remote.generation()
+     << "->" << remote.id() << ":" << remote.component()
+     << ":" << remote.generation()
      << ":" << remote.type() << ":"
      << remote.protocol() << ":" << remote.address().ToString()
      << "|"
      << CONNECT_STATE_ABBREV[connected()]
      << READ_STATE_ABBREV[read_state()]
      << WRITE_STATE_ABBREV[write_state()]
+     << ICESTATE[state()]
      << "|";
   if (rtt_ < DEFAULT_RTT) {
     ss << rtt_ << "]";
@@ -786,6 +1155,7 @@ void Connection::OnConnectionRequestResponse(ConnectionRequest* request,
   // prune it again.
   uint32 rtt = request->Elapsed();
   set_write_state(STATE_WRITABLE);
+  set_state(STATE_SUCCEEDED);
 
   std::string pings;
   for (size_t i = 0; i < pings_since_last_response_.size(); ++i) {
@@ -795,30 +1165,46 @@ void Connection::OnConnectionRequestResponse(ConnectionRequest* request,
     pings.append(buf).append(" ");
   }
 
-  LOG_J(LS_VERBOSE, this) << "Received STUN ping response " << request->id()
-                          << ", pings_since_last_response_=" << pings
-                          << ", rtt=" << rtt;
+  talk_base::LoggingSeverity level =
+      (pings_since_last_response_.size() > CONNECTION_WRITE_CONNECT_FAILURES) ?
+          talk_base::LS_INFO : talk_base::LS_VERBOSE;
+
+  LOG_JV(level, this) << "Received STUN ping response " << request->id()
+                      << ", pings_since_last_response_=" << pings
+                      << ", rtt=" << rtt;
 
   pings_since_last_response_.clear();
+  last_ping_response_received_ = talk_base::Time();
   rtt_ = (RTT_RATIO * rtt_ + rtt) / (RTT_RATIO + 1);
 }
 
 void Connection::OnConnectionRequestErrorResponse(ConnectionRequest* request,
                                                   StunMessage* response) {
-  const StunErrorCodeAttribute* error = response->GetErrorCode();
-  uint32 error_code = error ?
-      error->error_code() : static_cast<uint32>(STUN_ERROR_GLOBAL_FAILURE);
+  const StunErrorCodeAttribute* error_attr = response->GetErrorCode();
+  int error_code = STUN_ERROR_GLOBAL_FAILURE;
+  if (error_attr) {
+    if (port_->ice_protocol_ == ICEPROTO_GOOGLE) {
+      // When doing GICE, the error code is written out incorrectly, so we need
+      // to unmunge it here.
+      error_code = error_attr->eclass() * 256 + error_attr->number();
+    } else {
+      error_code = error_attr->code();
+    }
+  }
 
-  if ((error_code == STUN_ERROR_UNKNOWN_ATTRIBUTE)
-      || (error_code == STUN_ERROR_SERVER_ERROR)
-      || (error_code == STUN_ERROR_UNAUTHORIZED)) {
+  if (error_code == STUN_ERROR_UNKNOWN_ATTRIBUTE ||
+      error_code == STUN_ERROR_SERVER_ERROR ||
+      error_code == STUN_ERROR_UNAUTHORIZED) {
     // Recoverable error, retry
   } else if (error_code == STUN_ERROR_STALE_CREDENTIALS) {
     // Race failure, retry
+  } else if (error_code == STUN_ERROR_ROLE_CONFLICT) {
+    HandleRoleConflictFromPeer();
   } else {
     // This is not a valid connection.
     LOG_J(LS_ERROR, this) << "Received STUN error response, code="
                           << error_code << "; killing connection";
+    set_state(STATE_FAILED);
     set_write_state(STATE_WRITE_TIMEOUT);
   }
 }
@@ -832,14 +1218,23 @@ void Connection::OnConnectionRequestTimeout(ConnectionRequest* request) {
 }
 
 void Connection::CheckTimeout() {
-  // If both read and write have timed out, then this connection can contribute
-  // no more to p2p socket unless at some later date readability were to come
-  // back.  However, we gave readability a long time to timeout, so at this
-  // point, it seems fair to get rid of this connection.
-  if ((read_state_ == STATE_READ_TIMEOUT) &&
-      (write_state_ == STATE_WRITE_TIMEOUT)) {
+  // If both read and write have timed out or read has never initialized, then
+  // this connection can contribute no more to p2p socket unless at some later
+  // date readability were to come back.  However, we gave readability a long
+  // time to timeout, so at this point, it seems fair to get rid of this
+  // connection.
+  if ((read_state_ == STATE_READ_TIMEOUT ||
+       read_state_ == STATE_READ_INIT) &&
+      write_state_ == STATE_WRITE_TIMEOUT) {
     port_->thread()->Post(this, MSG_DELETE);
   }
+}
+
+void Connection::HandleRoleConflictFromPeer() {
+  // Maybe we should reverse the nominated flag if we are in controlling mode.
+  if (port_->Role() == ROLE_CONTROLLING)
+    nominated_ = false;  // Role change will be done from Transport.
+  port_->SignalRoleConflict();
 }
 
 void Connection::OnMessage(talk_base::Message *pmsg) {
@@ -872,7 +1267,7 @@ ProxyConnection::ProxyConnection(Port* port, size_t index,
 }
 
 int ProxyConnection::Send(const void* data, size_t size) {
-  if (write_state() != STATE_WRITABLE) {
+  if (write_state_ == STATE_WRITE_INIT || write_state_ == STATE_WRITE_TIMEOUT) {
     error_ = EWOULDBLOCK;
     return SOCKET_ERROR;
   }

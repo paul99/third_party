@@ -26,6 +26,8 @@
 #include "config.h"
 #include "AuthenticationManager.h"
 
+#if USE(SECURITY_FRAMEWORK)
+
 #include "PlatformCertificateInfo.h"
 #include <Security/SecIdentity.h>
 #include <WebCore/AuthenticationChallenge.h>
@@ -36,6 +38,9 @@ namespace WebKit {
 
 bool AuthenticationManager::tryUsePlatformCertificateInfoForChallenge(const AuthenticationChallenge& challenge, const PlatformCertificateInfo& certificateInfo)
 {
+    // FIXME (NetworkProcess): This occurs in the WebProcess and therefore won't work.
+    // We need this to happen in the NetworkProcess.
+
     CFArrayRef chain = certificateInfo.certificateChain();
     if (!chain)
         return false;
@@ -63,3 +68,5 @@ bool AuthenticationManager::tryUsePlatformCertificateInfoForChallenge(const Auth
 }
 
 } // namespace WebKit
+
+#endif // USE(SECURITY_FRAMEWORK)

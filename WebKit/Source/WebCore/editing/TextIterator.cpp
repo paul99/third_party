@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2012 Apple Inc. All rights reserved.
  * Copyright (C) 2005 Alexey Proskuryakov.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,21 +28,25 @@
 #include "TextIterator.h"
 
 #include "Document.h"
+#include "Font.h"
 #include "Frame.h"
 #include "HTMLElement.h"
 #include "HTMLTextFormControlElement.h"
 #include "HTMLNames.h"
 #include "htmlediting.h"
 #include "InlineTextBox.h"
+#include "NodeTraversal.h"
 #include "Range.h"
 #include "RenderTableCell.h"
 #include "RenderTableRow.h"
 #include "RenderTextControl.h"
 #include "RenderTextFragment.h"
+#include "ShadowRoot.h"
 #include "TextBoundaries.h"
 #include "TextBreakIterator.h"
 #include "VisiblePosition.h"
 #include "visible_units.h"
+#include <wtf/text/CString.h>
 #include <wtf/unicode/CharacterNames.h>
 
 #if USE(ICU_UNICODE) && !UCONFIG_NO_COLLATION
@@ -211,8 +215,7 @@ static inline bool ignoresContainerClip(Node* node)
     RenderObject* renderer = node->renderer();
     if (!renderer || renderer->isText())
         return false;
-    EPosition position = renderer->style()->position();
-    return position == AbsolutePosition || position == FixedPosition;
+    return renderer->style()->hasOutOfFlowPosition();
 }
 
 static void pushFullyClippedState(BitStack& stack, Node* node)
@@ -240,19 +243,6 @@ static void setUpFullyClippedStack(BitStack& stack, Node* node)
     ASSERT(stack.size() == 1 + depthCrossingShadowBoundaries(node));
 }
 
-#if OS(ANDROID)
-static bool checkFormControlElement(Node* startNode)
-{
-    Node* node = startNode;
-    while (node) {
-        if (node->isElementNode() && static_cast<Element*>(node)->isFormControlElement())
-            return true;
-        node = node->parentNode();
-    }
-    return false;
-}
-#endif
-
 // --------
 
 TextIterator::TextIterator()
@@ -274,10 +264,8 @@ TextIterator::TextIterator()
     , m_handledFirstLetter(false)
     , m_ignoresStyleVisibility(false)
     , m_emitsObjectReplacementCharacters(false)
-#if OS(ANDROID)
     , m_stopsOnFormControls(false)
     , m_shouldStop(false)
-#endif
 {
 }
 
@@ -299,10 +287,8 @@ TextIterator::TextIterator(const Range* r, TextIteratorBehavior behavior)
     , m_handledFirstLetter(false)
     , m_ignoresStyleVisibility(behavior & TextIteratorIgnoresStyleVisibility)
     , m_emitsObjectReplacementCharacters(behavior & TextIteratorEmitsObjectReplacementCharacters)
-#if OS(ANDROID)
     , m_stopsOnFormControls(behavior & TextIteratorStopsOnFormControls)
     , m_shouldStop(false)
-#endif
 {
     if (!r)
         return;
@@ -360,21 +346,10 @@ TextIterator::~TextIterator()
 {
 }
 
-bool TextIterator::atEnd() const
-{
-#if OS(ANDROID)
-    return !m_positionNode || m_shouldStop;
-#else
-    return !m_positionNode;
-#endif
-}
-
 void TextIterator::advance()
 {
-#if OS(ANDROID)
     if (m_shouldStop)
         return;
-#endif
 
     // reset the run information
     m_positionNode = 0;
@@ -408,10 +383,8 @@ void TextIterator::advance()
     }
 
     while (m_node && m_node != m_pastEndNode) {
-#if OS(ANDROID)
-        if (!m_shouldStop && m_stopsOnFormControls && checkFormControlElement(m_node))
+        if (!m_shouldStop && m_stopsOnFormControls && HTMLFormControlElement::enclosingFormControlElement(m_node))
             m_shouldStop = true;
-#endif
 
         // if the range ends at offset 0 of an element, represent the
         // position, but not the content, of that element e.g. if the
@@ -434,7 +407,10 @@ void TextIterator::advance()
                     m_handledNode = handleTextNode();
                 else if (renderer && (renderer->isImage() || renderer->isWidget() ||
                          (renderer->node() && renderer->node()->isElementNode() &&
-                          static_cast<Element*>(renderer->node())->isFormControlElement())))
+                          (static_cast<Element*>(renderer->node())->isFormControlElement()
+                          || static_cast<Element*>(renderer->node())->hasTagName(legendTag)
+                          || static_cast<Element*>(renderer->node())->hasTagName(meterTag)
+                          || static_cast<Element*>(renderer->node())->hasTagName(progressTag)))))
                     m_handledNode = handleReplacedElement();
                 else
                     m_handledNode = handleNonTextNode();
@@ -450,7 +426,7 @@ void TextIterator::advance()
         if (!next) {
             next = m_node->nextSibling();
             if (!next) {
-                bool pastEnd = m_node->traverseNextNode() == m_pastEndNode;
+                bool pastEnd = NodeTraversal::next(m_node) == m_pastEndNode;
                 Node* parentNode = m_node->parentOrHostNode();
                 while (!next && parentNode) {
                     if ((pastEnd && parentNode == m_endContainer) || m_endContainer->isDescendantOf(parentNode))
@@ -485,6 +461,26 @@ void TextIterator::advance()
         if (m_positionNode)
             return;
     }
+}
+
+UChar TextIterator::characterAt(unsigned index) const
+{
+    ASSERT(index < static_cast<unsigned>(length()));
+    if (!(index < static_cast<unsigned>(length())))
+        return 0;
+
+    if (!m_textCharacters)
+        return string()[startOffset() + index];
+
+    return m_textCharacters[index];
+}
+
+void TextIterator::appendTextToStringBuilder(StringBuilder& builder) const
+{
+    if (!m_textCharacters)
+        builder.append(string(), startOffset(), length());
+    else
+        builder.append(characters(), length());
 }
 
 bool TextIterator::handleTextNode()
@@ -689,7 +685,7 @@ bool TextIterator::handleReplacedElement()
 
     if (m_entersTextControls && renderer->isTextControl()) {
         if (HTMLElement* innerTextElement = toRenderTextControl(renderer)->textFormControlElement()->innerTextElement()) {
-            m_node = innerTextElement->shadowTreeRootNode();
+            m_node = innerTextElement->containingShadowRoot();
             pushFullyClippedState(m_fullyClippedStack, m_node);
             m_offset = 0;
             return false;
@@ -800,7 +796,8 @@ static bool shouldEmitNewlinesBeforeAndAfterNode(Node* node)
             return true;
     }
     
-    return !r->isInline() && r->isRenderBlock() && !r->isFloatingOrPositioned() && !r->isBody();
+    return !r->isInline() && r->isRenderBlock()
+        && !r->isFloatingOrOutOfFlowPositioned() && !r->isBody() && !r->isRubyText();
 }
 
 static bool shouldEmitNewlineAfterNode(Node* node)
@@ -810,7 +807,7 @@ static bool shouldEmitNewlineAfterNode(Node* node)
         return false;
     // Check if this is the very last renderer in the document.
     // If so, then we should not emit a newline.
-    while ((node = node->traverseNextSibling()))
+    while ((node = NodeTraversal::nextSkippingChildren(node)))
         if (node->renderer())
             return true;
     return false;
@@ -918,9 +915,10 @@ bool TextIterator::shouldRepresentNodeOffsetZero()
     // If this node is unrendered or invisible the VisiblePosition checks below won't have much meaning.
     // Additionally, if the range we are iterating over contains huge sections of unrendered content, 
     // we would create VisiblePositions on every call to this function without this check.
-    if (!m_node->renderer() || m_node->renderer()->style()->visibility() != VISIBLE)
+    if (!m_node->renderer() || m_node->renderer()->style()->visibility() != VISIBLE
+        || (m_node->renderer()->isBlockFlow() && !toRenderBlock(m_node->renderer())->height() && !m_node->hasTagName(bodyTag)))
         return false;
-    
+
     // The startPos.isNotNull() check is needed because the start could be before the body,
     // and in that case we'll get null. We don't want to put in newlines at the start in that case.
     // The currPos.isNotNull() check is needed because positions in non-HTML content
@@ -1031,7 +1029,7 @@ void TextIterator::emitText(Node* textNode, RenderObject* renderObject, int text
 {
     RenderText* renderer = toRenderText(renderObject);
     m_text = m_emitsOriginalText ? renderer->originalText() : (m_emitsTextWithoutTranscoding ? renderer->textWithoutTranscoding() : renderer->text());
-    ASSERT(m_text.characters());
+    ASSERT(!m_text.isEmpty());
     ASSERT(0 <= textStartOffset && textStartOffset < static_cast<int>(m_text.length()));
     ASSERT(0 <= textEndOffset && textEndOffset <= static_cast<int>(m_text.length()));
     ASSERT(textStartOffset <= textEndOffset);
@@ -1040,7 +1038,7 @@ void TextIterator::emitText(Node* textNode, RenderObject* renderObject, int text
     m_positionOffsetBaseNode = 0;
     m_positionStartOffset = textStartOffset;
     m_positionEndOffset = textEndOffset;
-    m_textCharacters = m_text.characters() + textStartOffset;
+    m_textCharacters = 0;
     m_textLength = textEndOffset - textStartOffset;
     m_lastCharacter = m_text[textEndOffset - 1];
 
@@ -1091,8 +1089,7 @@ Node* TextIterator::node() const
 // --------
 
 SimplifiedBackwardsTextIterator::SimplifiedBackwardsTextIterator()
-    : m_behavior(TextIteratorDefaultBehavior)
-    , m_node(0)
+    : m_node(0)
     , m_offset(0)
     , m_handledNode(false)
     , m_handledChildren(false)
@@ -1110,16 +1107,13 @@ SimplifiedBackwardsTextIterator::SimplifiedBackwardsTextIterator()
     , m_singleCharacterBuffer(0)
     , m_havePassedStartNode(false)
     , m_shouldHandleFirstLetter(false)
-#if OS(ANDROID)
     , m_stopsOnFormControls(false)
     , m_shouldStop(false)
-#endif
 {
 }
 
 SimplifiedBackwardsTextIterator::SimplifiedBackwardsTextIterator(const Range* r, TextIteratorBehavior behavior)
-    : m_behavior(behavior)
-    , m_node(0)
+    : m_node(0)
     , m_offset(0)
     , m_handledNode(false)
     , m_handledChildren(false)
@@ -1137,16 +1131,10 @@ SimplifiedBackwardsTextIterator::SimplifiedBackwardsTextIterator(const Range* r,
     , m_singleCharacterBuffer(0)
     , m_havePassedStartNode(false)
     , m_shouldHandleFirstLetter(false)
-#if OS(ANDROID)
     , m_stopsOnFormControls(behavior & TextIteratorStopsOnFormControls)
     , m_shouldStop(false)
-#endif
 {
-#if OS(ANDROID)
-    ASSERT(m_behavior == TextIteratorDefaultBehavior || m_behavior == TextIteratorStopsOnFormControls);
-#else
-    ASSERT(m_behavior == TextIteratorDefaultBehavior);
-#endif
+    ASSERT(behavior == TextIteratorDefaultBehavior || behavior == TextIteratorStopsOnFormControls);
 
     if (!r)
         return;
@@ -1195,29 +1183,17 @@ SimplifiedBackwardsTextIterator::SimplifiedBackwardsTextIterator(const Range* r,
     advance();
 }
 
-bool SimplifiedBackwardsTextIterator::atEnd() const
-{
-#if OS(ANDROID)
-    return !m_positionNode || m_shouldStop;
-#else
-    return !m_positionNode;
-#endif
-}
-
 void SimplifiedBackwardsTextIterator::advance()
 {
     ASSERT(m_positionNode);
 
-#if OS(ANDROID)
     if (m_shouldStop)
         return;
 
-    // Prevent changing the iterator position if a form control element was found and advance should stop on it.
-    if (m_stopsOnFormControls && checkFormControlElement(m_node)) {
+    if (m_stopsOnFormControls && HTMLFormControlElement::enclosingFormControlElement(m_node)) {
         m_shouldStop = true;
         return;
     }
-#endif
 
     m_positionNode = 0;
     m_textLength = 0;
@@ -1409,7 +1385,7 @@ PassRefPtr<Range> SimplifiedBackwardsTextIterator::range() const
 {
     if (m_positionNode)
         return Range::create(m_positionNode->document(), m_positionNode, m_positionStartOffset, m_positionNode, m_positionEndOffset);
-
+    
     return Range::create(m_startNode->document(), m_startNode, m_startOffset, m_startNode, m_startOffset);
 }
 
@@ -1779,7 +1755,7 @@ static inline void unlockSearcher()
 
 // ICU's search ignores the distinction between small kana letters and ones
 // that are not small, and also characters that differ only in the voicing
-// marks when considering only primary collation strength diffrences.
+// marks when considering only primary collation strength differences.
 // This is not helpful for end users, since these differences make words
 // distinct, so for our purposes we need these to be considered.
 // The Unicode folks do not think the collation algorithm should be
@@ -2448,7 +2424,7 @@ PassRefPtr<Range> TextIterator::subrange(Range* entireRange, int characterOffset
     return characterSubrange(entireRangeIterator, characterOffset, characterCount);
 }
 
-PassRefPtr<Range> TextIterator::rangeFromLocationAndLength(Element* scope, int rangeLocation, int rangeLength, bool forSelectionPreservation)
+PassRefPtr<Range> TextIterator::rangeFromLocationAndLength(ContainerNode* scope, int rangeLocation, int rangeLength, bool forSelectionPreservation)
 {
     RefPtr<Range> resultRange = scope->document()->createRange();
 
@@ -2485,7 +2461,7 @@ PassRefPtr<Range> TextIterator::rangeFromLocationAndLength(Element* scope, int r
         if (foundEnd) {
             // FIXME: This is a workaround for the fact that the end of a run is often at the wrong
             // position for emitted '\n's.
-            if (len == 1 && it.characters()[0] == '\n') {
+            if (len == 1 && it.characterAt(0) == '\n') {
                 scope->document()->updateLayoutIgnorePendingStylesheets();
                 it.advance();
                 if (!it.atEnd()) {
@@ -2577,80 +2553,35 @@ bool TextIterator::getLocationAndLengthFromRange(Element* scope, const Range* ra
 }
 
 // --------
-    
-UChar* plainTextToMallocAllocatedBuffer(const Range* r, unsigned& bufferLength, bool isDisplayString, TextIteratorBehavior defaultBehavior)
-{
-    UChar* result = 0;
 
-    // Do this in pieces to avoid massive reallocations if there is a large amount of text.
-    // Use system malloc for buffers since they can consume lots of memory and current TCMalloc is unable return it back to OS.
-    static const unsigned cMaxSegmentSize = 1 << 16;
-    bufferLength = 0;
-    typedef pair<UChar*, unsigned> TextSegment;
-    OwnPtr<Vector<TextSegment> > textSegments;
-    Vector<UChar> textBuffer;
-    textBuffer.reserveInitialCapacity(cMaxSegmentSize);
+String plainText(const Range* r, TextIteratorBehavior defaultBehavior, bool isDisplayString)
+{
+    // The initial buffer size can be critical for performance: https://bugs.webkit.org/show_bug.cgi?id=81192
+    static const unsigned cMaxSegmentSize = 1 << 15;
+
+    unsigned bufferLength = 0;
+    StringBuilder builder;
+    builder.reserveCapacity(cMaxSegmentSize);
     TextIteratorBehavior behavior = defaultBehavior;
     if (!isDisplayString)
         behavior = static_cast<TextIteratorBehavior>(behavior | TextIteratorEmitsTextsWithoutTranscoding);
     
     for (TextIterator it(r, behavior); !it.atEnd(); it.advance()) {
-        if (textBuffer.size() && textBuffer.size() + it.length() > cMaxSegmentSize) {
-            UChar* newSegmentBuffer = static_cast<UChar*>(malloc(textBuffer.size() * sizeof(UChar)));
-            if (!newSegmentBuffer)
-                goto exit;
-            memcpy(newSegmentBuffer, textBuffer.data(), textBuffer.size() * sizeof(UChar));
-            if (!textSegments)
-                textSegments = adoptPtr(new Vector<TextSegment>);
-            textSegments->append(make_pair(newSegmentBuffer, (unsigned)textBuffer.size()));
-            textBuffer.clear();
-        }
-        textBuffer.append(it.characters(), it.length());
+        if (builder.capacity() < builder.length() + it.length())
+            builder.reserveCapacity(builder.capacity() + cMaxSegmentSize);
+
+        it.appendTextToStringBuilder(builder);
         bufferLength += it.length();
     }
 
     if (!bufferLength)
-        return 0;
+        return emptyString();
 
-    // Since we know the size now, we can make a single buffer out of the pieces with one big alloc
-    result = static_cast<UChar*>(malloc(bufferLength * sizeof(UChar)));
-    if (!result)
-        goto exit;
+    String result = builder.toString();
 
-    {
-        UChar* resultPos = result;
-        if (textSegments) {
-            unsigned size = textSegments->size();
-            for (unsigned i = 0; i < size; ++i) {
-                const TextSegment& segment = textSegments->at(i);
-                memcpy(resultPos, segment.first, segment.second * sizeof(UChar));
-                resultPos += segment.second;
-            }
-        }
-        memcpy(resultPos, textBuffer.data(), textBuffer.size() * sizeof(UChar));
-    }
-
-exit:
-    if (textSegments) {
-        unsigned size = textSegments->size();
-        for (unsigned i = 0; i < size; ++i)
-            free(textSegments->at(i).first);
-    }
-    
     if (isDisplayString && r->ownerDocument())
-        r->ownerDocument()->displayBufferModifiedByEncoding(result, bufferLength);
+        r->ownerDocument()->displayStringModifiedByEncoding(result);
 
-    return result;
-}
-
-String plainText(const Range* r, TextIteratorBehavior defaultBehavior)
-{
-    unsigned length;
-    UChar* buf = plainTextToMallocAllocatedBuffer(r, length, false, defaultBehavior);
-    if (!buf)
-        return "";
-    String result(buf, length);
-    free(buf);
     return result;
 }
 

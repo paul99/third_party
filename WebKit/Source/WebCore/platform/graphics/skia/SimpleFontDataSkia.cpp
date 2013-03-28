@@ -36,21 +36,17 @@
 #include "FontCache.h"
 #include "FontDescription.h"
 #include "Logging.h"
-#if OS(ANDROID)
-#include "PlatformSupport.h"
-#endif
 #include "SkFontHost.h"
 #include "SkPaint.h"
 #include "SkTime.h"
 #include "SkTypeface.h"
 #include "SkTypes.h"
 #include "VDMXParser.h"
+#include <unicode/normlzr.h>
+#include <wtf/unicode/Unicode.h>
 
 namespace WebCore {
 
-// Smallcaps versions of fonts are 70% the size of the normal font.
-static const float smallCapsFraction = 0.7f;
-static const float emphasisMarkFraction = .5;
 // This is the largest VDMX table which we'll try to load and parse.
 static const size_t maxVDMXTableSize = 1024 * 1024; // 1 MB
 
@@ -89,7 +85,7 @@ void SimpleFontData::platformInit()
     float descent;
 
     // Beware those who step here: This code is designed to match Win32 font
-    // metrics *exactly*.
+    // metrics *exactly* (except the adjustment of ascent/descent on Linux/Android).
     if (isVDMXValid) {
         ascent = vdmxAscent;
         descent = -vdmxDescent;
@@ -97,15 +93,14 @@ void SimpleFontData::platformInit()
         SkScalar height = -metrics.fAscent + metrics.fDescent + metrics.fLeading;
         ascent = SkScalarRound(-metrics.fAscent);
         descent = SkScalarRound(height) - ascent;
-#if OS(ANDROID)
-        // Android browser uses fractional scales, resulting fractional ascents and descents.
-        // If the descent is rounded down, the descent part of glyphs may be truncated.
-        // To avoid that, we borrow 1 unit from the ascent. This won't result truncated glyph
-        // because of the leading.
-        // TODO(wangxianzhu): On upstreaming, check if this is also applicable to other platforms.
-        if (!PlatformSupport::layoutTestMode() && descent < SkScalarToFloat(metrics.fDescent) && ascent >= 1) {
-            descent++;
-            ascent--;
+#if OS(LINUX) || OS(ANDROID)
+        // When subpixel positioning is enabled, if the descent is rounded down, the descent part
+        // of the glyph may be truncated when displayed in a 'overflow: hidden' container.
+        // To avoid that, borrow 1 unit from the ascent when possible.
+        // FIXME: This can be removed if sub-pixel ascent/descent is supported.
+        if (platformData().fontRenderStyle().useSubpixelPositioning && descent < SkScalarToFloat(metrics.fDescent) && ascent >= 1) {
+            ++descent;
+            --ascent;
         }
 #endif
     }
@@ -114,16 +109,18 @@ void SimpleFontData::platformInit()
     m_fontMetrics.setDescent(descent);
 
     float xHeight;
-    if (metrics.fXHeight)
+    if (metrics.fXHeight) {
         xHeight = metrics.fXHeight;
-    else {
-        // hack taken from the Windows port
-        xHeight = ascent * 0.56f;
+        m_fontMetrics.setXHeight(xHeight);
+    } else {
+        xHeight = ascent * 0.56; // Best guess from Windows font metrics.
+        m_fontMetrics.setXHeight(xHeight);
+        m_fontMetrics.setHasXHeight(false);
     }
+
 
     float lineGap = SkScalarToFloat(metrics.fLeading);
     m_fontMetrics.setLineGap(lineGap);
-    m_fontMetrics.setXHeight(xHeight);
     m_fontMetrics.setLineSpacing(lroundf(ascent) + lroundf(descent) + lroundf(lineGap));
 
     if (platformData().orientation() == Vertical && !isTextOrientationFallback()) {
@@ -153,10 +150,19 @@ void SimpleFontData::platformInit()
             static const UChar32 xChar = 'x';
             const Glyph xGlyph = glyphPageZero->glyphDataForCharacter(xChar).glyph;
 
-            if (xGlyph)
+            if (xGlyph) {
+                // In widthForGlyph(), xGlyph will be compared with
+                // m_zeroWidthSpaceGlyph, which isn't initialized yet here.
+                // Initialize it with zero to make sure widthForGlyph() returns
+                // the right width.
+                m_zeroWidthSpaceGlyph = 0;
                 m_avgCharWidth = widthForGlyph(xGlyph);
+            }
         }
     }
+
+    if (int unitsPerEm = paint.getTypeface()->getUnitsPerEm())
+        m_fontMetrics.setUnitsPerEm(unitsPerEm);
 }
 
 void SimpleFontData::platformCharWidthInit()
@@ -168,30 +174,10 @@ void SimpleFontData::platformDestroy()
 {
 }
 
-PassOwnPtr<SimpleFontData> SimpleFontData::createScaledFontData(const FontDescription& fontDescription, float scaleFactor) const
+PassRefPtr<SimpleFontData> SimpleFontData::createScaledFontData(const FontDescription& fontDescription, float scaleFactor) const
 {
     const float scaledSize = lroundf(fontDescription.computedSize() * scaleFactor);
-    return adoptPtr(new SimpleFontData(FontPlatformData(m_platformData, scaledSize), isCustomFont(), false));
-}
-
-SimpleFontData* SimpleFontData::smallCapsFontData(const FontDescription& fontDescription) const
-{
-    if (!m_derivedFontData)
-        m_derivedFontData = DerivedFontData::create(isCustomFont());
-    if (!m_derivedFontData->smallCaps)
-        m_derivedFontData->smallCaps = createScaledFontData(fontDescription, smallCapsFraction);
-
-    return m_derivedFontData->smallCaps.get();
-}
-
-SimpleFontData* SimpleFontData::emphasisMarkFontData(const FontDescription& fontDescription) const
-{
-    if (!m_derivedFontData)
-        m_derivedFontData = DerivedFontData::create(isCustomFont());
-    if (!m_derivedFontData->emphasisMark)
-        m_derivedFontData->emphasisMark = createScaledFontData(fontDescription, emphasisMarkFraction);
-
-    return m_derivedFontData->emphasisMark.get();
+    return SimpleFontData::create(FontPlatformData(m_platformData, scaledSize), isCustomFont(), false);
 }
 
 bool SimpleFontData::containsCharacters(const UChar* characters, int length) const
@@ -225,9 +211,26 @@ void SimpleFontData::determinePitch()
     m_treatAsFixedPitch = platformData().isFixedPitch();
 }
 
-FloatRect SimpleFontData::platformBoundsForGlyph(Glyph) const
+FloatRect SimpleFontData::platformBoundsForGlyph(Glyph glyph) const
 {
-    return FloatRect();
+    if (!m_platformData.size())
+        return FloatRect();
+
+    SkASSERT(sizeof(glyph) == 2); // compile-time assert
+
+    SkPaint paint;
+
+    m_platformData.setupPaint(&paint);
+
+    paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
+    SkRect bounds;
+    paint.measureText(&glyph, 2, &bounds);
+    if (!paint.isSubpixelText()) {
+        SkIRect ir;
+        bounds.round(&ir);
+        bounds.set(ir);
+    }
+    return FloatRect(bounds);
 }
     
 float SimpleFontData::platformWidthForGlyph(Glyph glyph) const
@@ -243,11 +246,37 @@ float SimpleFontData::platformWidthForGlyph(Glyph glyph) const
 
     paint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
     SkScalar width = paint.measureText(&glyph, 2);
-
-    // Though WebKit supports non-integral advances, Skia only supports them
-    // for "subpixel" (distinct from LCD subpixel antialiasing) text, which
-    // we don't use.
-    return round(SkScalarToFloat(width));
+    if (!paint.isSubpixelText())
+        width = SkScalarRound(width);
+    return SkScalarToFloat(width);
 }
+
+#if USE(HARFBUZZ_NG)
+bool SimpleFontData::canRenderCombiningCharacterSequence(const UChar* characters, size_t length) const
+{
+    if (!m_combiningCharacterSequenceSupport)
+        m_combiningCharacterSequenceSupport = adoptPtr(new HashMap<String, bool>);
+
+    WTF::HashMap<String, bool>::AddResult addResult = m_combiningCharacterSequenceSupport->add(String(characters, length), false);
+    if (!addResult.isNewEntry)
+        return addResult.iterator->value;
+
+    UErrorCode error = U_ZERO_ERROR;
+    Vector<UChar, 4> normalizedCharacters(length);
+    int32_t normalizedLength = unorm_normalize(characters, length, UNORM_NFC, UNORM_UNICODE_3_2, &normalizedCharacters[0], length, &error);
+    // Can't render if we have an error or no composition occurred.
+    if (U_FAILURE(error) || (static_cast<size_t>(normalizedLength) == length))
+        return false;
+
+    SkPaint paint;
+    m_platformData.setupPaint(&paint);
+    paint.setTextEncoding(SkPaint::kUTF16_TextEncoding);
+    if (paint.textToGlyphs(&normalizedCharacters[0], normalizedLength * 2, 0)) {
+        addResult.iterator->value = true;
+        return true;
+    }
+    return false;
+}
+#endif
 
 } // namespace WebCore

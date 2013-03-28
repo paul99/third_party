@@ -31,6 +31,7 @@
 
 #import "DOMElementInternal.h"
 #import "DOMNodeInternal.h"
+#import "WebBasePluginPackage.h"
 #import "WebDefaultUIDelegate.h"
 #import "WebDelegateImplementationCaching.h"
 #import "WebElementDictionary.h"
@@ -38,6 +39,7 @@
 #import "WebFrameView.h"
 #import "WebHTMLViewInternal.h"
 #import "WebHistoryInternal.h"
+#import "WebKitFullScreenListener.h"
 #import "WebKitPrefix.h"
 #import "WebKitSystemInterface.h"
 #import "WebNSURLRequestExtras.h"
@@ -51,9 +53,9 @@
 #import <Foundation/Foundation.h>
 #import <WebCore/BlockExceptions.h>
 #import <WebCore/Console.h>
-#import <WebCore/Cursor.h>
 #import <WebCore/ContextMenu.h>
 #import <WebCore/ContextMenuController.h>
+#import <WebCore/Cursor.h>
 #import <WebCore/Element.h>
 #import <WebCore/FileChooser.h>
 #import <WebCore/FileIconLoader.h>
@@ -62,6 +64,7 @@
 #import <WebCore/FrameLoadRequest.h>
 #import <WebCore/FrameView.h>
 #import <WebCore/HTMLNames.h>
+#import <WebCore/HTMLPlugInImageElement.h>
 #import <WebCore/HitTestResult.h>
 #import <WebCore/Icon.h>
 #import <WebCore/IntPoint.h>
@@ -70,7 +73,6 @@
 #import <WebCore/NotImplemented.h>
 #import <WebCore/Page.h>
 #import <WebCore/PlatformScreen.h>
-#import <WebCore/PlatformString.h>
 #import <WebCore/PopupMenuMac.h>
 #import <WebCore/ResourceRequest.h>
 #import <WebCore/SearchPopupMenuMac.h>
@@ -78,6 +80,7 @@
 #import <WebCore/WindowFeatures.h>
 #import <wtf/PassRefPtr.h>
 #import <wtf/Vector.h>
+#import <wtf/text/WTFString.h>
 
 #if USE(ACCELERATED_COMPOSITING)
 #import <WebCore/GraphicsLayer.h>
@@ -93,15 +96,6 @@ NSString *WebConsoleMessageJSMessageSource = @"JSMessageSource";
 NSString *WebConsoleMessageNetworkMessageSource = @"NetworkMessageSource";
 NSString *WebConsoleMessageConsoleAPIMessageSource = @"ConsoleAPIMessageSource";
 NSString *WebConsoleMessageOtherMessageSource = @"OtherMessageSource";
-
-NSString *WebConsoleMessageLogMessageType = @"LogMessageType";
-NSString *WebConsoleMessageDirMessageType = @"DirMessageType";
-NSString *WebConsoleMessageDirXMLMessageType = @"DirXMLMessageType";
-NSString *WebConsoleMessageTraceMessageType = @"TraceMessageType";
-NSString *WebConsoleMessageStartGroupMessageType = @"StartGroupMessageType";
-NSString *WebConsoleMessageStartGroupCollapsedMessageType = @"StartGroupCollapsedMessageType";
-NSString *WebConsoleMessageEndGroupMessageType = @"EndGroupMessageType";
-NSString *WebConsoleMessageAssertMessageType = @"AssertMessageType";
 
 NSString *WebConsoleMessageTipMessageLevel = @"TipMessageLevel";
 NSString *WebConsoleMessageLogMessageLevel = @"LogMessageLevel";
@@ -127,18 +121,7 @@ NSString *WebConsoleMessageDebugMessageLevel = @"DebugMessageLevel";
 @end
 
 using namespace WebCore;
-
-#if ENABLE(FULLSCREEN_API)
-
-@interface WebKitFullScreenListener : NSObject <WebKitFullScreenListener>
-{
-    RefPtr<Element> _element;
-}
-
-- (id)initWithElement:(Element*)element;
-@end
-
-#endif
+using namespace HTMLNames;
 
 WebChromeClient::WebChromeClient(WebView *webView) 
     : m_webView(webView)
@@ -150,16 +133,19 @@ void WebChromeClient::chromeDestroyed()
     delete this;
 }
 
+// These functions scale between window and WebView coordinates because JavaScript/DOM operations 
+// assume that the WebView and the window share the same coordinate system.
+
 void WebChromeClient::setWindowRect(const FloatRect& rect)
 {
-    NSRect windowRect = toDeviceSpace(rect, [m_webView window], [m_webView _backingScaleFactor]);
+    NSRect windowRect = toDeviceSpace(rect, [m_webView window]);
     [[m_webView _UIDelegateForwarder] webView:m_webView setFrame:windowRect];
 }
 
 FloatRect WebChromeClient::windowRect()
 {
     NSRect windowRect = [[m_webView _UIDelegateForwarder] webViewFrame:m_webView];
-    return toUserSpace(windowRect, [m_webView window], [m_webView _backingScaleFactor]);
+    return toUserSpace(windowRect, [m_webView window]);
 }
 
 // FIXME: We need to add API for setting and getting this.
@@ -360,30 +346,6 @@ inline static NSString *stringForMessageSource(MessageSource source)
     return @"";
 }
 
-inline static NSString *stringForMessageType(MessageType type)
-{
-    switch (type) {
-    case LogMessageType:
-        return WebConsoleMessageLogMessageType;
-    case DirMessageType:
-        return WebConsoleMessageDirMessageType;
-    case DirXMLMessageType:
-        return WebConsoleMessageDirXMLMessageType;
-    case TraceMessageType:
-        return WebConsoleMessageTraceMessageType;
-    case StartGroupMessageType:
-        return WebConsoleMessageStartGroupMessageType;
-    case StartGroupCollapsedMessageType:
-        return WebConsoleMessageStartGroupCollapsedMessageType;
-    case EndGroupMessageType:
-        return WebConsoleMessageEndGroupMessageType;
-    case AssertMessageType:
-        return WebConsoleMessageAssertMessageType;
-    }
-    ASSERT_NOT_REACHED();
-    return @"";
-}
-
 inline static NSString *stringForMessageLevel(MessageLevel level)
 {
     switch (level) {
@@ -402,7 +364,7 @@ inline static NSString *stringForMessageLevel(MessageLevel level)
     return @"";
 }
 
-void WebChromeClient::addMessageToConsole(MessageSource source, MessageType type, MessageLevel level, const String& message, unsigned int lineNumber, const String& sourceURL)
+void WebChromeClient::addMessageToConsole(MessageSource source, MessageLevel level, const String& message, unsigned int lineNumber, const String& sourceURL)
 {
     id delegate = [m_webView UIDelegate];
     BOOL respondsToNewSelector = NO;
@@ -425,7 +387,6 @@ void WebChromeClient::addMessageToConsole(MessageSource source, MessageType type
         [NSNumber numberWithUnsignedInt:lineNumber], @"lineNumber",
         (NSString *)sourceURL, @"sourceURL",
         messageSource, @"MessageSource",
-        stringForMessageType(type), @"MessageType",
         stringForMessageLevel(level), @"MessageLevel",
         NULL];
 
@@ -598,13 +559,43 @@ void WebChromeClient::scrollRectIntoView(const IntRect& r) const
 
 // End host window methods.
 
-bool WebChromeClient::shouldMissingPluginMessageBeButton() const
+bool WebChromeClient::shouldUnavailablePluginMessageBeButton(RenderEmbeddedObject::PluginUnavailabilityReason pluginUnavailabilityReason) const
 {
-    return [[m_webView UIDelegate] respondsToSelector:@selector(webView:didPressMissingPluginButton:)];
+    if (pluginUnavailabilityReason == RenderEmbeddedObject::PluginInactive)
+        return true;
+
+    if (pluginUnavailabilityReason == RenderEmbeddedObject::PluginMissing)
+        return [[m_webView UIDelegate] respondsToSelector:@selector(webView:didPressMissingPluginButton:)];
+
+    return false;
 }
 
-void WebChromeClient::missingPluginButtonClicked(Element* element) const
+void WebChromeClient::unavailablePluginButtonClicked(Element* element, RenderEmbeddedObject::PluginUnavailabilityReason pluginUnavailabilityReason) const
 {
+    ASSERT(element->hasTagName(objectTag) || element->hasTagName(embedTag) || element->hasTagName(appletTag));
+
+    if (pluginUnavailabilityReason == RenderEmbeddedObject::PluginInactive) {
+        HTMLPlugInImageElement* pluginElement = static_cast<HTMLPlugInImageElement*>(element);
+
+        WebBasePluginPackage *pluginPackage = nil;
+        if (!pluginElement->serviceType().isEmpty())
+            pluginPackage = [m_webView _pluginForMIMEType:pluginElement->serviceType()];
+
+        NSURL *url = pluginElement->document()->completeURL(pluginElement->url());
+        NSString *extension = [[url path] pathExtension];
+        if (!pluginPackage && [extension length])
+            pluginPackage = [m_webView _pluginForExtension:extension];
+
+        if (pluginPackage && [pluginPackage bundleIdentifier] == "com.oracle.java.JavaAppletPlugin") {
+            // Reactivate the plug-in and reload the page so the plug-in will be instantiated correctly.
+            WKActivateJavaPlugIn();
+            [m_webView reload:nil];
+        }
+
+        return;
+    }
+
+    ASSERT(pluginUnavailabilityReason == RenderEmbeddedObject::PluginMissing || pluginUnavailabilityReason == RenderEmbeddedObject::PluginInactive);
     CallUIDelegate(m_webView, @selector(webView:didPressMissingPluginButton:), kit(element));
 }
 
@@ -685,7 +676,7 @@ void WebChromeClient::populateVisitedLinks()
 
 #if ENABLE(DASHBOARD_SUPPORT)
 
-void WebChromeClient::dashboardRegionsChanged()
+void WebChromeClient::annotatedRegionsChanged()
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
     CallUIDelegate(m_webView, @selector(webView:dashboardRegionsChanged:), [m_webView _dashboardRegions]);
@@ -822,7 +813,7 @@ void WebChromeClient::elementDidBlur(const WebCore::Node* node)
 
 bool WebChromeClient::selectItemWritingDirectionIsNatural()
 {
-#ifndef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
     return false;
 #else
     return true;
@@ -831,7 +822,7 @@ bool WebChromeClient::selectItemWritingDirectionIsNatural()
 
 bool WebChromeClient::selectItemAlignmentFollowsMenuWritingDirection()
 {
-#ifndef BUILDING_ON_LEOPARD
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1060
     return true;
 #else
     return false;
@@ -853,35 +844,6 @@ PassRefPtr<WebCore::SearchPopupMenu> WebChromeClient::createSearchPopupMenu(WebC
 {
     return adoptRef(new SearchPopupMenuMac(client));
 }
-
-#if ENABLE(CONTEXT_MENUS)
-void WebChromeClient::showContextMenu()
-{
-    Page* page = [m_webView page];
-    if (!page)
-        return;
-
-    ContextMenuController* controller = page->contextMenuController();
-    Node* node = controller->hitTestResult().innerNonSharedNode();
-    if (!node)
-        return;
-    Frame* frame = node->document()->frame();
-    if (!frame)
-        return;
-    FrameView* frameView = frame->view();
-    if (!frameView)
-        return;
-    NSView* view = frameView->documentView();
-    
-    IntPoint point = frameView->contentsToWindow(controller->hitTestResult().point());
-    NSPoint nsScreenPoint = [view convertPoint:point toView:nil];
-    // Show the contextual menu for this event.
-    NSEvent* event = [NSEvent mouseEventWithType:NSRightMouseDown location:nsScreenPoint modifierFlags:0 timestamp:0 windowNumber:[[view window] windowNumber] context:0 eventNumber:0 clickCount:1 pressure:1];
-    NSMenu* nsMenu = [view menuForEvent:event];
-    if (nsMenu)
-        [NSMenu popUpContextMenu:nsMenu withEvent:event forView:view];    
-}
-#endif
 
 #if USE(ACCELERATED_COMPOSITING)
 
@@ -911,10 +873,10 @@ void WebChromeClient::setNeedsOneShotDrawingSynchronization()
     END_BLOCK_OBJC_EXCEPTIONS;
 }
 
-void WebChromeClient::scheduleCompositingLayerSync()
+void WebChromeClient::scheduleCompositingLayerFlush()
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
-    [m_webView _scheduleCompositingLayerSync];
+    [m_webView _scheduleCompositingLayerFlush];
     END_BLOCK_OBJC_EXCEPTIONS;
 }
 
@@ -980,45 +942,6 @@ void WebChromeClient::fullScreenRendererChanged(RenderBox* renderer)
     SEL selector = @selector(webView:fullScreenRendererChanged:);
     if ([[m_webView UIDelegate] respondsToSelector:selector])
         CallUIDelegate(m_webView, selector, (id)renderer);
-    else
-        [m_webView _fullScreenRendererChanged:renderer];
 }
-
-@implementation WebKitFullScreenListener
-
-- (id)initWithElement:(Element*)element
-{
-    if (!(self = [super init]))
-        return nil;
-    
-    _element = element;
-    return self;
-}
-
-- (void)webkitWillEnterFullScreen
-{
-    if (_element)
-        _element->document()->webkitWillEnterFullScreenForElement(_element.get());
-}
-
-- (void)webkitDidEnterFullScreen
-{
-    if (_element)
-        _element->document()->webkitDidEnterFullScreenForElement(_element.get());
-}
-
-- (void)webkitWillExitFullScreen
-{
-    if (_element)
-        _element->document()->webkitWillExitFullScreenForElement(_element.get());
-}
-
-- (void)webkitDidExitFullScreen
-{
-    if (_element)
-        _element->document()->webkitDidExitFullScreenForElement(_element.get());
-}
-
-@end
 
 #endif

@@ -1,39 +1,52 @@
 # -----------------------------------------------------------------------------
 # Add module directories
 # -----------------------------------------------------------------------------
-ADD_SUBDIRECTORY(JavaScriptCore)
+add_subdirectory(WTF)
 
-IF (ENABLE_WEBCORE)
-    ADD_SUBDIRECTORY(WebCore)
-ENDIF ()
+add_subdirectory(JavaScriptCore)
 
-IF (ENABLE_WEBKIT)
-    ADD_SUBDIRECTORY(WebKit)
-ENDIF ()
+if (ENABLE_API_TESTS)
+    add_subdirectory(cmake/gtest)
+endif ()
 
-IF (ENABLE_WEBKIT2)
-    ADD_SUBDIRECTORY(WebKit2)
-ENDIF ()
+if (ENABLE_WEBCORE)
+    add_subdirectory(WebCore)
+endif ()
+
+if (ENABLE_WEBKIT)
+    add_subdirectory(WebKit)
+endif ()
+
+if (ENABLE_WEBKIT2)
+    add_subdirectory(WebKit2)
+endif ()
+
+WEBKIT_INCLUDE_CONFIG_FILES_IF_EXISTS()
 
 # -----------------------------------------------------------------------------
 # Set compiler flags for all targets
 # -----------------------------------------------------------------------------
-WEBKIT_SET_EXTRA_COMPILER_FLAGS(${WTF_LIBRARY_NAME})
-WEBKIT_SET_EXTRA_COMPILER_FLAGS(${JavaScriptCore_LIBRARY_NAME})
+if (${PORT} STREQUAL "Efl")
+    set(ADDITIONAL_FLAGS ENABLE_WERROR)
+endif ()
 
-IF (ENABLE_WEBCORE)
-    WEBKIT_SET_EXTRA_COMPILER_FLAGS(${WebCore_LIBRARY_NAME})
-ENDIF ()
+WEBKIT_SET_EXTRA_COMPILER_FLAGS(${WTF_LIBRARY_NAME} ${ADDITIONAL_FLAGS})
+WEBKIT_SET_EXTRA_COMPILER_FLAGS(${JavaScriptCore_LIBRARY_NAME} ${ADDITIONAL_FLAGS})
+WEBKIT_SET_EXTRA_COMPILER_FLAGS(${WebCoreTestSupport_LIBRARY_NAME} ${ADDITIONAL_FLAGS})
 
-IF (ENABLE_WEBKIT)
-    WEBKIT_SET_EXTRA_COMPILER_FLAGS(${WebKit_LIBRARY_NAME})
-ENDIF ()
+if (ENABLE_WEBCORE)
+    WEBKIT_SET_EXTRA_COMPILER_FLAGS(${WebCore_LIBRARY_NAME} ${ADDITIONAL_FLAGS})
+endif ()
 
-IF (ENABLE_WEBKIT2)
-    WEBKIT_SET_EXTRA_COMPILER_FLAGS(${WebKit2_LIBRARY_NAME})
-ENDIF ()
+if (ENABLE_WEBKIT)
+    WEBKIT_SET_EXTRA_COMPILER_FLAGS(${WebKit_LIBRARY_NAME} ${ADDITIONAL_FLAGS})
+endif ()
+
+if (ENABLE_WEBKIT2)
+    WEBKIT_SET_EXTRA_COMPILER_FLAGS(${WebKit2_LIBRARY_NAME} ${ADDITIONAL_FLAGS})
+endif ()
 
 # -----------------------------------------------------------------------------
 # Create the configuration file
 # -----------------------------------------------------------------------------
-CONFIGURE_FILE(cmakeconfig.h.cmake ${CMAKE_BINARY_DIR}/cmakeconfig.h @ONLY)
+configure_file(cmakeconfig.h.cmake ${CMAKE_BINARY_DIR}/cmakeconfig.h @ONLY)

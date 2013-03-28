@@ -23,11 +23,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-module html {
-    interface [
-        CustomNativeConverter,
-        OmitConstructor
-    ] VoidCallback {
-        void handleEvent();
-    };
-}
+[
+    Callback
+] interface VoidCallback {
+    boolean handleEvent();
+};

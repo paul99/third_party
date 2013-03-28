@@ -32,9 +32,9 @@
 #define DrawingBuffer_h
 
 #include "GraphicsContext3D.h"
-#include "GraphicsLayer.h"
 #include "GraphicsTypes3D.h"
 #include "IntSize.h"
+#include "PlatformLayer.h"
 
 #include <wtf/Noncopyable.h>
 #include <wtf/OwnPtr.h>
@@ -44,23 +44,34 @@
 #endif
 
 namespace WebCore {
-class CanvasRenderingContext;
 class GraphicsContext3D;
 class ImageData;
 #if PLATFORM(CHROMIUM)
-class WebGLLayerChromium;
+class DrawingBufferPrivate;
 #endif
 
 // Manages a rendering target (framebuffer + attachment) for a canvas.  Can publish its rendering
 // results to a PlatformLayer for compositing.
 class DrawingBuffer : public RefCounted<DrawingBuffer> {
 public:
-    static PassRefPtr<DrawingBuffer> create(GraphicsContext3D*, const IntSize&, bool);
+    enum PreserveDrawingBuffer {
+        Preserve,
+        Discard
+    };
+
+    enum AlphaRequirement {
+        Alpha,
+        Opaque
+    };
+
+    static PassRefPtr<DrawingBuffer> create(GraphicsContext3D*, const IntSize&, PreserveDrawingBuffer, AlphaRequirement);
     friend class GraphicsContext3D;
 
     ~DrawingBuffer();
 
-    void clearFramebuffer();
+    // Issues a glClear() on all framebuffers associated with this DrawingBuffer. The caller is responsible for
+    // making the context current and setting the clear values and masks. Modifies the framebuffer binding.
+    void clearFramebuffers(GC3Dbitfield clearMask);
 
     // Returns true if the buffer was successfully resized.
     bool reset(const IntSize&);
@@ -87,7 +98,14 @@ public:
 
     // The DrawingBuffer needs to track the texture bound to texture unit 0.
     // The bound texture is tracked to avoid costly queries during rendering.
-    void setTexture2DBinding(GC3Dint texture) { m_texture2DBinding = texture; }
+    void setTexture2DBinding(Platform3DObject texture) { m_texture2DBinding = texture; }
+
+    // The DrawingBuffer needs to track the currently bound framebuffer so it
+    // restore the binding when needed.
+    void setFramebufferBinding(Platform3DObject fbo) { m_framebufferBinding = fbo; }
+
+    // Bind to the m_framebufferBinding if it's not 0.
+    void restoreFramebufferBinding();
 
     // Track the currently active texture unit. Texture unit 0 is used as host for a scratch
     // texture.
@@ -95,7 +113,6 @@ public:
 
     bool multisample() const;
 
-    Platform3DObject platformColorBuffer() const;
     Platform3DObject framebuffer() const;
 
     PassRefPtr<ImageData> paintRenderingResultsToImageData();
@@ -104,23 +121,29 @@ public:
     // graphics context to prevent freeing invalid resources.
     void discardResources();
 
+    void markContentsChanged() { m_contentsChanged = true; }
+
 #if USE(ACCELERATED_COMPOSITING)
     PlatformLayer* platformLayer();
-    void publishToPlatformLayer();
-    void paintCompositedResultsToCanvas(CanvasRenderingContext*);
+    void prepareBackBuffer();
+    bool requiresCopyFromBackToFrontBuffer() const;
+    unsigned frontColorBuffer() const;
+    void paintCompositedResultsToCanvas(ImageBuffer*);
 #endif
 
-    PassRefPtr<GraphicsContext3D> graphicsContext3D() const { return m_context; }
+    GraphicsContext3D* graphicsContext3D() const { return m_context.get(); }
 
 private:
     DrawingBuffer(GraphicsContext3D*, const IntSize&, bool multisampleExtensionSupported,
-                  bool packedDepthStencilExtensionSupported, bool separateBackingTexture);
+                  bool packedDepthStencilExtensionSupported, PreserveDrawingBuffer, AlphaRequirement);
 
     void initialize(const IntSize&);
 
-    bool m_separateBackingTexture;
+    PreserveDrawingBuffer m_preserveDrawingBuffer;
+    AlphaRequirement m_alpha;
     bool m_scissorEnabled;
     Platform3DObject m_texture2DBinding;
+    Platform3DObject m_framebufferBinding;
     GC3Denum m_activeTextureUnit;
 
     RefPtr<GraphicsContext3D> m_context;
@@ -129,7 +152,8 @@ private:
     bool m_packedDepthStencilExtensionSupported;
     Platform3DObject m_fbo;
     Platform3DObject m_colorBuffer;
-    Platform3DObject m_backingColorBuffer;
+    Platform3DObject m_frontColorBuffer;
+    bool m_separateFrontTexture;
 
     // This is used when we have OES_packed_depth_stencil.
     Platform3DObject m_depthStencilBuffer;
@@ -142,8 +166,11 @@ private:
     Platform3DObject m_multisampleFBO;
     Platform3DObject m_multisampleColorBuffer;
 
+    // True if our contents have been modified since the last presentation of this buffer.
+    bool m_contentsChanged;
+
 #if PLATFORM(CHROMIUM)
-    RefPtr<WebGLLayerChromium> m_platformLayer;
+    OwnPtr<DrawingBufferPrivate> m_private;
 #endif
 
 #if PLATFORM(MAC)

@@ -36,6 +36,7 @@
 #include "WebNotificationCenter.h"
 #include "WebPreferences.h"
 #include <CoreFoundation/CoreFoundation.h>
+#include <WebCore/BString.h>
 #include <WebCore/HistoryItem.h>
 #include <WebCore/HistoryPropertyList.h>
 #include <WebCore/KURL.h>
@@ -612,14 +613,13 @@ HRESULT STDMETHODCALLTYPE WebHistory::historyAgeInDaysLimit(
 HRESULT WebHistory::removeItem(IWebHistoryItem* entry)
 {
     HRESULT hr = S_OK;
-    BSTR urlBStr = 0;
+    BString urlBStr;
 
     hr = entry->URLString(&urlBStr);
     if (FAILED(hr))
         return hr;
 
     RetainPtr<CFStringRef> urlString(AdoptCF, MarshallingHelpers::BSTRToCFStringRef(urlBStr));
-    SysFreeString(urlBStr);
 
     // If this exact object isn't stored, then make no change.
     // FIXME: Is this the right behavior if this entry isn't present, but another entry for the same URL is?
@@ -646,13 +646,12 @@ HRESULT WebHistory::addItem(IWebHistoryItem* entry, bool discardDuplicate, bool*
     if (!entry)
         return E_FAIL;
 
-    BSTR urlBStr = 0;
+    BString urlBStr;
     hr = entry->URLString(&urlBStr);
     if (FAILED(hr))
         return hr;
 
     RetainPtr<CFStringRef> urlString(AdoptCF, MarshallingHelpers::BSTRToCFStringRef(urlBStr));
-    SysFreeString(urlBStr);
 
     COMPtr<IWebHistoryItem> oldEntry((IWebHistoryItem*) CFDictionaryGetValue(
         m_entriesByURL.get(), urlString.get()));
@@ -694,9 +693,9 @@ HRESULT WebHistory::addItem(IWebHistoryItem* entry, bool discardDuplicate, bool*
 
 void WebHistory::visitedURL(const KURL& url, const String& title, const String& httpMethod, bool wasFailure, bool increaseVisitCount)
 {
-    RetainPtr<CFStringRef> urlString(AdoptCF, url.string().createCFString());
+    RetainPtr<CFStringRef> urlString = url.string().createCFString();
 
-    IWebHistoryItem* entry = (IWebHistoryItem*) CFDictionaryGetValue(m_entriesByURL.get(), urlString.get());
+    IWebHistoryItem* entry = (IWebHistoryItem*)CFDictionaryGetValue(m_entriesByURL.get(), urlString.get());
     if (entry) {
         COMPtr<IWebHistoryItemPrivate> entryPrivate(Query, entry);
         if (!entryPrivate)
@@ -735,7 +734,7 @@ void WebHistory::visitedURL(const KURL& url, const String& title, const String& 
 
     entryPrivate->setLastVisitWasFailure(wasFailure);
     if (!httpMethod.isEmpty())
-        entryPrivate->setLastVisitWasHTTPNonGet(!equalIgnoringCase(httpMethod, "GET") && url.protocolInHTTPFamily());
+        entryPrivate->setLastVisitWasHTTPNonGet(!equalIgnoringCase(httpMethod, "GET") && url.protocolIsInHTTPFamily());
 
     COMPtr<WebHistoryItem> item(Query, entry);
     item->historyItem()->setRedirectURLs(nullptr);
@@ -787,11 +786,10 @@ HRESULT WebHistory::removeItemForURLString(CFStringRef urlString)
 
 COMPtr<IWebHistoryItem> WebHistory::itemForURLString(const String& urlString) const
 {
-    RetainPtr<CFStringRef> urlCFString(AdoptCF, urlString.createCFString());
-    if (!urlCFString)
+    if (!urlString)
         return 0;
     COMPtr<IWebHistoryItem> item;
-    if (FAILED(itemForURLString(urlCFString.get(), &item)))
+    if (FAILED(itemForURLString(urlString.createCFString().get(), &item)))
         return 0;
     return item;
 }
@@ -834,7 +832,7 @@ HRESULT WebHistory::removeItemFromDateCaches(IWebHistoryItem* entry)
 
     DateToEntriesMap::iterator found = m_entriesByDate.find(dateKey);
     ASSERT(found != m_entriesByDate.end());
-    CFMutableArrayRef entriesForDate = found->second.get();
+    CFMutableArrayRef entriesForDate = found->value.get();
 
     CFIndex count = CFArrayGetCount(entriesForDate);
     for (int i = count - 1; i >= 0; --i) {

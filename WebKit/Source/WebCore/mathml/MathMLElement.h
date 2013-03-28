@@ -37,15 +37,27 @@ class MathMLElement : public StyledElement {
 public:
     static PassRefPtr<MathMLElement> create(const QualifiedName& tagName, Document*);
 
+    int colSpan() const;
+    int rowSpan() const;
+
 protected:
     MathMLElement(const QualifiedName& tagName, Document*);
 
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
+
 private:    
     virtual bool isMathMLElement() const { return true; }
-    virtual bool mapToEntry(const QualifiedName&, MappedAttributeEntry&) const;
-    virtual void parseMappedAttribute(Attribute*);
+
+    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
+    virtual void collectStyleForPresentationAttribute(const Attribute&, StylePropertySet*) OVERRIDE;
 };
-    
+
+inline MathMLElement* toMathMLElement(Node* node)
+{
+    ASSERT(!node || (node->isElementNode() && static_cast<Element*>(node)->isMathMLElement()));
+    return static_cast<MathMLElement*>(node);
+}
+
 }
 
 #endif // ENABLE(MATHML)

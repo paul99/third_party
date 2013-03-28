@@ -26,6 +26,8 @@
 #ifndef LayerTreeContext_h
 #define LayerTreeContext_h
 
+#include <stdint.h>
+
 namespace CoreIPC {
     class ArgumentDecoder;
     class ArgumentEncoder;
@@ -33,12 +35,19 @@ namespace CoreIPC {
 
 namespace WebKit {
 
+enum LayerHostingMode {
+    LayerHostingModeDefault,
+#if HAVE(LAYER_HOSTING_IN_WINDOW_SERVER)
+    LayerHostingModeInWindowServer
+#endif
+};
+
 class LayerTreeContext {
 public:
     LayerTreeContext();
     ~LayerTreeContext();
 
-    void encode(CoreIPC::ArgumentEncoder*) const;
+    void encode(CoreIPC::ArgumentEncoder&) const;
     static bool decode(CoreIPC::ArgumentDecoder*, LayerTreeContext&);
 
     bool isEmpty() const;
@@ -48,7 +57,11 @@ public:
 #elif PLATFORM(WIN)
     HWND window;
 #elif PLATFORM(QT)
-    uint32_t webLayerID;
+    uint32_t coordinatedLayerID;
+#elif PLATFORM(GTK)
+    uint64_t windowHandle;
+#elif PLATFORM(EFL)
+    uint32_t coordinatedLayerID;
 #endif
 };
 

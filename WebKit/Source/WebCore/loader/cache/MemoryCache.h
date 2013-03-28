@@ -26,12 +26,12 @@
 #define Cache_h
 
 #include "CachedResource.h"
-#include "PlatformString.h"
 #include <wtf/HashMap.h>
 #include <wtf/HashSet.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/Vector.h>
 #include <wtf/text/StringHash.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore  {
 
@@ -39,6 +39,7 @@ class CachedCSSStyleSheet;
 class CachedResource;
 class CachedResourceLoader;
 class KURL;
+class ScriptExecutionContext;
 class SecurityOrigin;
 struct SecurityOriginHash;
 
@@ -134,9 +135,6 @@ public:
     void setDeadDecodedDataDeletionInterval(double interval) { m_deadDecodedDataDeletionInterval = interval; }
     double deadDecodedDataDeletionInterval() const { return m_deadDecodedDataDeletionInterval; }
 
-    void addCachedResourceLoader(CachedResourceLoader*);
-    void removeCachedResourceLoader(CachedResourceLoader*);
-
     // Calls to put the cached resource into and out of LRU lists.
     void insertInLRUList(CachedResource*);
     void removeFromLRUList(CachedResource*);
@@ -153,6 +151,8 @@ public:
 
     static bool shouldMakeResourcePurgeableOnEviction();
 
+    static void removeUrlFromCache(ScriptExecutionContext*, const String& urlString);
+
     // Function to collect cache statistics for the caches window in the Safari Debug menu.
     Statistics getStatistics();
     
@@ -161,6 +161,14 @@ public:
     typedef HashSet<RefPtr<SecurityOrigin>, SecurityOriginHash> SecurityOriginSet;
     void removeResourcesWithOrigin(SecurityOrigin*);
     void getOriginsWithCache(SecurityOriginSet& origins);
+
+    unsigned minDeadCapacity() const { return m_minDeadCapacity; }
+    unsigned maxDeadCapacity() const { return m_maxDeadCapacity; }
+    unsigned capacity() const { return m_capacity; }
+    unsigned liveSize() const { return m_liveSize; }
+    unsigned deadSize() const { return m_deadSize; }
+
+    void reportMemoryUsage(MemoryObjectInfo*) const;
 
 private:
     MemoryCache();
@@ -187,9 +195,11 @@ private:
     bool makeResourcePurgeable(CachedResource*);
     void evict(CachedResource*);
 
+    static void removeUrlFromCacheImpl(ScriptExecutionContext*, const String& urlString);
+
     bool m_disabled;  // Whether or not the cache is enabled.
     bool m_pruneEnabled;
-    bool m_inPruneDeadResources;
+    bool m_inPruneResources;
 
     unsigned m_capacity;
     unsigned m_minDeadCapacity;

@@ -39,6 +39,7 @@
 #include "WebEvent.h"
 #include "WebFindOptions.h"
 #include "WebNumber.h"
+#include "WebSecurityOrigin.h"
 #include "WebString.h"
 #include "WebURL.h"
 #include "WebURLRequest.h"
@@ -47,6 +48,10 @@
 #include <WebCore/FloatRect.h>
 #include <WebCore/FrameLoaderTypes.h>
 #include <WebCore/IntRect.h>
+#include <WebCore/LayoutMilestones.h>
+#include <WebCore/SecurityOrigin.h>
+#include <WebCore/UserContentTypes.h>
+#include <WebCore/UserScriptTypes.h>
 #include <wtf/TypeTraits.h>
 
 namespace WebKit {
@@ -192,6 +197,13 @@ inline ProxyingRefPtr<WebURLRequest> toAPI(const WebCore::ResourceRequest& reque
 inline ProxyingRefPtr<WebURLResponse> toAPI(const WebCore::ResourceResponse& response)
 {
     return ProxyingRefPtr<WebURLResponse>(WebURLResponse::create(response));
+}
+
+inline WKSecurityOriginRef toCopiedAPI(WebCore::SecurityOrigin* origin)
+{
+    if (!origin)
+        return 0;
+    return toAPI(WebSecurityOrigin::create(origin).leakRef());
 }
 
 /* Geometry conversions */
@@ -414,6 +426,8 @@ inline WKContextMenuItemTag toAPI(WebCore::ContextMenuAction action)
         return kWKContextMenuItemTagPDFSinglePageScrolling;
     case WebCore::ContextMenuItemTagPDFFacingPagesScrolling:
         return kWKContextMenuItemTagPDFFacingPagesScrolling;
+    case WebCore::ContextMenuItemTagDictationAlternative:
+        return kWKContextMenuItemTagDictationAlternative;
 #if ENABLE(INSPECTOR)
     case WebCore::ContextMenuItemTagInspectElement:
         return kWKContextMenuItemTagInspectElement;
@@ -592,6 +606,8 @@ inline WebCore::ContextMenuAction toImpl(WKContextMenuItemTag tag)
         return WebCore::ContextMenuItemTagPDFSinglePageScrolling;
     case kWKContextMenuItemTagPDFFacingPagesScrolling:
         return WebCore::ContextMenuItemTagPDFFacingPagesScrolling;
+    case kWKContextMenuItemTagDictationAlternative:
+        return WebCore::ContextMenuItemTagDictationAlternative;
 #if ENABLE(INSPECTOR)
     case kWKContextMenuItemTagInspectElement:
         return WebCore::ContextMenuItemTagInspectElement;
@@ -744,6 +760,34 @@ inline WKSameDocumentNavigationType toAPI(SameDocumentNavigationType type)
     return wkType;
 }
 
+inline WKLayoutMilestones toWKLayoutMilestones(WebCore::LayoutMilestones milestones)
+{
+    unsigned wkMilestones = 0;
+
+    if (milestones & WebCore::DidFirstLayout)
+        wkMilestones |= kWKDidFirstLayout;
+    if (milestones & WebCore::DidFirstVisuallyNonEmptyLayout)
+        wkMilestones |= kWKDidFirstVisuallyNonEmptyLayout;
+    if (milestones & WebCore::DidHitRelevantRepaintedObjectsAreaThreshold)
+        wkMilestones |= kWKDidHitRelevantRepaintedObjectsAreaThreshold;
+    
+    return wkMilestones;
+}
+
+inline WebCore::LayoutMilestones toLayoutMilestones(WKLayoutMilestones wkMilestones)
+{
+    WebCore::LayoutMilestones milestones = 0;
+
+    if (wkMilestones & kWKDidFirstLayout)
+        milestones |= WebCore::DidFirstLayout;
+    if (wkMilestones & kWKDidFirstVisuallyNonEmptyLayout)
+        milestones |= WebCore::DidFirstVisuallyNonEmptyLayout;
+    if (wkMilestones & kWKDidHitRelevantRepaintedObjectsAreaThreshold)
+        milestones |= WebCore::DidHitRelevantRepaintedObjectsAreaThreshold;
+    
+    return milestones;
+}
+
 inline ImageOptions toImageOptions(WKImageOptions wkImageOptions)
 {
     unsigned imageOptions = 0;
@@ -752,6 +796,58 @@ inline ImageOptions toImageOptions(WKImageOptions wkImageOptions)
         imageOptions |= ImageOptionsShareable;
 
     return static_cast<ImageOptions>(imageOptions);
+}
+
+inline SnapshotOptions snapshotOptionsFromImageOptions(WKImageOptions wkImageOptions)
+{
+    unsigned snapshotOptions = 0;
+
+    if (wkImageOptions & kWKImageOptionsShareable)
+        snapshotOptions |= SnapshotOptionsShareable;
+
+    return snapshotOptions;
+}
+
+inline SnapshotOptions toSnapshotOptions(WKSnapshotOptions wkSnapshotOptions)
+{
+    unsigned snapshotOptions = 0;
+
+    if (wkSnapshotOptions & kWKSnapshotOptionsShareable)
+        snapshotOptions |= SnapshotOptionsShareable;
+    if (wkSnapshotOptions & kWKSnapshotOptionsExcludeSelectionHighlighting)
+        snapshotOptions |= SnapshotOptionsExcludeSelectionHighlighting;
+    if (wkSnapshotOptions & kWKSnapshotOptionsInViewCoordinates)
+        snapshotOptions |= SnapshotOptionsInViewCoordinates;
+    if (wkSnapshotOptions & kWKSnapshotOptionsPaintSelectionRectangle)
+        snapshotOptions |= SnapshotOptionsPaintSelectionRectangle;
+
+    return snapshotOptions;
+}
+
+inline WebCore::UserScriptInjectionTime toUserScriptInjectionTime(WKUserScriptInjectionTime wkInjectedTime)
+{
+    switch (wkInjectedTime) {
+    case kWKInjectAtDocumentStart:
+        return WebCore::InjectAtDocumentStart;
+    case kWKInjectAtDocumentEnd:
+        return WebCore::InjectAtDocumentEnd;
+    }
+
+    ASSERT_NOT_REACHED();
+    return WebCore::InjectAtDocumentStart;
+}
+
+inline WebCore::UserContentInjectedFrames toUserContentInjectedFrames(WKUserContentInjectedFrames wkInjectedFrames)
+{
+    switch (wkInjectedFrames) {
+    case kWKInjectInAllFrames:
+        return WebCore::InjectInAllFrames;
+    case kWKInjectInTopFrameOnly:
+        return WebCore::InjectInTopFrameOnly;
+    }
+
+    ASSERT_NOT_REACHED();
+    return WebCore::InjectInAllFrames;
 }
 
 } // namespace WebKit

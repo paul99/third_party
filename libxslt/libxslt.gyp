@@ -5,12 +5,11 @@
 {
   'variables': {
     'conditions': [
-      ['os_posix == 1 and OS != "mac" and OS != "android"', {
+      ['os_posix == 1 and OS != "mac"', {
         'os_include': 'linux'
       }],
       ['OS=="mac"', {'os_include': 'mac'}],
       ['OS=="win"', {'os_include': 'win32'}],
-      ['OS=="android"', {'os_include': 'linux'}],
     ],
     # We used to have a separate flag for using the system
     # libxslt, but it seems mixing Chrome libxml and system
@@ -22,7 +21,7 @@
     {
       'target_name': 'libxslt',
       'conditions': [
-        ['os_posix == 1 and OS != "mac" and OS != "android" and use_system_libxml', {
+        ['os_posix == 1 and OS != "mac" and use_system_libxml', {
           'type': 'none',
           'direct_dependent_settings': {
             'cflags': [

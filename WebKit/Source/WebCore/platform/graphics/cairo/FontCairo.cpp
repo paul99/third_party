@@ -35,9 +35,9 @@
 #include "GlyphBuffer.h"
 #include "Gradient.h"
 #include "GraphicsContext.h"
-#include "PlatformContextCairo.h"
 #include "ImageBuffer.h"
 #include "Pattern.h"
+#include "PlatformContextCairo.h"
 #include "ShadowBlur.h"
 #include "SimpleFontData.h"
 
@@ -85,7 +85,8 @@ static void drawGlyphsShadow(GraphicsContext* graphicsContext, const FloatPoint&
 
     cairo_text_extents_t extents;
     cairo_scaled_font_glyph_extents(font->platformData().scaledFont(), glyphs, numGlyphs, &extents);
-    FloatRect fontExtentsRect(point.x(), point.y() - extents.height, extents.width, extents.height);
+    FloatRect fontExtentsRect(point.x() + extents.x_bearing, point.y() + extents.y_bearing, extents.width, extents.height);
+
     if (GraphicsContext* shadowContext = shadow.beginShadowLayer(graphicsContext, fontExtentsRect)) {
         drawGlyphsToContext(shadowContext->platformContext()->cr(), font, glyphs, numGlyphs);
         shadow.endShadowLayer(graphicsContext);

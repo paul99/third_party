@@ -33,61 +33,83 @@
 #include "BytecodeGenerator.h"
 #include "DFGDriver.h"
 #include "JIT.h"
+#include "LLIntEntrypoints.h"
 
 namespace JSC {
 
 template<typename CodeBlockType>
-inline bool jitCompileIfAppropriate(JSGlobalData& globalData, OwnPtr<CodeBlockType>& codeBlock, JITCode& jitCode, JITCode::JITType jitType)
+inline bool jitCompileIfAppropriate(ExecState* exec, OwnPtr<CodeBlockType>& codeBlock, JITCode& jitCode, JITCode::JITType jitType, unsigned bytecodeIndex, JITCompilationEffort effort)
 {
+    JSGlobalData& globalData = exec->globalData();
+    
+    if (jitType == codeBlock->getJITType())
+        return true;
+    
     if (!globalData.canUseJIT())
         return true;
     
+    codeBlock->unlinkIncomingCalls();
+    
+    JITCode oldJITCode = jitCode;
+    
     bool dfgCompiled = false;
     if (jitType == JITCode::DFGJIT)
-        dfgCompiled = DFG::tryCompile(globalData, codeBlock.get(), jitCode);
+        dfgCompiled = DFG::tryCompile(exec, codeBlock.get(), jitCode, bytecodeIndex);
     if (dfgCompiled) {
         if (codeBlock->alternative())
             codeBlock->alternative()->unlinkIncomingCalls();
     } else {
         if (codeBlock->alternative()) {
             codeBlock = static_pointer_cast<CodeBlockType>(codeBlock->releaseAlternative());
+            jitCode = oldJITCode;
             return false;
         }
-        jitCode = JIT::compile(&globalData, codeBlock.get());
+        jitCode = JIT::compile(&globalData, codeBlock.get(), effort);
+        if (!jitCode) {
+            jitCode = oldJITCode;
+            return false;
+        }
     }
-#if !ENABLE(OPCODE_SAMPLING)
-    if (!BytecodeGenerator::dumpsGeneratedCode())
-        codeBlock->handleBytecodeDiscardingOpportunity();
-#endif
     codeBlock->setJITCode(jitCode, MacroAssemblerCodePtr());
     
     return true;
 }
 
-inline bool jitCompileFunctionIfAppropriate(JSGlobalData& globalData, OwnPtr<FunctionCodeBlock>& codeBlock, JITCode& jitCode, MacroAssemblerCodePtr& jitCodeWithArityCheck, SharedSymbolTable*& symbolTable, JITCode::JITType jitType)
+inline bool jitCompileFunctionIfAppropriate(ExecState* exec, OwnPtr<FunctionCodeBlock>& codeBlock, JITCode& jitCode, MacroAssemblerCodePtr& jitCodeWithArityCheck, JITCode::JITType jitType, unsigned bytecodeIndex, JITCompilationEffort effort)
 {
+    JSGlobalData& globalData = exec->globalData();
+    
+    if (jitType == codeBlock->getJITType())
+        return true;
+    
     if (!globalData.canUseJIT())
         return true;
     
+    codeBlock->unlinkIncomingCalls();
+    
+    JITCode oldJITCode = jitCode;
+    MacroAssemblerCodePtr oldJITCodeWithArityCheck = jitCodeWithArityCheck;
+    
     bool dfgCompiled = false;
     if (jitType == JITCode::DFGJIT)
-        dfgCompiled = DFG::tryCompileFunction(globalData, codeBlock.get(), jitCode, jitCodeWithArityCheck);
+        dfgCompiled = DFG::tryCompileFunction(exec, codeBlock.get(), jitCode, jitCodeWithArityCheck, bytecodeIndex);
     if (dfgCompiled) {
         if (codeBlock->alternative())
             codeBlock->alternative()->unlinkIncomingCalls();
     } else {
         if (codeBlock->alternative()) {
             codeBlock = static_pointer_cast<FunctionCodeBlock>(codeBlock->releaseAlternative());
-            symbolTable = codeBlock->sharedSymbolTable();
+            jitCode = oldJITCode;
+            jitCodeWithArityCheck = oldJITCodeWithArityCheck;
             return false;
         }
-        jitCode = JIT::compile(&globalData, codeBlock.get(), &jitCodeWithArityCheck);
+        jitCode = JIT::compile(&globalData, codeBlock.get(), effort, &jitCodeWithArityCheck);
+        if (!jitCode) {
+            jitCode = oldJITCode;
+            jitCodeWithArityCheck = oldJITCodeWithArityCheck;
+            return false;
+        }
     }
-#if !ENABLE(OPCODE_SAMPLING)
-    if (!BytecodeGenerator::dumpsGeneratedCode())
-        codeBlock->handleBytecodeDiscardingOpportunity();
-#endif
-    
     codeBlock->setJITCode(jitCode, jitCodeWithArityCheck);
     
     return true;

@@ -26,19 +26,16 @@
 #ifndef WebDatabaseManagerProxy_h
 #define WebDatabaseManagerProxy_h
 
+#if ENABLE(SQL_DATABASE)
+
 #include "APIObject.h"
 #include "Arguments.h"
 #include "GenericCallback.h"
+#include "MessageReceiver.h"
 #include "OriginAndDatabases.h"
 #include "WebDatabaseManagerProxyClient.h"
 #include <wtf/HashMap.h>
 #include <wtf/PassRefPtr.h>
-
-namespace CoreIPC {
-class ArgumentDecoder;
-class Connection;
-class MessageID;
-}
 
 namespace WebKit {
 
@@ -48,7 +45,7 @@ class WebSecurityOrigin;
 
 typedef GenericCallback<WKArrayRef> ArrayCallback;
 
-class WebDatabaseManagerProxy : public APIObject {
+class WebDatabaseManagerProxy : public APIObject, private CoreIPC::MessageReceiver {
 public:
     static const Type APIType = TypeDatabaseManager;
 
@@ -76,14 +73,16 @@ public:
     static String databaseDetailsExpectedUsageKey();
     static String databaseDetailsCurrentUsageKey();
 
-    void didReceiveWebDatabaseManagerProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
-
     bool shouldTerminate(WebProcessProxy*) const;
 
 private:
     explicit WebDatabaseManagerProxy(WebContext*);
 
     virtual Type type() const { return APIType; }
+
+    // CoreIPC::MessageReceiver
+    virtual void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&) OVERRIDE;
+    void didReceiveWebDatabaseManagerProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
 
     // Message handlers.
     void didGetDatabasesByOrigin(const Vector<OriginAndDatabases>& originAndDatabases, uint64_t callbackID);
@@ -98,5 +97,7 @@ private:
 };
 
 } // namespace WebKit
+
+#endif // ENABLE(SQL_DATABASE)
 
 #endif // DatabaseManagerProxy_h

@@ -30,28 +30,69 @@
 #include "config.h"
 #include "InitWebCoreQt.h"
 
+#include "Chrome.h"
+#include "ChromeClientQt.h"
+#include "Image.h"
+#include "InitializeLogging.h"
 #include "NotImplemented.h"
+#include "Page.h"
 #include "PlatformStrategiesQt.h"
+#include "RenderThemeQStyle.h"
 #include "ScriptController.h"
+#include "ScrollbarThemeQStyle.h"
 #include "SecurityPolicy.h"
 #if USE(QTKIT)
 #include "WebSystemInterface.h"
 #endif
 
 #include "qwebelement_p.h"
-
-#include <runtime/InitializeThreading.h>
+#include <JavaScriptCore/runtime/InitializeThreading.h>
 #include <wtf/MainThread.h>
+
+namespace WebKit {
+
+static QtStyleFacadeFactoryFunction initCallback = 0;
+
+Q_DECL_EXPORT void setWebKitWidgetsInitCallback(QtStyleFacadeFactoryFunction callback)
+{
+    initCallback = callback;
+}
+
+static WebCore::QStyleFacade* createStyleForPage(WebCore::Page* page)
+{
+    QWebPageAdapter* pageAdapter = 0;
+    if (page)
+        pageAdapter = static_cast<WebCore::ChromeClientQt*>(page->chrome()->client())->m_webPage;
+    return initCallback(pageAdapter);
+}
+
+// Called also from WebKit2's WebProcess
+Q_DECL_EXPORT void initializeWebKitQt()
+{
+    if (initCallback) {
+        WebCore::RenderThemeQStyle::setStyleFactoryFunction(createStyleForPage);
+        WebCore::RenderThemeQt::setCustomTheme(WebCore::RenderThemeQStyle::create, new WebCore::ScrollbarThemeQStyle);
+    }
+}
+
+Q_DECL_EXPORT void setImagePlatformResource(const char* name, const QPixmap& pixmap)
+{
+    WebCore::Image::setPlatformResource(name, pixmap);
+}
+
+}
 
 namespace WebCore {
 
-void initializeWebCoreQt()
+Q_DECL_EXPORT void initializeWebCoreQt()
 {
     static bool initialized = false;
     if (initialized)
         return;
 
+#if !LOG_DISABLED
     WebCore::initializeLoggingChannelsIfNecessary();
+#endif // !LOG_DISABLED
     ScriptController::initializeThreading();
     WTF::initializeMainThread();
     WebCore::SecurityPolicy::setLocalLoadPolicy(WebCore::SecurityPolicy::AllowLocalLoadsForLocalAndSubstituteData);

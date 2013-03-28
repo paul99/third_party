@@ -34,7 +34,7 @@
     ],
     'targets': [
         {
-            # These two targets should be sufficient to cause everything
+            # These targets should be sufficient to cause everything
             # else to build (incl. webkit); if they aren't, we have our
             # dependencies wrong.
             'target_name': 'all_webkit',
@@ -42,6 +42,23 @@
             'dependencies': [
                 'WebKitUnitTests.gyp:webkit_unit_tests',
                 '../../../Tools/DumpRenderTree/DumpRenderTree.gyp/DumpRenderTree.gyp:DumpRenderTree',
+                '../../../Tools/TestWebKitAPI/TestWebKitAPI.gyp/TestWebKitAPI.gyp:TestWebKitAPI',
+            ],
+            'conditions': [
+                ['OS=="android"', {
+                    'dependencies': [
+                        '../../../Tools/DumpRenderTree/DumpRenderTree.gyp/DumpRenderTree.gyp:DumpRenderTree_apk',
+                    ],
+                }],
+                # Special target to wrap a gtest_target_type==shared_library
+                # webkit_unit_tests and TestWebKitAPI into an android apk for
+                # execution. See base.gyp for TODO(jrg)s about this strategy.
+                ['OS=="android" and gtest_target_type == "shared_library"', {
+                    'dependencies': [
+                        'WebKitUnitTests.gyp:webkit_unit_tests_apk',
+                        '../../../Tools/TestWebKitAPI/TestWebKitAPI.gyp/TestWebKitAPI.gyp:TestWebKitAPI_apk',
+                    ],
+                }],
             ],
         }
     ],

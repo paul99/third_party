@@ -183,32 +183,25 @@ class AllocateRequest : public StunRequest {
   uint32 start_time_;
 };
 
-const char RELAY_PORT_TYPE[] = "relay";
-
 RelayPort::RelayPort(
     talk_base::Thread* thread, talk_base::PacketSocketFactory* factory,
     talk_base::Network* network, const talk_base::IPAddress& ip,
     int min_port, int max_port, const std::string& username,
-    const std::string& password, const std::string& magic_cookie)
-    : Port(thread, RELAY_PORT_TYPE, factory, network, ip, min_port, max_port),
+    const std::string& password)
+    : Port(thread, RELAY_PORT_TYPE, ICE_TYPE_PREFERENCE_RELAY,
+           factory, network, ip, min_port, max_port,
+           username, password),
       ready_(false),
-      magic_cookie_(magic_cookie),
       error_(0) {
   entries_.push_back(
       new RelayEntry(this, talk_base::SocketAddress()));
-
-  set_username_fragment(username);
-  set_password(password);
-  if (magic_cookie_.size() == 0) {
-    magic_cookie_.append(TURN_MAGIC_COOKIE_VALUE,
-                         sizeof(TURN_MAGIC_COOKIE_VALUE));
-  }
+  // TODO: set local preference value for TCP based candidates.
 }
 
 RelayPort::~RelayPort() {
   for (size_t i = 0; i < entries_.size(); ++i)
     delete entries_[i];
-  thread_->Clear(this);
+  thread()->Clear(this);
 }
 
 void RelayPort::AddServerAddress(const ProtocolAddress& addr) {
@@ -225,19 +218,26 @@ void RelayPort::AddServerAddress(const ProtocolAddress& addr) {
 
 void RelayPort::AddExternalAddress(const ProtocolAddress& addr) {
   std::string proto_name = ProtoToString(addr.proto);
-  for (std::vector<Candidate>::const_iterator it = candidates().begin();
-       it != candidates().end(); ++it) {
-    if ((it->address() == addr.address) && (it->protocol() == proto_name)) {
+  for (std::vector<ProtocolAddress>::iterator it = external_addr_.begin();
+       it != external_addr_.end(); ++it) {
+    if ((it->address == addr.address) && (it->proto == addr.proto)) {
       LOG(INFO) << "Redundant relay address: " << proto_name
                 << " @ " << addr.address.ToString();
       return;
     }
   }
-  AddAddress(addr.address, proto_name, false);
+  external_addr_.push_back(addr);
 }
 
 void RelayPort::SetReady() {
   if (!ready_) {
+    std::vector<ProtocolAddress>::iterator iter;
+    for (iter = external_addr_.begin();
+         iter != external_addr_.end(); ++iter) {
+      std::string proto_name = ProtoToString(iter->proto);
+      AddAddress(iter->address, iter->address, proto_name,
+                 RELAY_PORT_TYPE, ICE_TYPE_PREFERENCE_RELAY, false);
+    }
     ready_ = true;
     SignalAddressReady(this);
   }
@@ -250,12 +250,11 @@ const ProtocolAddress * RelayPort::ServerAddress(size_t index) const {
 }
 
 bool RelayPort::HasMagicCookie(const char* data, size_t size) {
-  if (size < 24 + magic_cookie_.size()) {
+  if (size < 24 + sizeof(TURN_MAGIC_COOKIE_VALUE)) {
     return false;
   } else {
-    return 0 == std::memcmp(data + 24,
-                            magic_cookie_.c_str(),
-                            magic_cookie_.size());
+    return 0 == std::memcmp(data + 24, TURN_MAGIC_COOKIE_VALUE,
+                            sizeof(TURN_MAGIC_COOKIE_VALUE));
   }
 }
 
@@ -275,13 +274,17 @@ Connection* RelayPort::CreateConnection(const Candidate& address,
   }
 
   // We don't support loopback on relays
-  if (address.type() == type()) {
+  if (address.type() == Type()) {
+    return 0;
+  }
+
+  if (!IsCompatibleAddress(address.address())) {
     return 0;
   }
 
   size_t index = 0;
-  for (size_t i = 0; i < candidates().size(); ++i) {
-    const Candidate& local = candidates()[i];
+  for (size_t i = 0; i < Candidates().size(); ++i) {
+    const Candidate& local = Candidates()[i];
     if (local.protocol() == address.protocol()) {
       index = i;
       break;
@@ -301,7 +304,7 @@ int RelayPort::SendTo(const void* data, size_t size,
   RelayEntry* entry = 0;
 
   for (size_t i = 0; i < entries_.size(); ++i) {
-    if (entries_[i]->address().IsAny() && payload) {
+    if (entries_[i]->address().IsNil() && payload) {
       entry = entries_[i];
       entry->set_address(addr);
       break;
@@ -364,11 +367,11 @@ int RelayPort::GetError() {
 
 void RelayPort::OnReadPacket(
     const char* data, size_t size,
-    const talk_base::SocketAddress& remote_addr) {
+    const talk_base::SocketAddress& remote_addr, ProtocolType proto) {
   if (Connection* conn = GetConnection(remote_addr)) {
     conn->OnReadPacket(data, size);
   } else {
-    Port::OnReadPacket(data, size, remote_addr);
+    Port::OnReadPacket(data, size, remote_addr, proto);
   }
 }
 
@@ -457,11 +460,11 @@ void RelayEntry::Connect() {
   if (ra->proto == PROTO_UDP) {
     // UDP sockets are simple.
     socket = port_->socket_factory()->CreateUdpSocket(
-        talk_base::SocketAddress(port_->ip_, 0),
-        port_->min_port_, port_->max_port_);
+        talk_base::SocketAddress(port_->ip(), 0),
+        port_->min_port(), port_->max_port());
   } else if (ra->proto == PROTO_TCP || ra->proto == PROTO_SSLTCP) {
     socket = port_->socket_factory()->CreateClientTcpSocket(
-        talk_base::SocketAddress(port_->ip_, 0), ra->address,
+        talk_base::SocketAddress(port_->ip(), 0), ra->address,
         port_->proxy(), port_->user_agent(), ra->proto == PROTO_SSLTCP);
   } else {
     LOG(LS_WARNING) << "Unknown protocol (" << ra->proto << ")";
@@ -517,6 +520,7 @@ void RelayEntry::OnConnect(const talk_base::SocketAddress& mapped_addr,
             << " @ " << mapped_addr.ToString();
   connected_ = true;
 
+  port_->set_related_address(mapped_addr);
   port_->AddExternalAddress(ProtocolAddress(mapped_addr, proto));
   port_->SetReady();
 }
@@ -535,41 +539,39 @@ int RelayEntry::SendTo(const void* data, size_t size,
   // likely no reason to resend this packet. If it is late, we just drop it.
   // The next send to this address will try again.
 
-  StunMessage request;
+  RelayMessage request;
   request.SetType(STUN_SEND_REQUEST);
-  request.SetTransactionID(
-      talk_base::CreateRandomString(kStunTransactionIdLength));
 
   StunByteStringAttribute* magic_cookie_attr =
       StunAttribute::CreateByteString(STUN_ATTR_MAGIC_COOKIE);
-  magic_cookie_attr->CopyBytes(port_->magic_cookie().c_str(),
-                               port_->magic_cookie().size());
-  request.AddAttribute(magic_cookie_attr);
+  magic_cookie_attr->CopyBytes(TURN_MAGIC_COOKIE_VALUE,
+                               sizeof(TURN_MAGIC_COOKIE_VALUE));
+  VERIFY(request.AddAttribute(magic_cookie_attr));
 
   StunByteStringAttribute* username_attr =
       StunAttribute::CreateByteString(STUN_ATTR_USERNAME);
   username_attr->CopyBytes(port_->username_fragment().c_str(),
                            port_->username_fragment().size());
-  request.AddAttribute(username_attr);
+  VERIFY(request.AddAttribute(username_attr));
 
   StunAddressAttribute* addr_attr =
       StunAttribute::CreateAddress(STUN_ATTR_DESTINATION_ADDRESS);
   addr_attr->SetIP(addr.ipaddr());
   addr_attr->SetPort(addr.port());
-  request.AddAttribute(addr_attr);
+  VERIFY(request.AddAttribute(addr_attr));
 
   // Attempt to lock
   if (ext_addr_ == addr) {
     StunUInt32Attribute* options_attr =
       StunAttribute::CreateUInt32(STUN_ATTR_OPTIONS);
     options_attr->SetValue(0x1);
-    request.AddAttribute(options_attr);
+    VERIFY(request.AddAttribute(options_attr));
   }
 
   StunByteStringAttribute* data_attr =
       StunAttribute::CreateByteString(STUN_ATTR_DATA);
   data_attr->CopyBytes(data, size);
-  request.AddAttribute(data_attr);
+  VERIFY(request.AddAttribute(data_attr));
 
   // TODO: compute the HMAC.
 
@@ -598,7 +600,8 @@ void RelayEntry::HandleConnectFailure(
     talk_base::AsyncPacketSocket* socket) {
   // Make sure it's the current connection that has failed, it might
   // be an old socked that has not yet been disposed.
-  if (!socket || socket == current_connection_->socket()) {
+  if (!socket ||
+      (current_connection_ && socket == current_connection_->socket())) {
     if (current_connection_)
       port()->SignalConnectFailure(current_connection_->protocol_address());
 
@@ -659,7 +662,7 @@ void RelayEntry::OnReadPacket(talk_base::AsyncPacketSocket* socket,
   // by the server,  The actual remote address is the one we recorded.
   if (!port_->HasMagicCookie(data, size)) {
     if (locked_) {
-      port_->OnReadPacket(data, size, ext_addr_);
+      port_->OnReadPacket(data, size, ext_addr_, PROTO_UDP);
     } else {
       LOG(WARNING) << "Dropping packet: entry not locked";
     }
@@ -667,7 +670,7 @@ void RelayEntry::OnReadPacket(talk_base::AsyncPacketSocket* socket,
   }
 
   talk_base::ByteBuffer buf(data, size);
-  StunMessage msg;
+  RelayMessage msg;
   if (!msg.Read(&buf)) {
     LOG(INFO) << "Incoming packet was not STUN";
     return;
@@ -711,7 +714,8 @@ void RelayEntry::OnReadPacket(talk_base::AsyncPacketSocket* socket,
   }
 
   // Process the actual data and remote address in the normal manner.
-  port_->OnReadPacket(data_attr->bytes(), data_attr->length(), remote_addr2);
+  port_->OnReadPacket(data_attr->bytes(), data_attr->length(), remote_addr2,
+                      PROTO_UDP);
 }
 
 int RelayEntry::SendPacket(const void* data, size_t size) {
@@ -725,27 +729,22 @@ int RelayEntry::SendPacket(const void* data, size_t size) {
 }
 
 AllocateRequest::AllocateRequest(RelayEntry* entry,
-                                 RelayConnection* connection) :
-    entry_(entry), connection_(connection) {
+                                 RelayConnection* connection)
+    : StunRequest(new RelayMessage()),
+      entry_(entry),
+      connection_(connection) {
   start_time_ = talk_base::Time();
 }
 
 void AllocateRequest::Prepare(StunMessage* request) {
   request->SetType(STUN_ALLOCATE_REQUEST);
 
-  StunByteStringAttribute* magic_cookie_attr =
-      StunAttribute::CreateByteString(STUN_ATTR_MAGIC_COOKIE);
-  magic_cookie_attr->CopyBytes(
-      entry_->port()->magic_cookie().c_str(),
-      entry_->port()->magic_cookie().size());
-  request->AddAttribute(magic_cookie_attr);
-
   StunByteStringAttribute* username_attr =
       StunAttribute::CreateByteString(STUN_ATTR_USERNAME);
   username_attr->CopyBytes(
       entry_->port()->username_fragment().c_str(),
       entry_->port()->username_fragment().size());
-  request->AddAttribute(username_attr);
+  VERIFY(request->AddAttribute(username_attr));
 }
 
 int AllocateRequest::GetNextDelay() {
@@ -779,7 +778,7 @@ void AllocateRequest::OnErrorResponse(StunMessage* response) {
     LOG(INFO) << "Bad allocate response error code";
   } else {
     LOG(INFO) << "Allocate error response:"
-              << " code=" << static_cast<int>(attr->error_code())
+              << " code=" << attr->code()
               << " reason='" << attr->reason() << "'";
   }
 

@@ -60,7 +60,6 @@ static void destroyAudioBufferList(AudioBufferList* bufferList)
 AudioFileReader::AudioFileReader(const char* filePath)
     : m_data(0)
     , m_dataSize(0)
-    , m_filePath(filePath)
     , m_audioFileID(0)
     , m_extAudioFileRef(0)
 {
@@ -75,7 +74,6 @@ AudioFileReader::AudioFileReader(const char* filePath)
 AudioFileReader::AudioFileReader(const void* data, size_t dataSize)
     : m_data(data)
     , m_dataSize(dataSize)
-    , m_filePath(0)
     , m_audioFileID(0)
     , m_extAudioFileRef(0)
 {
@@ -219,8 +217,10 @@ PassOwnPtr<AudioBus> AudioFileReader::createBus(float sampleRate, bool mixToMono
     // Read from the file (or in-memory version)
     UInt32 framesToRead = numberOfFrames;
     result = ExtAudioFileRead(m_extAudioFileRef, &framesToRead, bufferList);
-    if (result != noErr)
+    if (result != noErr) {
+        destroyAudioBufferList(bufferList);
         return nullptr;
+    }
 
     if (mixToMono && numberOfChannels == 2) {
         // Mix stereo down to mono

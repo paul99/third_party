@@ -10,46 +10,77 @@
 
 #if SK_ARM_NEON_IS_DYNAMIC
 
-#include <errno.h>
-#include <fcntl.h>
-#include <pthread.h>
-#include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <string.h>
+#include <pthread.h>
 
-#define NEON_DEBUG  0
-
-#if NEON_DEBUG
-#include <android/log.h>
-#include <sys/system_properties.h>
-#define D(...)  __android_log_print(ANDROID_LOG_INFO, "SkUtilsArm", __VA_ARGS__)
+// Set USE_ANDROID_NDK_CPU_FEATURES to use the Android NDK's
+// cpu-features helper library to detect NEON at runtime. See
+// http://crbug.com/164154 to see why this is needed in Chromium
+// for Android.
+#if defined(SK_BUILD_FOR_ANDROID) && defined(SK_BUILD_FOR_CHROMIUM)
+#  define USE_ANDROID_NDK_CPU_FEATURES 1
 #else
-#define D(...)  ((void)0)
+#  define USE_ANDROID_NDK_CPU_FEATURES 0
 #endif
 
-static bool            sHasArmNeon;
-static pthread_once_t  sOnce = PTHREAD_ONCE_INIT;
+#if USE_ANDROID_NDK_CPU_FEATURES
+#  include <cpu-features.h>
+#endif
 
-static void probe_cpu_for_neon(void)
-{
+// Set NEON_DEBUG to 1 to allow debugging of the CPU features probing.
+// For now, we always set it for SK_DEBUG builds.
+#ifdef SK_DEBUG
+#  define NEON_DEBUG  1
+#else
+#  define NEON_DEBUG 0
+#endif
+
+#if NEON_DEBUG
+#  ifdef SK_BUILD_FOR_ANDROID
+     // used to declare PROP_VALUE_MAX and __system_property_get()
+#    include <sys/system_properties.h>
+#  endif
+#endif
+
+// A function used to determine at runtime if the target CPU supports
+// the ARM NEON instruction set. This implementation is Linux-specific.
+static bool sk_cpu_arm_check_neon(void) {
+    bool result = false;
+
 #if NEON_DEBUG
     // Allow forcing the mode through the environment during debugging.
-#define PROP_NAME  "debug.skia.arm_neon_mode"
+#  ifdef SK_BUILD_FOR_ANDROID
+    // On Android, we use a system property
+#   define PROP_NAME  "debug.skia.arm_neon_mode"
     char prop[PROP_VALUE_MAX];
     if (__system_property_get(PROP_NAME, prop) > 0) {
-        D("%s: %s", PROP_NAME, prop);
+#  else
+#   define PROP_NAME   "SKIA_ARM_NEON_MODE"
+    // On ARM Linux, we use an environment variable
+    const char* prop = getenv(PROP_NAME);
+    if (prop != NULL) {
+#  endif
+        SkDebugf("%s: %s", PROP_NAME, prop);
         if (!strcmp(prop, "1")) {
-            D("Forcing ARM Neon mode to full!");
-            sHasArmNeon = true;
-            return;
+            SkDebugf("Forcing ARM Neon mode to full!\n");
+            return true;
         }
         if (!strcmp(prop, "0")) {
-            D("Disabling ARM NEON mode");
-            sHasArmNeon = false;
-            return;
+            SkDebugf("Disabling ARM NEON mode\n");
+            return false;
         }
     }
-    D("Running dynamic CPU feature detection");
+    SkDebugf("Running dynamic CPU feature detection\n");
 #endif
+
+#if USE_ANDROID_NDK_CPU_FEATURES
+
+  result = (android_getCpuFeatures() & ANDROID_CPU_ARM_FEATURE_NEON) != 0;
+
+#else  // USE_ANDROID_NDK_CPU_FEATURES
 
     // There is no user-accessible CPUID instruction on ARM that we can use.
     // Instead, we must parse /proc/cpuinfo and look for the 'neon' feature.
@@ -57,7 +88,7 @@ static void probe_cpu_for_neon(void)
     /*
     Processor       : ARMv7 Processor rev 2 (v7l)
     BogoMIPS        : 994.65
-    Features        : swp half thumb fastmult vfp edsp thumbee neon vfpv3 
+    Features        : swp half thumb fastmult vfp edsp thumbee neon vfpv3
     CPU implementer : 0x41
     CPU architecture: 7
     CPU variant     : 0x2
@@ -72,13 +103,13 @@ static void probe_cpu_for_neon(void)
 
     // If we fail any of the following, assume we don't have NEON instructions
     // This allows us to return immediately in case of error.
-    sHasArmNeon = false;
+    result = false;
 
     do {
         // open /proc/cpuinfo
         int fd = TEMP_FAILURE_RETRY(open("/proc/cpuinfo", O_RDONLY));
         if (fd < 0) {
-            D("Could not open /proc/cpuinfo: %s", strerror(errno));
+            SkDebugf("Could not open /proc/cpuinfo: %s\n", strerror(errno));
             break;
         }
 
@@ -90,11 +121,12 @@ static void probe_cpu_for_neon(void)
         close(fd);
 
         if (size < 0) {  // should not happen
-            D("Could not read /proc/cpuinfo: %s", strerror(errno));
+            SkDebugf("Could not read /proc/cpuinfo: %s\n", strerror(errno));
             break;
         }
 
-        D("START /proc/cpuinfo:\n%.*s\nEND /proc/cpuinfo", size, buffer+1);
+        SkDebugf("START /proc/cpuinfo:\n%.*s\nEND /proc/cpuinfo\n",
+                 size, buffer+1);
 
         // Compute buffer limit, and place final sentinel
         char* buffer_end = buffer + 1 + size;
@@ -102,13 +134,18 @@ static void probe_cpu_for_neon(void)
 
         // Now, find a line that starts with "Features", i.e. look for
         // '\nFeatures ' in our buffer.
-        char*  line = (char*) memmem(buffer, buffer_end - buffer, "\nFeatures\t", 10);
+        const char features[] = "\nFeatures\t";
+        const size_t features_len = sizeof(features)-1;
+
+        char*  line = (char*) memmem(buffer, buffer_end - buffer,
+                                     features, features_len);
         if (line == NULL) {  // Weird, no Features line, bad kernel?
-            D("Could not find a line starting with 'Features' in /proc/cpuinfo ?");
+            SkDebugf("Could not find a line starting with 'Features'"
+              "in /proc/cpuinfo ?\n");
             break;
         }
 
-        line += 10;  // Skip the "\nFeatures\t" prefix
+        line += features_len;  // Skip the "\nFeatures\t" prefix
 
         // Find the end of the current line
         char* line_end = (char*) memchr(line, '\n', buffer_end - line);
@@ -118,29 +155,42 @@ static void probe_cpu_for_neon(void)
         // Now find an instance of 'neon' in the flags list. We want to
         // ensure it's only 'neon' and not something fancy like 'noneon'
         // so check that it follows a space.
-        const char* neon = (const char*) memmem(line, line_end - line, " neon", 5);
-        if (neon == NULL)
+        const char neon[] = " neon";
+        const size_t neon_len = sizeof(neon)-1;
+        const char* flag = (const char*) memmem(line, line_end - line,
+                                                neon, neon_len);
+        if (flag == NULL)
             break;
 
         // Ensure it is followed by a space or a newline.
-        if (neon[5] != ' ' && neon[5] != '\n')
+        if (flag[neon_len] != ' ' && flag[neon_len] != '\n')
             break;
 
         // Fine, we support Arm NEON !
-        sHasArmNeon = true;
+        result = true;
 
     } while (0);
 
-    if (sHasArmNeon) {
-        D("Device supports ARM NEON instructions!");
+#endif  // USE_ANDROID_NDK_CPU_FEATURES
+
+    if (result) {
+        SkDebugf("Device supports ARM NEON instructions!\n");
     } else {
-        D("Device does NOT support ARM NEON instructions!");
+        SkDebugf("Device does NOT support ARM NEON instructions!\n");
     }
+    return result;
 }
 
-bool sk_cpu_arm_has_neon(void)
-{
-    pthread_once(&sOnce, probe_cpu_for_neon);
+static pthread_once_t  sOnce;
+static bool            sHasArmNeon;
+
+// called through pthread_once()
+void sk_cpu_arm_probe_features(void) {
+    sHasArmNeon = sk_cpu_arm_check_neon();
+}
+
+bool sk_cpu_arm_has_neon(void) {
+    pthread_once(&sOnce, sk_cpu_arm_probe_features);
     return sHasArmNeon;
 }
 

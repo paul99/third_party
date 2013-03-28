@@ -61,7 +61,7 @@ class FrameLoaderClientEfl : public FrameLoaderClient {
 
     void callPolicyFunction(FramePolicyFunction, PolicyAction);
 
-    virtual void makeRepresentation(DocumentLoader*);
+    virtual void makeRepresentation(DocumentLoader*) { }
     virtual void forceLayout();
     virtual void forceLayoutForNonHTML();
 
@@ -106,8 +106,7 @@ class FrameLoaderClientEfl : public FrameLoaderClient {
     virtual void dispatchDidFailLoad(const ResourceError&);
     virtual void dispatchDidFinishDocumentLoad();
     virtual void dispatchDidFinishLoad();
-    virtual void dispatchDidFirstLayout();
-    virtual void dispatchDidFirstVisuallyNonEmptyLayout();
+    virtual void dispatchDidLayout(LayoutMilestones);
 
     virtual Frame* dispatchCreatePage(const WebCore::NavigationAction&);
     virtual void dispatchShow();
@@ -119,11 +118,10 @@ class FrameLoaderClientEfl : public FrameLoaderClient {
 
     virtual void dispatchUnableToImplementPolicy(const ResourceError&);
 
-    virtual void dispatchWillSendSubmitEvent(HTMLFormElement*) { }
+    virtual void dispatchWillSendSubmitEvent(WTF::PassRefPtr<FormState>) { }
     virtual void dispatchWillSubmitForm(FramePolicyFunction, WTF::PassRefPtr<FormState>);
 
-    virtual void dispatchDidLoadMainResource(DocumentLoader*);
-    virtual void revertToProvisionalState(DocumentLoader*);
+    virtual void revertToProvisionalState(DocumentLoader*) { }
     virtual void setMainDocumentError(DocumentLoader*, const ResourceError&);
 
     virtual void postProgressStartedNotification();
@@ -132,10 +130,9 @@ class FrameLoaderClientEfl : public FrameLoaderClient {
 
     virtual PassRefPtr<Frame> createFrame(const KURL&, const String& name, HTMLFrameOwnerElement*,
                                const String& referrer, bool allowsScrolling, int marginWidth, int marginHeight);
-    virtual void didTransferChildFrameToNewDocument(Page*);
-    virtual void transferLoadingResourceFromPage(WebCore::ResourceLoader*, const ResourceRequest&, WebCore::Page*);
 
     virtual PassRefPtr<Widget> createPlugin(const IntSize&, HTMLPlugInElement*, const KURL&, const WTF::Vector<String>&, const WTF::Vector<String>&, const String&, bool);
+    virtual void recreatePlugin(Widget*) { }
     virtual void redirectDataToPlugin(Widget* pluginWidget);
     virtual PassRefPtr<Widget> createJavaAppletWidget(const IntSize&, HTMLAppletElement*, const KURL& baseURL, const WTF::Vector<String>& paramNames, const WTF::Vector<String>& paramValues);
     virtual String overrideMediaType() const;
@@ -188,6 +185,12 @@ class FrameLoaderClientEfl : public FrameLoaderClient {
     virtual void provisionalLoadStarted();
     virtual void didFinishLoad();
     virtual void prepareForDataSourceReplacement();
+#if ENABLE(WEB_INTENTS)
+    virtual void dispatchIntent(PassRefPtr<WebCore::IntentRequest>);
+#endif
+#if ENABLE(WEB_INTENTS_TAG)
+    virtual void registerIntentService(const String& action, const String& type, const KURL& href, const String& title, const String& disposition);
+#endif
 
     virtual WTF::PassRefPtr<DocumentLoader> createDocumentLoader(const ResourceRequest&, const SubstituteData&);
     virtual void setTitle(const StringWithDirection& title, const KURL&);
@@ -204,10 +207,12 @@ class FrameLoaderClientEfl : public FrameLoaderClient {
     virtual void dispatchDidBecomeFrameset(bool);
 
     virtual bool canCachePage() const;
-    virtual void download(ResourceHandle*, const ResourceRequest&, const ResourceResponse&);
+    virtual void convertMainResourceLoadToDownload(MainResourceLoader*, const ResourceRequest&, const ResourceResponse&);
 
     virtual PassRefPtr<WebCore::FrameNetworkingContext> createNetworkingContext();
  private:
+    bool isLoadingMainFrame() const { return m_frame == ewk_view_frame_main_get(m_view); }
+
     Evas_Object *m_view;
     Evas_Object *m_frame;
 
@@ -220,7 +225,6 @@ class FrameLoaderClientEfl : public FrameLoaderClient {
     // Plugin view to redirect data to
     PluginView* m_pluginView;
     bool m_hasSentResponseToPlugin;
-    bool m_hasRepresentation;
 };
 
 }

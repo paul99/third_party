@@ -165,7 +165,7 @@ NSImage* Frame::snapshotDragImage(Node* node, NSRect* imageRect, NSRect* element
         return nil;
 
     LayoutRect topLevelRect;
-    NSRect paintingRect = renderer->paintingRootRect(topLevelRect);
+    NSRect paintingRect = pixelSnappedIntRect(renderer->paintingRootRect(topLevelRect));
 
     m_view->setNodeToDraw(node);              // invoke special sub-tree drawing mode
     NSImage* result = imageFromRect(paintingRect);
@@ -174,7 +174,7 @@ NSImage* Frame::snapshotDragImage(Node* node, NSRect* imageRect, NSRect* element
     m_view->setNodeToDraw(0);
 
     if (elementRect)
-        *elementRect = topLevelRect;
+        *elementRect = pixelSnappedIntRect(topLevelRect);
     if (imageRect)
         *imageRect = paintingRect;
     return result;
@@ -188,7 +188,7 @@ DragImageRef Frame::nodeImage(Node* node)
     if (!renderer)
         return nil;
     LayoutRect topLevelRect;
-    NSRect paintingRect = renderer->paintingRootRect(topLevelRect);
+    NSRect paintingRect = pixelSnappedIntRect(renderer->paintingRootRect(topLevelRect));
 
     m_view->setNodeToDraw(node); // invoke special sub-tree drawing mode
     NSImage* result = imageFromRect(paintingRect);

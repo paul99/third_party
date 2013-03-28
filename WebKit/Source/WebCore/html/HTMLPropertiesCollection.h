@@ -33,29 +33,51 @@
 
 #if ENABLE(MICRODATA)
 
+#include "DOMStringList.h"
 #include "HTMLCollection.h"
 
 namespace WebCore {
 
 class DOMStringList;
+class PropertyNodeList;
 
 class HTMLPropertiesCollection : public HTMLCollection {
 public:
-    static PassOwnPtr<HTMLPropertiesCollection> create(Node*);
+    static PassRefPtr<HTMLPropertiesCollection> create(Node*, CollectionType);
     virtual ~HTMLPropertiesCollection();
 
-    unsigned length() const OVERRIDE;
-
-    virtual Node* item(unsigned) const OVERRIDE;
+    void updateRefElements() const;
 
     PassRefPtr<DOMStringList> names() const;
+    virtual PassRefPtr<PropertyNodeList> propertyNodeList(const String&) const;
+    virtual bool hasNamedItem(const AtomicString&) const OVERRIDE;
+
+    void invalidateCache() const
+    {
+        m_itemRefElements.clear();
+        m_propertyNames.clear();
+    }
 
 private:
     HTMLPropertiesCollection(Node*);
 
-    void findPropetiesOfAnItem(Node* current) const;
+    Node* findRefElements(Node* previous) const;
 
-    mutable Vector<Node*> m_properties;
+    virtual Element* virtualItemAfter(unsigned& offsetInArray, Element*) const OVERRIDE;
+    HTMLElement* virtualItemAfter(HTMLElement* base, Element* previous) const;
+
+    void updateNameCache() const;
+
+    void updatePropertyCache(Element*, const AtomicString& propertyName) const
+    {
+        if (!m_propertyNames)
+            m_propertyNames = DOMStringList::create();
+
+        if (!m_propertyNames->contains(propertyName))
+            m_propertyNames->append(propertyName);
+    }
+
+    mutable Vector<HTMLElement*> m_itemRefElements;
     mutable RefPtr<DOMStringList> m_propertyNames;
 };
 

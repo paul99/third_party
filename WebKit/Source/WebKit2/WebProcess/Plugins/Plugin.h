@@ -29,9 +29,16 @@
 #include <WebCore/GraphicsLayer.h>
 #include <WebCore/KURL.h>
 #include <WebCore/ScrollTypes.h>
+#include <WebCore/SecurityOrigin.h>
 #include <wtf/RefCounted.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/Vector.h>
+
+#if PLATFORM(MAC)
+#include "LayerHostingContext.h"
+
+OBJC_CLASS PDFDocument;
+#endif
 
 struct NPObject;
 
@@ -43,6 +50,7 @@ namespace CoreIPC {
 namespace WebCore {
     class AffineTransform;
     class GraphicsContext;
+    class IntPoint;
     class IntRect;
     class IntSize;
     class Scrollbar;
@@ -64,21 +72,20 @@ public:
         Vector<String> names;
         Vector<String> values;
         String mimeType;
-        bool loadManually;
+        bool isFullFramePlugin;
+        bool shouldUseManualLoader;
+#if PLATFORM(MAC)
+        LayerHostingMode layerHostingMode;
+#endif
 
-        // The URL of the document that the plug-in is in.
-        String documentURL;
-
-        // The URL of the document in the main frame. Will be null if the document the plug-in
-        // doesn't have access to the main frame document.
-        String toplevelDocumentURL;
-
-        void encode(CoreIPC::ArgumentEncoder*) const;
+        void encode(CoreIPC::ArgumentEncoder&) const;
         static bool decode(CoreIPC::ArgumentDecoder*, Parameters&);
     };
 
     // Sets the active plug-in controller and initializes the plug-in.
     bool initialize(PluginController*, const Parameters&);
+
+    virtual bool isBeingAsynchronouslyInitialized() const = 0;
 
     // Destroys the plug-in.
     void destroyPlugin();
@@ -117,6 +124,9 @@ public:
     
     // Returns whether the plug-in is transparent or not.
     virtual bool isTransparent() = 0;
+
+    // Returns whether we should send wheel events to this plug-in.
+    virtual bool wantsWheelEvents() = 0;
 
     // Tells the plug-in that its geometry has changed. The clip rect is in plug-in coordinates, and the affine transform can be used
     // to convert from root view coordinates to plug-in coordinates.
@@ -179,6 +189,18 @@ public:
     // Tells the plug-in to handle the passed in keyboard event. The plug-in should return true if it processed the event.
     virtual bool handleKeyboardEvent(const WebKeyboardEvent&) = 0;
     
+    // Tells the plug-in to handle the passed in editing command. The plug-in should return true if it executed the command.
+    virtual bool handleEditingCommand(const String& commandName, const String& argument) = 0;
+    
+    // Ask the plug-in whether it will be able to handle the given editing command.
+    virtual bool isEditingCommandEnabled(const String&) = 0;
+
+    // Ask the plug-in whether it should be allowed to execute JavaScript or navigate to JavaScript URLs.
+    virtual bool shouldAllowScripting() = 0;
+    
+    // Ask the plug-in whether it wants to override full-page zoom.
+    virtual bool handlesPageScaleFactor() = 0;
+    
     // Tells the plug-in about focus changes.
     virtual void setFocus(bool) = 0;
 
@@ -200,10 +222,16 @@ public:
 
     // Send the complex text input to the plug-in.
     virtual void sendComplexTextInput(const String& textInput) = 0;
+
+    // Tells the plug-in about changes to the layer hosting mode.
+    virtual void setLayerHostingMode(LayerHostingMode) = 0;
 #endif
 
     // Tells the plug-in about scale factor changes.
     virtual void contentsScaleFactorChanged(float) = 0;
+
+    // Called when the storage blocking policy for this plug-in changes.
+    virtual void storageBlockingStateChanged(bool) = 0;
 
     // Called when the private browsing state for this plug-in changes.
     virtual void privateBrowsingStateChanged(bool) = 0;
@@ -219,9 +247,13 @@ public:
     virtual WebCore::Scrollbar* horizontalScrollbar() = 0;
     virtual WebCore::Scrollbar* verticalScrollbar() = 0;
 
-#if USE(CG)
-    virtual RetainPtr<CGPDFDocumentRef> pdfDocumentForPrinting() const { return 0; }
+#if PLATFORM(MAC)
+    virtual RetainPtr<PDFDocument> pdfDocumentForPrinting() const { return 0; }
 #endif
+
+    virtual WebCore::IntPoint convertToRootView(const WebCore::IntPoint& pointInLocalCoordinates) const;
+
+    virtual bool shouldAlwaysAutoStart() const { return false; }
 
 protected:
     Plugin();

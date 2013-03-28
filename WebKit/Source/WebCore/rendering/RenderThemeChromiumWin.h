@@ -57,11 +57,13 @@ namespace WebCore {
         virtual Color platformActiveTextSearchHighlightColor() const;
         virtual Color platformInactiveTextSearchHighlightColor() const;
 
-        // System fonts.
-        virtual void systemFont(int propId, FontDescription&) const;
         virtual Color systemColor(int cssValueId) const;
 
-        virtual void adjustSliderThumbSize(RenderStyle*) const;
+#if ENABLE(DATALIST_ELEMENT)
+        virtual IntSize sliderTickSize() const OVERRIDE;
+        virtual int sliderTickOffsetFromTrackCenter() const OVERRIDE;
+#endif
+        virtual void adjustSliderThumbSize(RenderStyle*, Element*) const;
 
         // Various paint functions.
         virtual bool paintCheckbox(RenderObject*, const PaintInfo&, const IntRect&);
@@ -82,19 +84,17 @@ namespace WebCore {
         // entire menulist.
         virtual bool paintMenuList(RenderObject*, const PaintInfo&, const IntRect&);
 
-        // Override RenderThemeChromiumSkia's setDefaultFontSize method to also reset the local font property caches.
-        // See comment in RenderThemeChromiumSkia::setDefaultFontSize() regarding ugliness of this hack.
-        static void setDefaultFontSize(int);
-
-        virtual void adjustInnerSpinButtonStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+        virtual void adjustInnerSpinButtonStyle(StyleResolver*, RenderStyle*, Element*) const;
         virtual bool paintInnerSpinButton(RenderObject*, const PaintInfo&, const IntRect&);
 
-#if ENABLE(PROGRESS_TAG)
+#if ENABLE(PROGRESS_ELEMENT)
         virtual double animationRepeatIntervalForProgressBar(RenderProgress*) const;
         virtual double animationDurationForProgressBar(RenderProgress*) const;
-        virtual void adjustProgressBarStyle(CSSStyleSelector*, RenderStyle*, Element*) const;
+        virtual void adjustProgressBarStyle(StyleResolver*, RenderStyle*, Element*) const;
         virtual bool paintProgressBar(RenderObject*, const PaintInfo&, const IntRect&);
 #endif
+
+        virtual bool shouldOpenPickerWithF4Key() const OVERRIDE;
 
     protected:
         virtual double caretBlinkIntervalInternal() const;

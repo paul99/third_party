@@ -67,7 +67,7 @@ PlatformGraphicsContext* GraphicsContext::platformContext() const
     return m_data->baseSurface();
 }
 
-AffineTransform GraphicsContext::getCTM() const
+AffineTransform GraphicsContext::getCTM(IncludeDeviceScale) const
 {
     if (paintingDisabled())
         return AffineTransform();
@@ -95,6 +95,8 @@ void GraphicsContext::drawRect(const IntRect& rect)
 {
     if (paintingDisabled())
         return;
+
+    ASSERT(!rect.isEmpty());
 
     m_data->drawRect(rect);
 }
@@ -246,7 +248,7 @@ void GraphicsContext::drawLineForText(const IntPoint& origin, int width, bool pr
     UNUSED_PARAM(printing);
 }
 
-void GraphicsContext::drawLineForTextChecking(const IntPoint& origin, int width, TextCheckingLineStyle style)
+void GraphicsContext::drawLineForDocumentMarker(const IntPoint& origin, int width, DocumentMarkerLineStyle style)
 {
     if (paintingDisabled())
         return;

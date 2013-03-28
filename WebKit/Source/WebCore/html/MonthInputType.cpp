@@ -34,6 +34,7 @@
 #include "DateComponents.h"
 #include "HTMLInputElement.h"
 #include "HTMLNames.h"
+#include "InputTypeNames.h"
 #include <wtf/CurrentTime.h>
 #include <wtf/DateMath.h>
 #include <wtf/MathExtras.h>
@@ -41,12 +42,20 @@
 
 #if ENABLE(INPUT_TYPE_MONTH)
 
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+#include "DateTimeFieldsState.h"
+#include "LocalizedStrings.h"
+#include "PlatformLocale.h"
+#include <wtf/text/WTFString.h>
+#endif
+
 namespace WebCore {
 
 using namespace HTMLNames;
 
-static const double monthDefaultStep = 1.0;
-static const double monthStepScaleFactor = 1.0;
+static const int monthDefaultStep = 1;
+static const int monthDefaultStepBase = 0;
+static const int monthStepScaleFactor = 1;
 
 PassOwnPtr<InputType> MonthInputType::create(HTMLInputElement* element)
 {
@@ -81,7 +90,7 @@ String MonthInputType::serializeWithMilliseconds(double value) const
     return serializeWithComponents(date);
 }
 
-double MonthInputType::defaultValueForStepUp() const
+Decimal MonthInputType::defaultValueForStepUp() const
 {
     double current = currentTimeMS();
     double utcOffset = calculateUTCOffset();
@@ -93,42 +102,28 @@ double MonthInputType::defaultValueForStepUp() const
     date.setMillisecondsSinceEpochForMonth(current);
     double months = date.monthsSinceEpoch();
     ASSERT(isfinite(months));
-    return months;
+    return Decimal::fromDouble(months);
 }
 
-double MonthInputType::minimum() const
+StepRange MonthInputType::createStepRange(AnyStepHandling anyStepHandling) const
 {
-    return parseToDouble(element()->fastGetAttribute(minAttr), DateComponents::minimumMonth());
+    DEFINE_STATIC_LOCAL(const StepRange::StepDescription, stepDescription, (monthDefaultStep, monthDefaultStepBase, monthStepScaleFactor, StepRange::ParsedStepValueShouldBeInteger));
+
+    const Decimal stepBase = parseToNumber(element()->fastGetAttribute(minAttr), Decimal::fromDouble(monthDefaultStepBase));
+    const Decimal minimum = parseToNumber(element()->fastGetAttribute(minAttr), Decimal::fromDouble(DateComponents::minimumMonth()));
+    const Decimal maximum = parseToNumber(element()->fastGetAttribute(maxAttr), Decimal::fromDouble(DateComponents::maximumMonth()));
+    const Decimal step = StepRange::parseStep(anyStepHandling, stepDescription, element()->fastGetAttribute(stepAttr));
+    return StepRange(stepBase, minimum, maximum, step, stepDescription);
 }
 
-double MonthInputType::maximum() const
-{
-    return parseToDouble(element()->fastGetAttribute(maxAttr), DateComponents::maximumMonth());
-}
-
-double MonthInputType::defaultStep() const
-{
-    return monthDefaultStep;
-}
-
-double MonthInputType::stepScaleFactor() const
-{
-    return monthStepScaleFactor;
-}
-
-bool MonthInputType::parsedStepValueShouldBeInteger() const
-{
-    return true;
-}
-
-double MonthInputType::parseToDouble(const String& src, double defaultValue) const
+Decimal MonthInputType::parseToNumber(const String& src, const Decimal& defaultValue) const
 {
     DateComponents date;
     if (!parseToDateComponents(src, &date))
         return defaultValue;
     double months = date.monthsSinceEpoch();
     ASSERT(isfinite(months));
-    return months;
+    return Decimal::fromDouble(months);
 }
 
 bool MonthInputType::parseToDateComponentsInternal(const UChar* characters, unsigned length, DateComponents* out) const
@@ -144,13 +139,29 @@ bool MonthInputType::setMillisecondToDateComponents(double value, DateComponents
     return date->setMonthsSinceEpoch(value);
 }
 
-#if OS(ANDROID)
 bool MonthInputType::isMonthField() const
 {
     return true;
 }
-#endif
 
+#if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
+String MonthInputType::formatDateTimeFieldsState(const DateTimeFieldsState& dateTimeFieldsState) const
+{
+    if (!dateTimeFieldsState.hasMonth() || !dateTimeFieldsState.hasYear())
+        return emptyString();
+    return String::format("%04u-%02u", dateTimeFieldsState.year(), dateTimeFieldsState.month());
+}
+
+void MonthInputType::setupLayoutParameters(DateTimeEditElement::LayoutParameters& layoutParameters, const DateComponents& date) const
+{
+    layoutParameters.dateTimeFormat = layoutParameters.locale.monthFormat();
+    layoutParameters.fallbackDateTimeFormat = "MM/yyyy";
+    layoutParameters.minimumYear = fullYear(element()->fastGetAttribute(minAttr));
+    layoutParameters.maximumYear = fullYear(element()->fastGetAttribute(maxAttr));
+    layoutParameters.placeholderForMonth = "--";
+    layoutParameters.placeholderForYear = "----";
+}
+#endif
 } // namespace WebCore
 
 #endif

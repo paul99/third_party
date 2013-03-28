@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,8 @@
 #import "config.h"
 #import "PluginInfoStore.h"
 
+#if ENABLE(NETSCAPE_PLUGIN_API)
+
 #import "NetscapePluginModule.h"
 #import "WebKitSystemInterface.h"
 #import <WebCore/WebCoreNSStringExtras.h>
@@ -33,6 +35,8 @@
 #import <wtf/RetainPtr.h>
 
 using namespace WebCore;
+
+static const char* const oracleJavaAppletPluginBundleIdentifier =  "com.oracle.java.JavaAppletPlugin";
 
 namespace WebKit {
 
@@ -76,17 +80,85 @@ bool PluginInfoStore::getPluginInfo(const String& pluginPath, PluginModuleInfo& 
     return NetscapePluginModule::getPluginInfo(pluginPath, plugin);
 }
 
+static size_t findPluginWithBundleIdentifier(const Vector<PluginModuleInfo>& plugins, const String& bundleIdentifier)
+{
+    for (size_t i = 0; i < plugins.size(); ++i) {
+        if (plugins[i].bundleIdentifier == bundleIdentifier)
+            return i;
+    }
+
+    return notFound;
+}
+
+// Returns true if the given plug-in should be loaded, false otherwise.
+static bool checkForPreferredPlugin(Vector<PluginModuleInfo>& alreadyLoadedPlugins, const PluginModuleInfo& plugin, const String& oldPluginBundleIdentifier, const String& newPluginBundleIdentifier)
+{
+    if (plugin.bundleIdentifier == oldPluginBundleIdentifier) {
+        // If we've already found the new plug-in, we don't want to load the old plug-in.
+        if (findPluginWithBundleIdentifier(alreadyLoadedPlugins, newPluginBundleIdentifier) != notFound)
+            return false;
+    } else if (plugin.bundleIdentifier == newPluginBundleIdentifier) {
+        // If we've already found the old plug-in, remove it from the list of loaded plug-ins.
+        size_t oldPluginIndex = findPluginWithBundleIdentifier(alreadyLoadedPlugins, oldPluginBundleIdentifier);
+        if (oldPluginIndex != notFound)
+            alreadyLoadedPlugins.remove(oldPluginIndex);
+    }
+
+    return true;
+}
+
+static bool shouldBlockPlugin(const PluginModuleInfo& plugin)
+{
+    return PluginInfoStore::policyForPlugin(plugin) == PluginModuleBlocked;
+}
+
 bool PluginInfoStore::shouldUsePlugin(Vector<PluginModuleInfo>& alreadyLoadedPlugins, const PluginModuleInfo& plugin)
 {
     for (size_t i = 0; i < alreadyLoadedPlugins.size(); ++i) {
         const PluginModuleInfo& loadedPlugin = alreadyLoadedPlugins[i];
 
         // If a plug-in with the same bundle identifier already exists, we don't want to load it.
-        if (loadedPlugin.bundleIdentifier == plugin.bundleIdentifier)
-            return false;
+        // However, if the already existing plug-in is blocked we want to replace it with the new plug-in.
+        if (loadedPlugin.bundleIdentifier == plugin.bundleIdentifier) {
+            if (!shouldBlockPlugin(loadedPlugin))
+                return false;
+
+            alreadyLoadedPlugins.remove(i);
+            break;
+        }
+    }
+
+    // Prefer the Oracle Java plug-in over the Apple java plug-in.
+    if (!checkForPreferredPlugin(alreadyLoadedPlugins, plugin, "com.apple.java.JavaAppletPlugin",  oracleJavaAppletPluginBundleIdentifier))
+        return false;
+
+    if (plugin.bundleIdentifier == "com.apple.java.JavaAppletPlugin" && shouldBlockPlugin(plugin) && !WKIsJavaPlugInActive()) {
+        // If the Apple Java plug-in is blocked and there's no Java runtime installed, just pretend that the plug-in doesn't exist.
+        return false;
     }
 
     return true;
+}
+
+PluginModuleLoadPolicy PluginInfoStore::policyForPlugin(const PluginModuleInfo& plugin)
+{
+    if (WKShouldBlockPlugin(plugin.bundleIdentifier, plugin.versionString))
+        return PluginModuleBlocked;
+
+    if (plugin.bundleIdentifier == oracleJavaAppletPluginBundleIdentifier && !WKIsJavaPlugInActive())
+        return PluginModuleInactive;
+
+    return PluginModuleLoadNormally;
+}
+
+bool PluginInfoStore::reactivateInactivePlugin(const PluginModuleInfo& plugin)
+{
+    if (plugin.bundleIdentifier == oracleJavaAppletPluginBundleIdentifier) {
+        WKActivateJavaPlugIn();
+        return true;
+    }
+
+    return false;
 }
 
 String PluginInfoStore::getMIMETypeForExtension(const String& extension)
@@ -100,3 +172,5 @@ String PluginInfoStore::getMIMETypeForExtension(const String& extension)
 }
 
 } // namespace WebKit
+
+#endif // ENABLE(NETSCAPE_PLUGIN_API)

@@ -27,9 +27,9 @@
 #define PlatformSupport_h
 
 #include "KURL.h"
-#include "PlatformString.h"
 
 #include <wtf/Vector.h>
+#include <wtf/text/WTFString.h>
 
 // V8 bindings use the ARRAYSIZE_UNSAFE macro. This macro was copied
 // from http://src.chromium.org/viewvc/chrome/trunk/src/base/basictypes.h
@@ -92,14 +92,6 @@ public:
     // Plugin
     static NPObject* pluginScriptableObject(Widget*);
 
-    // If memory usage is below this threshold, do not bother forcing GC.
-    static int lowMemoryUsageMB() { return 256; }
-
-    // If memory usage is above this threshold, force GC more aggressively.
-    static int highMemoryUsageMB() { return 1024; }
-
-    // Delta of memory usage growth (vs. last actualMemoryUsageMB()) to force GC when memory usage is high.
-    static int highUsageDeltaMB() { return 128; }
 };
 
 }

@@ -26,6 +26,7 @@
 #import "config.h"
 #import "WebScriptObjectPrivate.h"
 
+#import "BindingSecurity.h"
 #import "BridgeJSC.h"
 #import "Console.h"
 #import "DOMInternal.h"
@@ -37,8 +38,6 @@
 #import "JSMainThreadExecState.h"
 #import "JSPluginElementFunctions.h"
 #import "ObjCRuntimeObject.h"
-#import "PlatformString.h"
-#import "StringSourceProvider.h"
 #import "WebCoreObjCExtras.h"
 #import "objc_instance.h"
 #import "runtime_object.h"
@@ -50,8 +49,9 @@
 #import <runtime/JSLock.h>
 #import <runtime/Completion.h>
 #import <runtime/Completion.h>
+#import <wtf/TCSpinLock.h>
 #import <wtf/Threading.h>
-
+#include <wtf/text/WTFString.h>
 
 using namespace JSC;
 using namespace JSC::Bindings;
@@ -60,16 +60,24 @@ using namespace WebCore;
 namespace WebCore {
 
 static NSMapTable* JSWrapperCache;
+static SpinLock spinLock = SPINLOCK_INITIALIZER;
 
 NSObject* getJSWrapper(JSObject* impl)
 {
+    ASSERT(isMainThread());
+    SpinLockHolder holder(&spinLock);
+
     if (!JSWrapperCache)
         return nil;
-    return static_cast<NSObject*>(NSMapGet(JSWrapperCache, impl));
+    NSObject* wrapper = static_cast<NSObject*>(NSMapGet(JSWrapperCache, impl));
+    return wrapper ? [[wrapper retain] autorelease] : nil;
 }
 
 void addJSWrapper(NSObject* wrapper, JSObject* impl)
 {
+    ASSERT(isMainThread());
+    SpinLockHolder holder(&spinLock);
+
     if (!JSWrapperCache)
         JSWrapperCache = createWrapperCache();
     NSMapInsert(JSWrapperCache, impl, wrapper);
@@ -77,15 +85,27 @@ void addJSWrapper(NSObject* wrapper, JSObject* impl)
 
 void removeJSWrapper(JSObject* impl)
 {
+    SpinLockHolder holder(&spinLock);
+
     if (!JSWrapperCache)
         return;
     NSMapRemove(JSWrapperCache, impl);
 }
 
+static void removeJSWrapperIfRetainCountOne(NSObject* wrapper, JSObject* impl)
+{
+    SpinLockHolder holder(&spinLock);
+
+    if (!JSWrapperCache)
+        return;
+    if ([wrapper retainCount] == 1)
+        NSMapRemove(JSWrapperCache, impl);
+}
+
 id createJSWrapper(JSC::JSObject* object, PassRefPtr<JSC::Bindings::RootObject> origin, PassRefPtr<JSC::Bindings::RootObject> root)
 {
     if (id wrapper = getJSWrapper(object))
-        return [[wrapper retain] autorelease];
+        return wrapper;
     return [[[WebScriptObject alloc] _initWithJSObject:object originRootObject:origin rootObject:root] autorelease];
 }
 
@@ -118,20 +138,6 @@ static void addExceptionToConsole(ExecState* exec)
         return domWrapper;
     
     return WebCore::createJSWrapper(toJS(jsObject), originRootObject, rootObject);
-}
-
-static void _didExecute(WebScriptObject *obj)
-{
-    ASSERT(JSLock::lockCount() > 0);
-    
-    RootObject* root = [obj _rootObject];
-    if (!root)
-        return;
-
-    ExecState* exec = root->globalObject()->globalExec();
-    KJSDidExecuteFunctionPtr func = Instance::didExecuteFunction();
-    if (func)
-        func(exec, root->globalObject());
 }
 
 - (void)_setImp:(JSObject*)imp originRootObject:(PassRefPtr<RootObject>)originRootObject rootObject:(PassRefPtr<RootObject>)rootObject
@@ -221,16 +227,26 @@ static void _didExecute(WebScriptObject *obj)
     if (!_private->originRootObject->isValid())
         return false;
 
-    return static_cast<JSDOMWindowBase*>(root->globalObject())->allowsAccessFrom(_private->originRootObject->globalObject());
+    // It's not actually correct to call shouldAllowAccessToFrame in this way because
+    // JSDOMWindowBase* isn't the right object to represent the currently executing
+    // JavaScript. Instead, we should use ExecState, like we do elsewhere.
+    JSDOMWindowBase* target = jsCast<JSDOMWindowBase*>(root->globalObject());
+    return BindingSecurity::shouldAllowAccessToDOMWindow(_private->originRootObject->globalObject()->globalExec(), target->impl());
+}
+
+- (oneway void)release
+{
+    // If we're releasing the last reference to this object, remove if from the map.
+    if (_private->imp)
+        WebCore::removeJSWrapperIfRetainCountOne(self, _private->imp);
+
+    [super release];
 }
 
 - (void)dealloc
 {
     if (WebCoreObjCScheduleDeallocateOnMainThread([WebScriptObject class], self))
         return;
-
-    if (_private->imp)
-        WebCore::removeJSWrapper(_private->imp);
 
     if (_private->rootObject && _private->rootObject->isValid())
         _private->rootObject->gcUnprotect(_private->imp);
@@ -281,13 +297,12 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
     if (![self _isSafeScript])
         return nil;
 
-    JSLock lock(SilenceAssertionsOnly);
-    
     // Look up the function object.
     ExecState* exec = [self _rootObject]->globalObject()->globalExec();
+    JSLockHolder lock(exec);
     ASSERT(!exec->hadException());
 
-    JSValue function = [self _imp]->get(exec, Identifier(exec, stringToUString(String(name))));
+    JSValue function = [self _imp]->get(exec, Identifier(exec, String(name)));
     CallData callData;
     CallType callType = getCallData(function, callData);
     if (callType == CallTypeNone)
@@ -312,8 +327,6 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
     // Convert and return the result of the function call.
     id resultObj = [WebScriptObject _convertValueToObjcValue:result originRootObject:[self _originRootObject] rootObject:[self _rootObject]];
 
-    _didExecute(self);
-        
     return resultObj;
 }
 
@@ -325,15 +338,13 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
     ExecState* exec = [self _rootObject]->globalObject()->globalExec();
     ASSERT(!exec->hadException());
 
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
     
     [self _rootObject]->globalObject()->globalData().timeoutChecker.start();
-    JSValue returnValue = JSMainThreadExecState::evaluate(exec, [self _rootObject]->globalObject()->globalScopeChain(), makeSource(String(script)), JSC::JSValue(), 0);
+    JSValue returnValue = JSMainThreadExecState::evaluate(exec, makeSource(String(script)), JSC::JSValue(), 0);
     [self _rootObject]->globalObject()->globalData().timeoutChecker.stop();
 
     id resultObj = [WebScriptObject _convertValueToObjcValue:returnValue originRootObject:[self _originRootObject] rootObject:[self _rootObject]];
-    
-    _didExecute(self);
     
     return resultObj;
 }
@@ -346,17 +357,15 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
     ExecState* exec = [self _rootObject]->globalObject()->globalExec();
     ASSERT(!exec->hadException());
 
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
 
     PutPropertySlot slot;
-    [self _imp]->methodTable()->put([self _imp], exec, Identifier(exec, stringToUString(String(key))), convertObjcValueToValue(exec, &value, ObjcObjectType, [self _rootObject]), slot);
+    [self _imp]->methodTable()->put([self _imp], exec, Identifier(exec, String(key)), convertObjcValueToValue(exec, &value, ObjcObjectType, [self _rootObject]), slot);
 
     if (exec->hadException()) {
         addExceptionToConsole(exec);
         exec->clearException();
     }
-
-    _didExecute(self);
 }
 
 - (id)valueForKey:(NSString *)key
@@ -372,9 +381,9 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
         // Need to scope this lock to ensure that we release the lock before calling
         // [super valueForKey:key] which might throw an exception and bypass the JSLock destructor,
         // leaving the lock permanently held
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(exec);
         
-        JSValue result = [self _imp]->get(exec, Identifier(exec, stringToUString(String(key))));
+        JSValue result = [self _imp]->get(exec, Identifier(exec, String(key)));
         
         if (exec->hadException()) {
             addExceptionToConsole(exec);
@@ -388,9 +397,6 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
     if ([resultObj isKindOfClass:[WebUndefined class]])
         resultObj = [super valueForKey:key];    // defaults to throwing an exception
 
-    JSLock lock(SilenceAssertionsOnly);
-    _didExecute(self);
-    
     return resultObj;
 }
 
@@ -402,15 +408,13 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
     ExecState* exec = [self _rootObject]->globalObject()->globalExec();
     ASSERT(!exec->hadException());
 
-    JSLock lock(SilenceAssertionsOnly);
-    [self _imp]->methodTable()->deleteProperty([self _imp], exec, Identifier(exec, stringToUString(String(key))));
+    JSLockHolder lock(exec);
+    [self _imp]->methodTable()->deleteProperty([self _imp], exec, Identifier(exec, String(key)));
 
     if (exec->hadException()) {
         addExceptionToConsole(exec);
         exec->clearException();
     }
-
-    _didExecute(self);
 }
 
 - (BOOL)hasWebScriptKey:(NSString *)key
@@ -421,15 +425,13 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
     ExecState* exec = [self _rootObject]->globalObject()->globalExec();
     ASSERT(!exec->hadException());
 
-    JSLock lock(SilenceAssertionsOnly);
-    BOOL result = [self _imp]->hasProperty(exec, Identifier(exec, stringToUString(String(key))));
+    JSLockHolder lock(exec);
+    BOOL result = [self _imp]->hasProperty(exec, Identifier(exec, String(key)));
 
     if (exec->hadException()) {
         addExceptionToConsole(exec);
         exec->clearException();
     }
-
-    _didExecute(self);
 
     return result;
 }
@@ -441,14 +443,12 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
         return @"Undefined";
     }
 
-    JSLock lock(SilenceAssertionsOnly);
     ExecState* exec = [self _rootObject]->globalObject()->globalExec();
+    JSLockHolder lock(exec);
     
     id result = convertValueToObjcValue(exec, [self _imp], ObjcObjectType).objectValue;
 
     NSString *description = [result description];
-
-    _didExecute(self);
 
     return description;
 }
@@ -461,7 +461,7 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
     ExecState* exec = [self _rootObject]->globalObject()->globalExec();
     ASSERT(!exec->hadException());
 
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
     JSValue result = [self _imp]->get(exec, index);
 
     if (exec->hadException()) {
@@ -471,8 +471,6 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
     }
 
     id resultObj = [WebScriptObject _convertValueToObjcValue:result originRootObject:[self _originRootObject] rootObject:[self _rootObject]];
-
-    _didExecute(self);
 
     return resultObj;
 }
@@ -485,15 +483,13 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
     ExecState* exec = [self _rootObject]->globalObject()->globalExec();
     ASSERT(!exec->hadException());
 
-    JSLock lock(SilenceAssertionsOnly);
-    [self _imp]->methodTable()->putByIndex([self _imp], exec, index, convertObjcValueToValue(exec, &value, ObjcObjectType, [self _rootObject]));
+    JSLockHolder lock(exec);
+    [self _imp]->methodTable()->putByIndex([self _imp], exec, index, convertObjcValueToValue(exec, &value, ObjcObjectType, [self _rootObject]), false);
 
     if (exec->hadException()) {
         addExceptionToConsole(exec);
         exec->clearException();
     }
-
-    _didExecute(self);
 }
 
 - (void)setException:(NSString *)description
@@ -506,8 +502,10 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
 - (JSObjectRef)JSObject
 {
     if (![self _isSafeScript])
-        return NULL;
-
+        return 0;
+    ExecState* exec = [self _rootObject]->globalObject()->globalExec();
+    
+    JSLockHolder lock(exec);
     return toRef([self _imp]);
 }
 
@@ -515,11 +513,11 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
 {
     if (value.isObject()) {
         JSObject* object = asObject(value);
-        JSLock lock(SilenceAssertionsOnly);
+        JSLockHolder lock(rootObject->globalObject()->globalData());
 
         if (object->inherits(&JSHTMLElement::s_info)) {
             // Plugin elements cache the instance internally.
-            HTMLElement* el = static_cast<JSHTMLElement*>(object)->impl();
+            HTMLElement* el = jsCast<JSHTMLElement*>(object)->impl();
             ObjcInstance* instance = static_cast<ObjcInstance*>(pluginInstance(el));
             if (instance)
                 return instance->getObject();
@@ -536,7 +534,7 @@ static void getListFromNSArray(ExecState *exec, NSArray *array, RootObject* root
 
     if (value.isString()) {
         ExecState* exec = rootObject->globalObject()->globalExec();
-        const UString& u = asString(value)->value(exec);
+        const String& u = asString(value)->value(exec);
         return [NSString stringWithCharacters:u.characters() length:u.length()];
     }
 

@@ -31,28 +31,17 @@
 #include "config.h"
 #include "SerializedScriptValue.h"
 
-#include "ArrayBuffer.h"
-#include "ArrayBufferView.h"
+#include "AsyncFileSystem.h"
 #include "Blob.h"
-#include "ByteArray.h"
-#include "CanvasPixelArray.h"
 #include "DataView.h"
 #include "ExceptionCode.h"
 #include "File.h"
 #include "FileList.h"
-#include "Float32Array.h"
-#include "Float64Array.h"
 #include "ImageData.h"
-#include "Int16Array.h"
-#include "Int32Array.h"
-#include "Int8Array.h"
 #include "MessagePort.h"
 #include "SharedBuffer.h"
-#include "Uint16Array.h"
-#include "Uint32Array.h"
-#include "Uint8Array.h"
-#include "Uint8ClampedArray.h"
 #include "V8ArrayBuffer.h"
+#include "V8ArrayBufferCustom.h"
 #include "V8ArrayBufferView.h"
 #include "V8Binding.h"
 #include "V8Blob.h"
@@ -66,16 +55,30 @@
 #include "V8Int32Array.h"
 #include "V8Int8Array.h"
 #include "V8MessagePort.h"
-#include "V8Proxy.h"
 #include "V8Uint16Array.h"
 #include "V8Uint32Array.h"
 #include "V8Uint8Array.h"
 #include "V8Uint8ClampedArray.h"
 #include "V8Utilities.h"
 
+#include <wtf/ArrayBuffer.h>
+#include <wtf/ArrayBufferView.h>
 #include <wtf/Assertions.h>
+#include <wtf/Float32Array.h>
+#include <wtf/Float64Array.h>
+#include <wtf/Int16Array.h>
+#include <wtf/Int32Array.h>
+#include <wtf/Int8Array.h>
 #include <wtf/RefCounted.h>
+#include <wtf/Uint16Array.h>
+#include <wtf/Uint32Array.h>
+#include <wtf/Uint8Array.h>
+#include <wtf/Uint8ClampedArray.h>
 #include <wtf/Vector.h>
+
+#if ENABLE(FILE_SYSTEM)
+#include "V8DOMFileSystem.h"
+#endif
 
 // FIXME: consider crashing in debug mode on deserialization errors
 // NOTE: be sure to change wireFormatVersion as necessary!
@@ -106,7 +109,7 @@ public:
     {
         typename HandleToT::iterator result = m_map.find(*handle);
         if (result != m_map.end()) {
-            *valueOut = result->second;
+            *valueOut = result->value;
             return true;
         }
         return false;
@@ -165,6 +168,7 @@ typedef UChar BufferValueType;
 
 // WebCoreStrings are read as (length:uint32_t, string:UTF8[length]).
 // RawStrings are read as (length:uint32_t, string:UTF8[length]).
+// RawUCharStrings are read as (length:uint32_t, string:UChar[length/sizeof(UChar)]).
 // RawFiles are read as (path:WebCoreString, url:WebCoreStrng, type:WebCoreString).
 // There is a reference table that maps object references (uint32_t) to v8::Values.
 // Tokens marked with (ref) are inserted into the reference table and given the next object reference ID after decoding.
@@ -182,6 +186,7 @@ enum SerializationTag {
     TrueTag = 'T', // -> <true>
     FalseTag = 'F', // -> <false>
     StringTag = 'S', // string:RawString -> string
+    StringUCharTag = 'c', // string:RawUCharString -> string
     Int32Tag = 'I', // value:ZigZag-encoded int32 -> Integer
     Uint32Tag = 'U', // value:uint32_t -> Integer
     DateTag = 'D', // value:double -> Date (ref)
@@ -189,6 +194,9 @@ enum SerializationTag {
     NumberTag = 'N', // value:double -> Number
     BlobTag = 'b', // url:WebCoreString, type:WebCoreString, size:uint64_t -> Blob (ref)
     FileTag = 'f', // file:RawFile -> File (ref)
+#if ENABLE(FILE_SYSTEM)
+    DOMFileSystemTag = 'd', // type:int32_t, name:WebCoreString, url:WebCoreString -> FileSystem (ref)
+#endif
     FileListTag = 'l', // length:uint32_t, files:RawFile[length] -> FileList (ref)
     ImageDataTag = '#', // width:uint32_t, height:uint32_t, pixelDataLength:uint32_t, data:byte[pixelDataLength] -> ImageData (ref)
     ObjectTag = '{', // numProperties:uint32_t -> pops the last object from the open stack;
@@ -236,7 +244,8 @@ static bool shouldCheckForCycles(int depth)
 }
 
 // Increment this for each incompatible change to the wire format.
-static const uint32_t wireFormatVersion = 1;
+// Version 2: Added StringUCharTag for UChar v8 strings.
+static const uint32_t wireFormatVersion = 2;
 
 static const int maxDepth = 20000;
 
@@ -275,8 +284,9 @@ private:
 class Writer {
     WTF_MAKE_NONCOPYABLE(Writer);
 public:
-    Writer()
+    Writer(v8::Isolate* isolate)
         : m_position(0)
+        , m_isolate(isolate)
     {
     }
 
@@ -300,6 +310,40 @@ public:
         ASSERT(length >= 0);
         append(StringTag);
         doWriteString(data, length);
+    }
+
+    void writeAsciiString(v8::Handle<v8::String>& string)
+    {
+        int length = string->Length();
+        ASSERT(length >= 0);
+
+        append(StringTag);
+        doWriteUint32(static_cast<uint32_t>(length));
+        ensureSpace(length);
+
+        char* buffer = reinterpret_cast<char*>(byteAt(m_position));
+        string->WriteAscii(buffer, 0, length, v8StringWriteOptions());
+        m_position += length;
+    }
+
+    void writeUCharString(v8::Handle<v8::String>& string)
+    {
+        int length = string->Length();
+        ASSERT(length >= 0);
+
+        int size = length * sizeof(UChar);
+        int bytes = bytesNeededToWireEncode(static_cast<uint32_t>(size));
+        if ((m_position + 1 + bytes) & 1)
+            append(PaddingTag);
+
+        append(StringUCharTag);
+        doWriteUint32(static_cast<uint32_t>(size));
+        ensureSpace(size);
+
+        ASSERT(!(m_position & 1));
+        uint16_t* buffer = reinterpret_cast<uint16_t*>(byteAt(m_position));
+        string->Write(buffer, 0, length, v8StringWriteOptions());
+        m_position += size;
     }
 
     void writeStringObject(const char* data, int length)
@@ -361,6 +405,16 @@ public:
         doWriteUint64(size);
     }
 
+#if ENABLE(FILE_SYSTEM)
+    void writeDOMFileSystem(int type, const String& name, const String& url)
+    {
+        append(DOMFileSystemTag);
+        doWriteUint32(type);
+        doWriteWebCoreString(name);
+        doWriteWebCoreString(url);
+    }
+#endif
+
     void writeFile(const String& path, const String& url, const String& type)
     {
         append(FileTag);
@@ -395,25 +449,27 @@ public:
         ASSERT(static_cast<const uint8_t*>(arrayBuffer.data()) + arrayBufferView.byteOffset() ==
                static_cast<const uint8_t*>(arrayBufferView.baseAddress()));
 #endif
-        if (arrayBufferView.isByteArray())
+        ArrayBufferView::ViewType type = arrayBufferView.getType();
+
+        if (type == ArrayBufferView::TypeInt8)
             append(ByteArrayTag);
-        else if (arrayBufferView.isUnsignedByteArray())
-            append(UnsignedByteArrayTag);
-        else if (arrayBufferView.isUnsignedByteClampedArray())
+        else if (type == ArrayBufferView::TypeUint8Clamped)
             append(UnsignedByteClampedArrayTag);
-        else if (arrayBufferView.isShortArray())
+        else if (type == ArrayBufferView::TypeUint8)
+            append(UnsignedByteArrayTag);
+        else if (type == ArrayBufferView::TypeInt16)
             append(ShortArrayTag);
-        else if (arrayBufferView.isUnsignedShortArray())
+        else if (type == ArrayBufferView::TypeUint16)
             append(UnsignedShortArrayTag);
-        else if (arrayBufferView.isIntArray())
+        else if (type == ArrayBufferView::TypeInt32)
             append(IntArrayTag);
-        else if (arrayBufferView.isUnsignedIntArray())
+        else if (type == ArrayBufferView::TypeUint32)
             append(UnsignedIntArrayTag);
-        else if (arrayBufferView.isFloatArray())
+        else if (type == ArrayBufferView::TypeFloat32)
             append(FloatArrayTag);
-        else if (arrayBufferView.isDoubleArray())
+        else if (type == ArrayBufferView::TypeFloat64)
             append(DoubleArrayTag);
-        else if (arrayBufferView.isDataView())
+        else if (type == ArrayBufferView::TypeDataView)
             append(DataViewTag);
         else
             ASSERT_NOT_REACHED();
@@ -505,6 +561,7 @@ public:
         doWriteUint32(length);
     }
 
+    v8::Isolate* getIsolate() { return m_isolate; }
 
 private:
     void doWriteArrayBuffer(const ArrayBuffer& arrayBuffer)
@@ -524,6 +581,19 @@ private:
     {
         RefPtr<SharedBuffer> buffer = utf8Buffer(string);
         doWriteString(buffer->data(), buffer->size());
+    }
+
+    int bytesNeededToWireEncode(uint32_t value)
+    {
+        int bytes = 1;
+        while (true) {
+            value >>= varIntShift;
+            if (!value)
+                break;
+            ++bytes;
+        }
+
+        return bytes;
     }
 
     template<class T>
@@ -588,11 +658,38 @@ private:
             *byteAt(m_position) = static_cast<uint8_t>(PaddingTag);
     }
 
-    uint8_t* byteAt(int position) { return reinterpret_cast<uint8_t*>(m_buffer.data()) + position; }
+    uint8_t* byteAt(int position)
+    {
+        return reinterpret_cast<uint8_t*>(m_buffer.data()) + position;
+    }
+
+    int v8StringWriteOptions()
+    {
+        return v8::String::NO_NULL_TERMINATION | v8::String::PRESERVE_ASCII_NULL;
+    }
 
     Vector<BufferValueType> m_buffer;
     unsigned m_position;
+    v8::Isolate* m_isolate;
 };
+
+static v8::Handle<v8::Object> toV8Object(MessagePort* impl, v8::Isolate* isolate)
+{
+    if (!impl)
+        return v8::Handle<v8::Object>();
+    v8::Handle<v8::Value> wrapper = toV8(impl, v8::Handle<v8::Object>(), isolate);
+    ASSERT(wrapper->IsObject());
+    return wrapper.As<v8::Object>();
+}
+
+static v8::Handle<v8::Object> toV8Object(ArrayBuffer* impl, v8::Isolate* isolate)
+{
+    if (!impl)
+        return v8::Handle<v8::Object>();
+    v8::Handle<v8::Value> wrapper = toV8(impl, v8::Handle<v8::Object>(), isolate);
+    ASSERT(wrapper->IsObject());
+    return wrapper.As<v8::Object>();
+}
 
 class Serializer {
     class StateBase;
@@ -606,22 +703,23 @@ public:
         JSFailure
     };
 
-    Serializer(Writer& writer, MessagePortArray* messagePorts, ArrayBufferArray* arrayBuffers, v8::TryCatch& tryCatch)
+    Serializer(Writer& writer, MessagePortArray* messagePorts, ArrayBufferArray* arrayBuffers, Vector<String>& blobURLs, v8::TryCatch& tryCatch)
         : m_writer(writer)
         , m_tryCatch(tryCatch)
         , m_depth(0)
         , m_execDepth(0)
         , m_status(Success)
         , m_nextObjectReference(0)
+        , m_blobURLs(blobURLs)
     {
         ASSERT(!tryCatch.HasCaught());
         if (messagePorts) {
             for (size_t i = 0; i < messagePorts->size(); i++)
-                m_transferredMessagePorts.set(V8MessagePort::wrap(messagePorts->at(i).get()), i);
+                m_transferredMessagePorts.set(toV8Object(messagePorts->at(i).get(), m_writer.getIsolate()), i);
         }
         if (arrayBuffers) {
             for (size_t i = 0; i < arrayBuffers->size(); i++)  {
-                v8::Handle<v8::Object> v8ArrayBuffer = V8ArrayBuffer::wrap(arrayBuffers->at(i).get());
+                v8::Handle<v8::Object> v8ArrayBuffer = toV8Object(arrayBuffers->at(i).get(), m_writer.getIsolate());
                 // Coalesce multiple occurences of the same buffer to the first index.
                 if (!m_transferredArrayBuffers.contains(v8ArrayBuffer))
                     m_transferredArrayBuffers.set(v8ArrayBuffer, i);
@@ -708,7 +806,7 @@ private:
     class ErrorState : public StateBase {
     public:
         ErrorState()
-            : StateBase(v8::Handle<v8::Value>(), 0)
+            : StateBase(v8Undefined(), 0)
         {
         }
 
@@ -948,8 +1046,11 @@ private:
 
     void writeString(v8::Handle<v8::Value> value)
     {
-        v8::String::Utf8Value stringValue(value);
-        m_writer.writeString(*stringValue, stringValue.length());
+        v8::Handle<v8::String> string = value.As<v8::String>();
+        if (!string->Length() || !string->MayContainNonAscii())
+            m_writer.writeAsciiString(string);
+        else
+            m_writer.writeUCharString(string);
     }
 
     void writeStringObject(v8::Handle<v8::Value> value)
@@ -977,7 +1078,21 @@ private:
         if (!blob)
             return;
         m_writer.writeBlob(blob->url().string(), blob->type(), blob->size());
+        m_blobURLs.append(blob->url().string());
     }
+
+#if ENABLE(FILE_SYSTEM)
+    StateBase* writeDOMFileSystem(v8::Handle<v8::Value> value, StateBase* next)
+    {
+        DOMFileSystem* fs = V8DOMFileSystem::toNative(value.As<v8::Object>());
+        if (!fs)
+            return 0;
+        if (!fs->clonable())
+            return handleError(DataCloneError, next);
+        m_writer.writeDOMFileSystem(fs->type(), fs->name(), fs->rootURL().string());
+        return 0;
+    }
+#endif
 
     void writeFile(v8::Handle<v8::Value> value)
     {
@@ -985,6 +1100,7 @@ private:
         if (!file)
             return;
         m_writer.writeFile(file->path(), file->url().string(), file->type());
+        m_blobURLs.append(file->url().string());
     }
 
     void writeFileList(v8::Handle<v8::Value> value)
@@ -993,6 +1109,9 @@ private:
         if (!fileList)
             return;
         m_writer.writeFileList(*fileList);
+        unsigned length = fileList->length();
+        for (unsigned i = 0; i < length; ++i)
+            m_blobURLs.append(fileList->item(i)->url().string());
     }
 
     void writeImageData(v8::Handle<v8::Value> value)
@@ -1000,7 +1119,7 @@ private:
         ImageData* imageData = V8ImageData::toNative(value.As<v8::Object>());
         if (!imageData)
             return;
-        WTF::ByteArray* pixelArray = imageData->data()->data();
+        Uint8ClampedArray* pixelArray = imageData->data();
         m_writer.writeImageData(imageData->width(), imageData->height(), pixelArray->data(), pixelArray->length());
     }
 
@@ -1018,7 +1137,7 @@ private:
             return 0;
         if (!arrayBufferView->buffer())
             return handleError(DataCloneError, next);
-        v8::Handle<v8::Value> underlyingBuffer = toV8(arrayBufferView->buffer());
+        v8::Handle<v8::Value> underlyingBuffer = toV8(arrayBufferView->buffer(), v8::Handle<v8::Object>(), m_writer.getIsolate());
         if (underlyingBuffer.IsEmpty())
             return handleError(DataCloneError, next);
         StateBase* stateOut = doSerialize(underlyingBuffer, 0);
@@ -1111,6 +1230,7 @@ private:
     ObjectPool m_transferredMessagePorts;
     ObjectPool m_transferredArrayBuffers;
     uint32_t m_nextObjectReference;
+    Vector<String>& m_blobURLs;
 };
 
 Serializer::StateBase* Serializer::doSerialize(v8::Handle<v8::Value> value, StateBase* next)
@@ -1175,6 +1295,10 @@ Serializer::StateBase* Serializer::doSerialize(v8::Handle<v8::Value> value, Stat
             writeFile(value);
         else if (V8Blob::HasInstance(value))
             writeBlob(value);
+#if ENABLE(FILE_SYSTEM)
+        else if (V8DOMFileSystem::HasInstance(value))
+            return writeDOMFileSystem(value, next);
+#endif
         else if (V8FileList::HasInstance(value))
             writeFileList(value);
         else if (V8ImageData::HasInstance(value))
@@ -1216,12 +1340,14 @@ public:
 // restoring information about saved objects of composite types.
 class Reader {
 public:
-    Reader(const uint8_t* buffer, int length)
+    Reader(const uint8_t* buffer, int length, v8::Isolate* isolate)
         : m_buffer(buffer)
         , m_length(length)
         , m_position(0)
         , m_version(0)
+        , m_isolate(isolate)
     {
+        ASSERT(!(reinterpret_cast<size_t>(buffer) & 1));
         ASSERT(length >= 0);
     }
 
@@ -1254,13 +1380,13 @@ public:
             *value = v8::Undefined();
             break;
         case NullTag:
-            *value = v8::Null();
+            *value = v8NullWithCheck(m_isolate);
             break;
         case TrueTag:
-            *value = v8::True();
+            *value = v8BooleanWithCheck(true, m_isolate);
             break;
         case FalseTag:
-            *value = v8::False();
+            *value = v8BooleanWithCheck(false, m_isolate);
             break;
         case TrueObjectTag:
             *value = v8::BooleanObject::New(true);
@@ -1272,6 +1398,10 @@ public:
             break;
         case StringTag:
             if (!readString(value))
+                return false;
+            break;
+        case StringUCharTag:
+            if (!readUCharString(value))
                 return false;
             break;
         case StringObjectTag:
@@ -1311,6 +1441,13 @@ public:
                 return false;
             creator.pushObjectReference(*value);
             break;
+#if ENABLE(FILE_SYSTEM)
+        case DOMFileSystemTag:
+            if (!readDOMFileSystem(value))
+                return false;
+            creator.pushObjectReference(*value);
+            break;
+#endif
         case FileListTag:
             if (!readFileList(value))
                 return false;
@@ -1460,6 +1597,8 @@ public:
         m_version = version;
     }
 
+    v8::Isolate* getIsolate() { return m_isolate; }
+
 private:
     bool readTag(SerializationTag* tag)
     {
@@ -1495,6 +1634,19 @@ private:
         return true;
     }
 
+    bool readUCharString(v8::Handle<v8::Value>* value)
+    {
+        uint32_t length;
+        if (!doReadUint32(&length) || (length & 1))
+            return false;
+        if (m_position + length > m_length)
+            return false;
+        ASSERT(!(m_position & 1));
+        *value = v8::String::New(reinterpret_cast<const uint16_t*>(m_buffer + m_position), length / sizeof(UChar));
+        m_position += length;
+        return true;
+    }
+
     bool readStringObject(v8::Handle<v8::Value>* value)
     {
         v8::Handle<v8::Value> stringValue;
@@ -1521,7 +1673,7 @@ private:
         uint32_t rawValue;
         if (!doReadUint32(&rawValue))
             return false;
-        *value = v8::Integer::New(static_cast<int32_t>(ZigZag::decode(rawValue)));
+        *value = v8Integer(static_cast<int32_t>(ZigZag::decode(rawValue)), m_isolate);
         return true;
     }
 
@@ -1530,7 +1682,7 @@ private:
         uint32_t rawValue;
         if (!doReadUint32(&rawValue))
             return false;
-        *value = v8::Integer::NewFromUnsigned(rawValue);
+        *value = v8UnsignedInteger(rawValue, m_isolate);
         return true;
     }
 
@@ -1575,12 +1727,12 @@ private:
         if (m_position + pixelDataLength > m_length)
             return false;
         RefPtr<ImageData> imageData = ImageData::create(IntSize(width, height));
-        WTF::ByteArray* pixelArray = imageData->data()->data();
+        Uint8ClampedArray* pixelArray = imageData->data();
         ASSERT(pixelArray);
         ASSERT(pixelArray->length() >= pixelDataLength);
         memcpy(pixelArray->data(), m_buffer + m_position, pixelDataLength);
         m_position += pixelDataLength;
-        *value = toV8(imageData.release());
+        *value = toV8(imageData.release(), v8::Handle<v8::Object>(), m_isolate);
         return true;
     }
 
@@ -1593,6 +1745,8 @@ private:
             return 0;
         const void* bufferStart = m_buffer + m_position;
         RefPtr<ArrayBuffer> arrayBuffer = ArrayBuffer::create(bufferStart, byteLength);
+        arrayBuffer->setDeallocationObserver(V8ArrayBufferDeallocationObserver::instance());
+        v8::V8::AdjustAmountOfExternalAllocatedMemory(arrayBuffer->byteLength());
         m_position += byteLength;
         return arrayBuffer.release();
     }
@@ -1602,7 +1756,7 @@ private:
         RefPtr<ArrayBuffer> arrayBuffer = doReadArrayBuffer();
         if (!arrayBuffer)
             return false;
-        *value = toV8(arrayBuffer.release());
+        *value = toV8(arrayBuffer.release(), v8::Handle<v8::Object>(), m_isolate);
         return true;
     }
 
@@ -1628,58 +1782,58 @@ private:
             return false;
         switch (subTag) {
         case ByteArrayTag:
-            *value = toV8(Int8Array::create(arrayBuffer.release(), byteOffset, byteLength));
+            *value = toV8(Int8Array::create(arrayBuffer.release(), byteOffset, byteLength), v8::Handle<v8::Object>(), m_isolate);
             break;
         case UnsignedByteArrayTag:
-            *value = toV8(Uint8Array::create(arrayBuffer.release(), byteOffset, byteLength));
+            *value = toV8(Uint8Array::create(arrayBuffer.release(), byteOffset, byteLength), v8::Handle<v8::Object>(),  m_isolate);
             break;
         case UnsignedByteClampedArrayTag:
-            *value = toV8(Uint8ClampedArray::create(arrayBuffer.release(), byteOffset, byteLength));
+            *value = toV8(Uint8ClampedArray::create(arrayBuffer.release(), byteOffset, byteLength), v8::Handle<v8::Object>(), m_isolate);
             break;
         case ShortArrayTag: {
             uint32_t shortLength = byteLength / sizeof(int16_t);
             if (shortLength * sizeof(int16_t) != byteLength)
                 return false;
-            *value = toV8(Int16Array::create(arrayBuffer.release(), byteOffset, shortLength));
+            *value = toV8(Int16Array::create(arrayBuffer.release(), byteOffset, shortLength), v8::Handle<v8::Object>(), m_isolate);
             break;
         }
         case UnsignedShortArrayTag: {
             uint32_t shortLength = byteLength / sizeof(uint16_t);
             if (shortLength * sizeof(uint16_t) != byteLength)
                 return false;
-            *value = toV8(Uint16Array::create(arrayBuffer.release(), byteOffset, shortLength));
+            *value = toV8(Uint16Array::create(arrayBuffer.release(), byteOffset, shortLength), v8::Handle<v8::Object>(), m_isolate);
             break;
         }
         case IntArrayTag: {
             uint32_t intLength = byteLength / sizeof(int32_t);
             if (intLength * sizeof(int32_t) != byteLength)
                 return false;
-            *value = toV8(Int32Array::create(arrayBuffer.release(), byteOffset, intLength));
+            *value = toV8(Int32Array::create(arrayBuffer.release(), byteOffset, intLength), v8::Handle<v8::Object>(), m_isolate);
             break;
         }
         case UnsignedIntArrayTag: {
             uint32_t intLength = byteLength / sizeof(uint32_t);
             if (intLength * sizeof(uint32_t) != byteLength)
                 return false;
-            *value = toV8(Uint32Array::create(arrayBuffer.release(), byteOffset, intLength));
+            *value = toV8(Uint32Array::create(arrayBuffer.release(), byteOffset, intLength), v8::Handle<v8::Object>(), m_isolate);
             break;
         }
         case FloatArrayTag: {
             uint32_t floatLength = byteLength / sizeof(float);
             if (floatLength * sizeof(float) != byteLength)
                 return false;
-            *value = toV8(Float32Array::create(arrayBuffer.release(), byteOffset, floatLength));
+            *value = toV8(Float32Array::create(arrayBuffer.release(), byteOffset, floatLength), v8::Handle<v8::Object>(), m_isolate);
             break;
         }
         case DoubleArrayTag: {
             uint32_t floatLength = byteLength / sizeof(double);
             if (floatLength * sizeof(double) != byteLength)
                 return false;
-            *value = toV8(Float64Array::create(arrayBuffer.release(), byteOffset, floatLength));
+            *value = toV8(Float64Array::create(arrayBuffer.release(), byteOffset, floatLength), v8::Handle<v8::Object>(), m_isolate);
             break;
         }
         case DataViewTag:
-            *value = toV8(DataView::create(arrayBuffer.release(), byteOffset, byteLength));
+            *value = toV8(DataView::create(arrayBuffer.release(), byteOffset, byteLength), v8::Handle<v8::Object>(), m_isolate);
             break;
         default:
             return false;
@@ -1714,9 +1868,27 @@ private:
         if (!doReadUint64(&size))
             return false;
         PassRefPtr<Blob> blob = Blob::create(KURL(ParsedURLString, url), type, size);
-        *value = toV8(blob);
+        *value = toV8(blob, v8::Handle<v8::Object>(), m_isolate);
         return true;
     }
+
+#if ENABLE(FILE_SYSTEM)
+    bool readDOMFileSystem(v8::Handle<v8::Value>* value)
+    {
+        uint32_t type;
+        String name;
+        String url;
+        if (!doReadUint32(&type))
+            return false;
+        if (!readWebCoreString(&name))
+            return false;
+        if (!readWebCoreString(&url))
+            return false;
+        RefPtr<DOMFileSystem> fs = DOMFileSystem::create(getScriptExecutionContext(), name, static_cast<WebCore::FileSystemType>(type), KURL(ParsedURLString, url), AsyncFileSystem::create());
+        *value = toV8(fs.release(), v8::Handle<v8::Object>(), m_isolate);
+        return true;
+    }
+#endif
 
     bool readFile(v8::Handle<v8::Value>* value)
     {
@@ -1730,7 +1902,7 @@ private:
         if (!readWebCoreString(&type))
             return false;
         PassRefPtr<File> file = File::create(path, KURL(ParsedURLString, url), type);
-        *value = toV8(file);
+        *value = toV8(file, v8::Handle<v8::Object>(), m_isolate);
         return true;
     }
 
@@ -1752,7 +1924,7 @@ private:
                 return false;
             fileList->append(File::create(path, KURL(ParsedURLString, urlString), type));
         }
-        *value = toV8(fileList);
+        *value = toV8(fileList, v8::Handle<v8::Object>(), m_isolate);
         return true;
     }
 
@@ -1796,6 +1968,7 @@ private:
     const unsigned m_length;
     unsigned m_position;
     uint32_t m_version;
+    v8::Isolate* m_isolate;
 };
 
 
@@ -1816,15 +1989,15 @@ public:
     v8::Handle<v8::Value> deserialize()
     {
         if (!m_reader.readVersion(m_version) || m_version > wireFormatVersion)
-            return v8::Null();
+            return v8NullWithCheck(m_reader.getIsolate());
         m_reader.setVersion(m_version);
         v8::HandleScope scope;
         while (!m_reader.isEof()) {
             if (!doDeserialize())
-                return v8::Null();
+                return v8NullWithCheck(m_reader.getIsolate());
         }
         if (stackDepth() != 1 || m_openCompositeReferenceStack.size())
-            return v8::Null();
+            return v8NullWithCheck(m_reader.getIsolate());
         v8::Handle<v8::Value> result = scope.Close(element(0));
         return result;
     }
@@ -1949,7 +2122,7 @@ public:
             return false;
         if (index >= m_transferredMessagePorts->size())
             return false;
-        *object = V8MessagePort::wrap(m_transferredMessagePorts->at(index).get());
+        *object = toV8(m_transferredMessagePorts->at(index).get(), v8::Handle<v8::Object>(), m_reader.getIsolate());
         return true;
     }
 
@@ -1961,7 +2134,10 @@ public:
             return false;
         v8::Handle<v8::Object> result = m_arrayBuffers.at(index);
         if (result.IsEmpty()) {
-            result = V8ArrayBuffer::wrap(ArrayBuffer::create(m_arrayBufferContents->at(index)).get());
+            RefPtr<ArrayBuffer> buffer = ArrayBuffer::create(m_arrayBufferContents->at(index));
+            buffer->setDeallocationObserver(V8ArrayBufferDeallocationObserver::instance());
+            v8::V8::AdjustAmountOfExternalAllocatedMemory(buffer->byteLength());
+            result = toV8Object(buffer.get(), m_reader.getIsolate());
             m_arrayBuffers[index] = result;
         }
         *object = result;
@@ -2053,32 +2229,19 @@ private:
 };
 
 } // namespace
-void SerializedScriptValue::deserializeAndSetProperty(v8::Handle<v8::Object> object, const char* propertyName,
-                                                      v8::PropertyAttribute attribute, SerializedScriptValue* value)
-{
-    if (!value)
-        return;
-    v8::Handle<v8::Value> deserialized = value->deserialize();
-    object->ForceSet(v8::String::NewSymbol(propertyName), deserialized, attribute);
-}
-
-void SerializedScriptValue::deserializeAndSetProperty(v8::Handle<v8::Object> object, const char* propertyName,
-                                                      v8::PropertyAttribute attribute, PassRefPtr<SerializedScriptValue> value)
-{
-    deserializeAndSetProperty(object, propertyName, attribute, value.get());
-}
 
 PassRefPtr<SerializedScriptValue> SerializedScriptValue::create(v8::Handle<v8::Value> value,
                                                                 MessagePortArray* messagePorts, ArrayBufferArray* arrayBuffers,
-                                                                bool& didThrow)
+                                                                bool& didThrow,
+                                                                v8::Isolate* isolate)
 {
-    return adoptRef(new SerializedScriptValue(value, messagePorts, arrayBuffers, didThrow));
+    return adoptRef(new SerializedScriptValue(value, messagePorts, arrayBuffers, didThrow, isolate));
 }
 
-PassRefPtr<SerializedScriptValue> SerializedScriptValue::create(v8::Handle<v8::Value> value)
+PassRefPtr<SerializedScriptValue> SerializedScriptValue::create(v8::Handle<v8::Value> value, v8::Isolate* isolate)
 {
     bool didThrow;
-    return adoptRef(new SerializedScriptValue(value, 0, 0, didThrow));
+    return adoptRef(new SerializedScriptValue(value, 0, 0, didThrow, isolate));
 }
 
 PassRefPtr<SerializedScriptValue> SerializedScriptValue::createFromWire(const String& data)
@@ -2086,9 +2249,9 @@ PassRefPtr<SerializedScriptValue> SerializedScriptValue::createFromWire(const St
     return adoptRef(new SerializedScriptValue(data));
 }
 
-PassRefPtr<SerializedScriptValue> SerializedScriptValue::create(const String& data)
+PassRefPtr<SerializedScriptValue> SerializedScriptValue::create(const String& data, v8::Isolate* isolate)
 {
-    Writer writer;
+    Writer writer(isolate);
     writer.writeWebCoreString(data);
     String wireData = StringImpl::adopt(writer.data());
     return adoptRef(new SerializedScriptValue(wireData));
@@ -2099,31 +2262,25 @@ PassRefPtr<SerializedScriptValue> SerializedScriptValue::create()
     return adoptRef(new SerializedScriptValue());
 }
 
-SerializedScriptValue* SerializedScriptValue::nullValue()
+PassRefPtr<SerializedScriptValue> SerializedScriptValue::nullValue(v8::Isolate* isolate)
 {
-    // FIXME: This is not thread-safe. Move caching to callers.
-    // https://bugs.webkit.org/show_bug.cgi?id=70833
-    DEFINE_STATIC_LOCAL(RefPtr<SerializedScriptValue>, nullValue, (0));
-    if (!nullValue) {
-        Writer writer;
-        writer.writeNull();
-        String wireData = StringImpl::adopt(writer.data());
-        nullValue = adoptRef(new SerializedScriptValue(wireData));
-    }
-    return nullValue.get();
+    Writer writer(isolate);
+    writer.writeNull();
+    String wireData = StringImpl::adopt(writer.data());
+    return adoptRef(new SerializedScriptValue(wireData));
 }
 
-PassRefPtr<SerializedScriptValue> SerializedScriptValue::undefinedValue()
+PassRefPtr<SerializedScriptValue> SerializedScriptValue::undefinedValue(v8::Isolate* isolate)
 {
-    Writer writer;
+    Writer writer(isolate);
     writer.writeUndefined();
     String wireData = StringImpl::adopt(writer.data());
     return adoptRef(new SerializedScriptValue(wireData));
 }
 
-PassRefPtr<SerializedScriptValue> SerializedScriptValue::booleanValue(bool value)
+PassRefPtr<SerializedScriptValue> SerializedScriptValue::booleanValue(bool value, v8::Isolate* isolate)
 {
-    Writer writer;
+    Writer writer(isolate);
     if (value)
         writer.writeTrue();
     else
@@ -2132,9 +2289,9 @@ PassRefPtr<SerializedScriptValue> SerializedScriptValue::booleanValue(bool value
     return adoptRef(new SerializedScriptValue(wireData));
 }
 
-PassRefPtr<SerializedScriptValue> SerializedScriptValue::numberValue(double value)
+PassRefPtr<SerializedScriptValue> SerializedScriptValue::numberValue(double value, v8::Isolate* isolate)
 {
-    Writer writer;
+    Writer writer(isolate);
     writer.writeNumber(value);
     String wireData = StringImpl::adopt(writer.data());
     return adoptRef(new SerializedScriptValue(wireData));
@@ -2148,24 +2305,26 @@ PassRefPtr<SerializedScriptValue> SerializedScriptValue::release()
 }
 
 SerializedScriptValue::SerializedScriptValue()
+    : m_externallyAllocatedMemory(0)
 {
 }
 
-static void neuterBinding(void* domObject) 
+template<typename T>
+inline void neuterBinding(T* object) 
 {
-    DOMDataList& allStores = DOMDataStore::allStores();
+    Vector<DOMDataStore*>& allStores = V8PerIsolateData::current()->allStores();
     for (size_t i = 0; i < allStores.size(); i++) {
-        v8::Handle<v8::Object> obj = allStores[i]->domObjectMap().get(domObject);
-        if (!obj.IsEmpty())
-            obj->SetIndexedPropertiesToExternalArrayData(0, v8::kExternalByteArray, 0);
+        v8::Handle<v8::Object> wrapper = allStores[i]->get(object);
+        if (!wrapper.IsEmpty())
+            wrapper->SetIndexedPropertiesToExternalArrayData(0, v8::kExternalByteArray, 0);
     }
 }
 
-PassOwnPtr<SerializedScriptValue::ArrayBufferContentsArray> SerializedScriptValue::transferArrayBuffers(ArrayBufferArray& arrayBuffers, bool& didThrow) 
+PassOwnPtr<SerializedScriptValue::ArrayBufferContentsArray> SerializedScriptValue::transferArrayBuffers(ArrayBufferArray& arrayBuffers, bool& didThrow, v8::Isolate* isolate)
 {
     for (size_t i = 0; i < arrayBuffers.size(); i++) {
         if (arrayBuffers[i]->isNeutered()) {
-            throwError(INVALID_STATE_ERR);
+            setDOMException(INVALID_STATE_ERR, isolate);
             didThrow = true;
             return nullptr;
         }
@@ -2183,7 +2342,7 @@ PassOwnPtr<SerializedScriptValue::ArrayBufferContentsArray> SerializedScriptValu
 
         bool result = arrayBuffers[i]->transfer(contents->at(i), neuteredViews);
         if (!result) {
-            throwError(INVALID_STATE_ERR);
+            setDOMException(INVALID_STATE_ERR, isolate);
             didThrow = true;
             return nullptr;
         }
@@ -2197,14 +2356,16 @@ PassOwnPtr<SerializedScriptValue::ArrayBufferContentsArray> SerializedScriptValu
 
 SerializedScriptValue::SerializedScriptValue(v8::Handle<v8::Value> value, 
                                              MessagePortArray* messagePorts, ArrayBufferArray* arrayBuffers,
-                                             bool& didThrow)
+                                             bool& didThrow,
+                                             v8::Isolate* isolate)
+    : m_externallyAllocatedMemory(0)
 {
     didThrow = false;
-    Writer writer;
+    Writer writer(isolate);
     Serializer::Status status;
     {
         v8::TryCatch tryCatch;
-        Serializer serializer(writer, messagePorts, arrayBuffers, tryCatch);
+        Serializer serializer(writer, messagePorts, arrayBuffers, m_blobURLs, tryCatch);
         status = serializer.serialize(value);
         if (status == Serializer::JSException) {
             // If there was a JS exception thrown, re-throw it.
@@ -2219,11 +2380,11 @@ SerializedScriptValue::SerializedScriptValue(v8::Handle<v8::Value> value,
         // If there was an input error, throw a new exception outside
         // of the TryCatch scope.
         didThrow = true;
-        throwError(DATA_CLONE_ERR);
+        setDOMException(DATA_CLONE_ERR, isolate);
         return;
     case Serializer::InvalidStateError:
         didThrow = true;
-        throwError(INVALID_STATE_ERR);
+        setDOMException(INVALID_STATE_ERR, isolate);
         return;
     case Serializer::JSFailure:
         // If there was a JS failure (but no exception), there's not
@@ -2234,7 +2395,7 @@ SerializedScriptValue::SerializedScriptValue(v8::Handle<v8::Value> value,
     case Serializer::Success:
         m_data = String(StringImpl::adopt(writer.data())).isolatedCopy();
         if (arrayBuffers)
-            m_arrayBufferContentsArray = transferArrayBuffers(*arrayBuffers, didThrow);
+            m_arrayBufferContentsArray = transferArrayBuffers(*arrayBuffers, didThrow, isolate);
         return;
     case Serializer::JSException:
         // We should never get here because this case was handled above.
@@ -2244,18 +2405,58 @@ SerializedScriptValue::SerializedScriptValue(v8::Handle<v8::Value> value,
 }
 
 SerializedScriptValue::SerializedScriptValue(const String& wireData)
+    : m_externallyAllocatedMemory(0)
 {
     m_data = wireData.isolatedCopy();
 }
 
 v8::Handle<v8::Value> SerializedScriptValue::deserialize(MessagePortArray* messagePorts)
 {
+    return deserialize(v8::Isolate::GetCurrent(), messagePorts);
+}
+
+v8::Handle<v8::Value> SerializedScriptValue::deserialize(v8::Isolate* isolate, MessagePortArray* messagePorts)
+{
     if (!m_data.impl())
-        return v8::Null();
+        return v8NullWithCheck(isolate);
     COMPILE_ASSERT(sizeof(BufferValueType) == 2, BufferValueTypeIsTwoBytes);
-    Reader reader(reinterpret_cast<const uint8_t*>(m_data.impl()->characters()), 2 * m_data.length());
+    Reader reader(reinterpret_cast<const uint8_t*>(m_data.impl()->characters()), 2 * m_data.length(), isolate);
     Deserializer deserializer(reader, messagePorts, m_arrayBufferContentsArray.get());
     return deserializer.deserialize();
+}
+
+#if ENABLE(INSPECTOR)
+ScriptValue SerializedScriptValue::deserializeForInspector(ScriptState* scriptState)
+{
+    v8::HandleScope handleScope;
+    v8::Context::Scope contextScope(scriptState->context());
+
+    return ScriptValue(deserialize(scriptState->isolate()));
+}
+#endif
+
+void SerializedScriptValue::registerMemoryAllocatedWithCurrentScriptContext()
+{
+    if (m_externallyAllocatedMemory)
+        return;
+    m_externallyAllocatedMemory = static_cast<intptr_t>(m_data.length());
+    v8::V8::AdjustAmountOfExternalAllocatedMemory(m_externallyAllocatedMemory);
+}
+
+SerializedScriptValue::~SerializedScriptValue()
+{
+    // If the allocated memory was not registered before, then this class is likely
+    // used in a context other then Worker's onmessage environment and the presence of
+    // current v8 context is not guaranteed. Avoid calling v8 then.
+    if (m_externallyAllocatedMemory) {
+        ASSERT(v8::Isolate::GetCurrent());
+        v8::V8::AdjustAmountOfExternalAllocatedMemory(-m_externallyAllocatedMemory);
+    }
+}
+
+uint32_t SerializedScriptValue::wireFormatVersion()
+{
+    return WebCore::wireFormatVersion;
 }
 
 } // namespace WebCore

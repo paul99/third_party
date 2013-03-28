@@ -29,9 +29,10 @@
  */
 
 #include "config.h"
-#include "InspectorAgent.h"
 
 #if ENABLE(INSPECTOR)
+
+#include "InspectorAgent.h"
 
 #include "Document.h"
 #include "DocumentLoader.h"
@@ -44,7 +45,6 @@
 #include "InspectorInstrumentation.h"
 #include "InspectorState.h"
 #include "InspectorValues.h"
-#include "InspectorWorkerResource.h"
 #include "InstrumentingAgents.h"
 #include "Page.h"
 #include "ResourceRequest.h"
@@ -68,7 +68,6 @@ InspectorAgent::InspectorAgent(Page* page, InjectedScriptManager* injectedScript
     , m_inspectedPage(page)
     , m_frontend(0)
     , m_injectedScriptManager(injectedScriptManager)
-    , m_didCommitLoadFired(false)
 {
     ASSERT_ARG(page, page);
     m_instrumentingAgents->setInspectorAgent(this);
@@ -77,12 +76,6 @@ InspectorAgent::InspectorAgent(Page* page, InjectedScriptManager* injectedScript
 InspectorAgent::~InspectorAgent()
 {
     m_instrumentingAgents->setInspectorAgent(0);
-}
-
-void InspectorAgent::emitCommitLoadIfNeeded()
-{
-    if (m_didCommitLoadFired)
-        InspectorInstrumentation::didCommitLoad(m_inspectedPage->mainFrame(), m_inspectedPage->mainFrame()->loader()->documentLoader());
 }
 
 void InspectorAgent::didClearWindowObjectInWorld(Frame* frame, DOMWrapperWorld* world)
@@ -108,7 +101,6 @@ void InspectorAgent::clearFrontend()
 {
     m_pendingEvaluateTestCommands.clear();
     m_frontend = 0;
-    m_didCommitLoadFired = false;
     m_injectedScriptManager->discardInjectedScripts();
     ErrorString error;
     disable(&error);
@@ -116,30 +108,18 @@ void InspectorAgent::clearFrontend()
 
 void InspectorAgent::didCommitLoad()
 {
-    m_didCommitLoadFired = true;
     m_injectedScriptManager->discardInjectedScripts();
-#if ENABLE(WORKERS)
-    m_workers.clear();
-#endif
 }
 
 void InspectorAgent::enable(ErrorString*)
 {
     m_state->setBoolean(InspectorAgentState::inspectorAgentEnabled, true);
 
-#if ENABLE(JAVASCRIPT_DEBUGGER) && ENABLE(WORKERS)
-    WorkersMap::iterator workersEnd = m_workers.end();
-    for (WorkersMap::iterator it = m_workers.begin(); it != workersEnd; ++it) {
-        InspectorWorkerResource* worker = it->second.get();
-        m_frontend->inspector()->didCreateWorker(worker->id(), worker->url(), worker->isSharedWorker());
-    }
-#endif
-
     if (m_pendingInspectData.first)
         inspect(m_pendingInspectData.first, m_pendingInspectData.second);
 
     for (Vector<pair<long, String> >::iterator it = m_pendingEvaluateTestCommands.begin(); m_frontend && it != m_pendingEvaluateTestCommands.end(); ++it)
-        m_frontend->inspector()->evaluateForTestInFrontend((*it).first, (*it).second);
+        m_frontend->inspector()->evaluateForTestInFrontend(static_cast<int>((*it).first), (*it).second);
     m_pendingEvaluateTestCommands.clear();
 }
 
@@ -150,7 +130,7 @@ void InspectorAgent::disable(ErrorString*)
 
 void InspectorAgent::domContentLoadedEventFired()
 {
-    m_injectedScriptManager->injectedScriptHost()->clearInspectedNodes();
+    m_injectedScriptManager->injectedScriptHost()->clearInspectedObjects();
 }
 
 bool InspectorAgent::isMainResourceLoader(DocumentLoader* loader, const KURL& requestUrl)
@@ -158,80 +138,10 @@ bool InspectorAgent::isMainResourceLoader(DocumentLoader* loader, const KURL& re
     return loader->frame() == m_inspectedPage->mainFrame() && requestUrl == loader->requestURL();
 }
 
-#if ENABLE(WORKERS)
-class PostWorkerNotificationToFrontendTask : public ScriptExecutionContext::Task {
-public:
-    static PassOwnPtr<PostWorkerNotificationToFrontendTask> create(PassRefPtr<InspectorWorkerResource> worker, InspectorAgent::WorkerAction action)
-    {
-        return adoptPtr(new PostWorkerNotificationToFrontendTask(worker, action));
-    }
-
-private:
-    PostWorkerNotificationToFrontendTask(PassRefPtr<InspectorWorkerResource> worker, InspectorAgent::WorkerAction action)
-        : m_worker(worker)
-        , m_action(action)
-    {
-    }
-
-    virtual void performTask(ScriptExecutionContext* scriptContext)
-    {
-        if (scriptContext->isDocument()) {
-            if (InspectorAgent* inspectorAgent = static_cast<Document*>(scriptContext)->page()->inspectorController()->m_inspectorAgent)
-                inspectorAgent->postWorkerNotificationToFrontend(*m_worker, m_action);
-        }
-    }
-
-private:
-    RefPtr<InspectorWorkerResource> m_worker;
-    InspectorAgent::WorkerAction m_action;
-};
-
-void InspectorAgent::postWorkerNotificationToFrontend(const InspectorWorkerResource& worker, InspectorAgent::WorkerAction action)
-{
-    if (!m_frontend || !m_state->getBoolean(InspectorAgentState::inspectorAgentEnabled))
-        return;
-
-#if ENABLE(JAVASCRIPT_DEBUGGER)
-    switch (action) {
-    case InspectorAgent::WorkerCreated:
-        m_frontend->inspector()->didCreateWorker(worker.id(), worker.url(), worker.isSharedWorker());
-        break;
-    case InspectorAgent::WorkerDestroyed:
-        m_frontend->inspector()->didDestroyWorker(worker.id());
-        break;
-    }
-#endif
-}
-
-void InspectorAgent::didCreateWorker(intptr_t id, const String& url, bool isSharedWorker)
-{
-    if (!developerExtrasEnabled())
-        return;
-
-    RefPtr<InspectorWorkerResource> workerResource(InspectorWorkerResource::create(id, url, isSharedWorker));
-    m_workers.set(id, workerResource);
-    if (m_inspectedPage && m_frontend && m_state->getBoolean(InspectorAgentState::inspectorAgentEnabled))
-        m_inspectedPage->mainFrame()->document()->postTask(PostWorkerNotificationToFrontendTask::create(workerResource, InspectorAgent::WorkerCreated));
-}
-
-void InspectorAgent::didDestroyWorker(intptr_t id)
-{
-    if (!developerExtrasEnabled())
-        return;
-
-    WorkersMap::iterator workerResource = m_workers.find(id);
-    if (workerResource == m_workers.end())
-        return;
-    if (m_inspectedPage && m_frontend && m_state->getBoolean(InspectorAgentState::inspectorAgentEnabled))
-        m_inspectedPage->mainFrame()->document()->postTask(PostWorkerNotificationToFrontendTask::create(workerResource->second, InspectorAgent::WorkerDestroyed));
-    m_workers.remove(workerResource);
-}
-#endif // ENABLE(WORKERS)
-
 void InspectorAgent::evaluateForTestInFrontend(long callId, const String& script)
 {
     if (m_state->getBoolean(InspectorAgentState::inspectorAgentEnabled))
-        m_frontend->inspector()->evaluateForTestInFrontend(callId, script);
+        m_frontend->inspector()->evaluateForTestInFrontend(static_cast<int>(callId), script);
     else
         m_pendingEvaluateTestCommands.append(pair<long, String>(callId, script));
 }
@@ -241,7 +151,7 @@ void InspectorAgent::setInjectedScriptForOrigin(const String& origin, const Stri
     m_injectedScriptForOrigin.set(origin, source);
 }
 
-void InspectorAgent::inspect(PassRefPtr<InspectorObject> objectToInspect, PassRefPtr<InspectorObject> hints)
+void InspectorAgent::inspect(PassRefPtr<TypeBuilder::Runtime::RemoteObject> objectToInspect, PassRefPtr<InspectorObject> hints)
 {
     if (m_state->getBoolean(InspectorAgentState::inspectorAgentEnabled) && m_frontend) {
         m_frontend->inspector()->inspect(objectToInspect, hints);

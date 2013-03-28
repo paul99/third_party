@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,22 +29,25 @@
 #include "WebPage.h"
 #include "WebProcess.h"
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 #include "WebNotification.h"
+#include "WebNotificationManagerMessages.h"
 #include "WebNotificationManagerProxyMessages.h"
 #include "WebPageProxyMessages.h"
+#include <WebCore/Document.h>
 #include <WebCore/Notification.h>
 #include <WebCore/Page.h>
 #include <WebCore/ScriptExecutionContext.h>
 #include <WebCore/SecurityOrigin.h>
 #include <WebCore/Settings.h>
+#include <WebCore/UserGestureIndicator.h>
 #endif
 
 using namespace WebCore;
 
 namespace WebKit {
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 static uint64_t generateNotificationID()
 {
     static uint64_t uniqueNotificationID = 1;
@@ -55,72 +58,115 @@ static uint64_t generateNotificationID()
 WebNotificationManager::WebNotificationManager(WebProcess* process)
     : m_process(process)
 {
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
+    m_process->addMessageReceiver(Messages::WebNotificationManager::messageReceiverName(), this);
+#endif
 }
 
 WebNotificationManager::~WebNotificationManager()
 {
 }
 
-void WebNotificationManager::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::ArgumentDecoder* arguments)
+void WebNotificationManager::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
 {
-    didReceiveWebNotificationManagerMessage(connection, messageID, arguments);
+    didReceiveWebNotificationManagerMessage(connection, messageID, decoder);
 }
 
 void WebNotificationManager::initialize(const HashMap<String, bool>& permissions)
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     m_permissionsMap = permissions;
+#else
+    UNUSED_PARAM(permissions);
 #endif
 }
 
 void WebNotificationManager::didUpdateNotificationDecision(const String& originString, bool allowed)
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     m_permissionsMap.set(originString, allowed);
+#else
+    UNUSED_PARAM(originString);
+    UNUSED_PARAM(allowed);
 #endif
 }
 
 void WebNotificationManager::didRemoveNotificationDecisions(const Vector<String>& originStrings)
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     size_t count = originStrings.size();
     for (size_t i = 0; i < count; ++i)
         m_permissionsMap.remove(originStrings[i]);
+#else
+    UNUSED_PARAM(originStrings);
 #endif
 }
 
-NotificationPresenter::Permission WebNotificationManager::policyForOrigin(WebCore::SecurityOrigin *origin) const
+NotificationClient::Permission WebNotificationManager::policyForOrigin(WebCore::SecurityOrigin *origin) const
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     if (!origin)
-        return NotificationPresenter::PermissionNotAllowed;
-    
-    HashMap<String, bool>::const_iterator it = m_permissionsMap.find(origin->toString());
+        return NotificationClient::PermissionNotAllowed;
+
+    ASSERT(!origin->isUnique());
+    HashMap<String, bool>::const_iterator it = m_permissionsMap.find(origin->toRawString());
     if (it != m_permissionsMap.end())
-        return it->second ? NotificationPresenter::PermissionAllowed : NotificationPresenter::PermissionDenied;
+        return it->value ? NotificationClient::PermissionAllowed : NotificationClient::PermissionDenied;
+#else
+    UNUSED_PARAM(origin);
 #endif
     
-    return NotificationPresenter::PermissionNotAllowed;
+    return NotificationClient::PermissionNotAllowed;
+}
+
+void WebNotificationManager::removeAllPermissionsForTesting()
+{
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
+    m_permissionsMap.clear();
+#endif
+}
+
+uint64_t WebNotificationManager::notificationIDForTesting(Notification* notification)
+{
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
+    if (!notification)
+        return 0;
+    return m_notificationMap.get(notification);
+#else
+    UNUSED_PARAM(notification);
+    return 0;
+#endif
 }
 
 bool WebNotificationManager::show(Notification* notification, WebPage* page)
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     if (!notification || !page->corePage()->settings()->notificationsEnabled())
-        return true;
+        return false;
     
     uint64_t notificationID = generateNotificationID();
     m_notificationMap.set(notification, notificationID);
     m_notificationIDMap.set(notificationID, notification);
     
-    m_process->connection()->send(Messages::WebPageProxy::ShowNotification(notification->contents().title, notification->contents().body, notification->scriptExecutionContext()->securityOrigin()->toString(), notificationID), page->pageID());
+    NotificationContextMap::iterator it = m_notificationContextMap.add(notification->scriptExecutionContext(), Vector<uint64_t>()).iterator;
+    it->value.append(notificationID);
+
+#if ENABLE(NOTIFICATIONS)
+    m_process->connection()->send(Messages::WebPageProxy::ShowNotification(notification->title(), notification->body(), notification->iconURL().string(), notification->tag(), notification->lang(), notification->dir(), notification->scriptExecutionContext()->securityOrigin()->toString(), notificationID), page->pageID());
+#else
+    m_process->connection()->send(Messages::WebPageProxy::ShowNotification(notification->title(), notification->body(), notification->iconURL().string(), notification->replaceId(), notification->lang(), notification->dir(), notification->scriptExecutionContext()->securityOrigin()->toString(), notificationID), page->pageID());
 #endif
     return true;
+#else
+    UNUSED_PARAM(notification);
+    UNUSED_PARAM(page);
+    return false;
+#endif
 }
 
 void WebNotificationManager::cancel(Notification* notification, WebPage* page)
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     if (!notification || !page->corePage()->settings()->notificationsEnabled())
         return;
     
@@ -128,25 +174,57 @@ void WebNotificationManager::cancel(Notification* notification, WebPage* page)
     if (!notificationID)
         return;
     
-    m_process->connection()->send(Messages::WebNotificationManagerProxy::Cancel(notificationID), page->pageID());
+    m_process->connection()->send(Messages::WebNotificationManagerProxy::Cancel(notificationID), 0);
+#else
+    UNUSED_PARAM(notification);
+    UNUSED_PARAM(page);
+#endif
+}
+
+void WebNotificationManager::clearNotifications(WebCore::ScriptExecutionContext* context, WebPage* page)
+{
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
+    NotificationContextMap::iterator it = m_notificationContextMap.find(context);
+    if (it == m_notificationContextMap.end())
+        return;
+    
+    Vector<uint64_t>& notificationIDs = it->value;
+    m_process->connection()->send(Messages::WebNotificationManagerProxy::ClearNotifications(notificationIDs), 0);
+    size_t count = notificationIDs.size();
+    for (size_t i = 0; i < count; ++i) {
+        RefPtr<Notification> notification = m_notificationIDMap.take(notificationIDs[i]);
+        if (!notification)
+            continue;
+        notification->finalize();
+        m_notificationMap.remove(notification);
+    }
+    
+    m_notificationContextMap.remove(it);
+#else
+    UNUSED_PARAM(context);
+    UNUSED_PARAM(page);
 #endif
 }
 
 void WebNotificationManager::didDestroyNotification(Notification* notification, WebPage* page)
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     uint64_t notificationID = m_notificationMap.take(notification);
     if (!notificationID)
         return;
 
-    m_notificationIDMap.take(notificationID);
-    m_process->connection()->send(Messages::WebNotificationManagerProxy::DidDestroyNotification(notificationID), page->pageID());
+    m_notificationIDMap.remove(notificationID);
+    removeNotificationFromContextMap(notificationID, notification);
+    m_process->connection()->send(Messages::WebNotificationManagerProxy::DidDestroyNotification(notificationID), 0);
+#else
+    UNUSED_PARAM(notification);
+    UNUSED_PARAM(page);
 #endif
 }
 
 void WebNotificationManager::didShowNotification(uint64_t notificationID)
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     if (!isNotificationIDValid(notificationID))
         return;
     
@@ -155,12 +233,14 @@ void WebNotificationManager::didShowNotification(uint64_t notificationID)
         return;
 
     notification->dispatchShowEvent();
+#else
+    UNUSED_PARAM(notificationID);
 #endif
 }
 
 void WebNotificationManager::didClickNotification(uint64_t notificationID)
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     if (!isNotificationIDValid(notificationID))
         return;
 
@@ -168,26 +248,49 @@ void WebNotificationManager::didClickNotification(uint64_t notificationID)
     if (!notification)
         return;
 
+    // Indicate that this event is being dispatched in reaction to a user's interaction with a platform notification.
+    UserGestureIndicator indicator(DefinitelyProcessingUserGesture);
     notification->dispatchClickEvent();
+#else
+    UNUSED_PARAM(notificationID);
 #endif
 }
 
 void WebNotificationManager::didCloseNotifications(const Vector<uint64_t>& notificationIDs)
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     size_t count = notificationIDs.size();
     for (size_t i = 0; i < count; ++i) {
         uint64_t notificationID = notificationIDs[i];
         if (!isNotificationIDValid(notificationID))
             continue;
 
-        RefPtr<Notification> notification = m_notificationIDMap.get(notificationID);
+        RefPtr<Notification> notification = m_notificationIDMap.take(notificationID);
         if (!notification)
             continue;
 
+        m_notificationMap.remove(notification);
+        removeNotificationFromContextMap(notificationID, notification.get());
+
         notification->dispatchCloseEvent();
     }
+#else
+    UNUSED_PARAM(notificationIDs);
 #endif
 }
+
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
+void WebNotificationManager::removeNotificationFromContextMap(uint64_t notificationID, Notification* notification)
+{
+    // This is a helper function for managing the hash maps.
+    NotificationContextMap::iterator it = m_notificationContextMap.find(notification->scriptExecutionContext());
+    ASSERT(it != m_notificationContextMap.end());
+    size_t index = it->value.find(notificationID);
+    ASSERT(index != notFound);
+    it->value.remove(index);
+    if (it->value.isEmpty())
+        m_notificationContextMap.remove(it);
+}
+#endif
 
 } // namespace WebKit

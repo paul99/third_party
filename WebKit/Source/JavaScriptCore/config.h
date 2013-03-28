@@ -57,20 +57,9 @@
 #ifndef _CRT_RAND_S
 #define _CRT_RAND_S
 #endif
-#endif
+#endif // !COMPILER(MSVC7_OR_LOWER) && !OS(WINCE)
 
-#endif
-
-#if OS(UNIX) || OS(WINDOWS)
-#define WTF_USE_OS_RANDOMNESS 1
-#endif
-
-#if (OS(FREEBSD) || OS(OPENBSD)) && !defined(__GLIBC__)
-#define HAVE_PTHREAD_NP_H 1
-#endif
-
-/* FIXME: if all platforms have these, do they really need #defines? */
-#define HAVE_STDINT_H 1
+#endif // OS(WINDOWS)
 
 #define WTF_CHANGES 1
 
@@ -80,12 +69,7 @@
 #include <wtf/FastMalloc.h>
 #endif
 
-// this breaks compilation of <QFontDatabase>, at least, so turn it off for now
-// Also generates errors on wx on Windows and QNX, because these functions
-// are used from wx and QNX headers. 
-#if !PLATFORM(QT) && !PLATFORM(WX) && !OS(QNX)
 #include <wtf/DisallowCType.h>
-#endif
 
 #if COMPILER(MSVC)
 #define SKIP_STATIC_CONSTRUCTORS_ON_MSVC 1

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2010, 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,6 +27,12 @@
 #define WebFrameLoaderClient_h
 
 #include <WebCore/FrameLoaderClient.h>
+
+namespace WebCore {
+#if ENABLE(WEB_INTENTS)
+class IntentRequest;
+#endif
+}
 
 namespace WebKit {
 
@@ -91,8 +97,7 @@ private:
     virtual void dispatchDidFinishDocumentLoad() OVERRIDE;
     virtual void dispatchDidFinishLoad() OVERRIDE;
 
-    virtual void dispatchDidFirstLayout() OVERRIDE;
-    virtual void dispatchDidFirstVisuallyNonEmptyLayout() OVERRIDE;
+    virtual void dispatchDidLayout(WebCore::LayoutMilestones) OVERRIDE;
     virtual void dispatchDidLayout() OVERRIDE;
 
     virtual WebCore::Frame* dispatchCreatePage(const WebCore::NavigationAction&) OVERRIDE;
@@ -105,10 +110,9 @@ private:
     
     virtual void dispatchUnableToImplementPolicy(const WebCore::ResourceError&) OVERRIDE;
     
-    virtual void dispatchWillSendSubmitEvent(WebCore::HTMLFormElement*) OVERRIDE { }
+    virtual void dispatchWillSendSubmitEvent(PassRefPtr<WebCore::FormState>) OVERRIDE;
     virtual void dispatchWillSubmitForm(WebCore::FramePolicyFunction, PassRefPtr<WebCore::FormState>) OVERRIDE;
     
-    virtual void dispatchDidLoadMainResource(WebCore::DocumentLoader*) OVERRIDE;
     virtual void revertToProvisionalState(WebCore::DocumentLoader*) OVERRIDE;
     virtual void setMainDocumentError(WebCore::DocumentLoader*, const WebCore::ResourceError&) OVERRIDE;
     
@@ -178,22 +182,32 @@ private:
     virtual void dispatchDidBecomeFrameset(bool) OVERRIDE;
 
     virtual bool canCachePage() const OVERRIDE;
-    virtual void download(WebCore::ResourceHandle*, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&) OVERRIDE;
+    virtual void convertMainResourceLoadToDownload(WebCore::MainResourceLoader*, const WebCore::ResourceRequest&, const WebCore::ResourceResponse&) OVERRIDE;
     
     virtual PassRefPtr<WebCore::Frame> createFrame(const WebCore::KURL& url, const String& name, WebCore::HTMLFrameOwnerElement* ownerElement,
                                           const String& referrer, bool allowsScrolling, int marginWidth, int marginHeight) OVERRIDE;
-    virtual void didTransferChildFrameToNewDocument(WebCore::Page*) OVERRIDE;
-    virtual void transferLoadingResourceFromPage(WebCore::ResourceLoader*, const WebCore::ResourceRequest&, WebCore::Page*) OVERRIDE;
     
     virtual PassRefPtr<WebCore::Widget> createPlugin(const WebCore::IntSize&, WebCore::HTMLPlugInElement*, const WebCore::KURL&, const Vector<String>&, const Vector<String>&, const String&, bool loadManually) OVERRIDE;
+    virtual void recreatePlugin(WebCore::Widget*) OVERRIDE;
     virtual void redirectDataToPlugin(WebCore::Widget* pluginWidget) OVERRIDE;
     
     virtual PassRefPtr<WebCore::Widget> createJavaAppletWidget(const WebCore::IntSize&, WebCore::HTMLAppletElement*, const WebCore::KURL& baseURL, const Vector<String>& paramNames, const Vector<String>& paramValues) OVERRIDE;
     
+#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
+    virtual PassRefPtr<WebCore::Widget> createMediaPlayerProxyPlugin(const WebCore::IntSize&, WebCore::HTMLMediaElement*, const WebCore::KURL&, const Vector<String>&, const Vector<String>&, const String&) OVERRIDE;
+    virtual void hideMediaPlayerProxyPlugin(WebCore::Widget*) OVERRIDE;
+    virtual void showMediaPlayerProxyPlugin(WebCore::Widget*) OVERRIDE;
+#endif
+
     virtual WebCore::ObjectContentType objectContentType(const WebCore::KURL&, const String& mimeType, bool shouldPreferPlugInsForImages) OVERRIDE;
     virtual String overrideMediaType() const OVERRIDE;
 
     virtual void dispatchDidClearWindowObjectInWorld(WebCore::DOMWrapperWorld*) OVERRIDE;
+    
+    virtual void dispatchGlobalObjectAvailable(WebCore::DOMWrapperWorld*) OVERRIDE;
+    virtual void dispatchWillDisconnectDOMWindowExtensionFromGlobalObject(WebCore::DOMWindowExtension*) OVERRIDE;
+    virtual void dispatchDidReconnectDOMWindowExtensionToGlobalObject(WebCore::DOMWindowExtension*) OVERRIDE;
+    virtual void dispatchWillDestroyGlobalObjectForDOMWindowExtension(WebCore::DOMWindowExtension*) OVERRIDE;
 
     virtual void documentElementAvailable() OVERRIDE;
     virtual void didPerformFirstNavigation() const OVERRIDE; // "Navigation" here means a transition from one page to another that ends up in the back/forward list.
@@ -203,26 +217,36 @@ private:
 #if PLATFORM(MAC)
     virtual RemoteAXObjectRef accessibilityRemoteObject() OVERRIDE;
     
-#if ENABLE(MAC_JAVA_BRIDGE)
-    virtual jobject javaApplet(NSView*) OVERRIDE;
-#endif
     virtual NSCachedURLResponse* willCacheResponse(WebCore::DocumentLoader*, unsigned long identifier, NSCachedURLResponse*) const OVERRIDE;
 #endif
 #if PLATFORM(WIN) && USE(CFNETWORK)
     // FIXME: Windows should use willCacheResponse - <https://bugs.webkit.org/show_bug.cgi?id=57257>.
     virtual bool shouldCacheResponse(WebCore::DocumentLoader*, unsigned long identifier, const WebCore::ResourceResponse&, const unsigned char* data, unsigned long long length) OVERRIDE;
 #endif
-    
+
+#if ENABLE(WEB_INTENTS)
+    virtual void dispatchIntent(PassRefPtr<WebCore::IntentRequest>) OVERRIDE;
+#endif
+#if ENABLE(WEB_INTENTS_TAG)
+    virtual void registerIntentService(const String& action, const String& type, const WebCore::KURL& href, const String& title, const String& disposition) OVERRIDE;
+#endif
+
     virtual bool shouldUsePluginDocument(const String& /*mimeType*/) const OVERRIDE;
 
     virtual void didChangeScrollOffset() OVERRIDE;
+
+    virtual bool allowScript(bool enabledPerSettings) OVERRIDE;
+
+    virtual bool shouldForceUniversalAccessFromLocalURL(const WebCore::KURL&) OVERRIDE;
 
     virtual PassRefPtr<WebCore::FrameNetworkingContext> createNetworkingContext() OVERRIDE;
 
     WebFrame* m_frame;
     RefPtr<PluginView> m_pluginView;
     bool m_hasSentResponseToPluginView;
+    bool m_didCompletePageTransitionAlready;
     bool m_frameHasCustomRepresentation;
+    bool m_frameCameFromPageCache;
 };
 
 } // namespace WebKit

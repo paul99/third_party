@@ -2,26 +2,26 @@
  * libjingle
  * Copyright 2004--2005, Google Inc.
  *
- * Redistribution and use in source and binary forms, with or without 
+ * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- *  1. Redistributions of source code must retain the above copyright notice, 
+ *  1. Redistributions of source code must retain the above copyright notice,
  *     this list of conditions and the following disclaimer.
  *  2. Redistributions in binary form must reproduce the above copyright notice,
  *     this list of conditions and the following disclaimer in the documentation
  *     and/or other materials provided with the distribution.
- *  3. The name of the author may not be used to endorse or promote products 
+ *  3. The name of the author may not be used to endorse or promote products
  *     derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF 
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
- * EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
+ * EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
  * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
  * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
  * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR 
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF 
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
@@ -54,6 +54,8 @@
 #include "talk/base/sigslot.h"
 #include "talk/p2p/base/candidate.h"
 #include "talk/p2p/base/constants.h"
+#include "talk/p2p/base/sessiondescription.h"
+#include "talk/p2p/base/transportinfo.h"
 
 namespace talk_base {
 class Thread;
@@ -68,6 +70,7 @@ namespace cricket {
 
 struct ParseError;
 struct WriteError;
+class CandidateTranslator;
 class PortAllocator;
 class SessionManager;
 class Session;
@@ -83,12 +86,19 @@ typedef std::vector<Candidate> Candidates;
 // Create/Translate.
 class TransportParser {
  public:
+  // The incoming Translator value may be null, in which case
+  // ParseCandidates should return false if there are candidates to
+  // parse (indicating a failure to parse).  If the Translator is null
+  // and there are no candidates to parse, then return true,
+  // indicating a successful parse of 0 candidates.
   virtual bool ParseCandidates(SignalingProtocol protocol,
                                const buzz::XmlElement* elem,
+                               const CandidateTranslator* translator,
                                Candidates* candidates,
                                ParseError* error) = 0;
   virtual bool WriteCandidates(SignalingProtocol protocol,
                                const Candidates& candidates,
+                               const CandidateTranslator* translator,
                                XmlElements* candidate_elems,
                                WriteError* error) = 0;
 
@@ -104,11 +114,27 @@ class TransportParser {
   virtual ~TransportParser() {}
 };
 
+// Whether our side of the call is driving the negotiation, or the other side.
+enum TransportRole {
+  ROLE_CONTROLLING = 0,
+  ROLE_CONTROLLED,
+  ROLE_UNKNOWN
+};
+
+// For "writable" and "readable", we need to differentiate between
+// none, all, and some.
+enum TransportState {
+  TRANSPORT_STATE_NONE = 0,
+  TRANSPORT_STATE_SOME,
+  TRANSPORT_STATE_ALL
+};
+
 class Transport : public talk_base::MessageHandler,
                   public sigslot::has_slots<> {
  public:
   Transport(talk_base::Thread* signaling_thread,
             talk_base::Thread* worker_thread,
+            const std::string& content_name,
             const std::string& type,
             PortAllocator* allocator);
   virtual ~Transport();
@@ -118,6 +144,8 @@ class Transport : public talk_base::MessageHandler,
   // Returns the worker thread. The actual networking is done on this thread.
   talk_base::Thread* worker_thread() { return worker_thread_; }
 
+  // Returns the content_name of this transport.
+  const std::string& content_name() const { return content_name_; }
   // Returns the type of this transport.
   const std::string& type() const { return type_; }
 
@@ -127,26 +155,58 @@ class Transport : public talk_base::MessageHandler,
   // Returns the readable and states of this manager.  These bits are the ORs
   // of the corresponding bits on the managed channels.  Each time one of these
   // states changes, a signal is raised.
-  bool readable() const { return readable_; }
-  bool writable() const { return writable_; }
+  // TODO: Replace uses of readable() and writable() with
+  // any_channels_readable() and any_channels_writable().
+  bool readable() const { return any_channels_readable(); }
+  bool writable() const { return any_channels_writable(); }
+  bool any_channels_readable() const {
+    return (readable_ == TRANSPORT_STATE_SOME ||
+            readable_ == TRANSPORT_STATE_ALL);
+  }
+  bool any_channels_writable() const {
+    return (writable_ == TRANSPORT_STATE_SOME ||
+            writable_ == TRANSPORT_STATE_ALL);
+  }
+  bool all_channels_readable() const {
+    return (readable_ == TRANSPORT_STATE_ALL);
+  }
+  bool all_channels_writable() const {
+    return (writable_ == TRANSPORT_STATE_ALL);
+  }
   sigslot::signal1<Transport*> SignalReadableState;
   sigslot::signal1<Transport*> SignalWritableState;
 
   // Returns whether the client has requested the channels to connect.
   bool connect_requested() const { return connect_requested_; }
 
-  // Create, destroy, and lookup the channels of this type by their names.
-  TransportChannelImpl* CreateChannel(const std::string& name,
-                                      const std::string& content_type);
+  void SetRole(TransportRole role);
+  TransportRole role() const { return role_; }
+
+  void SetTiebreaker(uint64 tiebreaker) { tiebreaker_ = tiebreaker; }
+  uint64 tiebreaker() { return tiebreaker_; }
+
+  TransportProtocol protocol() const { return protocol_; }
+
+  // Create, destroy, and lookup the channels of this type by their components.
+  TransportChannelImpl* CreateChannel(int component);
   // Note: GetChannel may lead to race conditions, since the mutex is not held
   // after the pointer is returned.
-  TransportChannelImpl* GetChannel(const std::string& name);
+  TransportChannelImpl* GetChannel(int component);
   // Note: HasChannel does not lead to race conditions, unlike GetChannel.
-  bool HasChannel(const std::string& name) {
-    return (NULL != GetChannel(name));
+  bool HasChannel(int component) {
+    return (NULL != GetChannel(component));
   }
   bool HasChannels();
-  void DestroyChannel(const std::string& name);
+  void DestroyChannel(int component);
+
+  // Set the local TransportDescription to be used by TransportChannels.
+  // This should be called before ConnectChannels().
+  bool SetLocalTransportDescription(const TransportDescription& description,
+                                    ContentAction action);
+
+  // Set the remote TransportDescription to be used by TransportChannels.
+  bool SetRemoteTransportDescription(const TransportDescription& description,
+                                     ContentAction action);
 
   // Tells all current and future channels to start connecting.  When the first
   // channel begins connecting, the following signal is raised.
@@ -171,15 +231,18 @@ class Transport : public talk_base::MessageHandler,
   // Handles sending of ready candidates and receiving of remote candidates.
   sigslot::signal2<Transport*,
                    const std::vector<Candidate>&> SignalCandidatesReady;
+
+  sigslot::signal1<Transport*> SignalCandidatesAllocationDone;
   void OnRemoteCandidates(const std::vector<Candidate>& candidates);
 
   // If candidate is not acceptable, returns false and sets error.
   // Call this before calling OnRemoteCandidates.
   virtual bool VerifyCandidate(const Candidate& candidate,
-                               ParseError* error);
+                               std::string* error);
 
   // Signals when the best connection for a channel changes.
-  sigslot::signal3<Transport*, const std::string&,
+  sigslot::signal3<Transport*,
+                   int,  // component
                    const Candidate&> SignalRouteChange;
 
   // A transport message has generated an transport-specific error.  The
@@ -195,32 +258,87 @@ class Transport : public talk_base::MessageHandler,
                    const buzz::XmlElement*>
       SignalTransportError;
 
-  sigslot::signal2<Transport*, const std::string&> SignalChannelGone;
-
-  // (For testing purposes only.)  This indicates whether we will allow local
-  // IPs (e.g. 127.*) to be used as addresses for P2P.
-  bool allow_local_ips() const { return allow_local_ips_; }
-  void set_allow_local_ips(bool value) { allow_local_ips_ = value; }
+  // Forwards the signal from TransportChannel to BaseSession.
+  sigslot::signal0<> SignalRoleConflict;
 
  protected:
   // These are called by Create/DestroyChannel above in order to create or
   // destroy the appropriate type of channel.
-  virtual TransportChannelImpl* CreateTransportChannel(
-      const std::string& name, const std::string &content_type) = 0;
+  virtual TransportChannelImpl* CreateTransportChannel(int component) = 0;
   virtual void DestroyTransportChannel(TransportChannelImpl* channel) = 0;
 
   // Informs the subclass that we received the signaling ready message.
   virtual void OnTransportSignalingReady() {}
 
+  // The current local transport description, for use by derived classes
+  // when performing transport description negotiation.
+  const TransportDescription* local_description() const {
+    return local_description_.get();
+  }
+
+  // The current remote transport description, for use by derived classes
+  // when performing transport description negotiation.
+  const TransportDescription* remote_description() const {
+    return remote_description_.get();
+  }
+
+  // Pushes down the transport parameters from the local description, such
+  // as the ICE ufrag and pwd.
+  // Derived classes can override, but must call the base as well.
+  virtual bool ApplyLocalTransportDescription_w(TransportChannelImpl*
+                                                channel);
+
+  // Negotiates the transport parameters based on the current local and remote
+  // transport description, such at the version of ICE to use, and whether DTLS
+  // should be activated.
+  // Derived classes can negotiate their specific parameters here, but must call
+  // the base as well.
+  virtual bool NegotiateTransportDescription_w(ContentAction local_role);
+
+  // Pushes down the transport parameters obtained via negotiation.
+  // Derived classes can set their specific parameters here, but must call the
+  // base as well.
+  virtual void ApplyNegotiatedTransportDescription_w(
+      TransportChannelImpl* channel);
+
  private:
-  typedef std::map<std::string, TransportChannelImpl*> ChannelMap;
+  struct ChannelMapEntry {
+    ChannelMapEntry() : impl_(NULL), candidates_allocated_(false), ref_(0) {}
+    explicit ChannelMapEntry(TransportChannelImpl *impl)
+        : impl_(impl),
+          candidates_allocated_(false),
+          ref_(0) {
+    }
+
+    void AddRef() { ++ref_; }
+    void DecRef() {
+      ASSERT(ref_ > 0);
+      --ref_;
+    }
+    int ref() const { return ref_; }
+
+    TransportChannelImpl* get() const { return impl_; }
+    TransportChannelImpl* operator->() const  { return impl_; }
+    void set_candidates_allocated(bool status) {
+      candidates_allocated_ = status;
+    }
+    bool candidates_allocated() const { return candidates_allocated_; }
+
+  private:
+    TransportChannelImpl *impl_;
+    bool candidates_allocated_;
+    int ref_;
+  };
+
+  // Candidate component => ChannelMapEntry
+  typedef std::map<int, ChannelMapEntry> ChannelMap;
 
   // Called when the state of a channel changes.
   void OnChannelReadableState(TransportChannel* channel);
   void OnChannelWritableState(TransportChannel* channel);
 
   // Called when a channel requests signaling.
-  void OnChannelRequestSignaling();
+  void OnChannelRequestSignaling(TransportChannelImpl* channel);
 
   // Called when a candidate is ready from remote peer.
   void OnRemoteCandidate(const Candidate& candidate);
@@ -229,6 +347,9 @@ class Transport : public talk_base::MessageHandler,
                                const Candidate& candidate);
   void OnChannelRouteChange(TransportChannel* channel,
                             const Candidate& remote_candidate);
+  void OnChannelCandidatesAllocationDone(TransportChannelImpl* channel);
+  // Called when there is ICE role change.
+  void OnRoleConflict(TransportChannelImpl* channel);
 
   // Dispatches messages to the appropriate handler (below).
   void OnMessage(talk_base::Message* msg);
@@ -236,44 +357,56 @@ class Transport : public talk_base::MessageHandler,
   // These are versions of the above methods that are called only on a
   // particular thread (s = signaling, w = worker).  The above methods post or
   // send a message to invoke this version.
-  TransportChannelImpl* CreateChannel_w(const std::string& name,
-                                        const std::string& content_type);
-  void DestroyChannel_w(const std::string& name);
+  TransportChannelImpl* CreateChannel_w(int component);
+  void DestroyChannel_w(int component);
   void ConnectChannels_w();
   void ResetChannels_w();
   void DestroyAllChannels_w();
   void OnRemoteCandidate_w(const Candidate& candidate);
   void OnChannelReadableState_s();
   void OnChannelWritableState_s();
-  void OnChannelRequestSignaling_s();
+  void OnChannelRequestSignaling_s(int component);
   void OnConnecting_s();
-  void OnChannelRouteChange_s(const std::string& name,
+  void OnChannelRouteChange_s(const TransportChannel* channel,
                               const Candidate& remote_candidate);
+  void OnChannelCandidatesAllocationDone_s();
 
   // Helper function that invokes the given function on every channel.
   typedef void (TransportChannelImpl::* TransportChannelFunc)();
   void CallChannels_w(TransportChannelFunc func);
 
   // Computes the OR of the channel's read or write state (argument picks).
-  bool GetTransportState_s(bool read);
+  TransportState GetTransportState_s(bool read);
 
   void OnChannelCandidateReady_s();
 
+  void SetRole_w();
+  bool SetLocalTransportDescription_w(const TransportDescription& desc,
+                                      ContentAction action);
+  bool SetRemoteTransportDescription_w(const TransportDescription& desc,
+                                       ContentAction action);
+
   talk_base::Thread* signaling_thread_;
   talk_base::Thread* worker_thread_;
+  std::string content_name_;
   std::string type_;
   PortAllocator* allocator_;
   bool destroyed_;
-  bool readable_;
-  bool writable_;
+  TransportState readable_;
+  TransportState writable_;
   bool connect_requested_;
+  TransportRole role_;
+  uint64 tiebreaker_;
+  TransportProtocol protocol_;
+  talk_base::scoped_ptr<TransportDescription> local_description_;
+  talk_base::scoped_ptr<TransportDescription> remote_description_;
+
   ChannelMap channels_;
   // Buffers the ready_candidates so that SignalCanidatesReady can
   // provide them in multiples.
   std::vector<Candidate> ready_candidates_;
   // Protects changes to channels and messages
   talk_base::CriticalSection crit_;
-  bool allow_local_ips_;
 
   DISALLOW_EVIL_CONSTRUCTORS(Transport);
 };

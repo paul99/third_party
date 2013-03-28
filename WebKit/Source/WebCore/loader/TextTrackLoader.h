@@ -31,13 +31,13 @@
 #include "CachedResourceClient.h"
 #include "CachedResourceHandle.h"
 #include "CachedTextTrack.h"
-#include "Document.h"
 #include "Timer.h"
 #include "WebVTTParser.h"
 #include <wtf/OwnPtr.h>
 
 namespace WebCore {
 
+class Document;
 class TextTrackLoader;
 class ScriptExecutionContext;
 
@@ -73,6 +73,7 @@ private:
     
     // WebVTTParserClient
     virtual void newCuesParsed();
+    virtual void fileFailedToParse();
     
     TextTrackLoader(TextTrackLoaderClient*, ScriptExecutionContext*);
     

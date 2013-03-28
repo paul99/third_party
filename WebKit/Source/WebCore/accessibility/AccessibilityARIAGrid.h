@@ -40,10 +40,12 @@ class AccessibilityTableHeaderContainer;
 class AccessibilityARIAGrid : public AccessibilityTable {
     
 private:
-    AccessibilityARIAGrid(RenderObject*);
+    explicit AccessibilityARIAGrid(RenderObject*);
 public:
     static PassRefPtr<AccessibilityARIAGrid> create(RenderObject*);
     virtual ~AccessibilityARIAGrid();
+
+    virtual void init();
     
     virtual bool isAriaTable() const { return true; }    
     
@@ -54,8 +56,9 @@ public:
 private:
     // ARIA treegrids and grids support selected rows.
     virtual bool supportsSelectedRows() { return true; }    
-
-    bool addChild(AccessibilityObject*, HashSet<AccessibilityObject*>& appendedRows, unsigned& columnCount);
+    virtual bool isMultiSelectable() const { return true; }
+    
+    bool addTableCellChild(AccessibilityObject*, HashSet<AccessibilityObject*>& appendedRows, unsigned& columnCount);
 };
 
 } // namespace WebCore 

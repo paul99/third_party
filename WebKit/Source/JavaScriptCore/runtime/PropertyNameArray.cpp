@@ -22,7 +22,7 @@
 #include "PropertyNameArray.h"
 
 #include "JSObject.h"
-#include "ScopeChain.h"
+
 #include "Structure.h"
 #include "StructureChain.h"
 
@@ -45,7 +45,7 @@ void PropertyNameArray::add(StringImpl* identifier)
             for (size_t i = 0; i < size; ++i)
                 m_set.add(m_data->propertyNameVector()[i].impl());
         }
-        if (!m_set.add(identifier).second)
+        if (!m_set.add(identifier).isNewEntry)
             return;
     }
 

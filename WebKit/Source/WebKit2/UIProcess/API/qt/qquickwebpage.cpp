@@ -21,20 +21,25 @@
 #include "config.h"
 #include "qquickwebpage_p.h"
 
-#include "LayerTreeHostProxy.h"
+#include "CoordinatedLayerTreeHostProxy.h"
+#include "LayerTreeRenderer.h"
 #include "QtWebPageEventHandler.h"
+#include "QtWebPageSGNode.h"
 #include "TransformationMatrix.h"
+#include "WebPageProxy.h"
 #include "qquickwebpage_p_p.h"
 #include "qquickwebview_p.h"
-#include <QtQuick/QQuickCanvas>
-#include <QtQuick/QSGGeometryNode>
-#include <QtQuick/QSGMaterial>
+#include "qwebkittest_p.h"
+#include <QQuickWindow>
+
+using namespace WebKit;
 
 QQuickWebPage::QQuickWebPage(QQuickWebView* viewportItem)
-    : QQuickItem(viewportItem)
+    : QQuickItem(viewportItem->contentItem())
     , d(new QQuickWebPagePrivate(this, viewportItem))
 {
     setFlag(ItemHasContents);
+    setClip(true);
 
     // We do the transform from the top left so the viewport can assume the position 0, 0
     // is always where rendering starts.
@@ -46,31 +51,12 @@ QQuickWebPage::~QQuickWebPage()
     delete d;
 }
 
-QtSGUpdateQueue *QQuickWebPage::sceneGraphUpdateQueue() const
-{
-    return &d->sgUpdateQueue;
-}
-
-void QQuickWebPage::geometryChanged(const QRectF& newGeometry, const QRectF& oldGeometry)
-{
-    QQuickItem::geometryChanged(newGeometry, oldGeometry);
-
-    if (!d->useTraditionalDesktopBehaviour)
-        return;
-
-    if (newGeometry.size() != oldGeometry.size())
-        d->setDrawingAreaSize(newGeometry.size().toSize());
-}
-
 QQuickWebPagePrivate::QQuickWebPagePrivate(QQuickWebPage* q, QQuickWebView* viewportItem)
     : q(q)
     , viewportItem(viewportItem)
     , webPageProxy(0)
-    , sgUpdateQueue(q)
     , paintingIsInitialized(false)
-    , m_paintNode(0)
-    , contentScale(1)
-    , useTraditionalDesktopBehaviour(false)
+    , contentsScale(1)
 {
 }
 
@@ -80,170 +66,51 @@ void QQuickWebPagePrivate::initialize(WebKit::WebPageProxy* webPageProxy)
     eventHandler.reset(new QtWebPageEventHandler(toAPI(webPageProxy), q, viewportItem));
 }
 
-static float computeEffectiveOpacity(const QQuickItem* item)
-{
-    if (!item)
-        return 1;
-
-    float opacity = item->opacity();
-    if (opacity < 0.01)
-        return 0;
-
-    return opacity * computeEffectiveOpacity(item->parentItem());
-}
-
-void QQuickWebPagePrivate::setDrawingAreaSize(const QSize& size)
-{
-    DrawingAreaProxy* drawingArea = webPageProxy->drawingArea();
-    if (!drawingArea)
-        return;
-    drawingArea->setSize(WebCore::IntSize(size), WebCore::IntSize());
-}
-
 void QQuickWebPagePrivate::paint(QPainter* painter)
 {
+    if (!webPageProxy->drawingArea())
+        return;
+
+    if (coordinatedLayerTreeHostProxy()->layerTreeRenderer())
+        coordinatedLayerTreeHostProxy()->layerTreeRenderer()->paintToGraphicsContext(painter);
+}
+
+CoordinatedLayerTreeHostProxy* QQuickWebPagePrivate::coordinatedLayerTreeHostProxy()
+{
     if (webPageProxy->drawingArea())
-        webPageProxy->drawingArea()->paintLayerTree(painter);
-}
+        return webPageProxy->drawingArea()->coordinatedLayerTreeHostProxy();
 
-void QQuickWebPagePrivate::paintToCurrentGLContext()
-{
-    if (!q->isVisible())
-        return;
-
-    QTransform transform = q->itemTransform(0, 0);
-    transform.scale(contentScale, contentScale);
-
-    float opacity = computeEffectiveOpacity(q);
-    QRectF clipRect = q->parentItem()->mapRectToScene(q->parentItem()->boundingRect());
-
-    if (!clipRect.isValid())
-        return;
-
-    DrawingAreaProxy* drawingArea = webPageProxy->drawingArea();
-    if (!drawingArea)
-        return;
-
-    // Make sure that no GL error code stays from previous QT operations.
-    glGetError();
-
-    glEnable(GL_SCISSOR_TEST);
-    ASSERT(!glGetError());
-    const int left = clipRect.left();
-    const int width = clipRect.width();
-    const int bottom = q->canvas()->height() - (clipRect.bottom() + 1);
-    const int height = clipRect.height();
-
-    glScissor(left, bottom, width, height);
-    ASSERT(!glGetError());
-
-    drawingArea->paintToCurrentGLContext(transform, opacity);
-
-    glDisable(GL_SCISSOR_TEST);
-    ASSERT(!glGetError());
-}
-
-struct PageProxyMaterial;
-struct PageProxyNode;
-
-// FIXME: temporary until Qt Scenegraph will support custom painting.
-struct PageProxyMaterialShader : public QSGMaterialShader {
-    virtual void updateState(const RenderState& state, QSGMaterial* newMaterial, QSGMaterial* oldMaterial);
-    virtual char const* const* attributeNames() const
-    {
-        static char const* const attr[] = { "vertex", 0 };
-        return attr;
-    }
-
-    // vertexShader and fragmentShader are no-op shaders.
-    // All real painting is gone by TextureMapper through LayerTreeHostProxy.
-    virtual const char* vertexShader() const
-    {
-        return "attribute highp vec4 vertex; \n"
-               "void main() { gl_Position = vertex; }";
-    }
-
-    virtual const char* fragmentShader() const
-    {
-        return "void main() { gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0); }";
-    }
-};
-
-struct PageProxyMaterial : public QSGMaterial {
-    PageProxyMaterial(PageProxyNode* node) : m_node(node) { }
-
-    QSGMaterialType* type() const
-    {
-        static QSGMaterialType type;
-        return &type;
-    }
-
-    QSGMaterialShader* createShader() const
-    {
-        return new PageProxyMaterialShader;
-    }
-
-    PageProxyNode* m_node;
-};
-
-struct PageProxyNode : public QSGGeometryNode {
-    PageProxyNode(QQuickWebPagePrivate* page) :
-        m_pagePrivate(page)
-      , m_material(this)
-      , m_geometry(QSGGeometry::defaultAttributes_Point2D(), 4)
-    {
-        setGeometry(&m_geometry);
-        setMaterial(&m_material);
-    }
-
-    ~PageProxyNode()
-    {
-        if (m_pagePrivate)
-            m_pagePrivate->resetPaintNode();
-    }
-
-    QQuickWebPagePrivate* m_pagePrivate;
-    PageProxyMaterial m_material;
-    QSGGeometry m_geometry;
-};
-
-void PageProxyMaterialShader::updateState(const RenderState& state, QSGMaterial* newMaterial, QSGMaterial* oldMaterial)
-{
-    if (!newMaterial)
-        return;
-
-    PageProxyNode* node = static_cast<PageProxyMaterial*>(newMaterial)->m_node;
-    // FIXME: Normally we wouldn't paint inside QSGMaterialShader::updateState,
-    // but this is a temporary hack until custom paint nodes are available.
-    if (node->m_pagePrivate)
-        node->m_pagePrivate->paintToCurrentGLContext();
+    return 0;
 }
 
 QSGNode* QQuickWebPage::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
 {
-    if (!(flags() & ItemHasContents)) {
-        if (oldNode)
-            delete oldNode;
-        return 0;
+    if (!d->webPageProxy->drawingArea())
+        return oldNode;
+
+    LayerTreeRenderer* renderer = d->coordinatedLayerTreeHostProxy()->layerTreeRenderer();
+
+    QtWebPageSGNode* node = static_cast<QtWebPageSGNode*>(oldNode);
+
+    const QWindow* window = this->window();
+    ASSERT(window);
+
+    if (window && d->webPageProxy->deviceScaleFactor() != window->devicePixelRatio()) {
+        d->webPageProxy->setIntrinsicDeviceScaleFactor(window->devicePixelRatio());
+        d->viewportItem->experimental()->test()->devicePixelRatioChanged();
     }
 
-    PageProxyNode* proxyNode = static_cast<PageProxyNode*>(oldNode);
-    if (!proxyNode) {
-        proxyNode = new PageProxyNode(d);
-        d->m_paintNode = proxyNode;
-    }
+    if (!node)
+        node = new QtWebPageSGNode(this);
 
-    return proxyNode;
-}
+    node->setRenderer(renderer);
 
-bool QQuickWebPage::usesTraditionalDesktopBehaviour() const
-{
-    return d->useTraditionalDesktopBehaviour;
-}
+    node->setScale(d->contentsScale);
+    QColor backgroundColor = d->webPageProxy->drawsTransparentBackground() ? Qt::transparent : Qt::white;
+    QRectF backgroundRect(QPointF(0, 0), d->contentsSize);
+    node->setBackground(backgroundRect, backgroundColor);
 
-void QQuickWebPage::setUsesTraditionalDesktopBehaviour(bool enable)
-{
-    d->useTraditionalDesktopBehaviour = enable;
+    return node;
 }
 
 QtWebPageEventHandler* QQuickWebPage::eventHandler() const
@@ -251,32 +118,33 @@ QtWebPageEventHandler* QQuickWebPage::eventHandler() const
     return d->eventHandler.data();
 }
 
-void QQuickWebPage::setContentSize(const QSizeF& size)
+void QQuickWebPage::setContentsSize(const QSizeF& size)
 {
-    if (size.isEmpty() || d->contentSize == size)
+    if (size.isEmpty() || d->contentsSize == size)
         return;
 
-    d->contentSize = size;
+    d->contentsSize = size;
     d->updateSize();
-    d->setDrawingAreaSize(d->contentSize.toSize());
+    emit d->viewportItem->experimental()->test()->contentsSizeChanged();
 }
 
-const QSizeF& QQuickWebPage::contentSize() const
+const QSizeF& QQuickWebPage::contentsSize() const
 {
-    return d->contentSize;
+    return d->contentsSize;
 }
 
-void QQuickWebPage::setContentScale(qreal scale)
+void QQuickWebPage::setContentsScale(qreal scale)
 {
     ASSERT(scale > 0);
-    d->contentScale = scale;
+    d->contentsScale = scale;
     d->updateSize();
+    emit d->viewportItem->experimental()->test()->contentsScaleChanged();
 }
 
-qreal QQuickWebPage::contentScale() const
+qreal QQuickWebPage::contentsScale() const
 {
-    ASSERT(d->contentScale > 0);
-    return d->contentScale;
+    ASSERT(d->contentsScale > 0);
+    return d->contentsScale;
 }
 
 QTransform QQuickWebPage::transformFromItem() const
@@ -286,27 +154,44 @@ QTransform QQuickWebPage::transformFromItem() const
 
 QTransform QQuickWebPage::transformToItem() const
 {
-    return QTransform(d->contentScale, 0, 0, 0, d->contentScale, 0, x(), y(), 1);
+    qreal xPos = x();
+    qreal yPos = y();
+
+    if (d->viewportItem->experimental()->flickableViewportEnabled()) {
+        // Flickable moves its contentItem so we need to take that position into
+        // account, as well as the potential displacement of the page on the
+        // contentItem because of additional QML items.
+        xPos += d->viewportItem->contentItem()->x();
+        yPos += d->viewportItem->contentItem()->y();
+    }
+
+    return QTransform(d->contentsScale, 0, 0, 0, d->contentsScale, 0, xPos, yPos, 1);
 }
 
 void QQuickWebPagePrivate::updateSize()
 {
-    QSizeF scaledSize = contentSize * contentScale;
-    q->setSize(scaledSize);
-}
+    QSizeF scaledSize = contentsSize * contentsScale;
 
-void QQuickWebPagePrivate::resetPaintNode()
-{
-    m_paintNode = 0;
-    DrawingAreaProxy* drawingArea = webPageProxy->drawingArea();
-    if (drawingArea && drawingArea->layerTreeHostProxy())
-        drawingArea->layerTreeHostProxy()->purgeGLResources();
+    if (coordinatedLayerTreeHostProxy())
+        coordinatedLayerTreeHostProxy()->setContentsSize(WebCore::FloatSize(contentsSize));
+
+    q->setSize(scaledSize);
+
+    if (viewportItem->experimental()->flickableViewportEnabled()) {
+        // Make sure that the content is sized to the page if the user did not
+        // add other flickable items. If that is not the case, the user needs to
+        // disable the default content item size property on the WebView and
+        // bind the contentWidth and contentHeight accordingly, in accordance
+        // accordance with normal Flickable behaviour.
+        if (viewportItem->experimental()->useDefaultContentItemSize()) {
+            viewportItem->setContentWidth(scaledSize.width());
+            viewportItem->setContentHeight(scaledSize.height());
+        }
+    }
 }
 
 QQuickWebPagePrivate::~QQuickWebPagePrivate()
 {
-    if (m_paintNode)
-        static_cast<PageProxyNode*>(m_paintNode)->m_pagePrivate = 0;
 }
 
 #include "moc_qquickwebpage_p.cpp"

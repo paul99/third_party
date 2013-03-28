@@ -20,7 +20,7 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  */
 
@@ -33,6 +33,7 @@
 #include "EventListener.h"
 #include "EventNames.h"
 #include "EventTarget.h"
+#include "GroupSettings.h"
 #include "ScriptExecutionContext.h"
 #include "WorkerEventQueue.h"
 #include "WorkerScriptController.h"
@@ -47,17 +48,7 @@
 namespace WebCore {
 
     class Blob;
-    class DOMFileSystemSync;
     class DOMURL;
-    class Database;
-    class DatabaseCallback;
-    class DatabaseSync;
-    class EntryCallback;
-    class EntrySync;
-    class ErrorCallback;
-    class FileSystemCallback;
-    class IDBFactory;
-    class NotificationCenter;
     class ScheduledAction;
     class WorkerInspectorController;
     class WorkerLocation;
@@ -78,9 +69,10 @@ namespace WebCore {
         const KURL& url() const { return m_url; }
         KURL completeURL(const String&) const;
 
+        const GroupSettings* groupSettings() { return m_groupSettings.get(); }
         virtual String userAgent(const KURL&) const;
 
-        virtual void disableEval();
+        virtual void disableEval(const String& errorMessage);
 
         WorkerScriptController* script() { return m_script.get(); }
         void clearScript() { m_script.clear(); }
@@ -114,38 +106,9 @@ namespace WebCore {
         // ScriptExecutionContext
         virtual WorkerEventQueue* eventQueue() const;
 
-#if ENABLE(NOTIFICATIONS)
-        NotificationCenter* webkitNotifications() const;
-#endif
-
-#if ENABLE(SQL_DATABASE)
-        // HTML 5 client-side database
-        PassRefPtr<Database> openDatabase(const String& name, const String& version, const String& displayName, unsigned long estimatedSize, PassRefPtr<DatabaseCallback> creationCallback, ExceptionCode&);
-        PassRefPtr<DatabaseSync> openDatabaseSync(const String& name, const String& version, const String& displayName, unsigned long estimatedSize, PassRefPtr<DatabaseCallback> creationCallback, ExceptionCode&);
-
-        // Not implemented yet.
-        virtual bool allowDatabaseAccess() const { return true; }
-        // Not implemented for real yet.
-        virtual void databaseExceededQuota(const String&);
-#endif
         virtual bool isContextThread() const;
         virtual bool isJSExecutionForbidden() const;
 
-#if ENABLE(BLOB)
-        DOMURL* webkitURL() const;
-#endif
-
-#if ENABLE(FILE_SYSTEM)
-        enum FileSystemType {
-            TEMPORARY,
-            PERSISTENT,
-            EXTERNAL,
-        };
-        void webkitRequestFileSystem(int type, long long size, PassRefPtr<FileSystemCallback> successCallback, PassRefPtr<ErrorCallback>);
-        PassRefPtr<DOMFileSystemSync> webkitRequestFileSystemSync(int type, long long size, ExceptionCode&);
-        void webkitResolveLocalFileSystemURL(const String& url, PassRefPtr<EntryCallback> successCallback, PassRefPtr<ErrorCallback>);
-        PassRefPtr<EntrySync> webkitResolveLocalFileSystemSyncURL(const String& url, ExceptionCode&);
-#endif
 #if ENABLE(INSPECTOR)
         WorkerInspectorController* workerInspectorController() { return m_workerInspectorController.get(); }
 #endif
@@ -174,15 +137,15 @@ namespace WebCore {
         void registerObserver(Observer*);
         void unregisterObserver(Observer*);
         void notifyObserversOfStop();
-#if ENABLE(INDEXED_DATABASE)
-        IDBFactory* webkitIndexedDB() const;
-#endif
+
+        const SecurityOrigin* topOrigin() const { return m_topOrigin.get(); }
 
     protected:
-        WorkerContext(const KURL&, const String&, WorkerThread*, const String& contentSecurityPolicy, ContentSecurityPolicy::HeaderType);
+        WorkerContext(const KURL&, const String& userAgent, PassOwnPtr<GroupSettings>, WorkerThread*, PassRefPtr<SecurityOrigin> topOrigin);
+        void applyContentSecurityPolicyFromString(const String& contentSecurityPolicy, ContentSecurityPolicy::HeaderType);
 
         virtual void logExceptionToConsole(const String& errorMessage, const String& sourceURL, int lineNumber, PassRefPtr<ScriptCallStack>);
-        void addMessageToWorkerConsole(MessageSource, MessageType, MessageLevel, const String& message, const String& sourceURL, unsigned lineNumber, PassRefPtr<ScriptCallStack>);
+        void addMessageToWorkerConsole(MessageSource, MessageLevel, const String& message, const String& sourceURL, unsigned lineNumber, PassRefPtr<ScriptCallStack>, ScriptState* = 0, unsigned long requestIdentifier = 0);
 
     private:
         virtual void refScriptExecutionContext() { ref(); }
@@ -196,12 +159,14 @@ namespace WebCore {
         virtual const KURL& virtualURL() const;
         virtual KURL virtualCompleteURL(const String&) const;
 
-        virtual void addMessage(MessageSource, MessageType, MessageLevel, const String& message, const String& sourceURL, unsigned lineNumber, PassRefPtr<ScriptCallStack>);
+        virtual void addMessage(MessageSource, MessageLevel, const String& message, const String& sourceURL, unsigned lineNumber, PassRefPtr<ScriptCallStack>, ScriptState* = 0, unsigned long requestIdentifier = 0);
+        virtual void addConsoleMessage(MessageSource, MessageLevel, const String& message, unsigned long requestIdentifier = 0);
 
         virtual EventTarget* errorEventTarget();
 
         KURL m_url;
         String m_userAgent;
+        OwnPtr<GroupSettings> m_groupSettings;
 
         mutable RefPtr<WorkerLocation> m_location;
         mutable RefPtr<WorkerNavigator> m_navigator;
@@ -209,9 +174,6 @@ namespace WebCore {
         OwnPtr<WorkerScriptController> m_script;
         WorkerThread* m_thread;
 
-#if ENABLE_NOTIFICATIONS
-        mutable RefPtr<NotificationCenter> m_notifications;
-#endif
 #if ENABLE(BLOB)
         mutable RefPtr<DOMURL> m_domURL;
 #endif
@@ -225,11 +187,7 @@ namespace WebCore {
 
         OwnPtr<WorkerEventQueue> m_eventQueue;
 
-#if ENABLE(INDEXED_DATABASE)
-        mutable RefPtr<IDBFactory> m_idbFactory;
-        mutable RefPtr<IDBFactoryBackendInterface> m_idbFactoryBackendInterface;
-#endif
-
+        RefPtr<SecurityOrigin> m_topOrigin;
     };
 
 } // namespace WebCore

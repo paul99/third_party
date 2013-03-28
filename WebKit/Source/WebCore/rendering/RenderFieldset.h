@@ -32,7 +32,8 @@ class RenderFieldset : public RenderBlock {
 public:
     explicit RenderFieldset(Node*);
 
-    RenderBox* findLegend() const;
+    enum FindLegendOption { IgnoreFloatingOrOutOfFlow, IncludeFloatingOrOutOfFlow };
+    RenderBox* findLegend(FindLegendOption = IgnoreFloatingOrOutOfFlow) const;
 
 private:
     virtual const char* renderName() const { return "RenderFieldSet"; }
@@ -42,7 +43,7 @@ private:
 
     virtual void computePreferredLogicalWidths();
     virtual bool avoidsFloats() const { return true; }
-    virtual bool stretchesToMinIntrinsicLogicalWidth() const { return true; }
+    virtual bool stretchesToMinIntrinsicLogicalWidth() const OVERRIDE;
 
     virtual void paintBoxDecorations(PaintInfo&, const LayoutPoint&);
     virtual void paintMask(PaintInfo&, const LayoutPoint&);

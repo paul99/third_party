@@ -62,7 +62,7 @@ bool XMLTreeViewer::hasNoStyleInformation() const
     if (!m_document->frame()->page()->settings()->developerExtrasEnabled())
         return false;
 
-    if (m_document->frame()->tree()->parent(true))
+    if (m_document->frame()->tree()->parent())
         return false; // This document is not in a top frame
 
     return true;
@@ -80,7 +80,7 @@ void XMLTreeViewer::transformDocumentToTreeView()
     RefPtr<Text> text = m_document->createTextNode(cssString);
     ExceptionCode exceptionCode;
     m_document->getElementById("xml-viewer-style")->appendChild(text, exceptionCode);
-    m_document->styleSelectorChanged(RecalcStyleImmediately);
+    m_document->styleResolverChanged(RecalcStyleImmediately);
 }
 
 } // namespace WebCore

@@ -65,7 +65,7 @@ public:
 #if ENABLE(TOUCH_EVENTS)
     virtual bool handleTouchEvent(const PlatformTouchEvent&);
 #endif
-#if ENABLE(GESTURE_RECOGNIZER)
+#if ENABLE(GESTURE_EVENTS)
     virtual bool handleGestureEvent(const PlatformGestureEvent&);
 #endif
 
@@ -99,7 +99,7 @@ public:
     int selectedIndex() const;
 
     // Refresh the popup values from the PopupMenuClient.
-    void refresh(const IntRect& targetControlRect);
+    IntRect refresh(const IntRect& targetControlRect);
 
     // The menu per-item data.
     const WTF::Vector<PopupItem*>& popupData() const;
@@ -118,6 +118,10 @@ public:
     // While hovering popup menu window, we want to show tool tip message.
     String getSelectedItemToolTip();
 
+    // This is public for testing.
+    static IntRect layoutAndCalculateWidgetRectInternal(IntRect widgetRectInScreen, int targetControlHeight, const FloatRect& windowRect, const FloatRect& screen, bool isRTL, const int rtlOffset, PopupContent*, bool& needToResizeView);
+
+
 private:
     friend class WTF::RefCounted<PopupContainer>;
 
@@ -130,6 +134,8 @@ private:
     // Layout and calculate popup widget size and location and returns it as IntRect.
     IntRect layoutAndCalculateWidgetRect(int targetControlHeight, const IntPoint& popupInitialCoordinate);
 
+    void fitToListBox();
+
     // Returns the ChromeClient of the page this popup is associated with.
     ChromeClientChromium* chromeClientChromium();
 
@@ -138,7 +144,13 @@ private:
 
     PopupContainerSettings m_settings;
     PopupType m_popupType;
+
+    // This contains the "ideal" dimensions and position for the popup
+    // (PopupContainer's frameRect() location should always be (0, 0), since
+    // it is rendered inside (and relative to) a WebWidget, which should get
+    // the actual popup position through chromeClientChromium()).
     IntRect m_originalFrameRect;
+
     // Whether the popup is currently open.
     bool m_popupOpen;
 };

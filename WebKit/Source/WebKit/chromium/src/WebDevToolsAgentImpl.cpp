@@ -32,41 +32,50 @@
 #include "WebDevToolsAgentImpl.h"
 
 #include "ExceptionCode.h"
+#include "Frame.h"
+#include "FrameView.h"
 #include "GraphicsContext.h"
 #include "InjectedScriptHost.h"
 #include "InspectorBackendDispatcher.h"
 #include "InspectorController.h"
 #include "InspectorFrontend.h"
-#include "InspectorInstrumentation.h"
 #include "InspectorProtocolVersion.h"
 #include "MemoryCache.h"
 #include "Page.h"
 #include "PageGroup.h"
 #include "PageScriptDebugServer.h"
 #include "painting/GraphicsContextBuilder.h"
-#include "PlatformString.h"
+#include "RenderView.h"
 #include "ResourceError.h"
 #include "ResourceRequest.h"
 #include "ResourceResponse.h"
 #include "V8Binding.h"
-#include "V8Proxy.h"
 #include "V8Utilities.h"
 #include "WebDataSource.h"
 #include "WebDevToolsAgentClient.h"
 #include "WebFrameImpl.h"
-#include "platform/WebRect.h"
-#include "platform/WebString.h"
-#include "platform/WebURL.h"
-#include "platform/WebURLError.h"
-#include "platform/WebURLRequest.h"
-#include "platform/WebURLResponse.h"
 #include "WebViewClient.h"
 #include "WebViewImpl.h"
+#include <public/Platform.h>
+#include <public/WebRect.h>
+#include <public/WebString.h>
+#include <public/WebURL.h>
+#include <public/WebURLError.h>
+#include <public/WebURLRequest.h>
+#include <public/WebURLResponse.h>
 #include <wtf/CurrentTime.h>
+#include <wtf/MathExtras.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/OwnPtr.h>
+#include <wtf/text/WTFString.h>
 
 using namespace WebCore;
+using namespace std;
+
+namespace OverlayZOrders {
+// Use 99 as a big z-order number so that highlight is above other overlays.
+static const int highlight = 99;
+}
 
 namespace WebKit {
 
@@ -173,6 +182,183 @@ private:
     OwnPtr<WebDevToolsAgent::MessageDescriptor> m_descriptor;
 };
 
+class DeviceMetricsSupport {
+public:
+    DeviceMetricsSupport(WebViewImpl* webView)
+        : m_webView(webView)
+        , m_fitWindow(false)
+        , m_originalZoomFactor(0)
+    {
+    }
+
+    ~DeviceMetricsSupport()
+    {
+        restore();
+    }
+
+    void setDeviceMetrics(int width, int height, float textZoomFactor, bool fitWindow)
+    {
+        WebCore::FrameView* view = frameView();
+        if (!view)
+            return;
+
+        m_emulatedFrameSize = WebSize(width, height);
+        m_fitWindow = fitWindow;
+        m_originalZoomFactor = 0;
+        m_webView->setEmulatedTextZoomFactor(textZoomFactor);
+        applySizeOverrideInternal(view, FitWindowAllowed);
+        autoZoomPageToFitWidth(view->frame());
+
+        m_webView->sendResizeEventAndRepaint();
+    }
+
+    void autoZoomPageToFitWidthOnNavigation(Frame* frame)
+    {
+        FrameView* frameView = frame->view();
+        applySizeOverrideInternal(frameView, FitWindowNotAllowed);
+        m_originalZoomFactor = 0;
+        applySizeOverrideInternal(frameView, FitWindowAllowed);
+        autoZoomPageToFitWidth(frame);
+    }
+
+    void autoZoomPageToFitWidth(Frame* frame)
+    {
+        if (!frame)
+            return;
+
+        frame->setTextZoomFactor(m_webView->emulatedTextZoomFactor());
+        ensureOriginalZoomFactor(frame->view());
+        Document* document = frame->document();
+        float numerator = document->renderView() ? document->renderView()->viewWidth() : frame->view()->contentsWidth();
+        float factor = m_originalZoomFactor * (numerator / m_emulatedFrameSize.width);
+        frame->setPageAndTextZoomFactors(factor, m_webView->emulatedTextZoomFactor());
+        document->styleResolverChanged(RecalcStyleImmediately);
+        document->updateLayout();
+    }
+
+    void webViewResized()
+    {
+        if (!m_fitWindow)
+            return;
+
+        applySizeOverrideIfNecessary();
+        autoZoomPageToFitWidth(m_webView->mainFrameImpl()->frame());
+    }
+
+    void applySizeOverrideIfNecessary()
+    {
+        FrameView* view = frameView();
+        if (!view)
+            return;
+
+        applySizeOverrideInternal(view, FitWindowAllowed);
+    }
+
+private:
+    enum FitWindowFlag { FitWindowAllowed, FitWindowNotAllowed };
+
+    void ensureOriginalZoomFactor(FrameView* frameView)
+    {
+        if (m_originalZoomFactor)
+            return;
+
+        m_webView->setPageScaleFactor(1, WebPoint());
+        m_webView->setZoomLevel(false, 0);
+        WebSize scaledEmulatedSize = scaledEmulatedFrameSize(frameView);
+        double denominator = frameView->contentsWidth();
+        if (!denominator)
+            denominator = 1;
+        m_originalZoomFactor = static_cast<double>(scaledEmulatedSize.width) / denominator;
+    }
+
+    void restore()
+    {
+        WebCore::FrameView* view = frameView();
+        if (!view)
+            return;
+
+        m_webView->setZoomLevel(false, 0);
+        m_webView->setEmulatedTextZoomFactor(1);
+        view->setHorizontalScrollbarLock(false);
+        view->setVerticalScrollbarLock(false);
+        view->setScrollbarModes(ScrollbarAuto, ScrollbarAuto, false, false);
+        view->setFrameRect(IntRect(IntPoint(), IntSize(m_webView->size())));
+        m_webView->sendResizeEventAndRepaint();
+    }
+
+    WebSize scaledEmulatedFrameSize(FrameView* frameView)
+    {
+        if (!m_fitWindow)
+            return m_emulatedFrameSize;
+
+        WebSize scrollbarDimensions = forcedScrollbarDimensions(frameView);
+
+        int overrideWidth = m_emulatedFrameSize.width;
+        int overrideHeight = m_emulatedFrameSize.height;
+
+        WebSize webViewSize = m_webView->size();
+        int availableViewWidth = max(webViewSize.width - scrollbarDimensions.width, 1);
+        int availableViewHeight = max(webViewSize.height - scrollbarDimensions.height, 1);
+
+        double widthRatio = static_cast<double>(overrideWidth) / availableViewWidth;
+        double heightRatio = static_cast<double>(overrideHeight) / availableViewHeight;
+        double dimensionRatio = max(widthRatio, heightRatio);
+        overrideWidth = static_cast<int>(ceil(static_cast<double>(overrideWidth) / dimensionRatio));
+        overrideHeight = static_cast<int>(ceil(static_cast<double>(overrideHeight) / dimensionRatio));
+
+        return WebSize(overrideWidth, overrideHeight);
+    }
+
+    WebSize forcedScrollbarDimensions(FrameView* frameView)
+    {
+        frameView->setScrollbarModes(ScrollbarAlwaysOn, ScrollbarAlwaysOn, true, true);
+
+        int verticalScrollbarWidth = 0;
+        int horizontalScrollbarHeight = 0;
+        if (Scrollbar* verticalBar = frameView->verticalScrollbar())
+            verticalScrollbarWidth = !verticalBar->isOverlayScrollbar() ? verticalBar->width() : 0;
+        if (Scrollbar* horizontalBar = frameView->horizontalScrollbar())
+            horizontalScrollbarHeight = !horizontalBar->isOverlayScrollbar() ? horizontalBar->height() : 0;
+        return WebSize(verticalScrollbarWidth, horizontalScrollbarHeight);
+    }
+
+    void applySizeOverrideInternal(FrameView* frameView, FitWindowFlag fitWindowFlag)
+    {
+        WebSize scrollbarDimensions = forcedScrollbarDimensions(frameView);
+
+        WebSize effectiveEmulatedSize = (fitWindowFlag == FitWindowAllowed) ? scaledEmulatedFrameSize(frameView) : m_emulatedFrameSize;
+        int overrideWidth = effectiveEmulatedSize.width + scrollbarDimensions.width;
+        int overrideHeight = effectiveEmulatedSize.height + scrollbarDimensions.height;
+
+        if (IntSize(overrideWidth, overrideHeight) != frameView->size())
+            frameView->resize(overrideWidth, overrideHeight);
+
+        Document* doc = frameView->frame()->document();
+        doc->styleResolverChanged(RecalcStyleImmediately);
+        doc->updateLayout();
+    }
+
+    WebCore::FrameView* frameView()
+    {
+        return m_webView->mainFrameImpl() ? m_webView->mainFrameImpl()->frameView() : 0;
+    }
+
+    WebViewImpl* m_webView;
+    WebSize m_emulatedFrameSize;
+    bool m_fitWindow;
+    double m_originalZoomFactor;
+};
+
+class SerializingFrontendChannel : public InspectorFrontendChannel {
+public:
+    virtual bool sendMessageToFrontend(const String& message)
+    {
+        m_message = message;
+        return true;
+    }
+    String m_message;
+};
+
 WebDevToolsAgentImpl::WebDevToolsAgentImpl(
     WebViewImpl* webViewImpl,
     WebDevToolsAgentClient* client)
@@ -187,6 +373,8 @@ WebDevToolsAgentImpl::WebDevToolsAgentImpl(
 WebDevToolsAgentImpl::~WebDevToolsAgentImpl()
 {
     ClientMessageLoopAdapter::inspectedViewClosed(m_webViewImpl);
+    if (m_attached)
+        WebKit::Platform::current()->currentThread()->removeTaskObserver(this);
 }
 
 void WebDevToolsAgentImpl::attach()
@@ -195,7 +383,9 @@ void WebDevToolsAgentImpl::attach()
         return;
 
     ClientMessageLoopAdapter::ensureClientMessageLoopCreated(m_client);
-    inspectorController()->connectFrontend();
+    inspectorController()->connectFrontend(this);
+    inspectorController()->webViewResized(m_webViewImpl->size());
+    WebKit::Platform::current()->currentThread()->addTaskObserver(this);
     m_attached = true;
 }
 
@@ -205,12 +395,14 @@ void WebDevToolsAgentImpl::reattach(const WebString& savedState)
         return;
 
     ClientMessageLoopAdapter::ensureClientMessageLoopCreated(m_client);
-    inspectorController()->restoreInspectorStateFromCookie(savedState);
+    inspectorController()->reconnectFrontend(this, savedState);
     m_attached = true;
 }
 
 void WebDevToolsAgentImpl::detach()
 {
+    WebKit::Platform::current()->currentThread()->removeTaskObserver(this);
+
     // Prevent controller from sending messages to the frontend.
     InspectorController* ic = inspectorController();
     ic->disconnectFrontend();
@@ -224,11 +416,154 @@ void WebDevToolsAgentImpl::didNavigate()
     ClientMessageLoopAdapter::didNavigate();
 }
 
-void WebDevToolsAgentImpl::didClearWindowObject(WebFrameImpl* webframe)
+void WebDevToolsAgentImpl::didCreateScriptContext(WebFrameImpl* webframe, int worldId)
 {
-    WebCore::V8Proxy* proxy = WebCore::V8Proxy::retrieve(webframe->frame());
-    if (proxy && webframe->frame()->script()->canExecuteScripts(NotAboutToExecuteScript))
-        proxy->setContextDebugId(m_hostId);
+    // Skip non main world contexts.
+    if (worldId)
+        return;
+    if (WebCore::Frame* frame = webframe->frame())
+        frame->script()->setContextDebugId(m_hostId);
+}
+
+void WebDevToolsAgentImpl::mainFrameViewCreated(WebFrameImpl* webFrame)
+{
+    if (m_metricsSupport)
+        m_metricsSupport->applySizeOverrideIfNecessary();
+}
+
+bool WebDevToolsAgentImpl::metricsOverridden()
+{
+    return !!m_metricsSupport;
+}
+
+void WebDevToolsAgentImpl::webViewResized(const WebSize& size)
+{
+    if (m_metricsSupport)
+        m_metricsSupport->webViewResized();
+    if (InspectorController* ic = inspectorController())
+        ic->webViewResized(m_metricsSupport ? IntSize(size.width, size.height) : IntSize());
+}
+
+void WebDevToolsAgentImpl::overrideDeviceMetrics(int width, int height, float fontScaleFactor, bool fitWindow)
+{
+    if (!width && !height) {
+        if (m_metricsSupport)
+            m_metricsSupport.clear();
+        if (InspectorController* ic = inspectorController())
+            ic->webViewResized(IntSize());
+        return;
+    }
+
+    if (!m_metricsSupport)
+        m_metricsSupport = adoptPtr(new DeviceMetricsSupport(m_webViewImpl));
+
+    m_metricsSupport->setDeviceMetrics(width, height, fontScaleFactor, fitWindow);
+    if (InspectorController* ic = inspectorController()) {
+        WebSize size = m_webViewImpl->size();
+        ic->webViewResized(IntSize(size.width, size.height));
+    }
+}
+
+void WebDevToolsAgentImpl::autoZoomPageToFitWidth()
+{
+    if (m_metricsSupport)
+        m_metricsSupport->autoZoomPageToFitWidthOnNavigation(m_webViewImpl->mainFrameImpl()->frame());
+}
+
+void WebDevToolsAgentImpl::getAllocatedObjects(HashSet<const void*>& set)
+{
+    class CountingVisitor : public WebDevToolsAgentClient::AllocatedObjectVisitor {
+    public:
+        CountingVisitor() : m_totalObjectsCount(0)
+        {
+        }
+
+        virtual bool visitObject(const void* ptr)
+        {
+            ++m_totalObjectsCount;
+            return true;
+        }
+        size_t totalObjectsCount() const
+        {
+            return m_totalObjectsCount;
+        }
+
+    private:
+        size_t m_totalObjectsCount;
+    };
+
+    CountingVisitor counter;
+    m_client->visitAllocatedObjects(&counter);
+
+    class PointerCollector : public WebDevToolsAgentClient::AllocatedObjectVisitor {
+    public:
+        explicit PointerCollector(size_t maxObjectsCount)
+            : m_maxObjectsCount(maxObjectsCount)
+            , m_index(0)
+            , m_success(true)
+            , m_pointers(new const void*[maxObjectsCount])
+        {
+        }
+        virtual ~PointerCollector()
+        {
+            delete[] m_pointers;
+        }
+        virtual bool visitObject(const void* ptr)
+        {
+            if (m_index == m_maxObjectsCount) {
+                m_success = false;
+                return false;
+            }
+            m_pointers[m_index++] = ptr;
+            return true;
+        }
+
+        bool success() const { return m_success; }
+
+        void copyTo(HashSet<const void*>& set)
+        {
+            for (size_t i = 0; i < m_index; i++)
+                set.add(m_pointers[i]);
+        }
+
+    private:
+        const size_t m_maxObjectsCount;
+        size_t m_index;
+        bool m_success;
+        const void** m_pointers;
+    };
+
+    // Double size to allow room for all objects that may have been allocated
+    // since we counted them.
+    size_t estimatedMaxObjectsCount = counter.totalObjectsCount() * 2;
+    while (true) {
+        PointerCollector collector(estimatedMaxObjectsCount);
+        m_client->visitAllocatedObjects(&collector);
+        if (collector.success()) {
+            collector.copyTo(set);
+            break;
+        }
+        estimatedMaxObjectsCount *= 2;
+    }
+}
+
+void WebDevToolsAgentImpl::dumpUncountedAllocatedObjects(const HashMap<const void*, size_t>& map)
+{
+    class InstrumentedObjectSizeProvider : public WebDevToolsAgentClient::InstrumentedObjectSizeProvider {
+    public:
+        InstrumentedObjectSizeProvider(const HashMap<const void*, size_t>& map) : m_map(map) { }
+        virtual size_t objectSize(const void* ptr) const
+        {
+            HashMap<const void*, size_t>::const_iterator i = m_map.find(ptr);
+            return i == m_map.end() ? 0 : i->value;
+        }
+
+    private:
+        const HashMap<const void*, size_t>& m_map;
+    };
+
+    InstrumentedObjectSizeProvider provider(map);
+    m_client->dumpUncountedAllocatedObjects(&provider);
 }
 
 void WebDevToolsAgentImpl::dispatchOnInspectorBackend(const WebString& message)
@@ -260,8 +595,9 @@ void WebDevToolsAgentImpl::inspectorDestroyed()
     // Our lifetime is bound to the WebViewImpl.
 }
 
-void WebDevToolsAgentImpl::openInspectorFrontend(InspectorController*)
+InspectorFrontendChannel* WebDevToolsAgentImpl::openInspectorFrontend(InspectorController*)
 {
+    return 0;
 }
 
 void WebDevToolsAgentImpl::closeInspectorFrontend()
@@ -282,8 +618,7 @@ void WebDevToolsAgentImpl::paintPageOverlay(WebCanvas* canvas)
 
 void WebDevToolsAgentImpl::highlight()
 {
-    // Use 99 as a big z-order number so that highlight is above other overlays.
-    m_webViewImpl->addPageOverlay(this, 99);
+    m_webViewImpl->addPageOverlay(this, OverlayZOrders::highlight);
 }
 
 void WebDevToolsAgentImpl::hideHighlight()
@@ -327,13 +662,16 @@ void WebDevToolsAgentImpl::evaluateInWebInspector(long callId, const WebString& 
     ic->evaluateForTestInFrontend(callId, script);
 }
 
-void WebDevToolsAgentImpl::setJavaScriptProfilingEnabled(bool enabled)
+void WebDevToolsAgentImpl::willProcessTask()
 {
-    InspectorController* ic = inspectorController();
-    if (enabled)
-        ic->enableProfiler();
-    else
-        ic->disableProfiler();
+    if (InspectorController* ic = inspectorController())
+        ic->willProcessTask();
+}
+
+void WebDevToolsAgentImpl::didProcessTask()
+{
+    if (InspectorController* ic = inspectorController())
+        ic->didProcessTask();
 }
 
 WebString WebDevToolsAgent::inspectorProtocolVersion()
@@ -374,26 +712,28 @@ void WebDevToolsAgent::processPendingMessages()
     PageScriptDebugServer::shared().runPendingTasks();
 }
 
-WebString WebDevToolsAgent::disconnectEventAsText()
+WebString WebDevToolsAgent::inspectorDetachedEvent(const WebString& reason)
 {
-#if ENABLE(WORKERS)
-    class ChannelImpl : public InspectorFrontendChannel {
-    public:
-        virtual bool sendMessageToFrontend(const String& message)
-        {
-            m_message = message;
-            return true;
-        }
-        String m_message;
-    } channel;
+    SerializingFrontendChannel channel;
+    InspectorFrontend::Inspector inspector(&channel);
+    inspector.detached(reason);
+    return channel.m_message;
+}
+
+WebString WebDevToolsAgent::workerDisconnectedFromWorkerEvent()
+{
+    SerializingFrontendChannel channel;
 #if ENABLE(WORKERS)
     InspectorFrontend::Worker inspector(&channel);
     inspector.disconnectedFromWorker();
 #endif
     return channel.m_message;
-#else
-    return WebString();
-#endif
+}
+
+// FIXME: remove this once migrated to workerDisconnectedFromWorkerEvent().
+WebString WebDevToolsAgent::disconnectEventAsText()
+{
+    return WebDevToolsAgent::workerDisconnectedFromWorkerEvent();
 }
 
 } // namespace WebKit

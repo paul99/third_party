@@ -39,13 +39,13 @@
 #include "WebFileInfo.h"
 #include "WebFileSystemCallbacks.h"
 #include "WebFileSystemEntry.h"
-#include "platform/WebString.h"
-#include "platform/WebURL.h"
 #include "WebWorkerBase.h"
 #include "WorkerContext.h"
 #include "WorkerLoaderProxy.h"
 #include "WorkerScriptController.h"
 #include "WorkerThread.h"
+#include <public/WebString.h>
+#include <public/WebURL.h>
 #include <wtf/MainThread.h>
 #include <wtf/Threading.h>
 #include <wtf/UnusedParam.h>
@@ -289,6 +289,15 @@ void WorkerFileSystemCallbacksBridge::postReadDirectoryToMainThread(WebFileSyste
                            this, mode));
 }
 
+void WorkerFileSystemCallbacksBridge::postCreateSnapshotFileToMainThread(WebFileSystem* fileSystem, const KURL& internalBlobURL, const KURL& path, const String& mode)
+{
+    ASSERT(fileSystem);
+    dispatchTaskToMainThread(
+        createCallbackTask(&createSnapshotFileOnMainThread,
+                           AllowCrossThreadAccess(fileSystem),
+                           internalBlobURL, path, this, mode));
+}
+
 void WorkerFileSystemCallbacksBridge::openFileSystemOnMainThread(ScriptExecutionContext*, WebCommonWorkerClient* commonClient, WebFileSystem::Type type, long long size, bool create, PassRefPtr<WorkerFileSystemCallbacksBridge> bridge, const String& mode)
 {
     if (!commonClient)
@@ -346,6 +355,11 @@ void WorkerFileSystemCallbacksBridge::directoryExistsOnMainThread(WebCore::Scrip
 void WorkerFileSystemCallbacksBridge::readDirectoryOnMainThread(WebCore::ScriptExecutionContext*, WebFileSystem* fileSystem, const KURL& path, PassRefPtr<WorkerFileSystemCallbacksBridge> bridge, const String& mode)
 {
     fileSystem->readDirectory(path, MainThreadFileSystemCallbacks::createLeakedPtr(bridge, mode));
+}
+
+void WorkerFileSystemCallbacksBridge::createSnapshotFileOnMainThread(WebCore::ScriptExecutionContext*, WebFileSystem* fileSystem, const KURL& internalBlobURL, const KURL& path, PassRefPtr<WorkerFileSystemCallbacksBridge> bridge, const String& mode)
+{
+    fileSystem->createSnapshotFileAndReadMetadata(internalBlobURL, path, MainThreadFileSystemCallbacks::createLeakedPtr(bridge, mode));
 }
 
 void WorkerFileSystemCallbacksBridge::didFailOnMainThread(WebFileError error, const String& mode)

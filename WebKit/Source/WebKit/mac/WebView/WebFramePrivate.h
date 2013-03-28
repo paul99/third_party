@@ -87,9 +87,6 @@ typedef enum {
 
 - (unsigned)_pendingFrameUnloadEventCount;
 
-- (void)_setIsDisconnected:(bool)isDisconnected;
-- (void)_setExcludeFromTextSearch:(bool)exclude;
-
 #if ENABLE_NETSCAPE_PLUGIN_API
 - (void)_recursive_resumeNullEventsForAllNetscapePlugins;
 - (void)_recursive_pauseNullEventsForAllNetscapePlugins;
@@ -104,16 +101,8 @@ typedef enum {
 - (BOOL)_pauseAnimation:(NSString*)name onNode:(DOMNode *)node atTime:(NSTimeInterval)time;
 - (BOOL)_pauseTransitionOfProperty:(NSString*)name onNode:(DOMNode*)node atTime:(NSTimeInterval)time;
 
-// Pause a given SVG animation on the target node at a specific time.
-// This method is only intended to be used for testing the SVG animation system.
-- (BOOL)_pauseSVGAnimation:(NSString*)elementId onSMILNode:(DOMNode *)node atTime:(NSTimeInterval)time;
-
 // Returns the total number of currently running animations (includes both CSS transitions and CSS animations).
 - (unsigned)_numberOfActiveAnimations;
-
-// Suspend and resume animations (includes both CSS transitions and CSS animations).
-- (void)_suspendAnimations;
-- (void)_resumeAnimations;
 
 - (void)_replaceSelectionWithFragment:(DOMDocumentFragment *)fragment selectReplacement:(BOOL)selectReplacement smartReplace:(BOOL)smartReplace matchStyle:(BOOL)matchStyle;
 - (void)_replaceSelectionWithText:(NSString *)text selectReplacement:(BOOL)selectReplacement smartReplace:(BOOL)smartReplace;
@@ -139,11 +128,6 @@ typedef enum {
 - (void)setAccessibleName:(NSString *)name;
 
 - (NSString*)_layerTreeAsText;
-
-// Returns whether there is a spelling marker in the specified range of the focused node.
-- (BOOL)hasSpellingMarker:(int)location length:(int)length;
-
-- (BOOL)hasGrammarMarker:(int)from length:(int)length;
 
 // The top of the accessibility tree.
 - (id)accessibilityRoot;

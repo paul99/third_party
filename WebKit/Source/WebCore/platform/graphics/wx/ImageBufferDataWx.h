@@ -23,7 +23,19 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "OwnPtr.h"
+#include <wtf/OwnPtr.h>
+
+// see http://trac.wxwidgets.org/ticket/11482
+#ifdef __WXMSW__
+#   include "wx/msw/winundef.h"
+#endif
+
+#include <wx/bitmap.h>
+#include <wx/dcmemory.h>
+
+class wxGCDC;
+class wxGraphicsContext;
+class wxMemoryDC;
 
 namespace WebCore {
 
@@ -32,6 +44,11 @@ class IntSize;
 class ImageBufferData {
 public:
     ImageBufferData(const IntSize&);
+    ~ImageBufferData();
+    wxBitmap m_bitmap;
+    wxMemoryDC* m_memDC;
+    wxGCDC* m_gcdc;
+    wxGraphicsContext* m_graphics;
 };
 
 } // namespace WebCore

@@ -27,11 +27,11 @@
 #define ClipboardMac_h
 
 #include "CachedImage.h"
+#include "CachedImageClient.h"
 #include "Clipboard.h"
 #include <wtf/RetainPtr.h>
 
 OBJC_CLASS NSImage;
-OBJC_CLASS NSPasteboard;
 
 namespace WebCore {
 
@@ -41,22 +41,28 @@ class FileList;
 class ClipboardMac : public Clipboard, public CachedImageClient {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    static PassRefPtr<ClipboardMac> create(ClipboardType clipboardType, NSPasteboard *pasteboard, ClipboardAccessPolicy policy, Frame* frame)
+    enum ClipboardContents {
+        DragAndDropData,
+        DragAndDropFiles,
+        CopyAndPasteGeneric
+    };
+
+    static PassRefPtr<ClipboardMac> create(ClipboardType clipboardType, const String& pasteboardName, ClipboardAccessPolicy policy, ClipboardContents clipboardContents, Frame* frame)
     {
-        return adoptRef(new ClipboardMac(clipboardType, pasteboard, policy, frame));
+        return adoptRef(new ClipboardMac(clipboardType, pasteboardName, policy, clipboardContents, frame));
     }
 
     virtual ~ClipboardMac();
     
     void clearData(const String& type);
     void clearAllData();
-    String getData(const String& type, bool& success) const;
+    String getData(const String& type) const;
     bool setData(const String& type, const String& data);
     
     virtual bool hasData();
     
     // extensions beyond IE's API
-    virtual HashSet<String> types() const;
+    virtual ListHashSet<String> types() const;
     virtual PassRefPtr<FileList> files() const;
 
     void setDragImage(CachedImage*, const IntPoint&);
@@ -72,15 +78,16 @@ public:
     
     // Methods for getting info in Cocoa's type system
     NSImage *dragNSImage(NSPoint&) const; // loc converted from dragLoc, based on whole image size
-    NSPasteboard *pasteboard() { return m_pasteboard.get(); }
+    const String& pasteboardName() { return m_pasteboardName; }
 
 private:
-    ClipboardMac(ClipboardType, NSPasteboard *, ClipboardAccessPolicy, Frame*);
+    ClipboardMac(ClipboardType, const String& pasteboardName, ClipboardAccessPolicy, ClipboardContents, Frame*);
 
     void setDragImage(CachedImage*, Node*, const IntPoint&);
 
-    RetainPtr<NSPasteboard> m_pasteboard;
+    String m_pasteboardName;
     int m_changeCount;
+    ClipboardContents m_clipboardContents;
     Frame* m_frame; // used on the source side to generate dragging images
 };
 

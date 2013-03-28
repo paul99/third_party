@@ -46,7 +46,16 @@ public:
     virtual void computePreferredLogicalWidths();
     
     void paintIntoRect(GraphicsContext*, const LayoutPoint&, const LayoutRect&);
-    
+
+    // Scrollbar parts needs to be rendered at device pixel boundaries.
+    virtual LayoutUnit marginTop() const OVERRIDE { ASSERT(isIntegerValue(m_marginBox.top())); return m_marginBox.top(); }
+    virtual LayoutUnit marginBottom() const OVERRIDE { ASSERT(isIntegerValue(m_marginBox.bottom())); return m_marginBox.bottom(); }
+    virtual LayoutUnit marginLeft() const OVERRIDE { ASSERT(isIntegerValue(m_marginBox.left())); return m_marginBox.left(); }
+    virtual LayoutUnit marginRight() const OVERRIDE { ASSERT(isIntegerValue(m_marginBox.right())); return m_marginBox.right(); }
+
+    virtual bool isRenderScrollbarPart() const { return true; }
+    RenderObject* rendererOwningScrollbar() const;
+
 protected:
     virtual void styleWillChange(StyleDifference diff, const RenderStyle* newStyle);
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle);
@@ -62,6 +71,21 @@ private:
     RenderScrollbar* m_scrollbar;
     ScrollbarPart m_part;
 };
+
+inline RenderScrollbarPart* toRenderScrollbarPart(RenderObject* object)
+{
+    ASSERT(!object || object->isRenderScrollbarPart());
+    return static_cast<RenderScrollbarPart*>(object);
+}
+
+inline const RenderScrollbarPart* toRenderScrollbarPart(const RenderObject* object)
+{
+    ASSERT(!object || object->isRenderScrollbarPart());
+    return static_cast<const RenderScrollbarPart*>(object);
+}
+
+// This will catch anyone doing an unnecessary cast.
+void toRenderScrollbarPart(const RenderScrollbarPart*);
 
 } // namespace WebCore
 

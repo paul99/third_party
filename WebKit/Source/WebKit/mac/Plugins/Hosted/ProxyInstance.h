@@ -46,12 +46,15 @@ public:
     }
     ~ProxyInstance();
 
-    JSC::Bindings::MethodList methodsNamed(const JSC::Identifier&);
-    JSC::Bindings::Field* fieldNamed(const JSC::Identifier&);
+    JSC::Bindings::Method* methodNamed(JSC::PropertyName);
+    JSC::Bindings::Field* fieldNamed(JSC::PropertyName);
 
     JSC::JSValue fieldValue(JSC::ExecState*, const JSC::Bindings::Field*) const;
     void setFieldValue(JSC::ExecState*, const JSC::Bindings::Field*, JSC::JSValue) const;
     
+
+    NetscapePluginInstanceProxy* instanceProxy() { return m_instanceProxy; }
+
     void invalidate();
     
     uint32_t objectID() const { return m_objectID; }
@@ -63,7 +66,7 @@ private:
 
     virtual JSC::Bindings::Class* getClass() const;
 
-    virtual JSC::JSValue getMethod(JSC::ExecState* exec, const JSC::Identifier& propertyName);
+    virtual JSC::JSValue getMethod(JSC::ExecState*, JSC::PropertyName);
     virtual JSC::JSValue invokeMethod(JSC::ExecState*, JSC::RuntimeMethod*);
 
     virtual bool supportsInvokeDefaultMethod() const;

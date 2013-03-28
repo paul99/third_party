@@ -26,9 +26,11 @@
 #ifndef WebIDBObjectStore_h
 #define WebIDBObjectStore_h
 
-#include "WebExceptionCode.h"
 #include "WebDOMStringList.h"
+#include "WebExceptionCode.h"
 #include "WebIDBCallbacks.h"
+#include "WebIDBCursor.h"
+#include "WebIDBKeyPath.h"
 #include "WebIDBTransaction.h"
 #include "platform/WebCommon.h"
 #include "platform/WebString.h"
@@ -43,23 +45,7 @@ class WebIDBObjectStore {
 public:
     virtual ~WebIDBObjectStore() { }
 
-    virtual WebString name() const
-    {
-        WEBKIT_ASSERT_NOT_REACHED();
-        return WebString();
-    }
-    virtual WebString keyPath() const
-    {
-        WEBKIT_ASSERT_NOT_REACHED();
-        return WebString();
-    }
-    virtual WebDOMStringList indexNames() const
-    {
-        WEBKIT_ASSERT_NOT_REACHED();
-        return WebDOMStringList();
-    }
-
-    virtual void get(const WebIDBKey&, WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
+    virtual void get(const WebIDBKeyRange&, WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
 
     enum PutMode {
         AddOrUpdate,
@@ -67,22 +53,31 @@ public:
         CursorUpdate
     };
 
-    virtual void put(const WebSerializedScriptValue&, const WebIDBKey&, PutMode, WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
-    virtual void deleteFunction(const WebIDBKey&, WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
+    typedef WebVector<WebIDBKey> WebIndexKeys;
+
+    virtual void put(const WebSerializedScriptValue&, const WebIDBKey&, PutMode, WebIDBCallbacks*, const WebIDBTransaction&, const WebVector<long long>& indexIds, const WebVector<WebIndexKeys>&) { WEBKIT_ASSERT_NOT_REACHED(); }
+    virtual void deleteFunction(const WebIDBKeyRange&, WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
     virtual void clear(WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
-    virtual WebIDBIndex* createIndex(const WebString& name, const WebString& keyPath, bool unique, bool multiEntry, const WebIDBTransaction& transaction, WebExceptionCode& ec)
+    virtual WebIDBIndex* createIndex(const WebString&, const WebIDBKeyPath&, bool, bool, const WebIDBTransaction&, WebExceptionCode&)
     {
         WEBKIT_ASSERT_NOT_REACHED();
         return 0;
     }
+    virtual WebIDBIndex* createIndex(long long, const WebString&, const WebIDBKeyPath&, bool, bool, const WebIDBTransaction&, WebExceptionCode&)
+    {
+        WEBKIT_ASSERT_NOT_REACHED();
+        return 0;
+    }
+    virtual void setIndexKeys(const WebIDBKey&, const WebVector<long long>&, const WebVector<WebIndexKeys>&, const WebIDBTransaction&) { WEBKIT_ASSERT_NOT_REACHED(); }
+    virtual void setIndexesReady(const WebVector<long long>&, const WebIDBTransaction&) { WEBKIT_ASSERT_NOT_REACHED(); };
     // Transfers ownership of the WebIDBIndex to the caller.
-    virtual WebIDBIndex* index(const WebString& name, WebExceptionCode&)
+    virtual WebIDBIndex* index(long long)
     {
         WEBKIT_ASSERT_NOT_REACHED();
         return 0;
     }
-    virtual void deleteIndex(const WebString& name, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
-    virtual void openCursor(const WebIDBKeyRange&, unsigned short direction, WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
+    virtual void deleteIndex(long long indexId, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
+    virtual void openCursor(const WebIDBKeyRange&, WebIDBCursor::Direction direction, WebIDBCallbacks*, WebIDBTransaction::TaskType, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
     virtual void count(const WebIDBKeyRange&, WebIDBCallbacks*, const WebIDBTransaction&, WebExceptionCode&) { WEBKIT_ASSERT_NOT_REACHED(); }
 
 protected:

@@ -37,13 +37,17 @@
 
 namespace WebCore {
 
-static UScriptCode getScriptCode(const String& scriptName)
+UScriptCode scriptNameToCode(const String& scriptName)
 {
     struct ScriptNameCode {
         const char* name;
         UScriptCode code;
     };
 
+    // This generally maps an ISO 15924 script code to its UScriptCode, but certain families of script codes are
+    // treated as a single script for assigning a per-script font in Settings. For example, "hira" is mapped to
+    // USCRIPT_KATAKANA_OR_HIRAGANA instead of USCRIPT_HIRAGANA, since we want all Japanese scripts to be rendered
+    // using the same font setting.
     static const ScriptNameCode scriptNameCodeList[] = {
         { "zyyy", USCRIPT_COMMON },
         { "qaai", USCRIPT_INHERITED },
@@ -65,9 +69,9 @@ static UScriptCode getScriptCode(const String& scriptName)
         { "hani", USCRIPT_HAN },
         { "hang", USCRIPT_HANGUL },
         { "hebr", USCRIPT_HEBREW },
-        { "hira", USCRIPT_HIRAGANA },
+        { "hira", USCRIPT_KATAKANA_OR_HIRAGANA },
         { "knda", USCRIPT_KANNADA },
-        { "kana", USCRIPT_KATAKANA },
+        { "kana", USCRIPT_KATAKANA_OR_HIRAGANA },
         { "khmr", USCRIPT_KHMER },
         { "laoo", USCRIPT_LAO },
         { "latn", USCRIPT_LATIN },
@@ -147,6 +151,8 @@ static UScriptCode getScriptCode(const String& scriptName)
         { "vaii", USCRIPT_VAI },
         { "visp", USCRIPT_VISIBLE_SPEECH },
         { "xsux", USCRIPT_CUNEIFORM },
+        { "jpan", USCRIPT_KATAKANA_OR_HIRAGANA },
+        { "kore", USCRIPT_HANGUL },
         { "zxxx", USCRIPT_UNWRITTEN_LANGUAGES },
         { "zzzz", USCRIPT_UNKNOWN }
     };
@@ -158,9 +164,9 @@ static UScriptCode getScriptCode(const String& scriptName)
             scriptNameCodeMap.set(scriptNameCodeList[i].name, scriptNameCodeList[i].code);
     }
 
-    HashMap<String, UScriptCode>::iterator it = scriptNameCodeMap.find(scriptName);
+    HashMap<String, UScriptCode>::iterator it = scriptNameCodeMap.find(scriptName.lower());
     if (it != scriptNameCodeMap.end())
-        return it->second;
+        return it->value;
     return USCRIPT_INVALID_CODE;
 }
 
@@ -383,11 +389,11 @@ UScriptCode localeToScriptCodeForFontSelection(const String& locale)
     while (!canonicalLocale.isEmpty()) {
         HashMap<String, UScriptCode>::iterator it = localeScriptMap.find(canonicalLocale);
         if (it != localeScriptMap.end())
-            return it->second;
+            return it->value;
         size_t pos = canonicalLocale.reverseFind('_');
         if (pos == notFound)
             break;
-        UScriptCode code = getScriptCode(canonicalLocale.substring(pos + 1));
+        UScriptCode code = scriptNameToCode(canonicalLocale.substring(pos + 1));
         if (code != USCRIPT_INVALID_CODE && code != USCRIPT_UNKNOWN)
             return code;
         canonicalLocale = canonicalLocale.substring(0, pos);

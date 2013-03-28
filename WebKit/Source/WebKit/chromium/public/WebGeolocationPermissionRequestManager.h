@@ -60,3 +60,4 @@ private:
 }
 
 #endif // WebGeolocationPermissionRequestManager_h
+

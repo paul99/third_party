@@ -25,11 +25,16 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#if HAVE_CONFIG_H
-#include "config.h"
-#endif  // HAVE_CONFIG_H
-
 #if HAVE_OPENSSL_SSL_H
+
+#include "talk/base/openssladapter.h"
+
+#if defined(POSIX)
+#include <unistd.h>
+#endif
+
+// Must be included first before openssl headers.
+#include "talk/base/win32.h"  // NOLINT
 
 #include <openssl/bio.h>
 #include <openssl/crypto.h>
@@ -39,9 +44,12 @@
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 
+#if HAVE_CONFIG_H
+#include "config.h"
+#endif  // HAVE_CONFIG_H
+
 #include "talk/base/common.h"
 #include "talk/base/logging.h"
-#include "talk/base/openssladapter.h"
 #include "talk/base/sslroots.h"
 #include "talk/base/stringutils.h"
 
@@ -190,8 +198,11 @@ static void locking_function(int mode, int n, const char * file, int line) {
   }
 }
 
-static pthread_t id_function() {
-  return THREAD_ID;
+static unsigned long id_function() {  // NOLINT
+  // Use old-style C cast because THREAD_ID's type varies with the platform,
+  // in some cases requiring static_cast, and in others requiring
+  // reinterpret_cast.
+  return (unsigned long)THREAD_ID; // NOLINT
 }
 
 static CRYPTO_dynlock_value* dyn_create_function(const char* file, int line) {
@@ -237,8 +248,9 @@ bool OpenSSLAdapter::InitializeSSLThread() {
   for (int i = 0; i < CRYPTO_num_locks(); ++i)
     MUTEX_SETUP(mutex_buf[i]);
 
-  // we need to cast our id_function to return an unsigned long -- pthread_t is a pointer
-  CRYPTO_set_id_callback((unsigned long (*)())id_function);
+  // we need to cast our id_function to return an unsigned long -- pthread_t is
+  // a pointer
+  CRYPTO_set_id_callback(id_function);
   CRYPTO_set_locking_callback(locking_function);
   CRYPTO_set_dynlock_create_callback(dyn_create_function);
   CRYPTO_set_dynlock_lock_callback(dyn_lock_function);
@@ -352,14 +364,11 @@ ssl_error:
 
 int
 OpenSSLAdapter::ContinueSSL() {
-  LOG(LS_INFO) << "ContinueSSL";
   ASSERT(state_ == SSL_CONNECTING);
 
   int code = SSL_connect(ssl_);
   switch (SSL_get_error(ssl_, code)) {
   case SSL_ERROR_NONE:
-    LOG(LS_INFO) << " -- success";
-
     if (!SSLPostConnectionCheck(ssl_, ssl_host_name_.c_str())) {
       LOG(LS_ERROR) << "TLS post connection check failed";
       // make sure we close the socket
@@ -381,16 +390,12 @@ OpenSSLAdapter::ContinueSSL() {
     break;
 
   case SSL_ERROR_WANT_READ:
-    LOG(LS_INFO) << " -- error want read";
-    break;
-
   case SSL_ERROR_WANT_WRITE:
-    LOG(LS_INFO) << " -- error want write";
     break;
 
   case SSL_ERROR_ZERO_RETURN:
   default:
-    LOG(LS_INFO) << " -- error " << code;
+    LOG(LS_WARNING) << "ContinueSSL -- error " << code;
     return (code != 0) ? code : -1;
   }
 
@@ -724,7 +729,8 @@ bool OpenSSLAdapter::VerifyServerName(SSL* ssl, const char* host,
       value = NULL;
 
       if (meth->it) {
-        ASN1_item_free(reinterpret_cast<ASN1_VALUE*>(ext_str), meth->it);
+        ASN1_item_free(reinterpret_cast<ASN1_VALUE*>(ext_str),
+                       ASN1_ITEM_ptr(meth->it));
       } else {
         meth->ext_free(ext_str);
       }
@@ -737,7 +743,7 @@ bool OpenSSLAdapter::VerifyServerName(SSL* ssl, const char* host,
   char data[256];
   X509_name_st* subject;
   if (!ok
-      && (subject = X509_get_subject_name(certificate))
+      && ((subject = X509_get_subject_name(certificate)) != NULL)
       && (X509_NAME_get_text_by_NID(subject, NID_commonName,
                                     data, sizeof(data)) > 0)) {
     data[sizeof(data)-1] = 0;
@@ -852,20 +858,22 @@ OpenSSLAdapter::SSLVerifyCallback(int ok, X509_STORE_CTX* store) {
 
 bool OpenSSLAdapter::ConfigureTrustedRootCertificates(SSL_CTX* ctx) {
   // Add the root cert that we care about to the SSL context
-#if OPENSSL_VERSION_NUMBER >= 0x0090800fL
-   const unsigned char* cert_buffer
-#else
-   unsigned char* cert_buffer
-#endif
-    = Equifax_Secure_Certificate_Authority_certificate;
-  size_t cert_buffer_len =
-      sizeof(Equifax_Secure_Certificate_Authority_certificate);
-  X509* cert = d2i_X509(NULL, &cert_buffer, cert_buffer_len);
-  if (cert == NULL)
-    return false;
-  bool success = X509_STORE_add_cert(SSL_CTX_get_cert_store(ctx), cert);
-  X509_free(cert);
-  return success;
+  int count_of_added_certs = 0;
+  for (int i = 0; i < ARRAY_SIZE(kSSLCertCertificateList); i++) {
+    const unsigned char* cert_buffer = kSSLCertCertificateList[i];
+    size_t cert_buffer_len = kSSLCertCertificateSizeList[i];
+    X509* cert = d2i_X509(NULL, &cert_buffer, cert_buffer_len);
+    if (cert) {
+      int return_value = X509_STORE_add_cert(SSL_CTX_get_cert_store(ctx), cert);
+      if (return_value == 0) {
+        LOG(LS_WARNING) << "Unable to add certificate.";
+      } else {
+        count_of_added_certs++;
+      }
+      X509_free(cert);
+    }
+  }
+  return count_of_added_certs > 0;
 }
 
 SSL_CTX*

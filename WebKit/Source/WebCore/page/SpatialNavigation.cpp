@@ -92,7 +92,7 @@ FocusCandidate::FocusCandidate(Node* node, FocusDirection direction)
 
 bool isSpatialNavigationEnabled(const Frame* frame)
 {
-    return (frame && frame->settings() && frame->settings()->isSpatialNavigationEnabled());
+    return (frame && frame->settings() && frame->settings()->spatialNavigationEnabled());
 }
 
 static RectsAlignment alignmentForRects(FocusDirection direction, const LayoutRect& curRect, const LayoutRect& targetRect, const LayoutSize& viewSize)
@@ -399,7 +399,7 @@ bool scrollInDirection(Node* container, FocusDirection direction)
             return false;
         }
 
-        container->renderBox()->enclosingLayer()->scrollByRecursively(dx, dy);
+        container->renderBox()->enclosingLayer()->scrollByRecursively(IntSize(dx, dy));
         return true;
     }
 
@@ -522,7 +522,7 @@ LayoutRect nodeRectInAbsoluteCoordinates(Node* node, bool ignoreBorder)
 
     if (node->isDocumentNode())
         return frameRectInAbsoluteCoordinates(static_cast<Document*>(node)->frame());
-    LayoutRect rect = rectToAbsoluteCoordinates(node->document()->frame(), node->getRect());
+    LayoutRect rect = rectToAbsoluteCoordinates(node->document()->frame(), node->boundingBox());
 
     // For authors that use border instead of outline in their CSS, we compensate by ignoring the border when calculating
     // the rect of the focused element.
@@ -645,29 +645,29 @@ void distanceDataForNode(FocusDirection direction, const FocusCandidate& current
     switch (direction) {
     case FocusDirectionLeft:
         sameAxisDistance = exitPoint.x() - entryPoint.x();
-        otherAxisDistance = abs(exitPoint.y() - entryPoint.y());
+        otherAxisDistance = absoluteValue(exitPoint.y() - entryPoint.y());
         break;
     case FocusDirectionUp:
         sameAxisDistance = exitPoint.y() - entryPoint.y();
-        otherAxisDistance = abs(exitPoint.x() - entryPoint.x());
+        otherAxisDistance = absoluteValue(exitPoint.x() - entryPoint.x());
         break;
     case FocusDirectionRight:
         sameAxisDistance = entryPoint.x() - exitPoint.x();
-        otherAxisDistance = abs(entryPoint.y() - exitPoint.y());
+        otherAxisDistance = absoluteValue(entryPoint.y() - exitPoint.y());
         break;
     case FocusDirectionDown:
         sameAxisDistance = entryPoint.y() - exitPoint.y();
-        otherAxisDistance = abs(entryPoint.x() - exitPoint.x());
+        otherAxisDistance = absoluteValue(entryPoint.x() - exitPoint.x());
         break;
     default:
         ASSERT_NOT_REACHED();
         return;
     }
 
-    LayoutUnit x = (entryPoint.x() - exitPoint.x()) * (entryPoint.x() - exitPoint.x());
-    LayoutUnit y = (entryPoint.y() - exitPoint.y()) * (entryPoint.y() - exitPoint.y());
+    float x = (entryPoint.x() - exitPoint.x()) * (entryPoint.x() - exitPoint.x());
+    float y = (entryPoint.y() - exitPoint.y()) * (entryPoint.y() - exitPoint.y());
 
-    float euclidianDistance = sqrt((x + y) * 1.0f);
+    float euclidianDistance = sqrt(x + y);
 
     // Loosely based on http://www.w3.org/TR/WICD/#focus-handling
     // df = dotDist + dx + dy + 2 * (xdisplacement + ydisplacement) - sqrt(Overlap)

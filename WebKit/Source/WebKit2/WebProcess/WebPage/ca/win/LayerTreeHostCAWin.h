@@ -49,6 +49,10 @@ public:
     static PassRefPtr<LayerTreeHostCAWin> create(WebPage*);
     virtual ~LayerTreeHostCAWin();
 
+#if USE(AVFOUNDATION)
+    virtual WebCore::GraphicsDeviceAdapter* graphicsDeviceAdapter() const OVERRIDE;
+#endif
+
 private:
     explicit LayerTreeHostCAWin(WebPage*);
 
@@ -64,7 +68,7 @@ private:
     virtual void scheduleChildWindowGeometryUpdate(const WindowGeometry&);
 
     // LayerTreeHostCA
-    virtual void platformInitialize(LayerTreeContext&);
+    virtual void platformInitialize();
     virtual void setRootCompositingLayer(WebCore::GraphicsLayer*);
 
     // AbstractCACFLayerTreeHost

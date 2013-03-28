@@ -1,6 +1,8 @@
 Name: icu
 URL: http://site.icu-project.org/
 Version: 4.6
+License: MIT
+Security Critical: yes
 
 Description:
 This directory contains the source code of ICU 4.6 for C/C++
@@ -107,7 +109,7 @@ This directory contains the source code of ICU 4.6 for C/C++
 
   - android/patch_locale.sh (to be run for Android build only):
       Makes changes to source/data/{curr,region,lang} to exclude these data
-      except the script names of Hans and Hant.
+      except the language and script names of zh_Hans and zh_Hant.
 
 7. Removal of unihan collation tables from data/coll/{zh,ja,ko}.txt
 
@@ -141,6 +143,8 @@ This directory contains the source code of ICU 4.6 for C/C++
   - patches/data.build.win.patch :
       Windows-only data build patch. Add a new target DATALIB to makedata.mak
   - patches/clang.patch: To build with Clang.
+    (see http://bugs.icu-project.org/trac/ticket/8954 Two other chunks in
+    the patch have already been fixed in the ICU trunk.)
   - add an empty file (stubdatabuilt.txt) to source/stubdata
 
 10. Pre-built data libraries are checked in.
@@ -226,3 +230,28 @@ This directory contains the source code of ICU 4.6 for C/C++
 20. Fix a null pointer error in ubrk_setText in ubrk.cpp.
     - patches/ubrk.patch
     - upstream bug : http://bugs.icu-project.org/trac/ticket/9115
+
+21. Fix a clang warning in rbbi.cpp by merging in an upstream change.
+    - patches/changeset_30255.patch
+    - upstream change : http://bugs.icu-project.org/trac/changeset/30255
+
+22. Fix time zone handling and compilation on iOS.
+    - patches/ios_timezone.patch
+    - upstream bugs : http://bugs.icu-project.org/trac/ticket/9051
+    -                 http://bugs.icu-project.org/trac/ticket/8661
+
+23. Fix a buffer overflow in utext
+    - patches/utext.patch
+    - upstream change : http://bugs.icu-project.org/trac/changeset/29356
+
+24. Fix compilation errors on VS2012.
+    - patches/vs2012.patch
+
+25. Fix a race condtion in locid.cpp
+   - patches/locid.patch
+   - upstream bug : http://bugs.icu-project.org/trac/ticket/9737
+   (upstream has a different patch that cannot be applied to our copy. 
+    We'll get the upstream change when we upgrade ICU to 50.1).
+
+
+

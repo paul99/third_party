@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 Adobe Systems Incorporated. All Rights Reserved.
+ * Copyright (C) 2012 Adobe Systems Incorporated. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -45,9 +45,9 @@ namespace WebCore {
 class StyleCustomFilterProgram : public CustomFilterProgram, public CachedResourceClient {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    static PassRefPtr<StyleCustomFilterProgram> create(PassRefPtr<StyleShader> vertexShader, PassRefPtr<StyleShader> fragmentShader)
+    static PassRefPtr<StyleCustomFilterProgram> create(PassRefPtr<StyleShader> vertexShader, PassRefPtr<StyleShader> fragmentShader, CustomFilterProgramType programType, const CustomFilterProgramMixSettings& mixSettings, CustomFilterMeshType meshType)
     {
-        return adoptRef(new StyleCustomFilterProgram(vertexShader, fragmentShader));
+        return adoptRef(new StyleCustomFilterProgram(vertexShader, fragmentShader, programType, mixSettings, meshType));
     }
     
     void setVertexShader(PassRefPtr<StyleShader> shader) { m_vertexShader = shader; }
@@ -106,17 +106,33 @@ public:
     {
         if (resource->errorOccurred())
             return;
+        // Note that m_cachedVertexShader might be equal to m_cachedFragmentShader and it would only get one event in that case.
         if (resource == m_cachedVertexShader.get())
             m_isVertexShaderLoaded = true;
-        else if (resource == m_cachedFragmentShader.get())
+        if (resource == m_cachedFragmentShader.get())
             m_isFragmentShaderLoaded = true;
         if (isLoaded())
             notifyClients();
     }
+    
+    CachedShader* cachedVertexShader() const { return m_vertexShader ? m_vertexShader->cachedShader() : 0; }
+    CachedShader* cachedFragmentShader() const { return m_fragmentShader ? m_fragmentShader->cachedShader() : 0; }
+    
+    virtual bool operator==(const CustomFilterProgram& o) const 
+    {
+        // We don't use the != operator because that would recursively call this method.
+        if (!CustomFilterProgram::operator==(o))
+            return false;
+
+        // The following cast is ugly, but StyleCustomFilterProgram is the single implementation of CustomFilterProgram.
+        const StyleCustomFilterProgram* other = static_cast<const StyleCustomFilterProgram*>(&o);
+        return cachedVertexShader() == other->cachedVertexShader() && cachedFragmentShader() == other->cachedFragmentShader();
+    }
 
 private:
-    StyleCustomFilterProgram(PassRefPtr<StyleShader> vertexShader, PassRefPtr<StyleShader> fragmentShader)
-        : m_vertexShader(vertexShader)
+    StyleCustomFilterProgram(PassRefPtr<StyleShader> vertexShader, PassRefPtr<StyleShader> fragmentShader, CustomFilterProgramType programType, const CustomFilterProgramMixSettings& mixSettings, CustomFilterMeshType meshType)
+        : CustomFilterProgram(programType, mixSettings, meshType)
+        , m_vertexShader(vertexShader)
         , m_fragmentShader(fragmentShader)
         , m_isVertexShaderLoaded(false)
         , m_isFragmentShaderLoaded(false)

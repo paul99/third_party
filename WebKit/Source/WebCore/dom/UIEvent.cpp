@@ -26,6 +26,7 @@
 #include "Console.h"
 #include "DOMWindow.h"
 #include "EventDispatcher.h"
+#include "Node.h"
 
 namespace WebCore {
 
@@ -78,13 +79,11 @@ int UIEvent::charCode() const
 
 int UIEvent::layerX()
 {
-    warnDeprecatedLayerXYUsage();
     return 0;
 }
 
 int UIEvent::layerY()
 {
-    warnDeprecatedLayerXYUsage();
     return 0;
 }
 
@@ -101,13 +100,6 @@ int UIEvent::pageY() const
 int UIEvent::which() const
 {
     return 0;
-}
-
-void UIEvent::warnDeprecatedLayerXYUsage()
-{
-    DEFINE_STATIC_LOCAL(String, consoleMessage , ("event.layerX and event.layerY are broken and deprecated in WebKit. They will be removed from the engine in the near future."));
-    if (m_view)
-        m_view->console()->addMessage(JSMessageSource, LogMessageType, WarningMessageLevel, consoleMessage);
 }
 
 PassRefPtr<FocusInEventDispatchMediator> FocusInEventDispatchMediator::create(PassRefPtr<Event> event, PassRefPtr<Node> oldFocusedNode)

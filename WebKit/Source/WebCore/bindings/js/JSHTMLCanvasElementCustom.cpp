@@ -21,7 +21,7 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "config.h"
@@ -29,7 +29,9 @@
 
 #include "CanvasContextAttributes.h"
 #include "HTMLCanvasElement.h"
+#include "InspectorCanvasInstrumentation.h"
 #include "JSCanvasRenderingContext2D.h"
+#include "ScriptObject.h"
 #if ENABLE(WEBGL)
 #include "JSWebGLRenderingContext.h"
 #include "WebGLContextAttributes.h"
@@ -43,7 +45,7 @@ namespace WebCore {
 JSValue JSHTMLCanvasElement::getContext(ExecState* exec)
 {
     HTMLCanvasElement* canvas = static_cast<HTMLCanvasElement*>(impl());
-    const UString& contextId = exec->argument(0).toString(exec)->value(exec);
+    const String& contextId = exec->argument(0).toString(exec)->value(exec);
     RefPtr<CanvasContextAttributes> attrs;
 #if ENABLE(WEBGL)
     if (contextId == "experimental-webgl" || contextId == "webkit-3d") {
@@ -72,19 +74,31 @@ JSValue JSHTMLCanvasElement::getContext(ExecState* exec)
         }
     }
 #endif
-    CanvasRenderingContext* context = canvas->getContext(ustringToString(contextId), attrs.get());
+    CanvasRenderingContext* context = canvas->getContext(contextId, attrs.get());
     if (!context)
         return jsNull();
-    return toJS(exec, globalObject(), WTF::getPtr(context));
+    JSValue jsValue = toJS(exec, globalObject(), WTF::getPtr(context));
+    if (InspectorInstrumentation::canvasAgentEnabled(canvas->document())) {
+        ScriptObject contextObject(exec, jsValue.getObject());
+        ScriptObject wrapped;
+        if (context->is2d())
+            wrapped = InspectorInstrumentation::wrapCanvas2DRenderingContextForInstrumentation(canvas->document(), contextObject);
+#if ENABLE(WEBGL)
+        else if (context->is3d())
+            wrapped = InspectorInstrumentation::wrapWebGLRenderingContextForInstrumentation(canvas->document(), contextObject);
+#endif
+        if (!wrapped.hasNoValue())
+            return wrapped.jsValue();
+    }
+    return jsValue;
 }
 
 JSValue JSHTMLCanvasElement::toDataURL(ExecState* exec)
 {
-    const String& type = valueToStringWithUndefinedOrNullCheck(exec, exec->argument(0));
     HTMLCanvasElement* canvas = static_cast<HTMLCanvasElement*>(impl());
     ExceptionCode ec = 0;
-    
-    JSC::JSValue result;
+
+    const String& type = valueToStringWithUndefinedOrNullCheck(exec, exec->argument(0));
     double quality;
     double* qualityPtr = 0;
     if (exec->argumentCount() > 1) {
@@ -94,8 +108,8 @@ JSValue JSHTMLCanvasElement::toDataURL(ExecState* exec)
             qualityPtr = &quality;
         }
     }
-    
-    result = jsString(exec, canvas->toDataURL(type, qualityPtr, ec));
+
+    JSValue result = JSC::jsString(exec, canvas->toDataURL(type, qualityPtr, ec));
     setDOMException(exec, ec);
     return result;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2005, 2007, 2011 Apple Computer, Inc.  All rights reserved.
+ * Copyright (C) 2005, 2007, 2011, 2012 Apple Computer, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,14 +44,15 @@ typedef enum {
 } WebTextDirectionSubmenuInclusionBehavior;
 
 typedef enum {
-    WebKitEditingMacBehavior,
-    WebKitEditingWinBehavior,
-    WebKitEditingUnixBehavior
-} WebKitEditingBehavior;
+    WebAllowAllStorage = 0,
+    WebBlockThirdPartyStorage,
+    WebBlockAllStorage
+} WebStorageBlockingPolicy;
 
 extern NSString *WebPreferencesChangedNotification;
 extern NSString *WebPreferencesRemovedNotification;
 extern NSString *WebPreferencesChangedInternalNotification;
+extern NSString *WebPreferencesCacheModelChangedInternalNotification;
 
 @interface WebPreferences (WebPrivate)
 
@@ -62,6 +63,9 @@ extern NSString *WebPreferencesChangedInternalNotification;
 
 - (BOOL)developerExtrasEnabled;
 - (void)setDeveloperExtrasEnabled:(BOOL)flag;
+
+- (BOOL)javaScriptExperimentsEnabled;
+- (void)setJavaScriptExperimentsEnabled:(BOOL)flag;
 
 - (BOOL)authorAndUserStylesEnabled;
 - (void)setAuthorAndUserStylesEnabled:(BOOL)flag;
@@ -148,9 +152,6 @@ extern NSString *WebPreferencesChangedInternalNotification;
 - (WebKitEditableLinkBehavior)editableLinkBehavior;
 - (void)setEditableLinkBehavior:(WebKitEditableLinkBehavior)behavior;
 
-- (WebKitEditingBehavior)editingBehavior;
-- (void)setEditingBehavior:(WebKitEditingBehavior)behavior;
-
 - (WebTextDirectionSubmenuInclusionBehavior)textDirectionSubmenuInclusionBehavior;
 - (void)setTextDirectionSubmenuInclusionBehavior:(WebTextDirectionSubmenuInclusionBehavior)behavior;
 
@@ -188,6 +189,12 @@ extern NSString *WebPreferencesChangedInternalNotification;
 
 - (BOOL)cssCustomFilterEnabled;
 - (void)setCSSCustomFilterEnabled:(BOOL)enabled;
+
+- (BOOL)cssRegionsEnabled;
+- (void)setCSSRegionsEnabled:(BOOL)enabled;
+
+- (BOOL)cssGridLayoutEnabled;
+- (void)setCSSGridLayoutEnabled:(BOOL)enabled;
 
 - (BOOL)showDebugBorders;
 - (void)setShowDebugBorders:(BOOL)show;
@@ -239,6 +246,8 @@ extern NSString *WebPreferencesChangedInternalNotification;
 + (CFStringEncoding)_systemCFStringEncoding;
 + (void)_setInitialDefaultTextEncodingToSystemEncoding;
 + (void)_setIBCreatorID:(NSString *)string;
+
+// For DumpRenderTree use only.
 + (void)_switchNetworkLoaderToNewTestingSession;
 + (void)_setCurrentNetworkLoaderSessionCookieAcceptPolicy:(NSHTTPCookieAcceptPolicy)cookieAcceptPolicy;
 
@@ -271,11 +280,14 @@ extern NSString *WebPreferencesChangedInternalNotification;
 - (void)setHixie76WebSocketProtocolEnabled:(BOOL)flag;
 - (BOOL)isHixie76WebSocketProtocolEnabled;
 
-- (void)setSuppressIncrementalRendering:(BOOL)flag;
-- (BOOL)suppressIncrementalRendering;
+- (void)setRegionBasedColumnsEnabled:(BOOL)flag;
+- (BOOL)regionBasedColumnsEnabled;
 
 - (void)setBackspaceKeyNavigationEnabled:(BOOL)flag;
 - (BOOL)backspaceKeyNavigationEnabled;
+
+- (void)setWantsBalancedSetDefersLoadingBehavior:(BOOL)flag;
+- (BOOL)wantsBalancedSetDefersLoadingBehavior;
 
 - (void)setShouldDisplaySubtitles:(BOOL)flag;
 - (BOOL)shouldDisplaySubtitles;
@@ -285,5 +297,29 @@ extern NSString *WebPreferencesChangedInternalNotification;
 
 - (void)setShouldDisplayTextDescriptions:(BOOL)flag;
 - (BOOL)shouldDisplayTextDescriptions;
+
+- (void)setNotificationsEnabled:(BOOL)flag;
+- (BOOL)notificationsEnabled;
+
+- (void)setShouldRespectImageOrientation:(BOOL)flag;
+- (BOOL)shouldRespectImageOrientation;
+
+- (BOOL)requestAnimationFrameEnabled;
+- (void)setRequestAnimationFrameEnabled:(BOOL)enabled;
+
+- (void)setIncrementalRenderingSuppressionTimeoutInSeconds:(NSTimeInterval)timeout;
+- (NSTimeInterval)incrementalRenderingSuppressionTimeoutInSeconds;
+
+- (BOOL)diagnosticLoggingEnabled;
+- (void)setDiagnosticLoggingEnabled:(BOOL)enabled;
+
+- (BOOL)screenFontSubstitutionEnabled;
+- (void)setScreenFontSubstitutionEnabled:(BOOL)enabled;
+
+- (void)setStorageBlockingPolicy:(WebStorageBlockingPolicy)storageBlockingPolicy;
+- (WebStorageBlockingPolicy)storageBlockingPolicy;
+
+- (BOOL)plugInSnapshottingEnabled;
+- (void)setPlugInSnapshottingEnabled:(BOOL)enabled;
 
 @end

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2010, 2011 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2008, 2010, 2011, 2012 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,11 +30,14 @@
 #import "GraphicsContext.h"
 #import "LocalCurrentGraphicsContext.h"
 #import "ScrollView.h"
+#import "WebCoreNSCellExtras.h"
 #import "WebCoreSystemInterface.h"
 #import <Carbon/Carbon.h>
 #include <wtf/StdLibExtras.h>
 
 using namespace std;
+
+NSRect focusRingClipRect;
 
 // This is a view whose sole purpose is to tell AppKit that it's flipped.
 @interface WebCoreFlippedView : NSControl
@@ -59,7 +62,13 @@ using namespace std;
 
 - (NSRect)_focusRingVisibleRect
 {
-    return [self visibleRect];
+    if (NSIsEmptyRect(focusRingClipRect))
+        return [self visibleRect];
+
+    NSRect rect = focusRingClipRect;
+    rect.origin.y = [self bounds].size.height - NSMaxY(rect);
+
+    return rect;
 }
 
 - (NSView *)_focusRingClipAncestor
@@ -68,31 +77,6 @@ using namespace std;
 }
 
 @end
-
-#define BUTTON_CELL_DRAW_WITH_FRAME_DRAWS_FOCUS_RING (defined(BUILDING_ON_SNOW_LEOPARD) || defined(BUILDING_ON_LION))
-
-#if !BUTTON_CELL_DRAW_WITH_FRAME_DRAWS_FOCUS_RING
-
-@interface NSCell (WebFocusRingDrawing)
-- (void)_web_drawFocusRingWithFrame:(NSRect)cellFrame inView:(NSView *)controlView;
-@end
-
-@implementation NSCell (WebFocusRingDrawing)
-
-- (void)_web_drawFocusRingWithFrame:(NSRect)cellFrame inView:(NSView *)controlView
-{
-    CGContextRef cgContext = (CGContextRef)[[NSGraphicsContext currentContext] graphicsPort];
-    CGContextSaveGState(cgContext);
-    NSSetFocusRingStyle(NSFocusRingOnly);
-    CGContextBeginTransparencyLayerWithRect(cgContext, NSRectToCGRect(cellFrame), 0);
-    [self drawFocusRingMaskWithFrame:cellFrame inView:controlView];
-    CGContextEndTransparencyLayer(cgContext);
-    CGContextRestoreGState(cgContext);
-}
-
-@end
-
-#endif
 
 // FIXME: Default buttons really should be more like push buttons and not like buttons.
 
@@ -285,8 +269,6 @@ static void paintCheckbox(ControlStates states, GraphicsContext* context, const 
 
     // Determine the width and height needed for the control and prepare the cell for painting.
     NSButtonCell *checkboxCell = checkbox(states, zoomedRect, zoomFactor);
-    LocalCurrentGraphicsContext localContext(context);
-
     GraphicsContextStateSaver stateSaver(*context);
 
     NSControlSize controlSize = [checkboxCell controlSize];
@@ -303,6 +285,7 @@ static void paintCheckbox(ControlStates states, GraphicsContext* context, const 
         context->translate(-inflatedRect.x(), -inflatedRect.y());
     }
 
+    LocalCurrentGraphicsContext localContext(context);
     NSView *view = ThemeMac::ensuredView(scrollView);
     [checkboxCell drawWithFrame:NSRect(inflatedRect) inView:view];
 #if !BUTTON_CELL_DRAW_WITH_FRAME_DRAWS_FOCUS_RING
@@ -366,8 +349,6 @@ static void paintRadio(ControlStates states, GraphicsContext* context, const Int
 {
     // Determine the width and height needed for the control and prepare the cell for painting.
     NSButtonCell *radioCell = radio(states, zoomedRect, zoomFactor);
-    LocalCurrentGraphicsContext localContext(context);
-
     GraphicsContextStateSaver stateSaver(*context);
 
     NSControlSize controlSize = [radioCell controlSize];
@@ -384,6 +365,7 @@ static void paintRadio(ControlStates states, GraphicsContext* context, const Int
         context->translate(-inflatedRect.x(), -inflatedRect.y());
     }
 
+    LocalCurrentGraphicsContext localContext(context);
     BEGIN_BLOCK_OBJC_EXCEPTIONS
     NSView *view = ThemeMac::ensuredView(scrollView);
     [radioCell drawWithFrame:NSRect(inflatedRect) inView:view];
@@ -403,14 +385,6 @@ static const IntSize* buttonSizes()
     static const IntSize sizes[3] = { IntSize(0, 21), IntSize(0, 18), IntSize(0, 15) };
     return sizes;
 }
-
-#if ENABLE(DATALIST)
-static const IntSize* listButtonSizes()
-{
-    static const IntSize sizes[3] = { IntSize(21, 21), IntSize(19, 18), IntSize(17, 16) };
-    return sizes;
-}
-#endif
 
 static const int* buttonMargins(NSControlSize controlSize)
 {
@@ -439,12 +413,6 @@ static void setUpButtonCell(NSButtonCell *cell, ControlPart part, ControlStates 
 {
     // Set the control size based off the rectangle we're painting into.
     const IntSize* sizes = buttonSizes();
-#if ENABLE(DATALIST)
-    if (part == ListButtonPart) {
-        [cell setBezelStyle:NSRoundedDisclosureBezelStyle];
-        sizes = listButtonSizes();
-    } else
-#endif
     if (part == SquareButtonPart || zoomedRect.height() > buttonSizes()[NSRegularControlSize].height() * zoomFactor) {
         // Use the square button
         if ([cell bezelStyle] != NSShadowlessSquareBezelStyle)
@@ -478,14 +446,10 @@ static void paintButton(ControlPart part, ControlStates states, GraphicsContext*
     
     // Determine the width and height needed for the control and prepare the cell for painting.
     NSButtonCell *buttonCell = button(part, states, zoomedRect, zoomFactor);
-    LocalCurrentGraphicsContext localContext(context);
+    GraphicsContextStateSaver stateSaver(*context);
 
     NSControlSize controlSize = [buttonCell controlSize];
-#if ENABLE(DATALIST)
-    IntSize zoomedSize = (part == ListButtonPart ? listButtonSizes() : buttonSizes())[controlSize];
-#else
     IntSize zoomedSize = buttonSizes()[controlSize];
-#endif
     zoomedSize.setWidth(zoomedRect.width()); // Buttons don't ever constrain width, so the zoomed width can just be honored.
     zoomedSize.setHeight(zoomedSize.height() * zoomFactor);
     IntRect inflatedRect = zoomedRect;
@@ -508,6 +472,7 @@ static void paintButton(ControlPart part, ControlStates states, GraphicsContext*
         }
     } 
 
+    LocalCurrentGraphicsContext localContext(context);
     NSView *view = ThemeMac::ensuredView(scrollView);
     NSWindow *window = [view window];
     NSButtonCell *previousDefaultButtonCell = [window defaultButtonCell];
@@ -586,23 +551,32 @@ static void paintStepper(ControlStates states, GraphicsContext* context, const I
         int heightDiff = clampToInteger(bounds.size.height - backgroundBounds.size.height);
         backgroundBounds.origin.y = bounds.origin.y + (heightDiff / 2) + 1;
     }
-    HIThemeDrawButton(&backgroundBounds, &drawInfo, context->platformContext(), kHIThemeOrientationNormal, 0);
+
+    LocalCurrentGraphicsContext localContext(context);
+    HIThemeDrawButton(&backgroundBounds, &drawInfo, localContext.cgContext(), kHIThemeOrientationNormal, 0);
 }
 
 // This will ensure that we always return a valid NSView, even if ScrollView doesn't have an associated document NSView.
 // If the ScrollView doesn't have an NSView, we will return a fake NSView whose sole purpose is to tell AppKit that it's flipped.
 NSView *ThemeMac::ensuredView(ScrollView* scrollView)
 {
+#if !PLATFORM(CHROMIUM)
     if (NSView *documentView = scrollView->documentView())
         return documentView;
+#endif
     
     // Use a fake flipped view.
     static NSView *flippedView = [[WebCoreFlippedView alloc] init];
-    [flippedView setFrameSize:scrollView->contentsSize()];
+    [flippedView setFrameSize:NSSizeFromCGSize(scrollView->contentsSize())];
 
     return flippedView;
 }
-    
+
+void ThemeMac::setFocusRingClipRect(const FloatRect& rect)
+{
+    focusRingClipRect = rect;
+}
+
 // Theme overrides
 
 int ThemeMac::baselinePositionAdjustment(ControlPart part) const
@@ -641,10 +615,6 @@ LengthSize ThemeMac::controlSize(ControlPart part, const Font& font, const Lengt
         case PushButtonPart:
             // Height is reset to auto so that specified heights can be ignored.
             return sizeFromFont(font, LengthSize(zoomedSize.width(), Length()), zoomFactor, buttonSizes());
-#if ENABLE(DATALIST)
-        case ListButtonPart:
-            return sizeFromFont(font, LengthSize(zoomedSize.width(), Length()), zoomFactor, listButtonSizes());
-#endif
         case InnerSpinButtonPart:
             if (!zoomedSize.width().isIntrinsicOrAuto() && !zoomedSize.height().isIntrinsicOrAuto())
                 return zoomedSize;
@@ -660,7 +630,6 @@ LengthSize ThemeMac::minimumControlSize(ControlPart part, const Font& font, floa
         case SquareButtonPart:
         case DefaultButtonPart:
         case ButtonPart:
-        case ListButtonPart:
             return LengthSize(Length(0, Fixed), Length(static_cast<int>(15 * zoomFactor), Fixed));
         case InnerSpinButtonPart:{
             IntSize base = stepperSizes()[NSMiniControlSize];
@@ -678,7 +647,6 @@ LengthBox ThemeMac::controlBorder(ControlPart part, const Font& font, const Leng
         case SquareButtonPart:
         case DefaultButtonPart:
         case ButtonPart:
-        case ListButtonPart:
             return LengthBox(0, zoomedBox.right().value(), 0, zoomedBox.left().value());
         default:
             return Theme::controlBorder(part, font, zoomedBox, zoomFactor);
@@ -771,7 +739,6 @@ void ThemeMac::paint(ControlPart part, ControlStates states, GraphicsContext* co
         case DefaultButtonPart:
         case ButtonPart:
         case SquareButtonPart:
-        case ListButtonPart:
             paintButton(part, states, context, zoomedRect, zoomFactor, scrollView);
             break;
         case InnerSpinButtonPart:

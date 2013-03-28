@@ -33,14 +33,14 @@
 
 #if ENABLE(FILE_SYSTEM) && ENABLE(WORKERS)
 
-#include "PlatformString.h"
 #include "ScriptExecutionContext.h"
 #include "WebFileError.h"
-#include "platform/WebFileSystem.h"
-#include "platform/WebVector.h"
+#include <public/WebFileSystem.h>
+#include <public/WebVector.h>
 #include <wtf/PassOwnPtr.h>
 #include <wtf/PassRefPtr.h>
 #include <wtf/Threading.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
 class WorkerLoaderProxy;
@@ -94,6 +94,7 @@ public:
     void postFileExistsToMainThread(WebFileSystem*, const WebCore::KURL& path, const String& mode);
     void postDirectoryExistsToMainThread(WebFileSystem*, const WebCore::KURL& path, const String& mode);
     void postReadDirectoryToMainThread(WebFileSystem*, const WebCore::KURL& path, const String& mode);
+    void postCreateSnapshotFileToMainThread(WebFileSystem*, const WebCore::KURL& internalBlobURL, const WebCore::KURL& path, const String& mode);
 
     // Callback methods that are called on the main thread.
     void didFailOnMainThread(WebFileError, const String& mode);
@@ -117,6 +118,7 @@ private:
     static void fileExistsOnMainThread(WebCore::ScriptExecutionContext*, WebFileSystem*, const WebCore::KURL& path, PassRefPtr<WorkerFileSystemCallbacksBridge>, const String& mode);
     static void directoryExistsOnMainThread(WebCore::ScriptExecutionContext*, WebFileSystem*, const WebCore::KURL& path, PassRefPtr<WorkerFileSystemCallbacksBridge>, const String& mode);
     static void readDirectoryOnMainThread(WebCore::ScriptExecutionContext*, WebFileSystem*, const WebCore::KURL& path, PassRefPtr<WorkerFileSystemCallbacksBridge>, const String& mode);
+    static void createSnapshotFileOnMainThread(WebCore::ScriptExecutionContext*, WebFileSystem*, const WebCore::KURL& internalBlobURL, const WebCore::KURL& path, PassRefPtr<WorkerFileSystemCallbacksBridge>, const String& mode);
 
     friend class MainThreadFileSystemCallbacks;
 

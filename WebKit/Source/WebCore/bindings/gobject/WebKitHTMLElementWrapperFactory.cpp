@@ -60,7 +60,6 @@
 #include "HTMLIFrameElement.h"
 #include "HTMLImageElement.h"
 #include "HTMLInputElement.h"
-#include "HTMLIsIndexElement.h"
 #include "HTMLKeygenElement.h"
 #include "HTMLLIElement.h"
 #include "HTMLLabelElement.h"
@@ -93,80 +92,77 @@
 #include "HTMLTitleElement.h"
 #include "HTMLUListElement.h"
 #include "HTMLVideoElement.h"
-
-#include "webkit/WebKitDOMHTMLAnchorElementPrivate.h"
-#include "webkit/WebKitDOMHTMLAppletElementPrivate.h"
-#include "webkit/WebKitDOMHTMLAreaElementPrivate.h"
-#include "webkit/WebKitDOMHTMLBRElementPrivate.h"
-#include "webkit/WebKitDOMHTMLBaseElementPrivate.h"
-#include "webkit/WebKitDOMHTMLBaseFontElementPrivate.h"
-#include "webkit/WebKitDOMHTMLBodyElementPrivate.h"
-#include "webkit/WebKitDOMHTMLButtonElementPrivate.h"
-#include "webkit/WebKitDOMHTMLCanvasElementPrivate.h"
-#include "webkit/WebKitDOMHTMLDListElementPrivate.h"
-#include "webkit/WebKitDOMHTMLDirectoryElementPrivate.h"
-#include "webkit/WebKitDOMHTMLDivElementPrivate.h"
-#include "webkit/WebKitDOMHTMLElementPrivate.h"
-#include "webkit/WebKitDOMHTMLEmbedElementPrivate.h"
-#include "webkit/WebKitDOMHTMLFieldSetElementPrivate.h"
-#include "webkit/WebKitDOMHTMLFontElementPrivate.h"
-#include "webkit/WebKitDOMHTMLFormElementPrivate.h"
-#include "webkit/WebKitDOMHTMLFrameElementPrivate.h"
-#include "webkit/WebKitDOMHTMLFrameSetElementPrivate.h"
-#include "webkit/WebKitDOMHTMLHRElementPrivate.h"
-#include "webkit/WebKitDOMHTMLHeadElementPrivate.h"
-#include "webkit/WebKitDOMHTMLHeadingElementPrivate.h"
-#include "webkit/WebKitDOMHTMLHtmlElementPrivate.h"
-#include "webkit/WebKitDOMHTMLIFrameElementPrivate.h"
-#include "webkit/WebKitDOMHTMLImageElementPrivate.h"
-#include "webkit/WebKitDOMHTMLInputElementPrivate.h"
-#include "webkit/WebKitDOMHTMLIsIndexElementPrivate.h"
-#include "webkit/WebKitDOMHTMLKeygenElementPrivate.h"
-#include "webkit/WebKitDOMHTMLLIElementPrivate.h"
-#include "webkit/WebKitDOMHTMLLabelElementPrivate.h"
-#include "webkit/WebKitDOMHTMLLegendElementPrivate.h"
-#include "webkit/WebKitDOMHTMLLinkElementPrivate.h"
-#include "webkit/WebKitDOMHTMLMapElementPrivate.h"
-#include "webkit/WebKitDOMHTMLMarqueeElementPrivate.h"
-#include "webkit/WebKitDOMHTMLMenuElementPrivate.h"
-#include "webkit/WebKitDOMHTMLMetaElementPrivate.h"
-#include "webkit/WebKitDOMHTMLModElementPrivate.h"
-#include "webkit/WebKitDOMHTMLOListElementPrivate.h"
-#include "webkit/WebKitDOMHTMLObjectElementPrivate.h"
-#include "webkit/WebKitDOMHTMLOptGroupElementPrivate.h"
-#include "webkit/WebKitDOMHTMLOptionElementPrivate.h"
-#include "webkit/WebKitDOMHTMLParagraphElementPrivate.h"
-#include "webkit/WebKitDOMHTMLParamElementPrivate.h"
-#include "webkit/WebKitDOMHTMLPreElementPrivate.h"
-#include "webkit/WebKitDOMHTMLQuoteElementPrivate.h"
-#include "webkit/WebKitDOMHTMLScriptElementPrivate.h"
-#include "webkit/WebKitDOMHTMLSelectElementPrivate.h"
-#include "webkit/WebKitDOMHTMLStyleElementPrivate.h"
-#include "webkit/WebKitDOMHTMLTableCaptionElementPrivate.h"
-#include "webkit/WebKitDOMHTMLTableCellElementPrivate.h"
-#include "webkit/WebKitDOMHTMLTableColElementPrivate.h"
-#include "webkit/WebKitDOMHTMLTableElementPrivate.h"
-#include "webkit/WebKitDOMHTMLTableRowElementPrivate.h"
-#include "webkit/WebKitDOMHTMLTableSectionElementPrivate.h"
-#include "webkit/WebKitDOMHTMLTextAreaElementPrivate.h"
-#include "webkit/WebKitDOMHTMLTitleElementPrivate.h"
-#include "webkit/WebKitDOMHTMLUListElementPrivate.h"
-#include "webkit/webkitdom.h"
+#include "WebKitDOMHTMLAnchorElementPrivate.h"
+#include "WebKitDOMHTMLAppletElementPrivate.h"
+#include "WebKitDOMHTMLAreaElementPrivate.h"
+#include "WebKitDOMHTMLBRElementPrivate.h"
+#include "WebKitDOMHTMLBaseElementPrivate.h"
+#include "WebKitDOMHTMLBaseFontElementPrivate.h"
+#include "WebKitDOMHTMLBodyElementPrivate.h"
+#include "WebKitDOMHTMLButtonElementPrivate.h"
+#include "WebKitDOMHTMLCanvasElementPrivate.h"
+#include "WebKitDOMHTMLDListElementPrivate.h"
+#include "WebKitDOMHTMLDirectoryElementPrivate.h"
+#include "WebKitDOMHTMLDivElementPrivate.h"
+#include "WebKitDOMHTMLElementPrivate.h"
+#include "WebKitDOMHTMLEmbedElementPrivate.h"
+#include "WebKitDOMHTMLFieldSetElementPrivate.h"
+#include "WebKitDOMHTMLFontElementPrivate.h"
+#include "WebKitDOMHTMLFormElementPrivate.h"
+#include "WebKitDOMHTMLFrameElementPrivate.h"
+#include "WebKitDOMHTMLFrameSetElementPrivate.h"
+#include "WebKitDOMHTMLHRElementPrivate.h"
+#include "WebKitDOMHTMLHeadElementPrivate.h"
+#include "WebKitDOMHTMLHeadingElementPrivate.h"
+#include "WebKitDOMHTMLHtmlElementPrivate.h"
+#include "WebKitDOMHTMLIFrameElementPrivate.h"
+#include "WebKitDOMHTMLImageElementPrivate.h"
+#include "WebKitDOMHTMLInputElementPrivate.h"
+#include "WebKitDOMHTMLKeygenElementPrivate.h"
+#include "WebKitDOMHTMLLIElementPrivate.h"
+#include "WebKitDOMHTMLLabelElementPrivate.h"
+#include "WebKitDOMHTMLLegendElementPrivate.h"
+#include "WebKitDOMHTMLLinkElementPrivate.h"
+#include "WebKitDOMHTMLMapElementPrivate.h"
+#include "WebKitDOMHTMLMarqueeElementPrivate.h"
+#include "WebKitDOMHTMLMenuElementPrivate.h"
+#include "WebKitDOMHTMLMetaElementPrivate.h"
+#include "WebKitDOMHTMLModElementPrivate.h"
+#include "WebKitDOMHTMLOListElementPrivate.h"
+#include "WebKitDOMHTMLObjectElementPrivate.h"
+#include "WebKitDOMHTMLOptGroupElementPrivate.h"
+#include "WebKitDOMHTMLOptionElementPrivate.h"
+#include "WebKitDOMHTMLParagraphElementPrivate.h"
+#include "WebKitDOMHTMLParamElementPrivate.h"
+#include "WebKitDOMHTMLPreElementPrivate.h"
+#include "WebKitDOMHTMLQuoteElementPrivate.h"
+#include "WebKitDOMHTMLScriptElementPrivate.h"
+#include "WebKitDOMHTMLSelectElementPrivate.h"
+#include "WebKitDOMHTMLStyleElementPrivate.h"
+#include "WebKitDOMHTMLTableCaptionElementPrivate.h"
+#include "WebKitDOMHTMLTableCellElementPrivate.h"
+#include "WebKitDOMHTMLTableColElementPrivate.h"
+#include "WebKitDOMHTMLTableElementPrivate.h"
+#include "WebKitDOMHTMLTableRowElementPrivate.h"
+#include "WebKitDOMHTMLTableSectionElementPrivate.h"
+#include "WebKitDOMHTMLTextAreaElementPrivate.h"
+#include "WebKitDOMHTMLTitleElementPrivate.h"
+#include "WebKitDOMHTMLUListElementPrivate.h"
+#include "webkitdom.h"
+#include <wtf/text/CString.h>
 
 #if ENABLE(VIDEO)
-#include "webkit/WebKitDOMHTMLAudioElementPrivate.h"
-#include "webkit/WebKitDOMHTMLVideoElementPrivate.h"
+#include "WebKitDOMHTMLAudioElementPrivate.h"
+#include "WebKitDOMHTMLVideoElementPrivate.h"
 #endif
 
 #if ENABLE(VIDEO_TRACK)
-#include "webkit/WebKitDOMTextTrackCueListPrivate.h"
-#include "webkit/WebKitDOMTextTrackCuePrivate.h"
-#include "webkit/WebKitDOMTextTrackListPrivate.h"
-#include "webkit/WebKitDOMTextTrackPrivate.h"
-#include "webkit/WebKitDOMTrackEventPrivate.h"
+#include "WebKitDOMTextTrackCueListPrivate.h"
+#include "WebKitDOMTextTrackCuePrivate.h"
+#include "WebKitDOMTextTrackListPrivate.h"
+#include "WebKitDOMTextTrackPrivate.h"
+#include "WebKitDOMTrackEventPrivate.h"
 #endif
- 
-#include <wtf/text/CString.h>
 
 namespace WebKit {
 
@@ -325,11 +321,6 @@ static gpointer createImageWrapper(PassRefPtr<HTMLElement> element)
 static gpointer createInputWrapper(PassRefPtr<HTMLElement> element)
 {
     return wrapHTMLInputElement(static_cast<HTMLInputElement*>(element.get()));
-}
-
-static gpointer createIsIndexWrapper(PassRefPtr<HTMLElement> element)
-{
-    return wrapHTMLIsIndexElement(static_cast<HTMLIsIndexElement*>(element.get()));
 }
 
 static gpointer createKeygenWrapper(PassRefPtr<HTMLElement> element)
@@ -504,7 +495,6 @@ gpointer createHTMLElementWrapper(PassRefPtr<WebCore::HTMLElement> element)
        map.set(iframeTag.localName().impl(), createIFrameWrapper);
        map.set(imgTag.localName().impl(), createImageWrapper);
        map.set(inputTag.localName().impl(), createInputWrapper);
-       map.set(isindexTag.localName().impl(), createIsIndexWrapper);
        map.set(labelTag.localName().impl(), createLabelWrapper);
        map.set(legendTag.localName().impl(), createLegendWrapper);
        map.set(liTag.localName().impl(), createLIWrapper);

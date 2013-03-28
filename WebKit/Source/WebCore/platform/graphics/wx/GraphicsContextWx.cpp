@@ -99,6 +99,12 @@ static int strokeStyleToWxPenStyle(int p)
         return wxDOT;
     if (p == DashedStroke)
         return wxLONG_DASH;
+#if ENABLE(CSS3_TEXT)
+    if (p == DoubleStroke)
+        return wxSOLID;
+    if (p == WavyStroke) // FIXME: https://bugs.webkit.org/show_bug.cgi?id=94111 - Needs platform support.
+        return wxSOLID;
+#endif // CSS3_TEXT
     if (p == NoStroke)
         return wxTRANSPARENT;
     
@@ -221,6 +227,8 @@ void GraphicsContext::drawRect(const IntRect& rect)
 {
     if (paintingDisabled())
         return;
+
+    ASSERT(!rect.isEmpty());
 
     save();
     m_data->context->SetPen(wxPen(strokeColor(), strokeThickness(), strokeStyleToWxPenStyle(strokeStyle())));
@@ -394,10 +402,11 @@ void GraphicsContext::clipPath(const Path& path, WindRule clipRule)
 {
     if (paintingDisabled())
         return;
-        
+
+    // FIXME: Why does this method ignore empty paths?
     if (path.isEmpty())
         return; 
-    
+
     wxGraphicsContext* gc = m_data->context->GetGraphicsContext();
 
 #if wxUSE_CAIRO
@@ -442,13 +451,13 @@ void GraphicsContext::drawLineForText(const FloatPoint& origin, float width, boo
     restore();
 }
 
-void GraphicsContext::drawLineForTextChecking(const FloatPoint& origin, float width, TextCheckingLineStyle style)
+void GraphicsContext::drawLineForDocumentMarker(const FloatPoint& origin, float width, DocumentMarkerLineStyle style)
 {
     switch (style) {
-    case TextCheckingSpellingLineStyle:
+    case DocumentMarkerSpellingLineStyle:
         m_data->context->SetPen(wxPen(*wxRED, 2, wxLONG_DASH));
         break;
-    case TextCheckingGrammarLineStyle:
+    case DocumentMarkerGrammarLineStyle:
         m_data->context->SetPen(wxPen(*wxGREEN, 2, wxLONG_DASH));
         break;
     default:
@@ -475,7 +484,7 @@ void GraphicsContext::canvasClip(const Path& path)
     clip(path);
 }
 
-AffineTransform GraphicsContext::getCTM() const
+AffineTransform GraphicsContext::getCTM(IncludeDeviceScale) const
 { 
     if (paintingDisabled())
         return AffineTransform();
@@ -636,6 +645,9 @@ InterpolationQuality GraphicsContext::imageInterpolationQuality() const
 
 void GraphicsContext::fillPath(const Path& path)
 {
+    if (path.isNull())
+        return;
+
 #if USE(WXGC)
     wxGraphicsContext* gc = m_data->context->GetGraphicsContext();
     if (gc)
@@ -645,6 +657,9 @@ void GraphicsContext::fillPath(const Path& path)
 
 void GraphicsContext::strokePath(const Path& path)
 {
+    if (path.isNull())
+        return;
+
 #if USE(WXGC)
     wxGraphicsContext* gc = m_data->context->GetGraphicsContext();
     if (gc)
@@ -668,19 +683,29 @@ void GraphicsContext::clearPlatformShadow()
     notImplemented(); 
 }
 
-void GraphicsContext::beginPlatformTransparencyLayer(float)
-{ 
-    notImplemented(); 
+void GraphicsContext::beginPlatformTransparencyLayer(float opacity)
+{
+    if (paintingDisabled())
+        return;
+
+    wxGraphicsContext* gc = m_data->context->GetGraphicsContext();
+    if (gc)
+        gc->BeginLayer(opacity);
 }
 
 void GraphicsContext::endPlatformTransparencyLayer()
 { 
-    notImplemented(); 
+    if (paintingDisabled())
+        return;
+    
+    wxGraphicsContext* gc = m_data->context->GetGraphicsContext();
+    if (gc)
+        gc->EndLayer();
 }
 
 bool GraphicsContext::supportsTransparencyLayers()
 {
-    return false;
+    return true;
 }
 
 void GraphicsContext::clearRect(const FloatRect&) 

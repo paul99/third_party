@@ -38,7 +38,11 @@ void JSCell::destroy(JSCell* cell)
     cell->JSCell::~JSCell();
 }
 
-bool JSCell::getString(ExecState* exec, UString&stringValue) const
+void JSCell::copyBackingStore(JSCell*, CopyVisitor&)
+{
+}
+
+bool JSCell::getString(ExecState* exec, String& stringValue) const
 {
     if (!isString())
         return false;
@@ -46,9 +50,9 @@ bool JSCell::getString(ExecState* exec, UString&stringValue) const
     return true;
 }
 
-UString JSCell::getString(ExecState* exec) const
+String JSCell::getString(ExecState* exec) const
 {
-    return isString() ? static_cast<const JSString*>(this)->value(exec) : UString();
+    return isString() ? static_cast<const JSString*>(this)->value(exec) : String();
 }
 
 JSObject* JSCell::getObject()
@@ -71,7 +75,7 @@ ConstructType JSCell::getConstructData(JSCell*, ConstructData&)
     return ConstructTypeNone;
 }
 
-bool JSCell::getOwnPropertySlot(JSCell* cell, ExecState* exec, const Identifier& identifier, PropertySlot& slot)
+bool JSCell::getOwnPropertySlot(JSCell* cell, ExecState* exec, PropertyName identifier, PropertySlot& slot)
 {
     // This is not a general purpose implementation of getOwnPropertySlot.
     // It should only be called by JSValue::get.
@@ -95,19 +99,28 @@ bool JSCell::getOwnPropertySlotByIndex(JSCell* cell, ExecState* exec, unsigned i
     return true;
 }
 
-void JSCell::put(JSCell* cell, ExecState* exec, const Identifier& identifier, JSValue value, PutPropertySlot& slot)
+void JSCell::put(JSCell* cell, ExecState* exec, PropertyName identifier, JSValue value, PutPropertySlot& slot)
 {
+    if (cell->isString()) {
+        JSValue(cell).putToPrimitive(exec, identifier, value, slot);
+        return;
+    }
     JSObject* thisObject = cell->toObject(exec, exec->lexicalGlobalObject());
     thisObject->methodTable()->put(thisObject, exec, identifier, value, slot);
 }
 
-void JSCell::putByIndex(JSCell* cell, ExecState* exec, unsigned identifier, JSValue value)
+void JSCell::putByIndex(JSCell* cell, ExecState* exec, unsigned identifier, JSValue value, bool shouldThrow)
 {
+    if (cell->isString()) {
+        PutPropertySlot slot(shouldThrow);
+        JSValue(cell).putToPrimitive(exec, Identifier::from(exec, identifier), value, slot);
+        return;
+    }
     JSObject* thisObject = cell->toObject(exec, exec->lexicalGlobalObject());
-    thisObject->methodTable()->putByIndex(thisObject, exec, identifier, value);
+    thisObject->methodTable()->putByIndex(thisObject, exec, identifier, value, shouldThrow);
 }
 
-bool JSCell::deleteProperty(JSCell* cell, ExecState* exec, const Identifier& identifier)
+bool JSCell::deleteProperty(JSCell* cell, ExecState* exec, PropertyName identifier)
 {
     JSObject* thisObject = cell->toObject(exec, exec->lexicalGlobalObject());
     return thisObject->methodTable()->deleteProperty(thisObject, exec, identifier);
@@ -150,22 +163,12 @@ JSObject* JSCell::toObject(ExecState* exec, JSGlobalObject* globalObject) const
     if (isString())
         return static_cast<const JSString*>(this)->toObject(exec, globalObject);
     ASSERT(isObject());
-    return static_cast<JSObject*>(const_cast<JSCell*>(this));
+    return jsCast<JSObject*>(const_cast<JSCell*>(this));
 }
 
 void slowValidateCell(JSCell* cell)
 {
     ASSERT_GC_OBJECT_LOOKS_VALID(cell);
-}
-
-void JSCell::defineGetter(JSObject*, ExecState*, const Identifier&, JSObject*, unsigned)
-{
-    ASSERT_NOT_REACHED();
-}
-
-void JSCell::defineSetter(JSObject*, ExecState*, const Identifier&, JSObject*, unsigned)
-{
-    ASSERT_NOT_REACHED();
 }
 
 JSValue JSCell::defaultValue(const JSObject*, ExecState*, PreferredPrimitiveType)
@@ -179,10 +182,20 @@ void JSCell::getOwnPropertyNames(JSObject*, ExecState*, PropertyNameArray&, Enum
     ASSERT_NOT_REACHED();
 }
 
-UString JSCell::className(const JSObject*)
+void JSCell::getOwnNonIndexPropertyNames(JSObject*, ExecState*, PropertyNameArray&, EnumerationMode)
 {
     ASSERT_NOT_REACHED();
-    return UString();
+}
+
+String JSCell::className(const JSObject*)
+{
+    ASSERT_NOT_REACHED();
+    return String();
+}
+
+const char* JSCell::className()
+{
+    return classInfo()->className;
 }
 
 void JSCell::getPropertyNames(JSObject*, ExecState*, PropertyNameArray&, EnumerationMode)
@@ -190,24 +203,24 @@ void JSCell::getPropertyNames(JSObject*, ExecState*, PropertyNameArray&, Enumera
     ASSERT_NOT_REACHED();
 }
 
-bool JSCell::hasInstance(JSObject*, ExecState*, JSValue, JSValue)
+bool JSCell::customHasInstance(JSObject*, ExecState*, JSValue)
 {
     ASSERT_NOT_REACHED();
     return false;
 }
 
-void JSCell::putDirectVirtual(JSObject*, ExecState*, const Identifier&, JSValue, unsigned)
+void JSCell::putDirectVirtual(JSObject*, ExecState*, PropertyName, JSValue, unsigned)
 {
     ASSERT_NOT_REACHED();
 }
 
-bool JSCell::defineOwnProperty(JSObject*, ExecState*, const Identifier&, PropertyDescriptor&, bool)
+bool JSCell::defineOwnProperty(JSObject*, ExecState*, PropertyName, PropertyDescriptor&, bool)
 {
     ASSERT_NOT_REACHED();
     return false;
 }
 
-bool JSCell::getOwnPropertyDescriptor(JSObject*, ExecState*, const Identifier&, PropertyDescriptor&)
+bool JSCell::getOwnPropertyDescriptor(JSObject*, ExecState*, PropertyName, PropertyDescriptor&)
 {
     ASSERT_NOT_REACHED();
     return false;

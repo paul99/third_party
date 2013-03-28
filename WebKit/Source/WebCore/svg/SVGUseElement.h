@@ -22,6 +22,7 @@
 #define SVGUseElement_h
 
 #if ENABLE(SVG)
+#include "CachedSVGDocument.h"
 #include "SVGAnimatedBoolean.h"
 #include "SVGAnimatedLength.h"
 #include "SVGExternalResourcesRequired.h"
@@ -32,16 +33,18 @@
 
 namespace WebCore {
 
+class CachedSVGDocument;
 class SVGElementInstance;
-class SVGShadowTreeRootElement;
 
 class SVGUseElement : public SVGStyledTransformableElement,
                       public SVGTests,
                       public SVGLangSpace,
                       public SVGExternalResourcesRequired,
-                      public SVGURIReference {
+                      public SVGURIReference,
+                      public CachedSVGDocumentClient {
 public:
-    static PassRefPtr<SVGUseElement> create(const QualifiedName&, Document*);
+    static PassRefPtr<SVGUseElement> create(const QualifiedName&, Document*, bool wasInsertedByParser);
+    virtual ~SVGUseElement();
 
     SVGElementInstance* instanceRoot();
     SVGElementInstance* animatedInstanceRoot() const;
@@ -51,45 +54,41 @@ public:
     RenderObject* rendererClipChild() const;
 
 private:
-    SVGUseElement(const QualifiedName&, Document*);
+    SVGUseElement(const QualifiedName&, Document*, bool wasInsertedByParser);
+
+    void createShadowSubtree();
 
     virtual bool isValid() const { return SVGTests::isValid(); }
     virtual bool supportsFocus() const { return true; }
 
-    virtual void insertedIntoDocument();
-    virtual void removedFromDocument();
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
+    virtual void removedFrom(ContainerNode*) OVERRIDE;
     virtual void buildPendingResource();
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseMappedAttribute(Attribute*);
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
     virtual void svgAttributeChanged(const QualifiedName&);
 
     virtual bool willRecalcStyle(StyleChange);
-    virtual void didRecalcStyle(StyleChange);
 
     virtual RenderObject* createRenderer(RenderArena*, RenderStyle*);
-    virtual void attach();
-    virtual void detach();
-
     virtual void toClipPath(Path&);
 
-    static void removeDisallowedElementsFromSubtree(Node* element);
-
-    void setUpdatesBlocked(bool blocked) { m_updatesBlocked = blocked; }
-
-    friend class RenderSVGShadowTreeRootContainer;
-    friend class SVGElement;
-    void buildShadowAndInstanceTree(SVGShadowTreeRootElement*);
+    void clearResourceReferences();
+    void buildShadowAndInstanceTree(SVGElement* target);
     void detachInstance();
 
+    virtual bool haveLoadedRequiredResources() { return SVGExternalResourcesRequired::haveLoadedRequiredResources(); }
+
+    virtual void finishParsingChildren();
     virtual bool selfHasRelativeLengths() const;
 
     // Instance tree handling
-    void buildInstanceTree(SVGElement* target, SVGElementInstance* targetInstance, bool& foundCycle);
+    void buildInstanceTree(SVGElement* target, SVGElementInstance* targetInstance, bool& foundCycle, bool foundUse);
     bool hasCycleUseReferencing(SVGUseElement*, SVGElementInstance* targetInstance, SVGElement*& newTarget);
 
     // Shadow tree handling
-    void buildShadowTree(SVGShadowTreeRootElement*, SVGElement* target, SVGElementInstance* targetInstance);
+    void buildShadowTree(SVGElement* target, SVGElementInstance* targetInstance);
 
     void expandUseElementsInShadowTree(Node* element);
     void expandSymbolElementsInShadowTree(Node* element);
@@ -101,9 +100,6 @@ private:
     void transferUseAttributesToReplacedElement(SVGElement* from, SVGElement* to) const;
     void transferEventListenersToShadowTree(SVGElementInstance* target);
 
-    void updateContainerOffsets();
-    void updateContainerSizes();
-
     BEGIN_DECLARE_ANIMATED_PROPERTIES(SVGUseElement)
         DECLARE_ANIMATED_LENGTH(X, x)
         DECLARE_ANIMATED_LENGTH(Y, y)
@@ -113,15 +109,30 @@ private:
         DECLARE_ANIMATED_BOOLEAN(ExternalResourcesRequired, externalResourcesRequired)
     END_DECLARE_ANIMATED_PROPERTIES
 
+    bool cachedDocumentIsStillLoading();
+    Document* externalDocument() const;
+    bool instanceTreeIsLoading(SVGElementInstance*);
+    virtual void notifyFinished(CachedResource*);
+    Document* referencedDocument() const;
+    void setCachedDocument(CachedResourceHandle<CachedSVGDocument>);
+
     // SVGTests
     virtual void synchronizeRequiredFeatures() { SVGTests::synchronizeRequiredFeatures(this); }
     virtual void synchronizeRequiredExtensions() { SVGTests::synchronizeRequiredExtensions(this); }
     virtual void synchronizeSystemLanguage() { SVGTests::synchronizeSystemLanguage(this); }
 
-    bool m_updatesBlocked;
+    // SVGExternalResourcesRequired
+    virtual void setHaveFiredLoadEvent(bool haveFiredLoadEvent) { m_haveFiredLoadEvent = haveFiredLoadEvent; }
+    virtual bool isParserInserted() const { return m_wasInsertedByParser; }
+    virtual bool haveFiredLoadEvent() const { return m_haveFiredLoadEvent; }
+    virtual Timer<SVGElement>* svgLoadEventTimer() OVERRIDE { return &m_svgLoadEventTimer; }
+
+    bool m_wasInsertedByParser;
+    bool m_haveFiredLoadEvent;
     bool m_needsShadowTreeRecreation;
-    String m_resourceId;
     RefPtr<SVGElementInstance> m_targetElementInstance;
+    CachedResourceHandle<CachedSVGDocument> m_cachedDocument;
+    Timer<SVGElement> m_svgLoadEventTimer;
 };
 
 }

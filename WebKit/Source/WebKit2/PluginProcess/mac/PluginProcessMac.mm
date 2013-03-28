@@ -33,10 +33,14 @@
 #import "PluginProcessShim.h"
 #import "PluginProcessProxyMessages.h"
 #import "PluginProcessCreationParameters.h"
+#import <CoreAudio/AudioHardware.h>
 #import <WebCore/LocalizedStrings.h>
 #import <WebKitSystemInterface.h>
 #import <dlfcn.h>
+#import <objc/runtime.h>
 #import <wtf/HashSet.h>
+
+#import "NetscapeSandboxFunctions.h"
 
 namespace WebKit {
 
@@ -160,16 +164,6 @@ static UInt32 getCurrentEventButtonState()
     return 0;
 #endif
 }
-    
-static void cocoaWindowShown(NSWindow *window)
-{
-    fullscreenWindowTracker().windowShown(window);
-}
-
-static void cocoaWindowHidden(NSWindow *window)
-{
-    fullscreenWindowTracker().windowHidden(window);
-}
 
 static void carbonWindowShown(WindowRef window)
 {
@@ -190,14 +184,51 @@ static void setModal(bool modalWindowIsShowing)
     PluginProcess::shared().setModalWindowIsShowing(modalWindowIsShowing);
 }
 
+static unsigned modalCount = 0;
+
+static void beginModal()
+{
+#if COMPILER(CLANG)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+    // Make sure to make ourselves the front process
+    ProcessSerialNumber psn;
+    GetCurrentProcess(&psn);
+    SetFrontProcess(&psn);
+#if COMPILER(CLANG)
+#pragma clang diagnostic pop
+#endif
+
+    if (!modalCount++)
+        setModal(true);
+}
+
+static void endModal()
+{
+    if (!--modalCount)
+        setModal(false);
+}
+
+static IMP NSApplication_RunModalForWindow;
+
+static NSInteger replacedRunModalForWindow(id self, SEL _cmd, NSWindow* window)
+{
+    beginModal();
+    NSInteger result = ((NSInteger (*)(id, SEL, NSWindow *))NSApplication_RunModalForWindow)(self, _cmd, window);
+    endModal();
+
+    return result;
+}
+
 void PluginProcess::initializeShim()
 {
     const PluginProcessShimCallbacks callbacks = {
         shouldCallRealDebugger,
         isWindowActive,
         getCurrentEventButtonState,
-        cocoaWindowShown,
-        cocoaWindowHidden,
+        beginModal,
+        endModal,
         carbonWindowShown,
         carbonWindowHidden,
         setModal,
@@ -205,6 +236,30 @@ void PluginProcess::initializeShim()
 
     PluginProcessShimInitializeFunc initFunc = reinterpret_cast<PluginProcessShimInitializeFunc>(dlsym(RTLD_DEFAULT, "WebKitPluginProcessShimInitialize"));
     initFunc(callbacks);
+}
+
+void PluginProcess::initializeCocoaOverrides()
+{
+    // Override -[NSApplication runModalForWindow:]
+    Method runModalForWindowMethod = class_getInstanceMethod(objc_getClass("NSApplication"), @selector(runModalForWindow:));
+    NSApplication_RunModalForWindow = method_setImplementation(runModalForWindowMethod, reinterpret_cast<IMP>(replacedRunModalForWindow));
+
+    NSNotificationCenter *defaultCenter = [NSNotificationCenter defaultCenter];
+
+    // Track when any Cocoa window is about to be be shown.
+    id orderOnScreenObserver = [defaultCenter addObserverForName:WKWindowWillOrderOnScreenNotification()
+                                                          object:nil
+                                                           queue:nil
+                                                           usingBlock:^(NSNotification *notification) { fullscreenWindowTracker().windowShown([notification object]); }];
+    // Track when any Cocoa window is about to be hidden.
+    id orderOffScreenObserver = [defaultCenter addObserverForName:WKWindowWillOrderOffScreenNotification()
+                                                           object:nil
+                                                            queue:nil
+                                                       usingBlock:^(NSNotification *notification) { fullscreenWindowTracker().windowHidden([notification object]); }];
+
+    // Leak the two observers so that they observe notifications for the lifetime of the process.
+    CFRetain(orderOnScreenObserver);
+    CFRetain(orderOffScreenObserver);
 }
 
 void PluginProcess::setModalWindowIsShowing(bool modalWindowIsShowing)
@@ -215,6 +270,43 @@ void PluginProcess::setModalWindowIsShowing(bool modalWindowIsShowing)
 void PluginProcess::setFullscreenWindowIsShowing(bool fullscreenWindowIsShowing)
 {
     m_connection->send(Messages::PluginProcessProxy::SetFullscreenWindowIsShowing(fullscreenWindowIsShowing), 0);
+}
+
+static void initializeSandbox(const String& pluginPath, const String& sandboxProfileDirectoryPath)
+{
+    if (sandboxProfileDirectoryPath.isEmpty())
+        return;
+
+    RetainPtr<CFURLRef> pluginURL = adoptCF(CFURLCreateWithFileSystemPath(0, pluginPath.createCFString().get(), kCFURLPOSIXPathStyle, false));
+    if (!pluginURL)
+        return;
+
+    RetainPtr<CFBundleRef> pluginBundle = adoptCF(CFBundleCreate(kCFAllocatorDefault, pluginURL.get()));
+    if (!pluginBundle)
+        return;
+    
+    CFStringRef bundleIdentifier = CFBundleGetIdentifier(pluginBundle.get());
+    if (!bundleIdentifier)
+        return;
+
+    RetainPtr<CFURLRef> sandboxProfileDirectory = adoptCF(CFURLCreateWithFileSystemPath(0, sandboxProfileDirectoryPath.createCFString().get(), kCFURLPOSIXPathStyle, TRUE));
+
+    RetainPtr<CFStringRef> sandboxFileName = CFStringCreateWithFormat(0, 0, CFSTR("%@.sb"), bundleIdentifier);
+    RetainPtr<CFURLRef> sandboxURL = adoptCF(CFURLCreateWithFileSystemPathRelativeToBase(0, sandboxFileName.get(), kCFURLPOSIXPathStyle, FALSE, sandboxProfileDirectory.get()));
+
+    RetainPtr<NSString> profileString = [[NSString alloc] initWithContentsOfURL:(NSURL *)sandboxURL.get() encoding:NSUTF8StringEncoding error:NULL];
+    if (!profileString)
+        return;
+
+    enterSandbox([profileString.get() UTF8String], 0, 0);
+}
+
+static void muteAudio(void)
+{
+    AudioObjectPropertyAddress propertyAddress = { kAudioHardwarePropertyProcessIsAudible, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMaster };
+    UInt32 propertyData = 0;
+    OSStatus result = AudioObjectSetPropertyData(kAudioObjectSystemObject, &propertyAddress, 0, 0, sizeof(UInt32), &propertyData);
+    ASSERT_UNUSED(result, result == noErr);
 }
 
 void PluginProcess::platformInitialize(const PluginProcessCreationParameters& parameters)
@@ -228,6 +320,11 @@ void PluginProcess::platformInitialize(const PluginProcessCreationParameters& pa
                                  (NSString *)parameters.parentProcessName];
     
     WKSetVisibleApplicationName((CFStringRef)applicationName);
+
+    initializeSandbox(m_pluginPath, parameters.sandboxProfileDirectoryPath);
+
+    if (parameters.processType == TypeSnapshotProcess)
+        muteAudio();
 }
 
 } // namespace WebKit

@@ -20,6 +20,9 @@
  */
 
 #include "config.h"
+
+#if ENABLE(CONTEXT_MENUS)
+
 #include "ContextMenu.h"
 
 #include "NotImplemented.h"
@@ -88,7 +91,7 @@ PlatformMenuDescription ContextMenu::releasePlatformDescription()
     return PlatformMenuDescription();
 }
 
-PlatformMenuDescription platformMenuDescription(Vector<ContextMenuItem>& menuItemVector)
+PlatformMenuDescription platformMenuDescription(Vector<ContextMenuItem>&)
 {
     notImplemented();
     return 0;
@@ -101,3 +104,4 @@ Vector<ContextMenuItem> contextMenuItemVector(const Vector<ContextMenuItem>* ite
 #endif
 
 }
+#endif // ENABLE(CONTEXT_MENUS)

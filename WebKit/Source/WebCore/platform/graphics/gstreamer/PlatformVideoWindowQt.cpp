@@ -19,14 +19,16 @@
 
 #include "config.h"
 #include "PlatformVideoWindow.h"
+#if ENABLE(VIDEO) && USE(GSTREAMER) && !defined(GST_API_VERSION_1)
 
 #include "HTMLVideoElement.h"
 #include "PlatformVideoWindowPrivate.h"
 
+#include <QCursor>
 #include <QGuiApplication>
-#include <QDesktopWidget>
 #include <QKeyEvent>
 #include <QPalette>
+
 using namespace WebCore;
 
 #ifndef QT_NO_CURSOR
@@ -34,13 +36,9 @@ static const int gHideMouseCursorDelay = 3000;
 #endif
 
 FullScreenVideoWindow::FullScreenVideoWindow()
-    : QWidget(0, Qt::Window)
-    , m_mediaElement(0)
+    : m_mediaElement(0)
 {
-    setAttribute(Qt::WA_NativeWindow);
-    setWindowModality(Qt::ApplicationModal);
-    setAttribute(Qt::WA_NoSystemBackground, true);
-    setAttribute(Qt::WA_PaintOnScreen, true);
+    setModality(Qt::ApplicationModal);
 
 #ifndef QT_NO_CURSOR
     m_cursorTimer.setSingleShot(true);
@@ -53,18 +51,6 @@ void FullScreenVideoWindow::setVideoElement(HTMLVideoElement* element)
     m_mediaElement = element;
 }
 
-void FullScreenVideoWindow::closeEvent(QCloseEvent*)
-{
-#ifndef QT_NO_CURSOR
-    m_cursorTimer.stop();
-#endif
-    setMouseTracking(false);
-    releaseMouse();
-#ifndef QT_NO_CURSOR
-    QGuiApplication::restoreOverrideCursor();
-#endif
-}
-
 void FullScreenVideoWindow::keyPressEvent(QKeyEvent* ev)
 {
     if (m_mediaElement && ev->key() == Qt::Key_Space) {
@@ -74,7 +60,7 @@ void FullScreenVideoWindow::keyPressEvent(QKeyEvent* ev)
             m_mediaElement->play();
     } else if (ev->key() == Qt::Key_Escape)
         emit closed();
-    QWidget::keyPressEvent(ev);
+    QWindow::keyPressEvent(ev);
 }
 
 bool FullScreenVideoWindow::event(QEvent* ev)
@@ -88,17 +74,24 @@ bool FullScreenVideoWindow::event(QEvent* ev)
         emit closed();
         ev->accept();
         return true;
+    case QEvent::Close:
+#ifndef QT_NO_CURSOR
+        m_cursorTimer.stop();
+#endif
+#ifndef QT_NO_CURSOR
+        QGuiApplication::restoreOverrideCursor();
+#endif
+        break;
     default:
-        return QWidget::event(ev);
+        break;
     }
+    return QWindow::event(ev);
 }
 
 void FullScreenVideoWindow::showFullScreen()
 {
-    QWidget::showFullScreen();
-    setMouseTracking(true);
+    QWindow::showFullScreen();
     raise();
-    setFocus();
     hideCursor();
 }
 
@@ -120,14 +113,12 @@ void FullScreenVideoWindow::showCursor()
 
 PlatformVideoWindow::PlatformVideoWindow()
 {
-    m_window = new FullScreenVideoWindow();
-    m_window->setWindowFlags(m_window->windowFlags() | Qt::FramelessWindowHint);
-    QPalette p;
-    p.setColor(QPalette::Base, Qt::black);
-    p.setColor(QPalette::Window, Qt::black);
-    m_window->setPalette(p);
-    m_window->showFullScreen();
-    m_videoWindowId = m_window->winId();
+    QWindow* win = new FullScreenVideoWindow();
+    m_window = win;
+    win->setFlags(win->flags() | Qt::FramelessWindowHint);
+    // FIXME: Port to Qt 5.
+    win->showFullScreen();
+    m_videoWindowId = win->winId();
 }
 
 PlatformVideoWindow::~PlatformVideoWindow()
@@ -139,3 +130,4 @@ PlatformVideoWindow::~PlatformVideoWindow()
 void PlatformVideoWindow::prepareForOverlay(GstMessage*)
 {
 }
+#endif // ENABLE(VIDEO) && USE(GSTREAMER) && !defined(GST_API_VERSION_1)

@@ -74,7 +74,7 @@ static const size_t maxFilePathsListSize = USHRT_MAX;
 
 WebChromeClient::WebChromeClient(WebView* webView)
     : m_webView(webView)
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     , m_notificationsDelegate(new WebDesktopNotificationsDelegate(webView))
 #endif
 {
@@ -334,7 +334,7 @@ void WebChromeClient::setResizable(bool resizable)
     }
 }
 
-void WebChromeClient::addMessageToConsole(MessageSource source, MessageType type, MessageLevel level, const String& message, unsigned line, const String& url)
+void WebChromeClient::addMessageToConsole(MessageSource source, MessageLevel level, const String& message, unsigned line, const String& url)
 {
     COMPtr<IWebUIDelegate> uiDelegate;
     if (SUCCEEDED(m_webView->uiDelegate(&uiDelegate))) {
@@ -410,17 +410,15 @@ bool WebChromeClient::runJavaScriptPrompt(Frame*, const String& message, const S
 
     TimerBase::fireTimersInNestedEventLoop();
 
-    BSTR resultBSTR = 0;
+    BString resultBSTR;
     if (FAILED(ui->runJavaScriptTextInputPanelWithPrompt(m_webView, BString(message), BString(defaultValue), &resultBSTR)))
         return false;
 
-    if (resultBSTR) {
-        result = String(resultBSTR, SysStringLen(resultBSTR));
-        SysFreeString(resultBSTR);
-        return true;
-    }
+    if (!resultBSTR)
+        return false;
 
-    return false;
+    result = String(resultBSTR, SysStringLen(resultBSTR));
+    return true;
 }
 
 void WebChromeClient::setStatusbarText(const String& statusText)
@@ -539,8 +537,11 @@ void WebChromeClient::mouseDidMoveOverElement(const HitTestResult& result, unsig
     uiDelegate->mouseDidMoveOverElement(m_webView, element.get(), modifierFlags);
 }
 
-bool WebChromeClient::shouldMissingPluginMessageBeButton() const
+bool WebChromeClient::shouldUnavailablePluginMessageBeButton(RenderEmbeddedObject::PluginUnavailabilityReason pluginUnavailabilityReason) const
 {
+    if (pluginUnavailabilityReason != RenderEmbeddedObject::PluginMissing)
+        return false;
+
     COMPtr<IWebUIDelegate> uiDelegate;
     if (FAILED(m_webView->uiDelegate(&uiDelegate)))
         return false;
@@ -551,8 +552,10 @@ bool WebChromeClient::shouldMissingPluginMessageBeButton() const
     return uiDelegatePrivate3;
 }
 
-void WebChromeClient::missingPluginButtonClicked(Element* element) const
+void WebChromeClient::unavailablePluginButtonClicked(Element* element, RenderEmbeddedObject::PluginUnavailabilityReason pluginUnavailabilityReason) const
 {
+    ASSERT_UNUSED(pluginUnavailabilityReason, pluginUnavailabilityReason == RenderEmbeddedObject::PluginMissing);
+
     COMPtr<IWebUIDelegate> uiDelegate;
     if (FAILED(m_webView->uiDelegate(&uiDelegate)))
         return;
@@ -743,11 +746,17 @@ void WebChromeClient::attachRootGraphicsLayer(Frame* frame, GraphicsLayer* graph
     m_webView->setRootChildLayer(graphicsLayer);
 }
 
-void WebChromeClient::scheduleCompositingLayerSync()
+void WebChromeClient::scheduleCompositingLayerFlush()
 {
     m_webView->flushPendingGraphicsLayerChangesSoon();
 }
+#endif
 
+#if PLATFORM(WIN) && USE(AVFOUNDATION)
+WebCore::GraphicsDeviceAdapter* WebChromeClient::graphicsDeviceAdapter() const
+{
+    return m_webView->graphicsDeviceAdapter();
+}
 #endif
 
 COMPtr<IWebUIDelegate> WebChromeClient::uiDelegate()

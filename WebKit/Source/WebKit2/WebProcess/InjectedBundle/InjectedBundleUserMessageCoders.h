@@ -33,6 +33,10 @@
 #include "WebPageGroupProxy.h"
 #include "WebProcess.h"
 
+#if PLATFORM(MAC)
+#include "ObjCObjectGraphCoders.h"
+#endif
+
 namespace WebKit {
 
 // Adds
@@ -49,7 +53,7 @@ public:
     {
     }
 
-    void encode(CoreIPC::ArgumentEncoder* encoder) const 
+    void encode(CoreIPC::ArgumentEncoder& encoder) const
     {
         APIObject::Type type = APIObject::TypeNull;
         if (baseEncode(encoder, type))
@@ -58,19 +62,26 @@ public:
         switch (type) {
         case APIObject::TypeBundlePage: {
             WebPage* page = static_cast<WebPage*>(m_root);
-            encoder->encode(page->pageID());
+            encoder << page->pageID();
             break;
         }
         case APIObject::TypeBundleFrame: {
             WebFrame* frame = static_cast<WebFrame*>(m_root);
-            encoder->encode(frame->frameID());
+            encoder << frame->frameID();
             break;
         }
         case APIObject::TypeBundlePageGroup: {
             WebPageGroupProxy* pageGroup = static_cast<WebPageGroupProxy*>(m_root);
-            encoder->encode(pageGroup->pageGroupID());
+            encoder << pageGroup->pageGroupID();
             break;
         }
+#if PLATFORM(MAC)
+        case APIObject::TypeObjCObjectGraph: {
+            ObjCObjectGraph* objectGraph = static_cast<ObjCObjectGraph*>(m_root);
+            encoder << InjectedBundleObjCObjectGraphEncoder(objectGraph);
+            break;
+        }
+#endif
         default:
             ASSERT_NOT_REACHED();
             break;
@@ -128,6 +139,16 @@ public:
             coder.m_root = WebProcess::shared().webPageGroup(pageGroupData);
             break;
         }
+#if PLATFORM(MAC)
+        case APIObject::TypeObjCObjectGraph: {
+            RefPtr<ObjCObjectGraph> objectGraph;
+            InjectedBundleObjCObjectGraphDecoder objectGraphDecoder(objectGraph, &WebProcess::shared());
+            if (!decoder->decode(objectGraphDecoder))
+                return false;
+            coder.m_root = objectGraph.get();
+            break;
+        }
+#endif
         default:
             return false;
         }

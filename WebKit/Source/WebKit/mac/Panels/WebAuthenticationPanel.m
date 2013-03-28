@@ -102,7 +102,10 @@
 - (BOOL)loadNib
 {
     if (!nibLoaded) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
         if ([NSBundle loadNibNamed:WebAuthenticationPanelNibName owner:self]) {
+#pragma clang diagnostic pop
             nibLoaded = YES;
             [imageView setImage:[NSImage imageNamed:@"NSApplicationIcon"]];
         } else {
@@ -125,7 +128,7 @@
     if ([space port] == 0) {
         host = [[space host] _web_decodeHostName];
     } else {
-        host = [NSString stringWithFormat:@"%@:%u", [[space host] _web_decodeHostName], [space port]];
+        host = [NSString stringWithFormat:@"%@:%ld", [[space host] _web_decodeHostName], (long)[space port]];
     }
 
     NSString *realm = [space realm];

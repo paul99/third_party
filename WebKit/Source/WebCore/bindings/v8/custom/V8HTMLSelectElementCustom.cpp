@@ -42,7 +42,6 @@
 #include "V8NamedNodesCollection.h"
 #include "V8Node.h"
 #include "V8NodeList.h"
-#include "V8Proxy.h"
 
 namespace WebCore {
 
@@ -51,16 +50,16 @@ v8::Handle<v8::Value> V8HTMLSelectElement::indexedPropertyGetter(uint32_t index,
     ASSERT(V8DOMWrapper::maybeDOMWrapper(info.Holder()));
     RefPtr<Node> result = V8HTMLSelectElement::toNative(info.Holder())->item(index);
     if (!result)
-        return notHandledByInterceptor();
+        return v8Undefined();
 
-    return toV8(result.release());
+    return toV8(result.release(), info.Holder(), info.GetIsolate());
 }
 
 v8::Handle<v8::Value> V8HTMLSelectElement::indexedPropertySetter(uint32_t index, v8::Local<v8::Value> value, const v8::AccessorInfo& info)
 {
     INC_STATS("DOM.HTMLSelectElement.IndexedPropertySetter");
     HTMLSelectElement* select = V8HTMLSelectElement::toNative(info.Holder());
-    return toOptionsCollectionSetter(index, value, select);
+    return toOptionsCollectionSetter(index, value, select, info.GetIsolate());
 }
 
 v8::Handle<v8::Value> V8HTMLSelectElement::removeCallback(const v8::Arguments& args)

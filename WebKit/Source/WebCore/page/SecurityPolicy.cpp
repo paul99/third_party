@@ -131,11 +131,11 @@ void SecurityPolicy::addOriginAccessWhitelistEntry(const SecurityOrigin& sourceO
         return;
 
     String sourceString = sourceOrigin.toString();
-    pair<OriginAccessMap::iterator, bool> result = originAccessMap().add(sourceString, nullptr);
-    if (result.second)
-        result.first->second = adoptPtr(new OriginAccessWhiteList);
+    OriginAccessMap::AddResult result = originAccessMap().add(sourceString, nullptr);
+    if (result.isNewEntry)
+        result.iterator->value = adoptPtr(new OriginAccessWhiteList);
 
-    OriginAccessWhiteList* list = result.first->second.get();
+    OriginAccessWhiteList* list = result.iterator->value.get();
     list->append(OriginAccessEntry(destinationProtocol, destinationDomain, allowDestinationSubdomains ? OriginAccessEntry::AllowSubdomains : OriginAccessEntry::DisallowSubdomains));
 }
 
@@ -152,7 +152,7 @@ void SecurityPolicy::removeOriginAccessWhitelistEntry(const SecurityOrigin& sour
     if (it == map.end())
         return;
 
-    OriginAccessWhiteList* list = it->second.get();
+    OriginAccessWhiteList* list = it->value.get();
     size_t index = list->find(OriginAccessEntry(destinationProtocol, destinationDomain, allowDestinationSubdomains ? OriginAccessEntry::AllowSubdomains : OriginAccessEntry::DisallowSubdomains));
     if (index == notFound)
         return;

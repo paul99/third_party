@@ -1,7 +1,7 @@
 /*
  *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2003, 2006, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ *  Copyright (C) 2003, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -35,15 +35,38 @@
 #include <wtf/OwnPtr.h>
 #include <wtf/WTFThreadData.h>
 
+#define fail() do { if (!m_error) updateErrorMessage(); return 0; } while (0)
+#define failWithToken(tok) do { if (!m_error) updateErrorMessage(tok); return 0; } while (0)
+#define failWithMessage(msg) do { if (!m_error) updateErrorMessage(msg); return 0; } while (0)
+#define failWithNameAndMessage(before, name, after) do { if (!m_error) updateErrorWithNameAndMessage(before, name, after); return 0; } while (0)
+#define failWithStackOverflow() do { m_error = true; m_hasStackOverflow = true; return 0; } while (0)
+#define failIfFalse(cond) do { if (!(cond)) fail(); } while (0)
+#define failIfFalseWithMessage(cond, msg) do { if (!(cond)) failWithMessage(msg); } while (0)
+#define failIfFalseWithNameAndMessage(cond, before, name, msg) do { if (!(cond)) failWithNameAndMessage(before, name, msg); } while (0)
+#define failIfTrue(cond) do { if ((cond)) fail(); } while (0)
+#define failIfTrueWithMessage(cond, msg) do { if ((cond)) failWithMessage(msg); } while (0)
+#define failIfTrueWithNameAndMessage(cond, before, name, msg) do { if ((cond)) failWithNameAndMessage(before, name, msg); } while (0)
+#define failIfTrueIfStrict(cond) do { if ((cond) && strictMode()) fail(); } while (0)
+#define failIfTrueIfStrictWithMessage(cond, msg) do { if ((cond) && strictMode()) failWithMessage(msg); } while (0)
+#define failIfTrueIfStrictWithNameAndMessage(cond, before, name, after) do { if ((cond) && strictMode()) failWithNameAndMessage(before, name, after); } while (0)
+#define failIfFalseIfStrict(cond) do { if ((!(cond)) && strictMode()) fail(); } while (0)
+#define failIfFalseIfStrictWithMessage(cond, msg) do { if ((!(cond)) && strictMode()) failWithMessage(msg); } while (0)
+#define failIfFalseIfStrictWithNameAndMessage(cond, before, name, after) do { if ((!(cond)) && strictMode()) failWithNameAndMessage(before, name, after); } while (0)
+#define consumeOrFail(tokenType) do { if (!consume(tokenType)) failWithToken(tokenType); } while (0)
+#define consumeOrFailWithFlags(tokenType, flags) do { if (!consume(tokenType, flags)) failWithToken(tokenType); } while (0)
+#define matchOrFail(tokenType) do { if (!match(tokenType)) failWithToken(tokenType); } while (0)
+#define failIfStackOverflow() do { if (!canRecurse()) failWithStackOverflow(); } while (0)
+
 using namespace std;
 
 namespace JSC {
 
 template <typename LexerType>
-Parser<LexerType>::Parser(JSGlobalData* globalData, const SourceCode& source, FunctionParameters* parameters, JSParserStrictness strictness, JSParserMode parserMode)
+Parser<LexerType>::Parser(JSGlobalData* globalData, const SourceCode& source, FunctionParameters* parameters, const Identifier& name, JSParserStrictness strictness, JSParserMode parserMode)
     : m_globalData(globalData)
     , m_source(&source)
     , m_stack(wtfThreadData().stack())
+    , m_hasStackOverflow(false)
     , m_error(false)
     , m_errorMessage("Parse error")
     , m_allowsIn(true)
@@ -71,6 +94,8 @@ Parser<LexerType>::Parser(JSGlobalData* globalData, const SourceCode& source, Fu
         for (unsigned i = 0; i < parameters->size(); i++)
             scope->declareParameter(&parameters->at(i));
     }
+    if (!name.isNull())
+        scope->declareCallee(&name);
     next();
     m_lexer->setLastLineNumber(tokenLine());
 }
@@ -81,9 +106,9 @@ Parser<LexerType>::~Parser()
 }
 
 template <typename LexerType>
-UString Parser<LexerType>::parseInner()
+String Parser<LexerType>::parseInner()
 {
-    UString parseError = UString();
+    String parseError = String();
     
     unsigned oldFunctionCacheSize = m_functionCache ? m_functionCache->byteSize() : 0;
     ASTBuilder context(const_cast<JSGlobalData*>(m_globalData), const_cast<SourceCode*>(m_source));
@@ -138,7 +163,7 @@ template <SourceElementsMode mode, class TreeBuilder> TreeSourceElements Parser<
     bool seenNonDirective = false;
     const Identifier* directive = 0;
     unsigned directiveLiteralLength = 0;
-    unsigned startOffset = m_token.m_info.startOffset;
+    unsigned startOffset = m_token.m_location.startOffset;
     unsigned oldLastLineNumber = m_lexer->lastLineNumber();
     unsigned oldLineNumber = m_lexer->lineNumber();
     bool hasSetStrict = false;
@@ -172,6 +197,7 @@ template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseVarDeclaration(TreeBuilder& context)
 {
     ASSERT(match(VAR));
+    JSTokenLocation location(tokenLocation());
     int start = tokenLine();
     int end = 0;
     int scratch;
@@ -182,20 +208,21 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseVarDeclaratio
     failIfTrue(m_error);
     failIfFalse(autoSemiColon());
     
-    return context.createVarStatement(m_lexer->lastLineNumber(), varDecls, start, end);
+    return context.createVarStatement(location, varDecls, start, end);
 }
 
 template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseConstDeclaration(TreeBuilder& context)
 {
     ASSERT(match(CONSTTOKEN));
+    JSTokenLocation location(tokenLocation());
     int start = tokenLine();
     int end = 0;
     TreeConstDeclList constDecls = parseConstDeclarationList(context);
     failIfTrue(m_error);
     failIfFalse(autoSemiColon());
     
-    return context.createConstStatement(m_lexer->lastLineNumber(), constDecls, start, end);
+    return context.createConstStatement(location, constDecls, start, end);
 }
 
 template <typename LexerType>
@@ -210,6 +237,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseDoWhileStatem
     endLoop();
     failIfFalse(statement);
     int endLine = tokenLine();
+    JSTokenLocation location(tokenLocation());
     consumeOrFail(WHILE);
     consumeOrFail(OPENPAREN);
     TreeExpression expr = parseExpression(context);
@@ -217,13 +245,14 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseDoWhileStatem
     consumeOrFail(CLOSEPAREN);
     if (match(SEMICOLON))
         next(); // Always performs automatic semicolon insertion.
-    return context.createDoWhileStatement(m_lexer->lastLineNumber(), statement, expr, startLine, endLine);
+    return context.createDoWhileStatement(location, statement, expr, startLine, endLine);
 }
 
 template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseWhileStatement(TreeBuilder& context)
 {
     ASSERT(match(WHILE));
+    JSTokenLocation location(tokenLocation());
     int startLine = tokenLine();
     next();
     consumeOrFail(OPENPAREN);
@@ -236,7 +265,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseWhileStatemen
     TreeStatement statement = parseStatement(context, unused);
     endLoop();
     failIfFalse(statement);
-    return context.createWhileStatement(m_lexer->lastLineNumber(), expr, statement, startLine, endLine);
+    return context.createWhileStatement(location, expr, statement, startLine, endLine);
 }
 
 template <typename LexerType>
@@ -245,6 +274,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseVarDeclarati
     TreeExpression varDecls = 0;
     do {
         declarations++;
+        JSTokenLocation location(tokenLocation());
         next();
         matchOrFail(IDENT);
         
@@ -260,17 +290,16 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseVarDeclarati
             int varDivot = tokenStart() + 1;
             initStart = tokenStart();
             next(TreeBuilder::DontBuildStrings); // consume '='
-            int initialAssignments = m_assignmentCount;
             TreeExpression initializer = parseAssignmentExpression(context);
             initEnd = lastTokenEnd();
             lastInitializer = initializer;
             failIfFalse(initializer);
             
-            TreeExpression node = context.createAssignResolve(m_lexer->lastLineNumber(), *name, initializer, initialAssignments != m_assignmentCount, varStart, varDivot, lastTokenEnd());
+            TreeExpression node = context.createAssignResolve(location, *name, initializer, varStart, varDivot, lastTokenEnd());
             if (!varDecls)
                 varDecls = node;
             else
-                varDecls = context.combineCommaNodes(m_lexer->lastLineNumber(), varDecls, node);
+                varDecls = context.combineCommaNodes(location, varDecls, node);
         }
     } while (match(COMMA));
     return varDecls;
@@ -283,6 +312,7 @@ template <class TreeBuilder> TreeConstDeclList Parser<LexerType>::parseConstDecl
     TreeConstDeclList constDecls = 0;
     TreeConstDeclList tail = 0;
     do {
+        JSTokenLocation location(tokenLocation());
         next();
         matchOrFail(IDENT);
         const Identifier* name = m_token.m_data.ident;
@@ -295,7 +325,7 @@ template <class TreeBuilder> TreeConstDeclList Parser<LexerType>::parseConstDecl
             next(TreeBuilder::DontBuildStrings); // consume '='
             initializer = parseAssignmentExpression(context);
         }
-        tail = context.appendConstDecl(m_lexer->lastLineNumber(), tail, name, initializer);
+        tail = context.appendConstDecl(location, tail, name, initializer);
         if (!constDecls)
             constDecls = tail;
     } while (match(COMMA));
@@ -306,6 +336,7 @@ template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseForStatement(TreeBuilder& context)
 {
     ASSERT(match(FOR));
+    JSTokenLocation location(tokenLocation());
     int startLine = tokenLine();
     next();
     consumeOrFail(OPENPAREN);
@@ -314,14 +345,12 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseForStatement(
     int declsStart = 0;
     int declsEnd = 0;
     TreeExpression decls = 0;
-    bool hasDeclaration = false;
     if (match(VAR)) {
         /*
          for (var IDENT in expression) statement
          for (var IDENT = expression in expression) statement
          for (var varDeclarationList; expressionOpt; expressionOpt)
          */
-        hasDeclaration = true;
         const Identifier* forInTarget = 0;
         TreeExpression forInInitializer = 0;
         m_allowsIn = false;
@@ -355,7 +384,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseForStatement(
         endLoop();
         failIfFalse(statement);
         
-        return context.createForInLoop(m_lexer->lastLineNumber(), forInTarget, forInInitializer, expr, statement, declsStart, inLocation, exprEnd, initStart, initEnd, startLine, endLine);
+        return context.createForInLoop(location, forInTarget, forInInitializer, expr, statement, declsStart, inLocation, exprEnd, initStart, initEnd, startLine, endLine);
     }
     
     if (!match(SEMICOLON)) {
@@ -391,7 +420,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseForStatement(
         TreeStatement statement = parseStatement(context, unused);
         endLoop();
         failIfFalse(statement);
-        return context.createForLoop(m_lexer->lastLineNumber(), decls, condition, increment, statement, hasDeclaration, startLine, endLine);
+        return context.createForLoop(location, decls, condition, increment, statement, startLine, endLine);
     }
     
     // For-in loop
@@ -408,13 +437,14 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseForStatement(
     endLoop();
     failIfFalse(statement);
     
-    return context.createForInLoop(m_lexer->lastLineNumber(), decls, expr, statement, declsStart, declsEnd, exprEnd, startLine, endLine);
+    return context.createForInLoop(location, decls, expr, statement, declsStart, declsEnd, exprEnd, startLine, endLine);
 }
 
 template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseBreakStatement(TreeBuilder& context)
 {
     ASSERT(match(BREAK));
+    JSTokenLocation location(tokenLocation());
     int startCol = tokenStart();
     int endCol = tokenEnd();
     int startLine = tokenLine();
@@ -423,7 +453,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseBreakStatemen
     
     if (autoSemiColon()) {
         failIfFalseWithMessage(breakIsValid(), "'break' is only valid inside a switch or loop statement");
-        return context.createBreakStatement(m_lexer->lastLineNumber(), startCol, endCol, startLine, endLine);
+        return context.createBreakStatement(location, startCol, endCol, startLine, endLine);
     }
     matchOrFail(IDENT);
     const Identifier* ident = m_token.m_data.ident;
@@ -432,13 +462,14 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseBreakStatemen
     endLine = tokenLine();
     next();
     failIfFalse(autoSemiColon());
-    return context.createBreakStatement(m_lexer->lastLineNumber(), ident, startCol, endCol, startLine, endLine);
+    return context.createBreakStatement(location, ident, startCol, endCol, startLine, endLine);
 }
 
 template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseContinueStatement(TreeBuilder& context)
 {
     ASSERT(match(CONTINUE));
+    JSTokenLocation location(tokenLocation());
     int startCol = tokenStart();
     int endCol = tokenEnd();
     int startLine = tokenLine();
@@ -447,7 +478,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseContinueState
     
     if (autoSemiColon()) {
         failIfFalseWithMessage(continueIsValid(), "'continue' is only valid inside a loop statement");
-        return context.createContinueStatement(m_lexer->lastLineNumber(), startCol, endCol, startLine, endLine);
+        return context.createContinueStatement(location, startCol, endCol, startLine, endLine);
     }
     matchOrFail(IDENT);
     const Identifier* ident = m_token.m_data.ident;
@@ -458,13 +489,14 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseContinueState
     endLine = tokenLine();
     next();
     failIfFalse(autoSemiColon());
-    return context.createContinueStatement(m_lexer->lastLineNumber(), ident, startCol, endCol, startLine, endLine);
+    return context.createContinueStatement(location, ident, startCol, endCol, startLine, endLine);
 }
 
 template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseReturnStatement(TreeBuilder& context)
 {
     ASSERT(match(RETURN));
+    JSTokenLocation location(tokenLocation());
     failIfFalse(currentScope()->isFunction());
     int startLine = tokenLine();
     int endLine = startLine;
@@ -477,20 +509,21 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseReturnStateme
     if (match(SEMICOLON))
         endLine  = tokenLine();
     if (autoSemiColon())
-        return context.createReturnStatement(m_lexer->lastLineNumber(), 0, start, end, startLine, endLine);
+        return context.createReturnStatement(location, 0, start, end, startLine, endLine);
     TreeExpression expr = parseExpression(context);
     failIfFalse(expr);
     end = lastTokenEnd();
     if (match(SEMICOLON))
         endLine  = tokenLine();
     failIfFalse(autoSemiColon());
-    return context.createReturnStatement(m_lexer->lastLineNumber(), expr, start, end, startLine, endLine);
+    return context.createReturnStatement(location, expr, start, end, startLine, endLine);
 }
 
 template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseThrowStatement(TreeBuilder& context)
 {
     ASSERT(match(THROW));
+    JSTokenLocation location(tokenLocation());
     int eStart = tokenStart();
     int startLine = tokenLine();
     next();
@@ -503,13 +536,14 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseThrowStatemen
     int endLine = tokenLine();
     failIfFalse(autoSemiColon());
     
-    return context.createThrowStatement(m_lexer->lastLineNumber(), expr, eStart, eEnd, startLine, endLine);
+    return context.createThrowStatement(location, expr, eStart, eEnd, startLine, endLine);
 }
 
 template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseWithStatement(TreeBuilder& context)
 {
     ASSERT(match(WITH));
+    JSTokenLocation location(tokenLocation());
     failIfTrueWithMessage(strictMode(), "'with' statements are not valid in strict mode");
     currentScope()->setNeedsFullActivation();
     int startLine = tokenLine();
@@ -526,13 +560,14 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseWithStatement
     TreeStatement statement = parseStatement(context, unused);
     failIfFalse(statement);
     
-    return context.createWithStatement(m_lexer->lastLineNumber(), expr, statement, start, end, startLine, endLine);
+    return context.createWithStatement(location, expr, statement, start, end, startLine, endLine);
 }
 
 template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseSwitchStatement(TreeBuilder& context)
 {
     ASSERT(match(SWITCH));
+    JSTokenLocation location(tokenLocation());
     int startLine = tokenLine();
     next();
     consumeOrFail(OPENPAREN);
@@ -553,7 +588,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseSwitchStateme
     endSwitch();
     consumeOrFail(CLOSEBRACE);
     
-    return context.createSwitchStatement(m_lexer->lastLineNumber(), expr, firstClauses, defaultClause, secondClauses, startLine, endLine);
+    return context.createSwitchStatement(location, expr, firstClauses, defaultClause, secondClauses, startLine, endLine);
     
 }
 
@@ -601,9 +636,9 @@ template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseTryStatement(TreeBuilder& context)
 {
     ASSERT(match(TRY));
+    JSTokenLocation location(tokenLocation());
     TreeStatement tryBlock = 0;
     const Identifier* ident = &m_globalData->propertyNames->nullIdentifier;
-    bool catchHasEval = false;
     TreeStatement catchBlock = 0;
     TreeStatement finallyBlock = 0;
     int firstLine = tokenLine();
@@ -626,10 +661,8 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseTryStatement(
         catchScope->preventNewDecls();
         consumeOrFail(CLOSEPAREN);
         matchOrFail(OPENBRACE);
-        int initialEvalCount = context.evalCount();
         catchBlock = parseBlockStatement(context);
         failIfFalseWithMessage(catchBlock, "'try' must have a catch or finally block");
-        catchHasEval = initialEvalCount != context.evalCount();
         failIfFalse(popScope(catchScope, TreeBuilder::NeedsFreeVariableInfo));
     }
     
@@ -640,37 +673,39 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseTryStatement(
         failIfFalse(finallyBlock);
     }
     failIfFalse(catchBlock || finallyBlock);
-    return context.createTryStatement(m_lexer->lastLineNumber(), tryBlock, ident, catchHasEval, catchBlock, finallyBlock, firstLine, lastLine);
+    return context.createTryStatement(location, tryBlock, ident, catchBlock, finallyBlock, firstLine, lastLine);
 }
 
 template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseDebuggerStatement(TreeBuilder& context)
 {
     ASSERT(match(DEBUGGER));
+    JSTokenLocation location(tokenLocation());
     int startLine = tokenLine();
     int endLine = startLine;
     next();
     if (match(SEMICOLON))
         startLine = tokenLine();
     failIfFalse(autoSemiColon());
-    return context.createDebugger(m_lexer->lastLineNumber(), startLine, endLine);
+    return context.createDebugger(location, startLine, endLine);
 }
 
 template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseBlockStatement(TreeBuilder& context)
 {
     ASSERT(match(OPENBRACE));
+    JSTokenLocation location(tokenLocation());
     int start = tokenLine();
     next();
     if (match(CLOSEBRACE)) {
         next();
-        return context.createBlockStatement(m_lexer->lastLineNumber(), 0, start, m_lastLine);
+        return context.createBlockStatement(location, 0, start, m_lastLine);
     }
     TreeSourceElements subtree = parseSourceElements<DontCheckForStrictMode>(context);
     failIfFalse(subtree);
     matchOrFail(CLOSEBRACE);
     next();
-    return context.createBlockStatement(m_lexer->lastLineNumber(), subtree, start, m_lastLine);
+    return context.createBlockStatement(location, subtree, start, m_lastLine);
 }
 
 template <typename LexerType>
@@ -691,9 +726,11 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseStatement(Tre
     case FUNCTION:
         failIfFalseIfStrictWithMessage(m_statementDepth == 1, "Functions cannot be declared in a nested block in strict mode");
         return parseFunctionDeclaration(context);
-    case SEMICOLON:
+    case SEMICOLON: {
+        JSTokenLocation location(tokenLocation());
         next();
-        return context.createEmptyStatement(m_lexer->lastLineNumber());
+        return context.createEmptyStatement(location);
+    }
     case IF:
         return parseIfStatement(context);
     case DO:
@@ -729,7 +766,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseStatement(Tre
     case STRING:
         directive = m_token.m_data.ident;
         if (directiveLiteralLength)
-            *directiveLiteralLength = m_token.m_info.endOffset - m_token.m_info.startOffset;
+            *directiveLiteralLength = m_token.m_location.endOffset - m_token.m_location.startOffset;
         nonTrivialExpressionCount = m_nonTrivialExpressionCount;
     default:
         TreeStatement exprStatement = parseExpressionStatement(context);
@@ -762,12 +799,12 @@ template <typename LexerType>
 template <class TreeBuilder> TreeFunctionBody Parser<LexerType>::parseFunctionBody(TreeBuilder& context)
 {
     if (match(CLOSEBRACE))
-        return context.createFunctionBody(m_lexer->lastLineNumber(), strictMode());
+        return context.createFunctionBody(tokenLocation(), strictMode());
     DepthManager statementDepth(&m_statementDepth);
     m_statementDepth = 0;
     typename TreeBuilder::FunctionBodyBuilder bodyBuilder(const_cast<JSGlobalData*>(m_globalData), m_lexer.get());
     failIfFalse(parseSourceElements<CheckForStrictMode>(bodyBuilder));
-    return context.createFunctionBody(m_lexer->lastLineNumber(), strictMode());
+    return context.createFunctionBody(tokenLocation(), strictMode());
 }
 
 template <typename LexerType>
@@ -775,9 +812,9 @@ template <FunctionRequirements requirements, bool nameIsInContainingScope, class
 {
     AutoPopScopeRef functionScope(this, pushScope());
     functionScope->setIsFunction();
+    int functionStart = m_token.m_location.startOffset;
     if (match(IDENT)) {
         name = m_token.m_data.ident;
-        failIfTrueWithMessage(*name == m_globalData->propertyNames->underscoreProto, "Cannot name a function __proto__");
         next();
         if (!nameIsInContainingScope)
             failIfFalseIfStrict(functionScope->declareVariable(name));
@@ -793,20 +830,22 @@ template <FunctionRequirements requirements, bool nameIsInContainingScope, class
     
     openBracePos = m_token.m_data.intValue;
     bodyStartLine = tokenLine();
+    JSTokenLocation location(tokenLocation());
     
     // If we know about this function already, we can use the cached info and skip the parser to the end of the function.
     if (const SourceProviderCacheItem* cachedInfo = TreeBuilder::CanUseFunctionCache ? findCachedFunctionInfo(openBracePos) : 0) {
         // If we're in a strict context, the cached function info must say it was strict too.
         ASSERT(!strictMode() || cachedInfo->strictMode);
-        body = context.createFunctionBody(m_lexer->lastLineNumber(), cachedInfo->strictMode);
+        body = context.createFunctionBody(location, cachedInfo->strictMode);
         
         functionScope->restoreFunctionInfo(cachedInfo);
         failIfFalse(popScope(functionScope, TreeBuilder::NeedsFreeVariableInfo));
         
         closeBracePos = cachedInfo->closeBracePos;
+        context.setFunctionStart(body, functionStart);
         m_token = cachedInfo->closeBraceToken();
-        m_lexer->setOffset(m_token.m_info.endOffset);
-        m_lexer->setLineNumber(m_token.m_info.line);
+        m_lexer->setOffset(m_token.m_location.endOffset);
+        m_lexer->setLineNumber(m_token.m_location.line);
         
         next();
         return true;
@@ -828,9 +867,10 @@ template <FunctionRequirements requirements, bool nameIsInContainingScope, class
     OwnPtr<SourceProviderCacheItem> newInfo;
     int functionLength = closeBracePos - openBracePos;
     if (TreeBuilder::CanUseFunctionCache && m_functionCache && functionLength > minimumFunctionLengthToCache) {
-        newInfo = adoptPtr(new SourceProviderCacheItem(m_token.m_info.line, closeBracePos));
+        newInfo = adoptPtr(new SourceProviderCacheItem(functionStart, m_token.m_location.line, closeBracePos));
         functionScope->saveFunctionInfo(newInfo.get());
     }
+    context.setFunctionStart(body, functionStart);
     
     failIfFalse(popScope(functionScope, TreeBuilder::NeedsFreeVariableInfo));
     matchOrFail(CLOSEBRACE);
@@ -848,6 +888,7 @@ template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseFunctionDeclaration(TreeBuilder& context)
 {
     ASSERT(match(FUNCTION));
+    JSTokenLocation location(tokenLocation());
     next();
     const Identifier* name = 0;
     TreeFormalParameterList parameters = 0;
@@ -858,7 +899,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseFunctionDecla
     failIfFalse((parseFunctionInfo<FunctionNeedsName, true>(context, name, parameters, body, openBracePos, closeBracePos, bodyStartLine)));
     failIfFalse(name);
     failIfFalseIfStrict(declareVariable(name));
-    return context.createFuncDeclStatement(m_lexer->lastLineNumber(), name, body, parameters, openBracePos, closeBracePos, bodyStartLine, m_lastLine);
+    return context.createFuncDeclStatement(location, name, body, parameters, openBracePos, closeBracePos, bodyStartLine, m_lastLine);
 }
 
 struct LabelInfo {
@@ -882,10 +923,11 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseExpressionOrL
      * special case that looks for a colon as the next character in the input.
      */
     Vector<LabelInfo> labels;
-    
+    JSTokenLocation location;
     do {
         int start = tokenStart();
         int startLine = tokenLine();
+        location = tokenLocation();
         if (!nextTokenIsColon()) {
             // If we hit this path we're making a expression statement, which
             // by definition can't make use of continue/break so we can just
@@ -893,7 +935,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseExpressionOrL
             TreeExpression expression = parseExpression(context);
             failIfFalse(expression);
             failIfFalse(autoSemiColon());
-            return context.createExprStatement(m_lexer->lastLineNumber(), expression, startLine, m_lastLine);
+            return context.createExprStatement(location, expression, startLine, m_lastLine);
         }
         const Identifier* ident = m_token.m_data.ident;
         int end = tokenEnd();
@@ -932,7 +974,7 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseExpressionOrL
     failIfFalse(statement);
     for (size_t i = 0; i < labels.size(); i++) {
         const LabelInfo& info = labels[labels.size() - i - 1];
-        statement = context.createLabelStatement(m_lexer->lastLineNumber(), info.m_ident, statement, info.m_start, info.m_end);
+        statement = context.createLabelStatement(location, info.m_ident, statement, info.m_start, info.m_end);
     }
     return statement;
 }
@@ -941,39 +983,42 @@ template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseExpressionStatement(TreeBuilder& context)
 {
     int startLine = tokenLine();
+    JSTokenLocation location(tokenLocation());
     TreeExpression expression = parseExpression(context);
     failIfFalse(expression);
     failIfFalse(autoSemiColon());
-    return context.createExprStatement(m_lexer->lastLineNumber(), expression, startLine, m_lastLine);
+    return context.createExprStatement(location, expression, startLine, m_lastLine);
 }
 
 template <typename LexerType>
 template <class TreeBuilder> TreeStatement Parser<LexerType>::parseIfStatement(TreeBuilder& context)
 {
     ASSERT(match(IF));
-    
+    JSTokenLocation ifLocation(tokenLocation());
     int start = tokenLine();
     next();
-    
+
     consumeOrFail(OPENPAREN);
-    
+
     TreeExpression condition = parseExpression(context);
     failIfFalse(condition);
     int end = tokenLine();
     consumeOrFail(CLOSEPAREN);
-    
+
     const Identifier* unused = 0;
     TreeStatement trueBlock = parseStatement(context, unused);
     failIfFalse(trueBlock);
-    
+
     if (!match(ELSE))
-        return context.createIfStatement(m_lexer->lastLineNumber(), condition, trueBlock, start, end);
-    
+        return context.createIfStatement(ifLocation, condition, trueBlock, start, end);
+
     Vector<TreeExpression> exprStack;
     Vector<pair<int, int> > posStack;
+    Vector<JSTokenLocation> tokenLocationStack;
     Vector<TreeStatement> statementStack;
     bool trailingElse = false;
     do {
+        JSTokenLocation tempLocation = tokenLocation();
         next();
         if (!match(IF)) {
             const Identifier* unused = 0;
@@ -985,21 +1030,22 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseIfStatement(T
         }
         int innerStart = tokenLine();
         next();
-        
+
         consumeOrFail(OPENPAREN);
-        
+
         TreeExpression innerCondition = parseExpression(context);
         failIfFalse(innerCondition);
         int innerEnd = tokenLine();
         consumeOrFail(CLOSEPAREN);
         const Identifier* unused = 0;
         TreeStatement innerTrueBlock = parseStatement(context, unused);
-        failIfFalse(innerTrueBlock);     
+        failIfFalse(innerTrueBlock);
+        tokenLocationStack.append(tempLocation);
         exprStack.append(innerCondition);
         posStack.append(make_pair(innerStart, innerEnd));
         statementStack.append(innerTrueBlock);
     } while (match(ELSE));
-    
+
     if (!trailingElse) {
         TreeExpression condition = exprStack.last();
         exprStack.removeLast();
@@ -1007,9 +1053,11 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseIfStatement(T
         statementStack.removeLast();
         pair<int, int> pos = posStack.last();
         posStack.removeLast();
-        statementStack.append(context.createIfStatement(m_lexer->lastLineNumber(), condition, trueBlock, pos.first, pos.second));
+        JSTokenLocation elseLocation = tokenLocationStack.last();
+        tokenLocationStack.removeLast();
+        statementStack.append(context.createIfStatement(elseLocation, condition, trueBlock, pos.first, pos.second));
     }
-    
+
     while (!exprStack.isEmpty()) {
         TreeExpression condition = exprStack.last();
         exprStack.removeLast();
@@ -1019,16 +1067,19 @@ template <class TreeBuilder> TreeStatement Parser<LexerType>::parseIfStatement(T
         statementStack.removeLast();
         pair<int, int> pos = posStack.last();
         posStack.removeLast();
-        statementStack.append(context.createIfStatement(m_lexer->lastLineNumber(), condition, trueBlock, falseBlock, pos.first, pos.second));
+        JSTokenLocation elseLocation = tokenLocationStack.last();
+        tokenLocationStack.removeLast();
+        statementStack.append(context.createIfStatement(elseLocation, condition, trueBlock, falseBlock, pos.first, pos.second));
     }
-    
-    return context.createIfStatement(m_lexer->lastLineNumber(), condition, trueBlock, statementStack.last(), start, end);
+
+    return context.createIfStatement(ifLocation, condition, trueBlock, statementStack.last(), start, end);
 }
 
 template <typename LexerType>
 template <class TreeBuilder> TreeExpression Parser<LexerType>::parseExpression(TreeBuilder& context)
 {
     failIfStackOverflow();
+    JSTokenLocation location(tokenLocation());
     TreeExpression node = parseAssignmentExpression(context);
     failIfFalse(node);
     if (!match(COMMA))
@@ -1038,7 +1089,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseExpression(T
     m_nonLHSCount++;
     TreeExpression right = parseAssignmentExpression(context);
     failIfFalse(right);
-    typename TreeBuilder::Comma commaNode = context.createCommaExpr(m_lexer->lastLineNumber(), node, right);
+    typename TreeBuilder::Comma commaNode = context.createCommaExpr(location, node, right);
     while (match(COMMA)) {
         next(TreeBuilder::DontBuildStrings);
         right = parseAssignmentExpression(context);
@@ -1053,6 +1104,7 @@ template <typename TreeBuilder> TreeExpression Parser<LexerType>::parseAssignmen
 {
     failIfStackOverflow();
     int start = tokenStart();
+    JSTokenLocation location(tokenLocation());
     int initialAssignmentCount = m_assignmentCount;
     int initialNonLHSCount = m_nonLHSCount;
     TreeExpression lhs = parseConditionalExpression(context);
@@ -1105,7 +1157,7 @@ end:
         return lhs;
     
     while (assignmentStack)
-        lhs = context.createAssignment(m_lexer->lastLineNumber(), assignmentStack, lhs, initialAssignmentCount, m_assignmentCount, lastTokenEnd());
+        lhs = context.createAssignment(location, assignmentStack, lhs, initialAssignmentCount, m_assignmentCount, lastTokenEnd());
     
     return lhs;
 }
@@ -1113,6 +1165,7 @@ end:
 template <typename LexerType>
 template <class TreeBuilder> TreeExpression Parser<LexerType>::parseConditionalExpression(TreeBuilder& context)
 {
+    JSTokenLocation location(tokenLocation());
     TreeExpression cond = parseBinaryExpression(context);
     failIfFalse(cond);
     if (!match(QUESTION))
@@ -1125,7 +1178,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseConditionalE
     
     TreeExpression rhs = parseAssignmentExpression(context);
     failIfFalse(rhs);
-    return context.createConditionalExpr(m_lexer->lastLineNumber(), cond, lhs, rhs);
+    return context.createConditionalExpr(location, cond, lhs, rhs);
 }
 
 ALWAYS_INLINE static bool isUnaryOp(JSTokenType token)
@@ -1148,6 +1201,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseBinaryExpres
     int operandStackDepth = 0;
     int operatorStackDepth = 0;
     typename TreeBuilder::BinaryExprContext binaryExprContext(context);
+    JSTokenLocation location(tokenLocation());
     while (true) {
         int exprStart = tokenStart();
         int initialAssignments = m_assignmentCount;
@@ -1169,7 +1223,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseBinaryExpres
             typename TreeBuilder::BinaryOperand rhs = context.getFromOperandStack(-1);
             typename TreeBuilder::BinaryOperand lhs = context.getFromOperandStack(-2);
             context.shrinkOperandStackBy(operandStackDepth, 2);
-            context.appendBinaryOperation(m_lexer->lastLineNumber(), operandStackDepth, operatorStackDepth, lhs, rhs);
+            context.appendBinaryOperation(location, operandStackDepth, operatorStackDepth, lhs, rhs);
             context.operatorStackPop(operatorStackDepth);
         }
         context.operatorStackAppend(operatorStackDepth, operatorToken, precedence);
@@ -1180,7 +1234,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseBinaryExpres
         typename TreeBuilder::BinaryOperand rhs = context.getFromOperandStack(-1);
         typename TreeBuilder::BinaryOperand lhs = context.getFromOperandStack(-2);
         context.shrinkOperandStackBy(operandStackDepth, 2);
-        context.appendBinaryOperation(m_lexer->lastLineNumber(), operandStackDepth, operatorStackDepth, lhs, rhs);
+        context.appendBinaryOperation(location, operandStackDepth, operatorStackDepth, lhs, rhs);
         context.operatorStackPop(operatorStackDepth);
     }
     return context.popOperandStack(operandStackDepth);
@@ -1208,7 +1262,6 @@ template <bool complete, class TreeBuilder> TreeProperty Parser<LexerType>::pars
             return context.template createProperty<complete>(ident, node, PropertyNode::Constant);
         }
         failIfFalse(wasIdent);
-        matchOrFail(IDENT);
         const Identifier* accessorName = 0;
         TreeFormalParameterList parameters = 0;
         TreeFunctionBody body = 0;
@@ -1222,8 +1275,20 @@ template <bool complete, class TreeBuilder> TreeProperty Parser<LexerType>::pars
             type = PropertyNode::Setter;
         else
             fail();
-        failIfFalse((parseFunctionInfo<FunctionNeedsName, false>(context, accessorName, parameters, body, openBracePos, closeBracePos, bodyStartLine)));
-        return context.template createGetterOrSetterProperty<complete>(m_lexer->lastLineNumber(), type, accessorName, parameters, body, openBracePos, closeBracePos, bodyStartLine, m_lastLine);
+        const Identifier* stringPropertyName = 0;
+        double numericPropertyName = 0;
+        if (m_token.m_type == IDENT || m_token.m_type == STRING)
+            stringPropertyName = m_token.m_data.ident;
+        else if (m_token.m_type == NUMBER)
+            numericPropertyName = m_token.m_data.doubleValue;
+        else
+            fail();
+        JSTokenLocation location(tokenLocation());
+        next();
+        failIfFalse((parseFunctionInfo<FunctionNoRequirements, false>(context, accessorName, parameters, body, openBracePos, closeBracePos, bodyStartLine)));
+        if (stringPropertyName)
+            return context.template createGetterOrSetterProperty<complete>(location, type, stringPropertyName, parameters, body, openBracePos, closeBracePos, bodyStartLine, m_lastLine);
+        return context.template createGetterOrSetterProperty<complete>(const_cast<JSGlobalData*>(m_globalData), location, type, numericPropertyName, parameters, body, openBracePos, closeBracePos, bodyStartLine, m_lastLine);
     }
     case NUMBER: {
         double propertyName = m_token.m_data.doubleValue;
@@ -1243,11 +1308,16 @@ template <typename LexerType>
 template <class TreeBuilder> TreeExpression Parser<LexerType>::parseObjectLiteral(TreeBuilder& context)
 {
     int startOffset = m_token.m_data.intValue;
+    unsigned oldLastLineNumber = m_lexer->lastLineNumber();
+    unsigned oldLineNumber = m_lexer->lineNumber();
     consumeOrFailWithFlags(OPENBRACE, TreeBuilder::DontBuildStrings);
+    JSTokenLocation location(tokenLocation());
+
+    int oldNonLHSCount = m_nonLHSCount;
     
     if (match(CLOSEBRACE)) {
         next();
-        return context.createObjectLiteral(m_lexer->lastLineNumber());
+        return context.createObjectLiteral(location);
     }
     
     TreeProperty property = parseProperty<false>(context);
@@ -1255,28 +1325,36 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseObjectLitera
     if (!m_syntaxAlreadyValidated && context.getType(property) != PropertyNode::Constant) {
         m_lexer->setOffset(startOffset);
         next();
+        m_lexer->setLastLineNumber(oldLastLineNumber);
+        m_lexer->setLineNumber(oldLineNumber);
         return parseStrictObjectLiteral(context);
     }
-    TreePropertyList propertyList = context.createPropertyList(m_lexer->lastLineNumber(), property);
+    TreePropertyList propertyList = context.createPropertyList(location, property);
     TreePropertyList tail = propertyList;
     while (match(COMMA)) {
         next(TreeBuilder::DontBuildStrings);
         // allow extra comma, see http://bugs.webkit.org/show_bug.cgi?id=5939
         if (match(CLOSEBRACE))
             break;
+        JSTokenLocation propertyLocation(tokenLocation());
         property = parseProperty<false>(context);
         failIfFalse(property);
         if (!m_syntaxAlreadyValidated && context.getType(property) != PropertyNode::Constant) {
             m_lexer->setOffset(startOffset);
             next();
+            m_lexer->setLastLineNumber(oldLastLineNumber);
+            m_lexer->setLineNumber(oldLineNumber);
             return parseStrictObjectLiteral(context);
         }
-        tail = context.createPropertyList(m_lexer->lastLineNumber(), property, tail);
+        tail = context.createPropertyList(propertyLocation, property, tail);
     }
-    
+
+    location = tokenLocation();
     consumeOrFail(CLOSEBRACE);
     
-    return context.createObjectLiteral(m_lexer->lastLineNumber(), propertyList);
+    m_nonLHSCount = oldNonLHSCount;
+    
+    return context.createObjectLiteral(location, propertyList);
 }
 
 template <typename LexerType>
@@ -1284,9 +1362,12 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseStrictObject
 {
     consumeOrFail(OPENBRACE);
     
+    int oldNonLHSCount = m_nonLHSCount;
+
+    JSTokenLocation location(tokenLocation());
     if (match(CLOSEBRACE)) {
         next();
-        return context.createObjectLiteral(m_lexer->lastLineNumber());
+        return context.createObjectLiteral(location);
     }
     
     TreeProperty property = parseProperty<true>(context);
@@ -1298,30 +1379,34 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseStrictObject
     if (!m_syntaxAlreadyValidated)
         objectValidator.add(context.getName(property).impl(), context.getType(property));
     
-    TreePropertyList propertyList = context.createPropertyList(m_lexer->lastLineNumber(), property);
+    TreePropertyList propertyList = context.createPropertyList(location, property);
     TreePropertyList tail = propertyList;
     while (match(COMMA)) {
         next();
         // allow extra comma, see http://bugs.webkit.org/show_bug.cgi?id=5939
         if (match(CLOSEBRACE))
             break;
+        JSTokenLocation propertyLocation(tokenLocation());
         property = parseProperty<true>(context);
         failIfFalse(property);
         if (!m_syntaxAlreadyValidated) {
-            std::pair<ObjectValidationMap::iterator, bool> propertyEntryIter = objectValidator.add(context.getName(property).impl(), context.getType(property));
-            if (!propertyEntryIter.second) {
-                failIfTrue(propertyEntryIter.first->second == PropertyNode::Constant);
+            ObjectValidationMap::AddResult propertyEntry = objectValidator.add(context.getName(property).impl(), context.getType(property));
+            if (!propertyEntry.isNewEntry) {
+                failIfTrue(propertyEntry.iterator->value == PropertyNode::Constant);
                 failIfTrue(context.getType(property) == PropertyNode::Constant);
-                failIfTrue(context.getType(property) & propertyEntryIter.first->second);
-                propertyEntryIter.first->second |= context.getType(property);
+                failIfTrue(context.getType(property) & propertyEntry.iterator->value);
+                propertyEntry.iterator->value |= context.getType(property);
             }
         }
-        tail = context.createPropertyList(m_lexer->lastLineNumber(), property, tail);
+        tail = context.createPropertyList(propertyLocation, property, tail);
     }
-    
+
+    location = tokenLocation();
     consumeOrFail(CLOSEBRACE);
-    
-    return context.createObjectLiteral(m_lexer->lastLineNumber(), propertyList);
+
+    m_nonLHSCount = oldNonLHSCount;
+
+    return context.createObjectLiteral(location, propertyList);
 }
 
 template <typename LexerType>
@@ -1329,14 +1414,17 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseArrayLiteral
 {
     consumeOrFailWithFlags(OPENBRACKET, TreeBuilder::DontBuildStrings);
     
+    int oldNonLHSCount = m_nonLHSCount;
+    
     int elisions = 0;
     while (match(COMMA)) {
         next(TreeBuilder::DontBuildStrings);
         elisions++;
     }
     if (match(CLOSEBRACKET)) {
+        JSTokenLocation location(tokenLocation());
         next(TreeBuilder::DontBuildStrings);
-        return context.createArray(m_lexer->lastLineNumber(), elisions);
+        return context.createArray(location, elisions);
     }
     
     TreeExpression elem = parseAssignmentExpression(context);
@@ -1354,17 +1442,21 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseArrayLiteral
         }
         
         if (match(CLOSEBRACKET)) {
+            JSTokenLocation location(tokenLocation());
             next(TreeBuilder::DontBuildStrings);
-            return context.createArray(m_lexer->lastLineNumber(), elisions, elementList);
+            return context.createArray(location, elisions, elementList);
         }
         TreeExpression elem = parseAssignmentExpression(context);
         failIfFalse(elem);
         tail = context.createElementList(tail, elisions, elem);
     }
-    
+
+    JSTokenLocation location(tokenLocation());
     consumeOrFail(CLOSEBRACKET);
     
-    return context.createArray(m_lexer->lastLineNumber(), elementList);
+    m_nonLHSCount = oldNonLHSCount;
+    
+    return context.createArray(location, elementList);
 }
 
 template <typename LexerType>
@@ -1388,38 +1480,45 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parsePrimaryExpre
         return result;
     }
     case THISTOKEN: {
+        JSTokenLocation location(tokenLocation());
         next();
-        return context.thisExpr(m_lexer->lastLineNumber());
+        return context.thisExpr(location);
     }
     case IDENT: {
         int start = tokenStart();
         const Identifier* ident = m_token.m_data.ident;
+        JSTokenLocation location(tokenLocation());
         next();
         currentScope()->useVariable(ident, m_globalData->propertyNames->eval == *ident);
         m_lastIdentifier = ident;
-        return context.createResolve(m_lexer->lastLineNumber(), ident, start);
+        return context.createResolve(location, ident, start);
     }
     case STRING: {
         const Identifier* ident = m_token.m_data.ident;
+        JSTokenLocation location(tokenLocation());
         next();
-        return context.createString(m_lexer->lastLineNumber(), ident);
+        return context.createString(location, ident);
     }
     case NUMBER: {
         double d = m_token.m_data.doubleValue;
+        JSTokenLocation location(tokenLocation());
         next();
-        return context.createNumberExpr(m_lexer->lastLineNumber(), d);
+        return context.createNumberExpr(location, d);
     }
     case NULLTOKEN: {
+        JSTokenLocation location(tokenLocation());
         next();
-        return context.createNull(m_lexer->lastLineNumber());
+        return context.createNull(location);
     }
     case TRUETOKEN: {
+        JSTokenLocation location(tokenLocation());
         next();
-        return context.createBoolean(m_lexer->lastLineNumber(), true);
+        return context.createBoolean(location, true);
     }
     case FALSETOKEN: {
+        JSTokenLocation location(tokenLocation());
         next();
-        return context.createBoolean(m_lexer->lastLineNumber(), false);
+        return context.createBoolean(location, false);
     }
     case DIVEQUAL:
     case DIVIDE: {
@@ -1432,10 +1531,11 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parsePrimaryExpre
             failIfFalse(m_lexer->scanRegExp(pattern, flags));
         
         int start = tokenStart();
+        JSTokenLocation location(tokenLocation());
         next();
-        TreeExpression re = context.createRegExp(m_lexer->lastLineNumber(), *pattern, *flags, start);
+        TreeExpression re = context.createRegExp(location, *pattern, *flags, start);
         if (!re) {
-            const char* yarrErrorMsg = Yarr::checkSyntax(pattern->ustring());
+            const char* yarrErrorMsg = Yarr::checkSyntax(pattern->string());
             ASSERT(!m_errorMessage.isNull());
             failWithMessage(yarrErrorMsg);
         }
@@ -1450,6 +1550,7 @@ template <typename LexerType>
 template <class TreeBuilder> TreeArguments Parser<LexerType>::parseArguments(TreeBuilder& context)
 {
     consumeOrFailWithFlags(OPENPAREN, TreeBuilder::DontBuildStrings);
+    JSTokenLocation location(tokenLocation());
     if (match(CLOSEPAREN)) {
         next(TreeBuilder::DontBuildStrings);
         return context.createArguments();
@@ -1457,13 +1558,14 @@ template <class TreeBuilder> TreeArguments Parser<LexerType>::parseArguments(Tre
     TreeExpression firstArg = parseAssignmentExpression(context);
     failIfFalse(firstArg);
     
-    TreeArgumentsList argList = context.createArgumentsList(m_lexer->lastLineNumber(), firstArg);
+    TreeArgumentsList argList = context.createArgumentsList(location, firstArg);
     TreeArgumentsList tail = argList;
     while (match(COMMA)) {
+        JSTokenLocation argumentLocation(tokenLocation());
         next(TreeBuilder::DontBuildStrings);
         TreeExpression arg = parseAssignmentExpression(context);
         failIfFalse(arg);
-        tail = context.createArgumentsList(m_lexer->lastLineNumber(), tail, arg);
+        tail = context.createArgumentsList(argumentLocation, tail, arg);
     }
     consumeOrFail(CLOSEPAREN);
     return context.createArguments(argList);
@@ -1476,6 +1578,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseMemberExpres
     int start = tokenStart();
     int expressionStart = start;
     int newCount = 0;
+    JSTokenLocation location;
     while (match(NEW)) {
         next();
         newCount++;
@@ -1488,14 +1591,16 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseMemberExpres
         int openBracePos = 0;
         int closeBracePos = 0;
         int bodyStartLine = 0;
+        location = tokenLocation();
         next();
         failIfFalse((parseFunctionInfo<FunctionNoRequirements, false>(context, name, parameters, body, openBracePos, closeBracePos, bodyStartLine)));
-        base = context.createFunctionExpr(m_lexer->lastLineNumber(), name, body, parameters, openBracePos, closeBracePos, bodyStartLine, m_lastLine);
+        base = context.createFunctionExpr(location, name, body, parameters, openBracePos, closeBracePos, bodyStartLine, m_lastLine);
     } else
         base = parsePrimaryExpression(context);
     
     failIfFalse(base);
     while (true) {
+        location = tokenLocation();
         switch (m_token.m_type) {
         case OPENBRACKET: {
             m_nonTrivialExpressionCount++;
@@ -1505,7 +1610,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseMemberExpres
             int initialAssignments = m_assignmentCount;
             TreeExpression property = parseExpression(context);
             failIfFalse(property);
-            base = context.createBracketAccess(m_lexer->lastLineNumber(), base, property, initialAssignments != m_assignmentCount, expressionStart, expressionEnd, tokenEnd());
+            base = context.createBracketAccess(location, base, property, initialAssignments != m_assignmentCount, expressionStart, expressionEnd, tokenEnd());
             consumeOrFail(CLOSEBRACKET);
             m_nonLHSCount = nonLHSCount;
             break;
@@ -1518,12 +1623,12 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseMemberExpres
                 int exprEnd = lastTokenEnd();
                 TreeArguments arguments = parseArguments(context);
                 failIfFalse(arguments);
-                base = context.createNewExpr(m_lexer->lastLineNumber(), base, arguments, start, exprEnd, lastTokenEnd());           
+                base = context.createNewExpr(location, base, arguments, start, exprEnd, lastTokenEnd());
             } else {
                 int expressionEnd = lastTokenEnd();
                 TreeArguments arguments = parseArguments(context);
                 failIfFalse(arguments);
-                base = context.makeFunctionCallNode(m_lexer->lastLineNumber(), base, arguments, expressionStart, expressionEnd, lastTokenEnd());
+                base = context.makeFunctionCallNode(location, base, arguments, expressionStart, expressionEnd, lastTokenEnd());
             }
             m_nonLHSCount = nonLHSCount;
             break;
@@ -1533,7 +1638,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseMemberExpres
             int expressionEnd = lastTokenEnd();
             nextExpectIdentifier(LexerFlagsIgnoreReservedWords | TreeBuilder::DontBuildKeywords);
             matchOrFail(IDENT);
-            base = context.createDotAccess(m_lexer->lastLineNumber(), base, m_token.m_data.ident, expressionStart, expressionEnd, tokenEnd());
+            base = context.createDotAccess(location, base, m_token.m_data.ident, expressionStart, expressionEnd, tokenEnd());
             next();
             break;
         }
@@ -1543,7 +1648,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseMemberExpres
     }
 endMemberExpression:
     while (newCount--)
-        base = context.createNewExpr(m_lexer->lastLineNumber(), base, start, lastTokenEnd());
+        base = context.createNewExpr(location, base, start, lastTokenEnd());
     return base;
 }
 
@@ -1581,6 +1686,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseUnaryExpress
         m_nonTrivialExpressionCount++;
     }
     int subExprStart = tokenStart();
+    JSTokenLocation location(tokenLocation());
     TreeExpression expr = parseMemberExpression(context);
     failIfFalse(expr);
     bool isEvalOrArguments = false;
@@ -1593,7 +1699,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseUnaryExpress
     case PLUSPLUS:
         m_nonTrivialExpressionCount++;
         m_nonLHSCount++;
-        expr = context.makePostfixNode(m_lexer->lastLineNumber(), expr, OpPlusPlus, subExprStart, lastTokenEnd(), tokenEnd());
+        expr = context.makePostfixNode(location, expr, OpPlusPlus, subExprStart, lastTokenEnd(), tokenEnd());
         m_assignmentCount++;
         failIfTrueIfStrictWithNameAndMessage(isEvalOrArguments, "'", m_lastIdentifier->impl(), "' cannot be modified in strict mode");
         failIfTrueIfStrict(requiresLExpr);
@@ -1602,7 +1708,7 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseUnaryExpress
     case MINUSMINUS:
         m_nonTrivialExpressionCount++;
         m_nonLHSCount++;
-        expr = context.makePostfixNode(m_lexer->lastLineNumber(), expr, OpMinusMinus, subExprStart, lastTokenEnd(), tokenEnd());
+        expr = context.makePostfixNode(location, expr, OpMinusMinus, subExprStart, lastTokenEnd(), tokenEnd());
         m_assignmentCount++;
         failIfTrueIfStrictWithNameAndMessage(isEvalOrArguments, "'", m_lastIdentifier->impl(), "' cannot be modified in strict mode");
         failIfTrueIfStrict(requiresLExpr);
@@ -1616,40 +1722,42 @@ template <class TreeBuilder> TreeExpression Parser<LexerType>::parseUnaryExpress
     
     if (!TreeBuilder::CreatesAST && (m_syntaxAlreadyValidated || !strictMode()))
         return expr;
-    
+
+    location = tokenLocation();
+    location.line = m_lexer->lastLineNumber();
     while (tokenStackDepth) {
         switch (context.unaryTokenStackLastType(tokenStackDepth)) {
         case EXCLAMATION:
-            expr = context.createLogicalNot(m_lexer->lastLineNumber(), expr);
+            expr = context.createLogicalNot(location, expr);
             break;
         case TILDE:
-            expr = context.makeBitwiseNotNode(m_lexer->lastLineNumber(), expr);
+            expr = context.makeBitwiseNotNode(location, expr);
             break;
         case MINUS:
-            expr = context.makeNegateNode(m_lexer->lastLineNumber(), expr);
+            expr = context.makeNegateNode(location, expr);
             break;
         case PLUS:
-            expr = context.createUnaryPlus(m_lexer->lastLineNumber(), expr);
+            expr = context.createUnaryPlus(location, expr);
             break;
         case PLUSPLUS:
         case AUTOPLUSPLUS:
-            expr = context.makePrefixNode(m_lexer->lastLineNumber(), expr, OpPlusPlus, context.unaryTokenStackLastStart(tokenStackDepth), subExprStart + 1, end);
+            expr = context.makePrefixNode(location, expr, OpPlusPlus, context.unaryTokenStackLastStart(tokenStackDepth), subExprStart + 1, end);
             m_assignmentCount++;
             break;
         case MINUSMINUS:
         case AUTOMINUSMINUS:
-            expr = context.makePrefixNode(m_lexer->lastLineNumber(), expr, OpMinusMinus, context.unaryTokenStackLastStart(tokenStackDepth), subExprStart + 1, end);
+            expr = context.makePrefixNode(location, expr, OpMinusMinus, context.unaryTokenStackLastStart(tokenStackDepth), subExprStart + 1, end);
             m_assignmentCount++;
             break;
         case TYPEOF:
-            expr = context.makeTypeOfNode(m_lexer->lastLineNumber(), expr);
+            expr = context.makeTypeOfNode(location, expr);
             break;
         case VOIDTOKEN:
-            expr = context.createVoid(m_lexer->lastLineNumber(), expr);
+            expr = context.createVoid(location, expr);
             break;
         case DELETETOKEN:
             failIfTrueIfStrictWithNameAndMessage(context.isResolve(expr), "Cannot delete unqualified property", m_lastIdentifier->impl(), "in strict mode");
-            expr = context.makeDeleteNode(m_lexer->lastLineNumber(), expr, context.unaryTokenStackLastStart(tokenStackDepth), end, end);
+            expr = context.makeDeleteNode(location, expr, context.unaryTokenStackLastStart(tokenStackDepth), end, end);
             break;
         default:
             // If we get here something has gone horribly horribly wrong

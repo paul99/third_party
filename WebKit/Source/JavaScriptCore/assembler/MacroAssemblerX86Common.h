@@ -34,6 +34,11 @@
 namespace JSC {
 
 class MacroAssemblerX86Common : public AbstractMacroAssembler<X86Assembler> {
+protected:
+#if CPU(X86_64)
+    static const X86Registers::RegisterID scratchRegister = X86Registers::r11;
+#endif
+
     static const int DoubleConditionBitInvert = 0x10;
     static const int DoubleConditionBitSpecial = 0x20;
     static const int DoubleConditionBits = DoubleConditionBitInvert | DoubleConditionBitSpecial;
@@ -42,7 +47,10 @@ public:
     typedef X86Assembler::FPRegisterID FPRegisterID;
     typedef X86Assembler::XMMRegisterID XMMRegisterID;
     
-    static const int MaximumCompactPtrAlignedAddressOffset = 127;
+    static bool isCompactPtrAlignedAddressOffset(ptrdiff_t value)
+    {
+        return value >= -128 && value <= 127;
+    }
 
     enum RelationalCondition {
         Equal = X86Assembler::ConditionE,
@@ -86,6 +94,16 @@ public:
 
     static const RegisterID stackPointerRegister = X86Registers::esp;
 
+#if ENABLE(JIT_CONSTANT_BLINDING)
+    static bool shouldBlindForSpecificArch(uint32_t value) { return value >= 0x00ffffff; }
+#if CPU(X86_64)
+    static bool shouldBlindForSpecificArch(uint64_t value) { return value >= 0x00ffffff; }
+#if OS(DARWIN) // On 64-bit systems other than DARWIN uint64_t and uintptr_t are the same type so overload is prohibited.
+    static bool shouldBlindForSpecificArch(uintptr_t value) { return value >= 0x00ffffff; }
+#endif
+#endif
+#endif
+
     // Integer arithmetic operations:
     //
     // Operations are typically two operand - operation(source, srcDst)
@@ -116,6 +134,11 @@ public:
     void add32(RegisterID src, Address dest)
     {
         m_assembler.addl_rm(src, dest.offset, dest.base);
+    }
+
+    void add32(TrustedImm32 imm, RegisterID src, RegisterID dest)
+    {
+        m_assembler.leal_mr(imm.m_value, src, dest);
     }
     
     void and32(RegisterID src, RegisterID dest)
@@ -223,16 +246,6 @@ public:
         m_assembler.negl_m(srcDest.offset, srcDest.base);
     }
 
-    void not32(RegisterID srcDest)
-    {
-        m_assembler.notl_r(srcDest);
-    }
-
-    void not32(Address srcDest)
-    {
-        m_assembler.notl_m(srcDest.offset, srcDest.base);
-    }
-    
     void or32(RegisterID src, RegisterID dest)
     {
         m_assembler.orl_rr(src, dest);
@@ -375,7 +388,6 @@ public:
         m_assembler.subl_rm(src, dest.offset, dest.base);
     }
 
-
     void xor32(RegisterID src, RegisterID dest)
     {
         m_assembler.xorl_rr(src, dest);
@@ -383,11 +395,17 @@ public:
 
     void xor32(TrustedImm32 imm, Address dest)
     {
-        m_assembler.xorl_im(imm.m_value, dest.offset, dest.base);
+        if (imm.m_value == -1)
+            m_assembler.notl_m(dest.offset, dest.base);
+        else
+            m_assembler.xorl_im(imm.m_value, dest.offset, dest.base);
     }
 
     void xor32(TrustedImm32 imm, RegisterID dest)
     {
+        if (imm.m_value == -1)
+        m_assembler.notl_r(dest);
+        else
         m_assembler.xorl_ir(imm.m_value, dest);
     }
 
@@ -424,6 +442,23 @@ public:
         m_assembler.sqrtsd_rr(src, dst);
     }
 
+    void absDouble(FPRegisterID src, FPRegisterID dst)
+    {
+        ASSERT(src != dst);
+        static const double negativeZeroConstant = -0.0;
+        loadDouble(&negativeZeroConstant, dst);
+        m_assembler.andnpd_rr(src, dst);
+    }
+
+    void negateDouble(FPRegisterID src, FPRegisterID dst)
+    {
+        ASSERT(src != dst);
+        static const double negativeZeroConstant = -0.0;
+        loadDouble(&negativeZeroConstant, dst);
+        m_assembler.xorpd_rr(src, dst);
+    }
+
+
     // Memory access operations:
     //
     // Loads are of the form load(address, destination) and stores of the form
@@ -453,25 +488,27 @@ public:
 
     DataLabel32 load32WithAddressOffsetPatch(Address address, RegisterID dest)
     {
+        padBeforePatch();
         m_assembler.movl_mr_disp32(address.offset, address.base, dest);
         return DataLabel32(this);
     }
     
     DataLabelCompact load32WithCompactAddressOffsetPatch(Address address, RegisterID dest)
     {
+        padBeforePatch();
         m_assembler.movl_mr_disp8(address.offset, address.base, dest);
         return DataLabelCompact(this);
     }
     
     static void repatchCompact(CodeLocationDataLabelCompact dataLabelCompact, int32_t value)
     {
-        ASSERT(value >= 0);
-        ASSERT(value < MaximumCompactPtrAlignedAddressOffset);
+        ASSERT(isCompactPtrAlignedAddressOffset(value));
         AssemblerType_T::repatchCompact(dataLabelCompact.dataLocation(), value);
     }
     
     DataLabelCompact loadCompactWithAddressOffsetPatch(Address address, RegisterID dest)
     {
+        padBeforePatch();
         m_assembler.movl_mr_disp8(address.offset, address.base, dest);
         return DataLabelCompact(this);
     }
@@ -518,6 +555,7 @@ public:
 
     DataLabel32 store32WithAddressOffsetPatch(RegisterID src, Address address)
     {
+        padBeforePatch();
         m_assembler.movl_rm_disp32(src, address.offset, address.base);
         return DataLabel32(this);
     }
@@ -618,6 +656,17 @@ public:
         ASSERT(isSSE2Present());
         if (src != dest)
             m_assembler.movsd_rr(src, dest);
+    }
+
+    void loadDouble(const void* address, FPRegisterID dest)
+    {
+#if CPU(X86)
+        ASSERT(isSSE2Present());
+        m_assembler.movsd_mr(address, dest);
+#else
+        move(TrustedImmPtr(address), scratchRegister);
+        loadDouble(scratchRegister, dest);
+#endif
     }
 
     void loadDouble(ImplicitAddress address, FPRegisterID dest)
@@ -777,11 +826,15 @@ public:
             m_assembler.ucomisd_rr(right, left);
 
         if (cond == DoubleEqual) {
+            if (left == right)
+                return Jump(m_assembler.jnp());
             Jump isUnordered(m_assembler.jp());
             Jump result = Jump(m_assembler.je());
             isUnordered.link(this);
             return result;
         } else if (cond == DoubleNotEqualOrUnordered) {
+            if (left == right)
+                return Jump(m_assembler.jp());
             Jump isUnordered(m_assembler.jp());
             Jump isEqual(m_assembler.je());
             isUnordered.link(this);
@@ -945,6 +998,11 @@ public:
     void move(TrustedImmPtr imm, RegisterID dest)
     {
         m_assembler.movq_i64r(imm.asIntptr(), dest);
+    }
+
+    void move(TrustedImm64 imm, RegisterID dest)
+    {
+        m_assembler.movq_i64r(imm.m_value, dest);
     }
 
     void swap(RegisterID reg1, RegisterID reg2)
@@ -1313,6 +1371,12 @@ public:
         m_assembler.ret();
     }
 
+    void compare8(RelationalCondition cond, Address left, TrustedImm32 right, RegisterID dest)
+    {
+        m_assembler.cmpb_im(right.m_value, left.offset, left.base);
+        set32(x86Condition(cond), dest);
+    }
+    
     void compare32(RelationalCondition cond, RegisterID left, RegisterID right, RegisterID dest)
     {
         m_assembler.cmpl_rr(right, left);
@@ -1360,6 +1424,16 @@ public:
     void nop()
     {
         m_assembler.nop();
+    }
+
+    static void replaceWithJump(CodeLocationLabel instructionStart, CodeLocationLabel destination)
+    {
+        X86Assembler::replaceWithJump(instructionStart.executableAddress(), destination.executableAddress());
+    }
+    
+    static ptrdiff_t maxJumpReplacementSize()
+    {
+        return X86Assembler::maxJumpReplacementSize();
     }
 
 protected:

@@ -29,17 +29,25 @@
 #include "Chrome.h"
 #include "ChromeClient.h"
 #include "Document.h"
+#include "DocumentStyleSheetCollection.h"
 #include "Frame.h"
 #include "GroupSettings.h"
-#include "IDBFactoryBackendInterface.h"
 #include "Page.h"
 #include "PageCache.h"
 #include "SecurityOrigin.h"
 #include "Settings.h"
 #include "StorageNamespace.h"
 
+#if ENABLE(VIDEO_TRACK)
+#if PLATFORM(MAC)
+#include "CaptionUserPreferencesMac.h"
+#else
+#include "CaptionUserPreferences.h"
+#endif
+#endif
+
 #if PLATFORM(CHROMIUM)
-#include "PlatformSupport.h"
+#include "VisitedLinks.h"
 #endif
 
 namespace WebCore {
@@ -91,15 +99,15 @@ PageGroup* PageGroup::pageGroup(const String& groupName)
     if (!pageGroups)
         pageGroups = new PageGroupMap;
 
-    pair<PageGroupMap::iterator, bool> result = pageGroups->add(groupName, 0);
+    PageGroupMap::AddResult result = pageGroups->add(groupName, 0);
 
-    if (result.second) {
-        ASSERT(!result.first->second);
-        result.first->second = new PageGroup(groupName);
+    if (result.isNewEntry) {
+        ASSERT(!result.iterator->value);
+        result.iterator->value = new PageGroup(groupName);
     }
 
-    ASSERT(result.first->second);
-    return result.first->second;
+    ASSERT(result.iterator->value);
+    return result.iterator->value;
 }
 
 void PageGroup::closeLocalStorage()
@@ -110,8 +118,8 @@ void PageGroup::closeLocalStorage()
     PageGroupMap::iterator end = pageGroups->end();
 
     for (PageGroupMap::iterator it = pageGroups->begin(); it != end; ++it) {
-        if (it->second->hasLocalStorage())
-            it->second->localStorage()->close();
+        if (it->value->hasLocalStorage())
+            it->value->localStorage()->close();
     }
 }
 
@@ -122,8 +130,8 @@ void PageGroup::clearLocalStorageForAllOrigins()
 
     PageGroupMap::iterator end = pageGroups->end();
     for (PageGroupMap::iterator it = pageGroups->begin(); it != end; ++it) {
-        if (it->second->hasLocalStorage())
-            it->second->localStorage()->clearAllOriginsForDeletion();
+        if (it->value->hasLocalStorage())
+            it->value->localStorage()->clearAllOriginsForDeletion();
     }
 }
 
@@ -134,11 +142,23 @@ void PageGroup::clearLocalStorageForOrigin(SecurityOrigin* origin)
 
     PageGroupMap::iterator end = pageGroups->end();
     for (PageGroupMap::iterator it = pageGroups->begin(); it != end; ++it) {
-        if (it->second->hasLocalStorage())
-            it->second->localStorage()->clearOriginForDeletion(origin);
-    }    
+        if (it->value->hasLocalStorage())
+            it->value->localStorage()->clearOriginForDeletion(origin);
+    }
 }
-    
+
+void PageGroup::closeIdleLocalStorageDatabases()
+{
+    if (!pageGroups)
+        return;
+
+    PageGroupMap::iterator end = pageGroups->end();
+    for (PageGroupMap::iterator it = pageGroups->begin(); it != end; ++it) {
+        if (it->value->hasLocalStorage())
+            it->value->localStorage()->closeIdleLocalStorageDatabases();
+    }
+}
+
 void PageGroup::syncLocalStorage()
 {
     if (!pageGroups)
@@ -146,8 +166,8 @@ void PageGroup::syncLocalStorage()
 
     PageGroupMap::iterator end = pageGroups->end();
     for (PageGroupMap::iterator it = pageGroups->begin(); it != end; ++it) {
-        if (it->second->hasLocalStorage())
-            it->second->localStorage()->sync();
+        if (it->value->hasLocalStorage())
+            it->value->localStorage()->sync();
     }
 }
 
@@ -177,7 +197,7 @@ bool PageGroup::isLinkVisited(LinkHash visitedLinkHash)
 {
 #if PLATFORM(CHROMIUM)
     // Use Chromium's built-in visited link database.
-    return PlatformSupport::isLinkVisited(visitedLinkHash);
+    return VisitedLinks::isLinkVisited(visitedLinkHash);
 #else
     if (!m_visitedLinksPopulated) {
         m_visitedLinksPopulated = true;
@@ -198,7 +218,7 @@ inline void PageGroup::addVisitedLink(LinkHash hash)
 {
     ASSERT(shouldTrackVisitedLinks);
 #if !PLATFORM(CHROMIUM)
-    if (!m_visitedLinkHashes.add(hash).second)
+    if (!m_visitedLinkHashes.add(hash).isNewEntry)
         return;
 #endif
     Page::visitedStateChanged(this, hash);
@@ -210,7 +230,7 @@ void PageGroup::addVisitedLink(const KURL& url)
     if (!shouldTrackVisitedLinks)
         return;
     ASSERT(!url.isEmpty());
-    addVisitedLink(visitedLinkHash(url.string().characters(), url.string().length()));
+    addVisitedLink(visitedLinkHash(url.string()));
 }
 
 void PageGroup::addVisitedLink(const UChar* characters, size_t length)
@@ -261,19 +281,8 @@ StorageNamespace* PageGroup::localStorage()
     return m_localStorage.get();
 }
 
-#if ENABLE(INDEXED_DATABASE)
-IDBFactoryBackendInterface* PageGroup::idbFactory()
-{
-    // Do not add page setting based access control here since this object is shared by all pages in
-    // the group and having per-page controls is misleading.
-    if (!m_factoryBackend)
-        m_factoryBackend = IDBFactoryBackendInterface::create();
-    return m_factoryBackend.get();
-}
-#endif
-
 void PageGroup::addUserScriptToWorld(DOMWrapperWorld* world, const String& source, const KURL& url,
-                                     PassOwnPtr<Vector<String> > whitelist, PassOwnPtr<Vector<String> > blacklist,
+                                     const Vector<String>& whitelist, const Vector<String>& blacklist,
                                      UserScriptInjectionTime injectionTime, UserContentInjectedFrames injectedFrames)
 {
     ASSERT_ARG(world, world);
@@ -281,14 +290,14 @@ void PageGroup::addUserScriptToWorld(DOMWrapperWorld* world, const String& sourc
     OwnPtr<UserScript> userScript = adoptPtr(new UserScript(source, url, whitelist, blacklist, injectionTime, injectedFrames));
     if (!m_userScripts)
         m_userScripts = adoptPtr(new UserScriptMap);
-    OwnPtr<UserScriptVector>& scriptsInWorld = m_userScripts->add(world, nullptr).first->second;
+    OwnPtr<UserScriptVector>& scriptsInWorld = m_userScripts->add(world, nullptr).iterator->value;
     if (!scriptsInWorld)
         scriptsInWorld = adoptPtr(new UserScriptVector);
     scriptsInWorld->append(userScript.release());
 }
 
 void PageGroup::addUserStyleSheetToWorld(DOMWrapperWorld* world, const String& source, const KURL& url,
-                                         PassOwnPtr<Vector<String> > whitelist, PassOwnPtr<Vector<String> > blacklist,
+                                         const Vector<String>& whitelist, const Vector<String>& blacklist,
                                          UserContentInjectedFrames injectedFrames,
                                          UserStyleLevel level,
                                          UserStyleInjectionTime injectionTime)
@@ -298,13 +307,13 @@ void PageGroup::addUserStyleSheetToWorld(DOMWrapperWorld* world, const String& s
     OwnPtr<UserStyleSheet> userStyleSheet = adoptPtr(new UserStyleSheet(source, url, whitelist, blacklist, injectedFrames, level));
     if (!m_userStyleSheets)
         m_userStyleSheets = adoptPtr(new UserStyleSheetMap);
-    OwnPtr<UserStyleSheetVector>& styleSheetsInWorld = m_userStyleSheets->add(world, nullptr).first->second;
+    OwnPtr<UserStyleSheetVector>& styleSheetsInWorld = m_userStyleSheets->add(world, nullptr).iterator->value;
     if (!styleSheetsInWorld)
         styleSheetsInWorld = adoptPtr(new UserStyleSheetVector);
     styleSheetsInWorld->append(userStyleSheet.release());
 
     if (injectionTime == InjectInExistingDocuments)
-        resetUserStyleCacheInAllFrames();
+        invalidatedInjectedStyleSheetCacheInAllFrames();
 }
 
 void PageGroup::removeUserScriptFromWorld(DOMWrapperWorld* world, const KURL& url)
@@ -318,7 +327,7 @@ void PageGroup::removeUserScriptFromWorld(DOMWrapperWorld* world, const KURL& ur
     if (it == m_userScripts->end())
         return;
     
-    UserScriptVector* scripts = it->second.get();
+    UserScriptVector* scripts = it->value.get();
     for (int i = scripts->size() - 1; i >= 0; --i) {
         if (scripts->at(i)->url() == url)
             scripts->remove(i);
@@ -340,7 +349,7 @@ void PageGroup::removeUserStyleSheetFromWorld(DOMWrapperWorld* world, const KURL
     if (it == m_userStyleSheets->end())
         return;
     
-    UserStyleSheetVector* stylesheets = it->second.get();
+    UserStyleSheetVector* stylesheets = it->value.get();
     for (int i = stylesheets->size() - 1; i >= 0; --i) {
         if (stylesheets->at(i)->url() == url) {
             stylesheets->remove(i);
@@ -354,7 +363,7 @@ void PageGroup::removeUserStyleSheetFromWorld(DOMWrapperWorld* world, const KURL
     if (stylesheets->isEmpty())
         m_userStyleSheets->remove(it);
 
-    resetUserStyleCacheInAllFrames();
+    invalidatedInjectedStyleSheetCacheInAllFrames();
 }
 
 void PageGroup::removeUserScriptsFromWorld(DOMWrapperWorld* world)
@@ -384,7 +393,7 @@ void PageGroup::removeUserStyleSheetsFromWorld(DOMWrapperWorld* world)
     
     m_userStyleSheets->remove(it);
 
-    resetUserStyleCacheInAllFrames();
+    invalidatedInjectedStyleSheetCacheInAllFrames();
 }
 
 void PageGroup::removeAllUserContent()
@@ -393,18 +402,60 @@ void PageGroup::removeAllUserContent()
 
     if (m_userStyleSheets) {
         m_userStyleSheets.clear();
-        resetUserStyleCacheInAllFrames();
+        invalidatedInjectedStyleSheetCacheInAllFrames();
     }
 }
 
-void PageGroup::resetUserStyleCacheInAllFrames()
+void PageGroup::invalidatedInjectedStyleSheetCacheInAllFrames()
 {
     // Clear our cached sheets and have them just reparse.
     HashSet<Page*>::const_iterator end = m_pages.end();
     for (HashSet<Page*>::const_iterator it = m_pages.begin(); it != end; ++it) {
         for (Frame* frame = (*it)->mainFrame(); frame; frame = frame->tree()->traverseNext())
-            frame->document()->updatePageGroupUserSheets();
+            frame->document()->styleSheetCollection()->invalidateInjectedStyleSheetCache();
     }
 }
+
+#if ENABLE(VIDEO_TRACK)
+CaptionUserPreferences* PageGroup::captionPreferences()
+{
+    if (!m_captionPreferences)
+#if PLATFORM(MAC)
+        m_captionPreferences = CaptionUserPreferencesMac::create(this);
+#else
+        m_captionPreferences = CaptionUserPreferences::create(this);
+#endif
+
+    return m_captionPreferences.get();
+}
+    
+void PageGroup::registerForCaptionPreferencesChangedCallbacks(CaptionPreferencesChangedListener* listener)
+{
+    captionPreferences()->registerForCaptionPreferencesChangedCallbacks(listener);
+}
+
+void PageGroup::unregisterForCaptionPreferencesChangedCallbacks(CaptionPreferencesChangedListener* listener)
+{
+    if (!m_captionPreferences)
+        return;
+    captionPreferences()->unregisterForCaptionPreferencesChangedCallbacks(listener);
+}
+    
+bool PageGroup::userPrefersCaptions()
+{
+    return captionPreferences()->userPrefersCaptions();
+}
+
+bool PageGroup::userHasCaptionPreferences()
+{
+    return captionPreferences()->userPrefersCaptions();
+}
+
+float PageGroup::captionFontSizeScale()
+{
+    return captionPreferences()->captionFontSizeScale();
+}
+
+#endif
 
 } // namespace WebCore

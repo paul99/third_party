@@ -31,6 +31,7 @@
 #include "Frame.h"
 #include "Geolocation.h"
 #include "V8Binding.h"
+#include "V8Callback.h"
 #include "V8PositionCallback.h"
 #include "V8PositionErrorCallback.h"
 #include "V8Utilities.h"
@@ -60,7 +61,7 @@ static PassRefPtr<PositionOptions> createPositionOptions(v8::Local<v8::Value> va
     // - If the getter or the property's valueOf method throws an exception, we
     //   quit so as not to risk overwriting the exception.
     // - If the value is absent or undefined, we don't override the default.
-    v8::Local<v8::Value> enableHighAccuracyValue = object->Get(v8::String::New("enableHighAccuracy"));
+    v8::Local<v8::Value> enableHighAccuracyValue = object->Get(v8::String::NewSymbol("enableHighAccuracy"));
     if (enableHighAccuracyValue.IsEmpty()) {
         succeeded = false;
         return 0;
@@ -74,7 +75,7 @@ static PassRefPtr<PositionOptions> createPositionOptions(v8::Local<v8::Value> va
         options->setEnableHighAccuracy(enableHighAccuracyBoolean->Value());
     }
 
-    v8::Local<v8::Value> timeoutValue = object->Get(v8::String::New("timeout"));
+    v8::Local<v8::Value> timeoutValue = object->Get(v8::String::NewSymbol("timeout"));
     if (timeoutValue.IsEmpty()) {
         succeeded = false;
         return 0;
@@ -98,7 +99,7 @@ static PassRefPtr<PositionOptions> createPositionOptions(v8::Local<v8::Value> va
         }
     }
 
-    v8::Local<v8::Value> maximumAgeValue = object->Get(v8::String::New("maximumAge"));
+    v8::Local<v8::Value> maximumAgeValue = object->Get(v8::String::NewSymbol("maximumAge"));
     if (maximumAgeValue.IsEmpty()) {
         succeeded = false;
         return 0;
@@ -133,13 +134,13 @@ v8::Handle<v8::Value> V8Geolocation::getCurrentPositionCallback(const v8::Argume
 
     bool succeeded = false;
 
-    RefPtr<PositionCallback> positionCallback = createFunctionOnlyCallback<V8PositionCallback>(args[0], succeeded);
+    RefPtr<PositionCallback> positionCallback = createFunctionOnlyCallback<V8PositionCallback>(args[0], succeeded, args.GetIsolate());
     if (!succeeded)
         return v8::Undefined();
     ASSERT(positionCallback);
 
     // Argument is optional (hence undefined is allowed), and null is allowed.
-    RefPtr<PositionErrorCallback> positionErrorCallback = createFunctionOnlyCallback<V8PositionErrorCallback>(args[1], succeeded, CallbackAllowUndefined | CallbackAllowNull);
+    RefPtr<PositionErrorCallback> positionErrorCallback = createFunctionOnlyCallback<V8PositionErrorCallback>(args[1], succeeded, args.GetIsolate(), CallbackAllowUndefined | CallbackAllowNull);
     if (!succeeded)
         return v8::Undefined();
 
@@ -159,13 +160,13 @@ v8::Handle<v8::Value> V8Geolocation::watchPositionCallback(const v8::Arguments& 
 
     bool succeeded = false;
 
-    RefPtr<PositionCallback> positionCallback = createFunctionOnlyCallback<V8PositionCallback>(args[0], succeeded);
+    RefPtr<PositionCallback> positionCallback = createFunctionOnlyCallback<V8PositionCallback>(args[0], succeeded, args.GetIsolate());
     if (!succeeded)
         return v8::Undefined();
     ASSERT(positionCallback);
 
     // Argument is optional (hence undefined is allowed), and null is allowed.
-    RefPtr<PositionErrorCallback> positionErrorCallback = createFunctionOnlyCallback<V8PositionErrorCallback>(args[1], succeeded, CallbackAllowUndefined | CallbackAllowNull);
+    RefPtr<PositionErrorCallback> positionErrorCallback = createFunctionOnlyCallback<V8PositionErrorCallback>(args[1], succeeded, args.GetIsolate(), CallbackAllowUndefined | CallbackAllowNull);
     if (!succeeded)
         return v8::Undefined();
 

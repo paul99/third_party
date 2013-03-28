@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2008, 2009, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,7 +30,6 @@
 #define SourceProvider_h
 
 #include "SourceProviderCache.h"
-#include "UString.h"
 #include <wtf/PassOwnPtr.h>
 #include <wtf/RefCounted.h>
 #include <wtf/UnusedParam.h>
@@ -40,28 +39,38 @@ namespace JSC {
 
     class SourceProvider : public RefCounted<SourceProvider> {
     public:
-        SourceProvider(const UString& url, const TextPosition& startPosition, SourceProviderCache* cache = 0)
+        static const intptr_t nullID = 1;
+        
+        SourceProvider(const String& url, const TextPosition& startPosition, SourceProviderCache* cache = 0)
             : m_url(url)
             , m_startPosition(startPosition)
             , m_validated(false)
             , m_cache(cache ? cache : new SourceProviderCache)
             , m_cacheOwned(!cache)
         {
-            deprecatedTurnOffVerifier();
         }
+
         virtual ~SourceProvider()
         {
             if (m_cacheOwned)
                 delete m_cache;
         }
 
-        virtual UString getRange(int start, int end) const = 0;
-        virtual const StringImpl* data() const = 0;
-        virtual int length() const = 0;
-        
-        const UString& url() { return m_url; }
+        virtual const String& source() const = 0;
+        String getRange(int start, int end) const
+        {
+            return source().substringSharingImpl(start, end - start);
+        }
+
+        const String& url() { return m_url; }
         TextPosition startPosition() const { return m_startPosition; }
-        intptr_t asID() { return reinterpret_cast<intptr_t>(this); }
+        intptr_t asID()
+        {
+            ASSERT(this);
+            if (!this) // Be defensive in release mode.
+                return nullID;
+            return reinterpret_cast<intptr_t>(this);
+        }
 
         bool isValid() const { return m_validated; }
         void setValid() { m_validated = true; }
@@ -72,35 +81,33 @@ namespace JSC {
     private:
         virtual void cacheSizeChanged(int delta) { UNUSED_PARAM(delta); }
 
-        UString m_url;
+        String m_url;
         TextPosition m_startPosition;
         bool m_validated;
         SourceProviderCache* m_cache;
         bool m_cacheOwned;
     };
 
-    class UStringSourceProvider : public SourceProvider {
+    class StringSourceProvider : public SourceProvider {
     public:
-        static PassRefPtr<UStringSourceProvider> create(const UString& source, const UString& url, const TextPosition& startPosition = TextPosition::minimumPosition())
+        static PassRefPtr<StringSourceProvider> create(const String& source, const String& url, const TextPosition& startPosition = TextPosition::minimumPosition())
         {
-            return adoptRef(new UStringSourceProvider(source, url, startPosition));
+            return adoptRef(new StringSourceProvider(source, url, startPosition));
         }
 
-        UString getRange(int start, int end) const
+        virtual const String& source() const OVERRIDE
         {
-            return m_source.substringSharingImpl(start, end - start);
+            return m_source;
         }
-        const StringImpl* data() const { return m_source.impl(); }
-        int length() const { return m_source.length(); }
 
     private:
-        UStringSourceProvider(const UString& source, const UString& url, const TextPosition& startPosition)
+        StringSourceProvider(const String& source, const String& url, const TextPosition& startPosition)
             : SourceProvider(url, startPosition)
             , m_source(source)
         {
         }
 
-        UString m_source;
+        String m_source;
     };
     
 } // namespace JSC

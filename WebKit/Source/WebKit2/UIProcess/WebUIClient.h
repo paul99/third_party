@@ -48,6 +48,7 @@ class GeolocationPermissionRequestProxy;
 class NativeWebKeyboardEvent;
 class NativeWebWheelEvent;
 class NotificationPermissionRequest;
+class WebColorPickerResultListenerProxy;
 class WebData;
 class WebFrameProxy;
 class WebPageProxy;
@@ -70,7 +71,7 @@ public:
 
     void setStatusText(WebPageProxy*, const String&);
     void mouseDidMoveOverElement(WebPageProxy*, const WebHitTestResult::Data&, WebEvent::Modifiers, APIObject*);
-    void missingPluginButtonClicked(WebPageProxy*, const String& mimeType, const String& url, const String& pluginsPageURL);
+    void unavailablePluginButtonClicked(WebPageProxy*, WKPluginUnavailabilityReason, const String& mimeType, const String& url, const String& pluginsPageURL);
     
     bool implementsDidNotHandleKeyEvent() const;
     void didNotHandleKeyEvent(WebPageProxy*, const NativeWebKeyboardEvent&);
@@ -115,6 +116,11 @@ public:
     void saveDataToFileInDownloadsFolder(WebPageProxy*, const String& suggestedFilename, const String& mimeType, const String& originatingURLString, WebData*);
 
     bool shouldInterruptJavaScript(WebPageProxy*);
+
+#if ENABLE(INPUT_TYPE_COLOR)
+    bool showColorPicker(WebPageProxy*, const String&, WebColorPickerResultListenerProxy*);
+    bool hideColorPicker(WebPageProxy*);
+#endif
 };
 
 } // namespace WebKit

@@ -26,7 +26,7 @@
 #include "config.h"
 #include "Hyphenation.h"
 
-#if !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#if (!PLATFORM(MAC) && !PLATFORM(CHROMIUM)) || PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
 
 #include "AtomicStringKeyedMRUCache.h"
 #include "TextBreakIteratorInternalICU.h"
@@ -46,8 +46,7 @@ RetainPtr<CFLocaleRef> AtomicStringKeyedMRUCache<RetainPtr<CFLocaleRef> >::creat
 template<>
 RetainPtr<CFLocaleRef> AtomicStringKeyedMRUCache<RetainPtr<CFLocaleRef> >::createValueForKey(const AtomicString& localeIdentifier)
 {
-    RetainPtr<CFStringRef> cfLocaleIdentifier(AdoptCF, localeIdentifier.createCFString());
-    RetainPtr<CFLocaleRef> locale(AdoptCF, CFLocaleCreate(kCFAllocatorDefault, cfLocaleIdentifier.get()));
+    RetainPtr<CFLocaleRef> locale = adoptCF(CFLocaleCreate(kCFAllocatorDefault, localeIdentifier.string().createCFString().get()));
 
     return CFStringIsHyphenationAvailableForLocale(locale.get()) ? locale : 0;
 }
@@ -70,10 +69,11 @@ size_t lastHyphenLocation(const UChar* characters, size_t length, size_t beforeI
     RetainPtr<CFLocaleRef> locale = cfLocaleCache().get(localeIdentifier);
     ASSERT(locale);
 
-    CFIndex result = CFStringGetHyphenationLocationBeforeIndex(string.get(), beforeIndex, CFRangeMake(0, length), 0, locale.get(), 0);
+    CFOptionFlags searchAcrossWordBoundaries = 1;
+    CFIndex result = CFStringGetHyphenationLocationBeforeIndex(string.get(), beforeIndex, CFRangeMake(0, length), searchAcrossWordBoundaries, locale.get(), 0);
     return result == kCFNotFound ? 0 : result;
 }
 
 } // namespace WebCore
 
-#endif // !defined(BUILDING_ON_LEOPARD) && !defined(BUILDING_ON_SNOW_LEOPARD)
+#endif // (!PLATFORM(MAC) && !PLATFORM(CHROMIUM)) || PLATFORM(IOS) || __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070

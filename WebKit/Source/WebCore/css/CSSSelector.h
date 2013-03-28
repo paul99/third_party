@@ -33,41 +33,13 @@ namespace WebCore {
 
     // this class represents a selector for a StyleRule
     class CSSSelector {
-        WTF_MAKE_NONCOPYABLE(CSSSelector); WTF_MAKE_FAST_ALLOCATED;
+        WTF_MAKE_FAST_ALLOCATED;
     public:
-        CSSSelector()
-            : m_relation(Descendant)
-            , m_match(None)
-            , m_pseudoType(PseudoNotParsed)
-            , m_parsedNth(false)
-            , m_isLastInSelectorList(false)
-            , m_isLastInTagHistory(true)
-            , m_hasRareData(false)
-            , m_isForPage(false)
-            , m_tag(anyQName())
-        {
-        }
+        CSSSelector();
+        CSSSelector(const QualifiedName&);
+        CSSSelector(const CSSSelector&);
 
-        CSSSelector(const QualifiedName& qName)
-            : m_relation(Descendant)
-            , m_match(None)
-            , m_pseudoType(PseudoNotParsed)
-            , m_parsedNth(false)
-            , m_isLastInSelectorList(false)
-            , m_isLastInTagHistory(true)
-            , m_hasRareData(false)
-            , m_isForPage(false)
-            , m_tag(qName)
-        {
-        }
-
-        ~CSSSelector()
-        {
-            if (m_hasRareData)
-                delete m_data.m_rareData;
-            else if (m_data.m_value)
-                m_data.m_value->deref();
-        }
+        ~CSSSelector();
 
         /**
          * Re-create selector text from selector's data
@@ -171,7 +143,6 @@ namespace WebCore {
             PseudoSingleButton,
             PseudoNoButton,
             PseudoSelection,
-            PseudoInputListButton,
             PseudoLeftPage,
             PseudoRightPage,
             PseudoFirstPage,
@@ -183,6 +154,8 @@ namespace WebCore {
 #endif
             PseudoInRange,
             PseudoOutOfRange,
+            PseudoUserAgentCustomElement,
+            PseudoWebKitCustomElement,
         };
 
         enum MarginBoxType {
@@ -212,7 +185,7 @@ namespace WebCore {
         }
 
         static PseudoType parsePseudoType(const AtomicString&);
-        static bool isUnknownPseudoType(const AtomicString&);
+        static bool isCustomPseudoType(const AtomicString&);        
         static PseudoId pseudoId(PseudoType);
 
         // Selectors are kept in an array by CSSSelectorList. The next component of the selector is
@@ -240,6 +213,7 @@ namespace WebCore {
 
         bool matchesPseudoElement() const;
         bool isUnknownPseudoElement() const;
+        bool isCustomPseudoElement() const;
         bool isSiblingSelector() const;
         bool isAttributeSelector() const;
 
@@ -270,10 +244,11 @@ namespace WebCore {
         unsigned specificityForPage() const;
         void extractPseudoType() const;
 
-        struct RareData {
-            WTF_MAKE_NONCOPYABLE(RareData); WTF_MAKE_FAST_ALLOCATED;
-        public:
-            RareData(PassRefPtr<AtomicStringImpl> value);
+        // Hide.
+        CSSSelector& operator=(const CSSSelector&);
+
+        struct RareData : public RefCounted<RareData> {
+            static PassRefPtr<RareData> create(PassRefPtr<AtomicStringImpl> value) { return adoptRef(new RareData(value)); }
             ~RareData();
 
             bool parseNth();
@@ -285,6 +260,9 @@ namespace WebCore {
             QualifiedName m_attribute; // used for attribute selector
             AtomicString m_argument; // Used for :contains, :lang and :nth-*
             OwnPtr<CSSSelectorList> m_selectorList; // Used for :-webkit-any and :not
+        
+        private:
+            RareData(PassRefPtr<AtomicStringImpl> value);
         };
         void createRareData();
 
@@ -314,6 +292,11 @@ inline bool CSSSelector::matchesPseudoElement() const
 inline bool CSSSelector::isUnknownPseudoElement() const
 {
     return m_match == PseudoElement && m_pseudoType == PseudoUnknown;
+}
+
+inline bool CSSSelector::isCustomPseudoElement() const
+{
+    return m_match == PseudoElement && (m_pseudoType == PseudoUserAgentCustomElement || m_pseudoType == PseudoWebKitCustomElement);
 }
 
 inline bool CSSSelector::isSiblingSelector() const
@@ -367,6 +350,60 @@ inline void move(PassOwnPtr<CSSSelector> from, CSSSelector* to)
     // We want to free the memory (which was allocated with fastNew), but we
     // don't want the destructor to run since it will affect the copy we've just made.
     fastDeleteSkippingDestructor(from.leakPtr());
+}
+
+inline CSSSelector::CSSSelector()
+    : m_relation(Descendant)
+    , m_match(None)
+    , m_pseudoType(PseudoNotParsed)
+    , m_parsedNth(false)
+    , m_isLastInSelectorList(false)
+    , m_isLastInTagHistory(true)
+    , m_hasRareData(false)
+    , m_isForPage(false)
+    , m_tag(anyQName())
+{
+}
+
+inline CSSSelector::CSSSelector(const QualifiedName& qName)
+    : m_relation(Descendant)
+    , m_match(None)
+    , m_pseudoType(PseudoNotParsed)
+    , m_parsedNth(false)
+    , m_isLastInSelectorList(false)
+    , m_isLastInTagHistory(true)
+    , m_hasRareData(false)
+    , m_isForPage(false)
+    , m_tag(qName)
+{
+}
+
+inline CSSSelector::CSSSelector(const CSSSelector& o)
+    : m_relation(o.m_relation)
+    , m_match(o.m_match)
+    , m_pseudoType(o.m_pseudoType)
+    , m_parsedNth(o.m_parsedNth)
+    , m_isLastInSelectorList(o.m_isLastInSelectorList)
+    , m_isLastInTagHistory(o.m_isLastInTagHistory)
+    , m_hasRareData(o.m_hasRareData)
+    , m_isForPage(o.m_isForPage)
+    , m_tag(o.m_tag)
+{
+    if (o.m_hasRareData) {
+        m_data.m_rareData = o.m_data.m_rareData;
+        m_data.m_rareData->ref();
+    } else if (o.m_data.m_value) {
+        m_data.m_value = o.m_data.m_value;
+        m_data.m_value->ref();
+    }
+}
+
+inline CSSSelector::~CSSSelector()
+{
+    if (m_hasRareData)
+        m_data.m_rareData->deref();
+    else if (m_data.m_value)
+        m_data.m_value->deref();
 }
 
 } // namespace WebCore

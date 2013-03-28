@@ -31,9 +31,9 @@
 #include "WebContext.h"
 #include "WebNotification.h"
 #include "WebNotificationManagerMessages.h"
+#include "WebNotificationManagerProxyMessages.h"
 #include "WebPageProxy.h"
 #include "WebSecurityOrigin.h"
-#include <WebCore/NotificationContents.h>
 
 using namespace WTF;
 using namespace WebCore;
@@ -48,6 +48,7 @@ PassRefPtr<WebNotificationManagerProxy> WebNotificationManagerProxy::create(WebC
 WebNotificationManagerProxy::WebNotificationManagerProxy(WebContext* context)
     : m_context(context)
 {
+    m_context->addMessageReceiver(Messages::WebNotificationManagerProxy::messageReceiverName(), this);
 }
 
 void WebNotificationManagerProxy::invalidate()
@@ -72,17 +73,17 @@ void WebNotificationManagerProxy::populateCopyOfNotificationPermissions(HashMap<
     }
 }
 
-void WebNotificationManagerProxy::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::ArgumentDecoder* arguments)
+void WebNotificationManagerProxy::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
 {
-    didReceiveWebNotificationManagerProxyMessage(connection, messageID, arguments);
+    didReceiveWebNotificationManagerProxyMessage(connection, messageID, decoder);
 }
 
-void WebNotificationManagerProxy::show(WebPageProxy* page, const String& title, const String& body, const String& originString, uint64_t notificationID)
+void WebNotificationManagerProxy::show(WebPageProxy* page, const String& title, const String& body, const String& iconURL, const String& tag, const String& lang, const String& dir, const String& originString, uint64_t notificationID)
 {
     if (!isNotificationIDValid(notificationID))
         return;
     
-    RefPtr<WebNotification> notification = WebNotification::create(title, body, originString, notificationID);
+    RefPtr<WebNotification> notification = WebNotification::create(title, body, iconURL, tag, lang, dir, originString, notificationID);
     m_notifications.set(notificationID, notification);
     m_provider.show(page, notification.get());
 }
@@ -109,6 +110,14 @@ void WebNotificationManagerProxy::didDestroyNotification(uint64_t notificationID
         return;
 
     m_provider.didDestroyNotification(notification.get());
+}
+
+void WebNotificationManagerProxy::clearNotifications(const Vector<uint64_t>& notificationIDs)
+{
+    m_provider.clearNotifications(notificationIDs);
+    size_t count = notificationIDs.size();
+    for (size_t i = 0; i < count; ++i)
+        m_notifications.remove(notificationIDs[i]);
 }
 
 void WebNotificationManagerProxy::providerDidShowNotification(uint64_t notificationID)

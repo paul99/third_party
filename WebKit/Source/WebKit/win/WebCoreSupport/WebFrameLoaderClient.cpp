@@ -416,20 +416,21 @@ void WebFrameLoaderClient::dispatchDidFinishLoad()
         frameLoadDelegate->didFinishLoadForFrame(webView, m_webFrame);
 }
 
-void WebFrameLoaderClient::dispatchDidFirstLayout()
+void WebFrameLoaderClient::dispatchDidLayout(LayoutMilestones milestones)
 {
     WebView* webView = m_webFrame->webView();
-    COMPtr<IWebFrameLoadDelegatePrivate> frameLoadDelegatePriv;
-    if (SUCCEEDED(webView->frameLoadDelegatePrivate(&frameLoadDelegatePriv)) && frameLoadDelegatePriv)
-        frameLoadDelegatePriv->didFirstLayoutInFrame(webView, m_webFrame);
-}
 
-void WebFrameLoaderClient::dispatchDidFirstVisuallyNonEmptyLayout()
-{
-    WebView* webView = m_webFrame->webView();
-    COMPtr<IWebFrameLoadDelegatePrivate> frameLoadDelegatePrivate;
-    if (SUCCEEDED(webView->frameLoadDelegatePrivate(&frameLoadDelegatePrivate)) && frameLoadDelegatePrivate)
-        frameLoadDelegatePrivate->didFirstVisuallyNonEmptyLayoutInFrame(webView, m_webFrame);
+    if (milestones & DidFirstLayout) {
+        COMPtr<IWebFrameLoadDelegatePrivate> frameLoadDelegatePrivate;
+        if (SUCCEEDED(webView->frameLoadDelegatePrivate(&frameLoadDelegatePrivate)) && frameLoadDelegatePrivate)
+            frameLoadDelegatePrivate->didFirstLayoutInFrame(webView, m_webFrame);
+    }
+
+    if (milestones & DidFirstVisuallyNonEmptyLayout) {
+        COMPtr<IWebFrameLoadDelegatePrivate> frameLoadDelegatePrivate;
+        if (SUCCEEDED(webView->frameLoadDelegatePrivate(&frameLoadDelegatePrivate)) && frameLoadDelegatePrivate)
+            frameLoadDelegatePrivate->didFirstVisuallyNonEmptyLayoutInFrame(webView, m_webFrame);
+    }
 }
 
 Frame* WebFrameLoaderClient::dispatchCreatePage(const NavigationAction&)
@@ -458,10 +459,6 @@ void WebFrameLoaderClient::dispatchShow()
     COMPtr<IWebUIDelegate> ui;
     if (SUCCEEDED(webView->uiDelegate(&ui)))
         ui->webViewShow(webView);
-}
-
-void WebFrameLoaderClient::dispatchDidLoadMainResource(DocumentLoader*)
-{
 }
 
 void WebFrameLoaderClient::setMainDocumentError(DocumentLoader*, const ResourceError& error)
@@ -521,13 +518,8 @@ void WebFrameLoaderClient::committedLoad(DocumentLoader* loader, const char* dat
     m_manualLoader->didReceiveData(data, length);
 }
 
-void WebFrameLoaderClient::finishedLoading(DocumentLoader* loader)
+void WebFrameLoaderClient::finishedLoading(DocumentLoader*)
 {
-    // Telling the frame we received some data and passing 0 as the data is our
-    // way to get work done that is normally done when the first bit of data is
-    // received, even for the case of a document with no data (like about:blank)
-    committedLoad(loader, 0, 0);
-
     if (!m_manualLoader)
         return;
 
@@ -733,7 +725,7 @@ void WebFrameLoaderClient::transitionToCommittedForNewPage()
     view->frameRect(&rect);
     bool transparent = view->transparent();
     Color backgroundColor = transparent ? Color::transparent : Color::white;
-    core(m_webFrame)->createView(IntRect(rect).size(), backgroundColor, transparent, IntSize(), false);
+    core(m_webFrame)->createView(IntRect(rect).size(), backgroundColor, transparent);
 }
 
 void WebFrameLoaderClient::didSaveToPageCache()
@@ -760,33 +752,6 @@ PassRefPtr<Frame> WebFrameLoaderClient::createFrame(const KURL& url, const Strin
     if (!result)
         return 0;
     return result.release();
-}
-
-void WebFrameLoaderClient::didTransferChildFrameToNewDocument(Page*)
-{
-    Frame* coreFrame = core(m_webFrame);
-    ASSERT(coreFrame);
-    WebView* webView = kit(coreFrame->page());
-    if (m_webFrame->webView() != webView)
-        m_webFrame->setWebView(webView);
-}
-
-void WebFrameLoaderClient::transferLoadingResourceFromPage(ResourceLoader* loader, const ResourceRequest& request, Page* oldPage)
-{
-    assignIdentifierToInitialRequest(loader->identifier(), loader->documentLoader(), request);
-
-    WebView* oldWebView = kit(oldPage);
-    if (!oldWebView)
-        return;
-
-    COMPtr<IWebResourceLoadDelegate> oldResourceLoadDelegate;
-    if (FAILED(oldWebView->resourceLoadDelegate(&oldResourceLoadDelegate)))
-        return;
-
-    COMPtr<IWebResourceLoadDelegatePrivate2> oldResourceLoadDelegatePrivate2(Query, oldResourceLoadDelegate);
-    if (!oldResourceLoadDelegatePrivate2)
-        return;
-    oldResourceLoadDelegatePrivate2->removeIdentifierForRequest(oldWebView, loader->identifier());
 }
 
 PassRefPtr<Frame> WebFrameLoaderClient::createFrame(const KURL& URL, const String& name, HTMLFrameOwnerElement* ownerElement, const String& referrer)
@@ -826,26 +791,22 @@ void WebFrameLoaderClient::dispatchDidFailToStartPlugin(const PluginView* plugin
 
     if (!pluginView->pluginsPage().isNull()) {
         KURL pluginPageURL = frame->document()->completeURL(stripLeadingAndTrailingHTMLSpaces(pluginView->pluginsPage()));
-        if (pluginPageURL.protocolInHTTPFamily()) {
+        if (pluginPageURL.protocolIsInHTTPFamily()) {
             static CFStringRef key = MarshallingHelpers::LPCOLESTRToCFStringRef(WebKitErrorPlugInPageURLStringKey);
-            RetainPtr<CFStringRef> str(AdoptCF, pluginPageURL.string().createCFString());
-            CFDictionarySetValue(userInfo.get(), key, str.get());
+            CFDictionarySetValue(userInfo.get(), key, pluginPageURL.string().createCFString().get());
         }
     }
 
     if (!pluginView->mimeType().isNull()) {
         static CFStringRef key = MarshallingHelpers::LPCOLESTRToCFStringRef(WebKitErrorMIMETypeKey);
-
-        RetainPtr<CFStringRef> str(AdoptCF, pluginView->mimeType().createCFString());
-        CFDictionarySetValue(userInfo.get(), key, str.get());
+        CFDictionarySetValue(userInfo.get(), key, pluginView->mimeType().createCFString().get());
     }
 
     if (pluginView->plugin()) {
         String pluginName = pluginView->plugin()->name();
         if (!pluginName.isNull()) {
             static CFStringRef key = MarshallingHelpers::LPCOLESTRToCFStringRef(WebKitErrorPlugInNameKey);
-            RetainPtr<CFStringRef> str(AdoptCF, pluginName.createCFString());
-            CFDictionarySetValue(userInfo.get(), key, str.get());
+            CFDictionarySetValue(userInfo.get(), key, pluginName.createCFString().get());
         }
     }
 
@@ -921,8 +882,7 @@ PassRefPtr<Widget> WebFrameLoaderClient::createPlugin(const IntSize& pluginSize,
 void WebFrameLoaderClient::redirectDataToPlugin(Widget* pluginWidget)
 {
     // Ideally, this function shouldn't be necessary, see <rdar://problem/4852889>
-
-    if (pluginWidget->isPluginView())
+    if (!pluginWidget || pluginWidget->isPluginView())
         m_manualLoader = static_cast<PluginView*>(pluginWidget);
     else 
         m_manualLoader = static_cast<EmbeddedWidget*>(pluginWidget);

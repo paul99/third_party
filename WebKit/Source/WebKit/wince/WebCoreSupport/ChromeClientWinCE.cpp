@@ -184,7 +184,7 @@ bool ChromeClientWinCE::runBeforeUnloadConfirmPanel(const String& message, Frame
     return runJavaScriptConfirm(frame, message);
 }
 
-void ChromeClientWinCE::addMessageToConsole(MessageSource, MessageType, MessageLevel, const String&, unsigned int, const String&)
+void ChromeClientWinCE::addMessageToConsole(MessageSource, MessageLevel, const String&, unsigned, const String&)
 {
     notImplemented();
 }
@@ -333,7 +333,7 @@ void ChromeClientWinCE::setNeedsOneShotDrawingSynchronization()
     notImplemented();
 }
 
-void ChromeClientWinCE::scheduleCompositingLayerSync()
+void ChromeClientWinCE::scheduleCompositingLayerFlush()
 {
     notImplemented();
 }
@@ -365,16 +365,6 @@ void ChromeClientWinCE::setLastSetCursorToCurrentCursor()
 }
 
 void ChromeClientWinCE::formStateDidChange(const Node*)
-{
-    notImplemented();
-}
-
-void ChromeClientWinCE::requestGeolocationPermissionForFrame(Frame*, Geolocation*)
-{
-    notImplemented();
-}
-
-void ChromeClientWinCE::cancelGeolocationPermissionRequestForFrame(Frame*, Geolocation*)
 {
     notImplemented();
 }

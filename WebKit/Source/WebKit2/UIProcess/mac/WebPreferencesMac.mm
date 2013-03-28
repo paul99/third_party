@@ -26,7 +26,7 @@
 #import "config.h"
 #import "WebPreferences.h"
 
-#import "PageClientImpl.h"
+#import "StringUtilities.h"
 #import <wtf/text/StringConcatenate.h>
 
 namespace WebKit {
@@ -123,6 +123,14 @@ void WebPreferences::platformUpdateDoubleValueForKey(const String& key, double v
         return;
 
     [[NSUserDefaults standardUserDefaults] setDouble:value forKey:makeKey(m_identifier, key)];
+}
+
+void WebPreferences::platformUpdateFloatValueForKey(const String& key, float value)
+{
+    if (!m_identifier)
+        return;
+
+    [[NSUserDefaults standardUserDefaults] setFloat:value forKey:makeKey(m_identifier, key)];
 }
 
 } // namespace WebKit

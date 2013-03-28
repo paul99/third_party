@@ -48,12 +48,11 @@
 #include "WebViewClient.h"
 #include "WebWidgetClient.h"
 #include "painting/GraphicsContextBuilder.h"
-#include "platform/WebRect.h"
+#include <public/WebRect.h>
 #include <skia/ext/platform_canvas.h>
 
-#if ENABLE(GESTURE_RECOGNIZER)
+#if ENABLE(GESTURE_EVENTS)
 #include "PlatformGestureEvent.h"
-#include "PlatformGestureRecognizer.h"
 #endif
 
 using namespace WebCore;
@@ -73,9 +72,6 @@ WebPopupMenu* WebPopupMenu::create(WebWidgetClient* client)
 WebPopupMenuImpl::WebPopupMenuImpl(WebWidgetClient* client)
     : m_client(client)
     , m_widget(0)
-#if ENABLE(GESTURE_RECOGNIZER)
-    , m_gestureRecognizer(WebCore::PlatformGestureRecognizer::create())
-#endif
 {
     // Set to impossible point so we always get the first mouse position.
     m_lastMousePosition = WebPoint(-1, -1);
@@ -87,7 +83,7 @@ WebPopupMenuImpl::~WebPopupMenuImpl()
         m_widget->setClient(0);
 }
 
-void WebPopupMenuImpl::init(FramelessScrollView* widget, const WebRect& bounds)
+void WebPopupMenuImpl::initialize(FramelessScrollView* widget, const WebRect& bounds)
 {
     m_widget = widget;
     m_widget->setClient(this);
@@ -134,15 +130,7 @@ void WebPopupMenuImpl::handleMouseWheel(const WebMouseWheelEvent& event)
 
 bool WebPopupMenuImpl::handleGestureEvent(const WebGestureEvent& event)
 {
-  // megamerge: this calls FramelessScrollView::handleGestureEvent(),
-  // which is only defined if ENABLE(GESTURE_RECOGNIZER).  It not
-  // enabled, We walk up the class hierarchy to FramelessScrollView
-  // --> ScrollView --> ScrollableArea to find a handleGestureEvent().
-  // However, ScrollableArea::handleGestureEvent() returns void, so we
-  // cannot return a bool.
-  // What's the right thing to do here?
-  /* return */ m_widget->handleGestureEvent(PlatformGestureEventBuilder(m_widget, event));
-  return true;  /* megamerge hack */
+    return m_widget->handleGestureEvent(PlatformGestureEventBuilder(m_widget, event));
 }
 
 #if ENABLE(TOUCH_EVENTS)
@@ -151,11 +139,6 @@ bool WebPopupMenuImpl::handleTouchEvent(const WebTouchEvent& event)
 
     PlatformTouchEventBuilder touchEventBuilder(m_widget, event);
     bool defaultPrevented(m_widget->handleTouchEvent(touchEventBuilder));
-#if ENABLE(GESTURE_RECOGNIZER)
-    OwnPtr<Vector<WebCore::PlatformGestureEvent> > gestureEvents(m_gestureRecognizer->processTouchEventForGestures(touchEventBuilder, defaultPrevented));
-    for (unsigned int  i = 0; i < gestureEvents->size(); i++)
-        m_widget->handleGestureEvent((*gestureEvents)[i]);
-#endif
     return defaultPrevented;
 }
 #endif
@@ -210,16 +193,25 @@ void WebPopupMenuImpl::layout()
 {
 }
 
-void WebPopupMenuImpl::paint(WebCanvas* canvas, const WebRect& rect)
+void WebPopupMenuImpl::paint(WebCanvas* canvas, const WebRect& rect, PaintOptions)
 {
     if (!m_widget)
         return;
 
-    if (!rect.isEmpty())
-        m_widget->paint(&GraphicsContextBuilder(canvas).context(), rect);
+    if (!rect.isEmpty()) {
+        GraphicsContextBuilder builder(canvas);
+        GraphicsContext& context = builder.context();
+        context.applyDeviceScaleFactor(m_client->deviceScaleFactor());
+        m_widget->paint(&context, rect);
+    }
 }
 
 void WebPopupMenuImpl::themeChanged()
+{
+    notImplemented();
+}
+
+void WebPopupMenuImpl::setCompositorSurfaceReady()
 {
     notImplemented();
 }
@@ -228,13 +220,6 @@ void WebPopupMenuImpl::composite(bool)
 {
     notImplemented();
 }
-
-#if defined(ANDROID)
-void WebPopupMenuImpl::releaseGpuTextures()
-{
-    notImplemented();
-}
-#endif
 
 bool WebPopupMenuImpl::handleInputEvent(const WebInputEvent& inputEvent)
 {
@@ -290,20 +275,21 @@ bool WebPopupMenuImpl::handleInputEvent(const WebInputEvent& inputEvent)
     case WebInputEvent::GestureScrollUpdate:
     case WebInputEvent::GestureFlingStart:
     case WebInputEvent::GestureFlingCancel:
+    case WebInputEvent::GestureTap:
+    case WebInputEvent::GestureTapDown:
+    case WebInputEvent::GestureTapCancel:
+    case WebInputEvent::GestureDoubleTap:
+    case WebInputEvent::GestureTwoFingerTap:
+    case WebInputEvent::GestureLongPress:
+    case WebInputEvent::GestureLongTap:
     case WebInputEvent::GesturePinchBegin:
     case WebInputEvent::GesturePinchEnd:
     case WebInputEvent::GesturePinchUpdate:
-    case WebInputEvent::GestureTap:
-    case WebInputEvent::GestureTapDown:
-    case WebInputEvent::GestureDoubleTap:
         return handleGestureEvent(*static_cast<const WebGestureEvent*>(&inputEvent));
 
     case WebInputEvent::Undefined:
     case WebInputEvent::MouseEnter:
     case WebInputEvent::ContextMenu:
-#if defined(ANDROID)
-    case WebInputEvent::GesturePageScaleAnimation:
-#endif
         return false;
     }
     return false;
@@ -343,13 +329,6 @@ bool WebPopupMenuImpl::compositionRange(size_t* location, size_t* length)
     *length = 0;
     return false;
 }
-
-#if OS(ANDROID)
-WebTextInputInfo WebPopupMenuImpl::textInputInfo()
-{
-    return WebTextInputInfo();
-}
-#endif
 
 WebTextInputType WebPopupMenuImpl::textInputType()
 {

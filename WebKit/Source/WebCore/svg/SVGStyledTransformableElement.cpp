@@ -66,14 +66,15 @@ AffineTransform SVGStyledTransformableElement::animatedLocalTransform() const
     AffineTransform matrix;
     RenderStyle* style = renderer() ? renderer()->style() : 0;
 
-    // if CSS property was set, use that, otherwise fallback to attribute (if set)
+    // If CSS property was set, use that, otherwise fallback to attribute (if set).
     if (style && style->hasTransform()) {
-        TransformationMatrix t;
-        // For now, the transform-origin is not taken into account
-        // Also, any percentage values will not be taken into account
-        style->applyTransform(t, IntSize(0, 0), RenderStyle::ExcludeTransformOrigin);
-        // Flatten any 3D transform
-        matrix = t.toAffineTransform();
+        // Note: objectBoundingBox is an emptyRect for elements like pattern or clipPath.
+        // See the "Object bounding box units" section of http://dev.w3.org/csswg/css3-transforms/
+        TransformationMatrix transform;
+        style->applyTransform(transform, renderer()->objectBoundingBox());
+
+        // Flatten any 3D transform.
+        matrix = transform.toAffineTransform();
     } else
         transform().concatenate(matrix);
 
@@ -97,17 +98,16 @@ bool SVGStyledTransformableElement::isSupportedAttribute(const QualifiedName& at
     return supportedAttributes.contains<QualifiedName, SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGStyledTransformableElement::parseMappedAttribute(Attribute* attr)
+void SVGStyledTransformableElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
-    if (!isSupportedAttribute(attr->name())) {
-        SVGStyledLocatableElement::parseMappedAttribute(attr);
+    if (!isSupportedAttribute(name)) {
+        SVGStyledLocatableElement::parseAttribute(name, value);
         return;
     }
 
-    if (attr->name() == SVGNames::transformAttr) {
+    if (name == SVGNames::transformAttr) {
         SVGTransformList newList;
-        if (!SVGTransformable::parseTransformAttribute(newList, attr->value()))
-            newList.clear();
+        newList.parse(value);
         detachAnimatedTransformListWrappers(newList.size());
         setTransformBaseValue(newList);
         return;

@@ -34,7 +34,7 @@ namespace WebCore {
 using namespace HTMLNames;
 
 inline HTMLTableCaptionElement::HTMLTableCaptionElement(const QualifiedName& tagName, Document* document)
-    : HTMLTablePartElement(tagName, document)
+    : HTMLElement(tagName, document)
 {
     ASSERT(hasTagName(captionTag));
 }
@@ -44,23 +44,20 @@ PassRefPtr<HTMLTableCaptionElement> HTMLTableCaptionElement::create(const Qualif
     return adoptRef(new HTMLTableCaptionElement(tagName, document));
 }
 
-bool HTMLTableCaptionElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+bool HTMLTableCaptionElement::isPresentationAttribute(const QualifiedName& name) const
 {
-    if (attrName == alignAttr) {
-        result = eCaption;
-        return false;
-    }
-
-    return HTMLElement::mapToEntry(attrName, result);
+    if (name == alignAttr)
+        return true;
+    return HTMLElement::isPresentationAttribute(name);
 }
 
-void HTMLTableCaptionElement::parseMappedAttribute(Attribute* attr)
+void HTMLTableCaptionElement::collectStyleForPresentationAttribute(const Attribute& attribute, StylePropertySet* style)
 {
-    if (attr->name() == alignAttr) {
-        if (!attr->value().isEmpty())
-            addCSSProperty(attr, CSSPropertyCaptionSide, attr->value());
+    if (attribute.name() == alignAttr) {
+        if (!attribute.isEmpty())
+            addPropertyToPresentationAttributeStyle(style, CSSPropertyCaptionSide, attribute.value());
     } else
-        HTMLElement::parseMappedAttribute(attr);
+        HTMLElement::collectStyleForPresentationAttribute(attribute, style);
 }
 
 }

@@ -36,11 +36,10 @@ using namespace JSC;
 
 namespace WebCore {
 
-static void* collect(void*)
+static void collect(void*)
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
     JSDOMWindow::commonJSGlobalData()->heap.collectAllGarbage();
-    return 0;
 }
 
 GCController& gcController()
@@ -50,26 +49,40 @@ GCController& gcController()
 }
 
 GCController::GCController()
+#if !USE(CF) && !PLATFORM(BLACKBERRY)
     : m_GCTimer(this, &GCController::gcTimerFired)
+#endif
 {
 }
 
 void GCController::garbageCollectSoon()
 {
+    // We only use reportAbandonedObjectGraph on systems with CoreFoundation 
+    // since it uses a runloop-based timer that is currently only available on 
+    // systems with CoreFoundation. If and when the notion of a run loop is pushed 
+    // down into WTF so that more platforms can take advantage of it, we will be 
+    // able to use reportAbandonedObjectGraph on more platforms.
+#if USE(CF) || PLATFORM(BLACKBERRY)
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
+    JSDOMWindow::commonJSGlobalData()->heap.reportAbandonedObjectGraph();
+#else
     if (!m_GCTimer.isActive())
         m_GCTimer.startOneShot(0);
+#endif
 }
 
+#if !USE(CF) && !PLATFORM(BLACKBERRY)
 void GCController::gcTimerFired(Timer<GCController>*)
 {
     collect(0);
 }
+#endif
 
 void GCController::garbageCollectNow()
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
     if (!JSDOMWindow::commonJSGlobalData()->heap.isBusy())
-        collect(0);
+        JSDOMWindow::commonJSGlobalData()->heap.collectAllGarbage();
 }
 
 void GCController::garbageCollectOnAlternateThreadForDebugging(bool waitUntilDone)
@@ -77,11 +90,22 @@ void GCController::garbageCollectOnAlternateThreadForDebugging(bool waitUntilDon
     ThreadIdentifier threadID = createThread(collect, 0, "WebCore: GCController");
 
     if (waitUntilDone) {
-        waitForThreadCompletion(threadID, 0);
+        waitForThreadCompletion(threadID);
         return;
     }
 
     detachThread(threadID);
+}
+
+void GCController::setJavaScriptGarbageCollectorTimerEnabled(bool enable)
+{
+    JSDOMWindow::commonJSGlobalData()->heap.setGarbageCollectionTimerEnabled(enable);
+}
+
+void GCController::discardAllCompiledCode()
+{
+    JSLockHolder lock(JSDOMWindow::commonJSGlobalData());
+    JSDOMWindow::commonJSGlobalData()->discardAllCode();
 }
 
 } // namespace WebCore

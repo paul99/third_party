@@ -39,7 +39,7 @@ class Region;
 
 namespace WebKit {
 
-class LayerTreeHostProxy;
+class CoordinatedLayerTreeHostProxy;
 
 class DrawingAreaProxyImpl : public DrawingAreaProxy {
 public:
@@ -48,12 +48,18 @@ public:
 
     void paint(BackingStore::PlatformGraphicsContext, const WebCore::IntRect&, WebCore::Region& unpaintedRegion);
 
+#if USE(ACCELERATED_COMPOSITING)
+    bool isInAcceleratedCompositingMode() const { return !m_layerTreeContext.isEmpty(); }
+#endif
+
 private:
     explicit DrawingAreaProxyImpl(WebPageProxy*);
 
     // DrawingAreaProxy
     virtual void sizeDidChange();
     virtual void deviceScaleFactorDidChange();
+    virtual void layerHostingModeDidChange() OVERRIDE;
+
     virtual void visibilityDidChange();
     virtual void setBackingStoreIsDiscardable(bool);
     virtual void waitForBackingStoreUpdateOnNextPaint();
@@ -63,6 +69,7 @@ private:
     virtual void didUpdateBackingStoreState(uint64_t backingStoreStateID, const UpdateInfo&, const LayerTreeContext&);
     virtual void enterAcceleratedCompositingMode(uint64_t backingStoreStateID, const LayerTreeContext&);
     virtual void exitAcceleratedCompositingMode(uint64_t backingStoreStateID, const UpdateInfo&);
+    virtual void updateAcceleratedCompositingMode(uint64_t backingStoreStateID, const LayerTreeContext&);
 
     void incorporateUpdate(const UpdateInfo&);
 
@@ -74,15 +81,10 @@ private:
 #if USE(ACCELERATED_COMPOSITING)
     void enterAcceleratedCompositingMode(const LayerTreeContext&);
     void exitAcceleratedCompositingMode();
-
-    bool isInAcceleratedCompositingMode() const { return !m_layerTreeContext.isEmpty(); }
-
-#if USE(TILED_BACKING_STORE)
-    virtual void setVisibleContentsRectAndScale(const WebCore::IntRect& visibleContentsRect, float scale);
-    virtual void setVisibleContentRectTrajectoryVector(const WebCore::FloatPoint&);
-    virtual void paintToCurrentGLContext(const WebCore::TransformationMatrix&, float opacity);
-    virtual void paintLayerTree(BackingStore::PlatformGraphicsContext);
-    void didReceiveLayerTreeHostProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+    void updateAcceleratedCompositingMode(const LayerTreeContext&);
+#if USE(COORDINATED_GRAPHICS)
+    virtual void setVisibleContentsRect(const WebCore::FloatRect& visibleContentsRect, float scale, const WebCore::FloatPoint& trajectory);
+    void didReceiveCoordinatedLayerTreeHostProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
 #endif
 #else
     bool isInAcceleratedCompositingMode() const { return false; }

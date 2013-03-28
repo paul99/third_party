@@ -36,18 +36,20 @@
 
 #include "Document.h"
 #include "Node.h"
+#include "QualifiedName.h"
 
 namespace WebCore {
 
-PassOwnPtr<MutationObserverRegistration> MutationObserverRegistration::create(PassRefPtr<WebKitMutationObserver> observer, Node* registrationNode)
+PassOwnPtr<MutationObserverRegistration> MutationObserverRegistration::create(PassRefPtr<MutationObserver> observer, Node* registrationNode, MutationObserverOptions options, const HashSet<AtomicString>& attributeFilter)
 {
-    return adoptPtr(new MutationObserverRegistration(observer, registrationNode));
+    return adoptPtr(new MutationObserverRegistration(observer, registrationNode, options, attributeFilter));
 }
 
-MutationObserverRegistration::MutationObserverRegistration(PassRefPtr<WebKitMutationObserver> observer, Node* registrationNode)
-     : m_observer(observer)
-     , m_registrationNode(registrationNode)
-     , m_options(0)
+MutationObserverRegistration::MutationObserverRegistration(PassRefPtr<MutationObserver> observer, Node* registrationNode, MutationObserverOptions options, const HashSet<AtomicString>& attributeFilter)
+    : m_observer(observer)
+    , m_registrationNode(registrationNode)
+    , m_options(options)
+    , m_attributeFilter(attributeFilter)
 {
     m_observer->observationStarted(this);
 }
@@ -63,10 +65,9 @@ void MutationObserverRegistration::resetObservation(MutationObserverOptions opti
     clearTransientRegistrations();
     m_options = options;
     m_attributeFilter = attributeFilter;
-    m_caseInsensitiveAttributeFilter.clear();
 }
 
-void MutationObserverRegistration::observedSubtreeNodeWillDetach(PassRefPtr<Node> node)
+void MutationObserverRegistration::observedSubtreeNodeWillDetach(Node* node)
 {
     if (!isSubtree())
         return;
@@ -105,39 +106,31 @@ void MutationObserverRegistration::unregister()
     // The above line will cause this object to be deleted, so don't do any more in this function.
 }
 
-bool MutationObserverRegistration::shouldReceiveMutationFrom(Node* node, WebKitMutationObserver::MutationType type, const AtomicString& attributeName)
+bool MutationObserverRegistration::shouldReceiveMutationFrom(Node* node, MutationObserver::MutationType type, const QualifiedName* attributeName) const
 {
+    ASSERT((type == MutationObserver::Attributes && attributeName) || !attributeName);
     if (!(m_options & type))
         return false;
 
     if (m_registrationNode != node && !isSubtree())
         return false;
 
-    if (type != WebKitMutationObserver::Attributes || !(m_options & WebKitMutationObserver::AttributeFilter))
+    if (type != MutationObserver::Attributes || !(m_options & MutationObserver::AttributeFilter))
         return true;
 
-    if (m_attributeFilter.contains(attributeName))
-        return true;
+    if (!attributeName->namespaceURI().isNull())
+        return false;
 
-    if (node->document()->isHTMLDocument() && node->isHTMLElement())
-        return caseInsensitiveAttributeFilter().contains(attributeName);
-
-    return false;
+    return m_attributeFilter.contains(attributeName->localName());
 }
 
-const HashSet<AtomicString>& MutationObserverRegistration::caseInsensitiveAttributeFilter()
+void MutationObserverRegistration::addRegistrationNodesToSet(HashSet<Node*>& nodes) const
 {
-    if (m_caseInsensitiveAttributeFilter)
-        return *m_caseInsensitiveAttributeFilter;
-
-    m_caseInsensitiveAttributeFilter = adoptPtr(new HashSet<AtomicString>());
-    for (HashSet<AtomicString>::const_iterator iter = m_attributeFilter.begin(); iter != m_attributeFilter.end(); ++iter) {
-        AtomicString attributeNameLower = iter->lower();
-        if ((*iter) != attributeNameLower)
-             m_caseInsensitiveAttributeFilter->add(attributeNameLower);
-    }
-
-    return *m_caseInsensitiveAttributeFilter;
+    nodes.add(m_registrationNode);
+    if (!m_transientRegistrationNodes)
+        return;
+    for (NodeHashSet::const_iterator iter = m_transientRegistrationNodes->begin(); iter != m_transientRegistrationNodes->end(); ++iter)
+        nodes.add(iter->get());
 }
 
 } // namespace WebCore

@@ -28,8 +28,6 @@ package CodeGeneratorCPP;
 use constant FileNamePrefix => "WebDOM";
 
 # Global Variables
-my $module = "";
-my $outputDir = "";
 
 my @headerContentHeader = ();
 my @headerContent = ();
@@ -97,8 +95,6 @@ sub new
     my $reference = { };
 
     $codeGenerator = shift;
-    $outputDir = shift;
-    shift; # $outputHeadersDir
     shift; # $useLayerOnTop
     shift; # $preprocessor
     shift; # $writeDependencies
@@ -107,101 +103,125 @@ sub new
     return $reference;
 }
 
-# Params: 'domClass' struct
 sub GenerateInterface
 {
     my $object = shift;
-    my $dataNode = shift;
+    my $interface = shift;
     my $defines = shift;
 
-    my $name = $dataNode->name;
+    my $name = $interface->name;
     my $className = GetClassName($name);
-    my $parentClassName = "WebDOM" . GetParentImplClassName($dataNode);
+    my $parentClassName = "WebDOM" . GetParentImplClassName($interface);
 
-    # Start actual generation.
-    $object->GenerateHeader($dataNode);
-    $object->GenerateImplementation($dataNode);
-
-    # Write changes.
-    $object->WriteData(FileNamePrefix . $name);
-}
-
-# Params: 'idlDocument' struct
-sub GenerateModule
-{
-    my $object = shift;
-    my $dataNode = shift;
-
-    $module = $dataNode->module;
+    $object->GenerateHeader($interface);
+    $object->GenerateImplementation($interface);
 }
 
 sub GetClassName
 {
-    my $name = $codeGenerator->StripModule(shift);
+    my $name = shift;
 
     # special cases
     return "WebDOMString" if $codeGenerator->IsStringType($name) or $name eq "SerializedScriptValue";
     return "WebDOMObject" if $name eq "DOMObject";
     return "bool" if $name eq "boolean";
     return $name if $codeGenerator->IsPrimitiveType($name);
-    return "WebDOMCustomVoidCallback" if $name eq "VoidCallback";
 
     return "WebDOM$name";
 }
 
 sub GetImplClassName
 {
-    return $codeGenerator->StripModule(shift);
+    return shift;
 }
 
 sub GetParentImplClassName
 {
-    my $dataNode = shift;
+    my $interface = shift;
 
-    if (@{$dataNode->parents} eq 0) {
-        return "EventTarget" if $dataNode->extendedAttributes->{"EventTarget"};
+    if (@{$interface->parents} eq 0) {
+        return "EventTarget" if $interface->extendedAttributes->{"EventTarget"};
         return "Object";
     }
 
-    return $codeGenerator->StripModule($dataNode->parents(0));
+    return $interface->parents(0);
 }
 
 sub GetParent
 {
-    my $dataNode = shift;
-    my $numParents = @{$dataNode->parents};
+    my $interface = shift;
+    my $numParents = @{$interface->parents};
 
     my $parent = "";
     if ($numParents eq 0) {
         $parent = "WebDOMObject";
-        $parent = "WebDOMEventTarget" if $dataNode->extendedAttributes->{"EventTarget"};
+        $parent = "WebDOMEventTarget" if $interface->extendedAttributes->{"EventTarget"};
     } elsif ($numParents eq 1) {
-        my $parentName = $codeGenerator->StripModule($dataNode->parents(0));
+        my $parentName = $interface->parents(0);
         $parent = "WebDOM" . $parentName;
     } else {
-        my @parents = @{$dataNode->parents};
-        my $firstParent = $codeGenerator->StripModule(shift(@parents));
+        my @parents = @{$interface->parents};
+        my $firstParent = shift(@parents);
         $parent = "WebDOM" . $firstParent;
     }
 
     return $parent;
 }
 
-sub ShouldSkipType
+sub SkipFunction
 {
-    my $typeInfo = shift;
+    my $function = shift;
 
-    return 1 if $typeInfo->signature->extendedAttributes->{"Custom"}
-             and !$typeInfo->signature->extendedAttributes->{"NoCPPCustom"};
-
-    return 1 if $typeInfo->signature->extendedAttributes->{"CustomArgumentHandling"}
-             or $typeInfo->signature->extendedAttributes->{"CustomGetter"}
-             or $typeInfo->signature->extendedAttributes->{"CPPCustom"};
+    return 1 if $function->signature->extendedAttributes->{"Custom"};
 
     # FIXME: We don't generate bindings for SVG related interfaces yet
-    return 1 if $typeInfo->signature->name =~ /getSVGDocument/;
+    return 1 if $function->signature->name =~ /getSVGDocument/;
 
-    return 1 if $typeInfo->signature->name =~ /Constructor/;
+    if ($codeGenerator->GetArrayType($function->signature->type)) {
+        return 1;
+    }
+
+    if ($codeGenerator->GetSequenceType($function->signature->type)) {
+        return 1;
+    }
+
+    foreach my $param (@{$function->parameters}) {
+        return 1 if $codeGenerator->GetSequenceType($param->type);
+        return 1 if $param->extendedAttributes->{"Clamp"};
+    }
+
+    # FIXME: This is typically used to add script execution state arguments to the method.
+    # These functions will not compile with the C++ bindings as is, so disable them
+    # to restore compilation until a proper implementation can be developed.
+    return 1 if $function->signature->extendedAttributes->{"CallWith"};
+}
+
+sub SkipAttribute
+{
+    my $attribute = shift;
+
+    return 1 if $attribute->signature->extendedAttributes->{"Custom"}
+                or $attribute->signature->extendedAttributes->{"CustomGetter"};
+
+    return 1 if $attribute->signature->type =~ /Constructor$/;
+
+    return 1 if $codeGenerator->IsTypedArrayType($attribute->signature->type);
+
+    if ($codeGenerator->GetArrayType($attribute->signature->type)) {
+        return 1;
+    }
+
+    if ($codeGenerator->GetSequenceType($attribute->signature->type)) {
+        return 1;
+    }
+
+    $codeGenerator->AssertNotSequenceType($attribute->signature->type);
+
+    # FIXME: This is typically used to add script execution state arguments to the method.
+    # These functions will not compile with the C++ bindings as is, so disable them
+    # to restore compilation until a proper implementation can be developed.
+    return 1 if $attribute->signature->extendedAttributes->{"CallWith"};
+
     return 0;
 }
 
@@ -231,14 +251,14 @@ sub GetCPPType
 
 sub ConversionNeeded
 {
-    my $type = $codeGenerator->StripModule(shift);
+    my $type = shift;
     return !$codeGenerator->IsNonPointerType($type) && !$codeGenerator->IsStringType($type);
 }
 
 sub GetCPPTypeGetter
 {
     my $argName = shift;
-    my $type = $codeGenerator->StripModule(shift);
+    my $type = shift;
 
     return $argName if $codeGenerator->IsPrimitiveType($type) or $codeGenerator->IsStringType($type);
     return "static_cast<WebCore::Range::CompareHow>($argName)" if $type eq "CompareHow";
@@ -248,7 +268,7 @@ sub GetCPPTypeGetter
 
 sub AddForwardDeclarationsForType
 {
-    my $type = $codeGenerator->StripModule(shift);
+    my $type = shift;
     my $public = shift;
 
     return if $codeGenerator->IsNonPointerType($type) or $codeGenerator->IsStringType($type);
@@ -259,8 +279,10 @@ sub AddForwardDeclarationsForType
 
 sub AddIncludesForType
 {
-    my $type = $codeGenerator->StripModule(shift);
+    my $type = shift;
 
+    return if $codeGenerator->GetSequenceType($type);
+    return if $codeGenerator->GetArrayType($type);
     return if $codeGenerator->IsNonPointerType($type);
     return if $type =~ /Constructor/;
 
@@ -285,34 +307,18 @@ sub AddIncludesForType
         $implIncludes{"SerializedScriptValue.h"} = 1;
         return;
     }
-    
-    if ($type eq "VoidCallback") {
-        $implIncludes{"WebDOMCustomVoidCallback.h"} = 1;
-        return;
-    }
-    
+
     # Also include CSSImportRule so that the toWebKit methods for subclasses are found
     if ($type eq "CSSRule") {
         $implIncludes{"WebDOMCSSImportRule.h"} = 1;
     }
 
     $implIncludes{"Node.h"} = 1 if $type eq "NodeList";
-    $implIncludes{"CSSMutableStyleDeclaration.h"} = 1 if $type eq "CSSStyleDeclaration";
+    $implIncludes{"StylePropertySet.h"} = 1 if $type eq "CSSStyleDeclaration";
 
     # Default, include the same named file (the implementation) and the same name prefixed with "WebDOM". 
     $implIncludes{"$type.h"} = 1 unless $type eq "DOMObject";
     $implIncludes{"WebDOM$type.h"} = 1;
-}
-
-sub GenerateConditionalString
-{
-    my $node = shift;
-    my $conditional = $node->extendedAttributes->{"Conditional"};
-    if ($conditional) {
-        return $codeGenerator->GenerateConditionalStringFromAttributeValue($conditional);
-    } else {
-        return "";
-    }
 }
 
 sub GetNamespaceForClass
@@ -328,27 +334,27 @@ sub GetNamespaceForClass
 sub GenerateHeader
 {
     my $object = shift;
-    my $dataNode = shift;
+    my $interface = shift;
 
-    my $interfaceName = $dataNode->name;
+    my $interfaceName = $interface->name;
     my $className = GetClassName($interfaceName);
     my $implClassName = GetImplClassName($interfaceName);
     
     my $implClassNameWithNamespace = GetNamespaceForClass($implClassName) . "::" . $implClassName;
 
     my $parentName = "";
-    $parentName = GetParent($dataNode);
+    $parentName = GetParent($interface);
 
-    my $numConstants = @{$dataNode->constants};
-    my $numAttributes = @{$dataNode->attributes};
-    my $numFunctions = @{$dataNode->functions};
+    my $numConstants = @{$interface->constants};
+    my $numAttributes = @{$interface->attributes};
+    my $numFunctions = @{$interface->functions};
 
     # - Add default header template
     @headerContentHeader = split("\r", $headerLicenseTemplate);
     push(@headerContentHeader, "\n#ifndef $className" . "_h");
     push(@headerContentHeader, "\n#define $className" . "_h\n\n");
 
-    my $conditionalString = GenerateConditionalString($dataNode);
+    my $conditionalString = $codeGenerator->GenerateConditionalString($interface);
     push(@headerContentHeader, "#if ${conditionalString}\n\n") if $conditionalString;
 
     # - INCLUDES -
@@ -388,7 +394,7 @@ sub GenerateHeader
     # - Add constants.
     if ($numConstants > 0) {
         my @headerConstants = ();
-        my @constants = @{$dataNode->constants};
+        my @constants = @{$interface->constants};
         my $combinedConstants = "";
 
         # FIXME: we need a way to include multiple enums.
@@ -422,10 +428,10 @@ sub GenerateHeader
 
     # - Add attribute getters/setters.
     if ($numAttributes > 0) {
-        foreach my $attribute (@{$dataNode->attributes}) {
-            next if ShouldSkipType($attribute);
+        foreach my $attribute (@{$interface->attributes}) {
+            next if SkipAttribute($attribute);
 
-            my $attributeConditionalString = GenerateConditionalString($attribute->signature);
+            my $attributeConditionalString = $codeGenerator->GenerateConditionalString($attribute->signature);
             my $attributeName = $attribute->signature->name;
             my $attributeType = GetCPPType($attribute->signature->type, 0);
             my $attributeIsReadonly = ($attribute->type =~ /^readonly/);
@@ -461,9 +467,10 @@ sub GenerateHeader
 
     # - Add functions.
     if ($numFunctions > 0) {
-        foreach my $function (@{$dataNode->functions}) {
-            next if ShouldSkipType($function);
-            my $functionName = $function->signature->name;
+        foreach my $function (@{$interface->functions}) {
+            next if SkipFunction($function);
+            next if ($function->signature->name eq "set" and $interface->extendedAttributes->{"TypedArray"});
+            my $functionName = $function->signature->extendedAttributes->{"ImplementedAs"} || $function->signature->name;
 
             my $returnType = GetCPPType($function->signature->type, 0);
             my $numberOfParameters = @{$function->parameters};
@@ -482,7 +489,7 @@ sub GenerateHeader
                 $parameterIndex++;
             }
             $functionSig .= ")";
-            if ($dataNode->extendedAttributes->{"PureInterface"}) {
+            if ($interface->extendedAttributes->{"CPPPureInterface"}) {
                 push(@interfaceFunctions, "    virtual " . $functionSig . " = 0;\n");
             }
             my $functionDeclaration = $functionSig;
@@ -493,8 +500,11 @@ sub GenerateHeader
                 AddForwardDeclarationsForType($type, 1);
             }
 
+            my $conditionalString = $codeGenerator->GenerateConditionalString($function->signature);
+            push(@headerFunctions, "#if ${conditionalString}\n") if $conditionalString;
             push(@headerFunctions, "    ");
             push(@headerFunctions, $functionDeclaration);
+            push(@headerFunctions, "#endif\n") if $conditionalString;
         }
 
         if (@headerFunctions > 0) {
@@ -514,9 +524,9 @@ sub GenerateHeader
 
     push(@headerContent, "};\n\n");
 
-    # for PureInterface classes also add the interface that the client code needs to
+    # for CPPPureInterface classes also add the interface that the client code needs to
     # implement
-    if ($dataNode->extendedAttributes->{"PureInterface"}) {
+    if ($interface->extendedAttributes->{"CPPPureInterface"}) {
         push(@headerContent, "class WebUser$interfaceName {\n");
         push(@headerContent, "public:\n");
         push(@headerContent, "    virtual void ref() = 0;\n");
@@ -530,7 +540,7 @@ sub GenerateHeader
     my $namespace = GetNamespaceForClass($implClassName);
     push(@headerContent, "$namespace" . "::$implClassName* toWebCore(const $className&);\n");
     push(@headerContent, "$className toWebKit($namespace" . "::$implClassName*);\n");
-    if ($dataNode->extendedAttributes->{"PureInterface"}) {
+    if ($interface->extendedAttributes->{"CPPPureInterface"}) {
         push(@headerContent, "$className toWebKit(WebUser$interfaceName*);\n");
     }
     push(@headerContent, "\n#endif\n");
@@ -573,31 +583,31 @@ sub AddReturnStatement
 sub GenerateImplementation
 {
     my $object = shift;
-    my $dataNode = shift;
+    my $interface = shift;
 
     my @ancestorInterfaceNames = ();
 
-    if (@{$dataNode->parents} > 1) {
-        $codeGenerator->AddMethodsConstantsAndAttributesFromParentClasses($dataNode, \@ancestorInterfaceNames);
+    if (@{$interface->parents} > 1) {
+        $codeGenerator->AddMethodsConstantsAndAttributesFromParentInterfaces($interface, \@ancestorInterfaceNames);
     }
 
-    my $interfaceName = $dataNode->name;
+    my $interfaceName = $interface->name;
     my $className = GetClassName($interfaceName);
     my $implClassName = GetImplClassName($interfaceName);
-    my $parentImplClassName = GetParentImplClassName($dataNode);
+    my $parentImplClassName = GetParentImplClassName($interface);
     my $implClassNameWithNamespace = GetNamespaceForClass($implClassName) . "::" . $implClassName;
     my $baseClass = "WebDOM$parentImplClassName";
-    my $conditional = $dataNode->extendedAttributes->{"Conditional"};
+    my $conditional = $interface->extendedAttributes->{"Conditional"};
 
-    my $numAttributes = @{$dataNode->attributes};
-    my $numFunctions = @{$dataNode->functions};
+    my $numAttributes = @{$interface->attributes};
+    my $numFunctions = @{$interface->functions};
 
     # - Add default header template.
     @implContentHeader = split("\r", $implementationLicenseTemplate);
 
     # - INCLUDES -
     push(@implContentHeader, "\n#include \"config.h\"\n");
-    my $conditionalString = GenerateConditionalString($dataNode);
+    my $conditionalString = $codeGenerator->GenerateConditionalString($interface);
     push(@implContentHeader, "\n#if ${conditionalString}\n\n") if $conditionalString;
     push(@implContentHeader, "#include \"$className.h\"\n\n");
 
@@ -673,11 +683,11 @@ sub GenerateImplementation
 
     # - Attributes
     if ($numAttributes > 0) {
-        foreach my $attribute (@{$dataNode->attributes}) {
-            next if ShouldSkipType($attribute);
+        foreach my $attribute (@{$interface->attributes}) {
+            next if SkipAttribute($attribute);
             AddIncludesForType($attribute->signature->type);
 
-            my $idlType = $codeGenerator->StripModule($attribute->signature->type);
+            my $idlType = $attribute->signature->type;
 
             my $attributeName = $attribute->signature->name;
             my $attributeType = GetCPPType($attribute->signature->type, 0);
@@ -714,7 +724,7 @@ sub GenerateImplementation
             }
 
             my $getterContent = "${getterContentHead}${functionName}(" . join(", ", @arguments) . ")${getterContentTail}";
-            my $attributeConditionalString = GenerateConditionalString($attribute->signature);
+            my $attributeConditionalString = $codeGenerator->GenerateConditionalString($attribute->signature);
             push(@implContent, "#if ${attributeConditionalString}\n") if $attributeConditionalString;
 
             push(@implContent, $getterSig);
@@ -749,11 +759,6 @@ sub GenerateImplementation
                 my $argName = "new" . ucfirst($attributeName);
                 my $arg = GetCPPTypeGetter($argName, $idlType);
 
-                # The definition of ConvertToString is flipped for the setter
-                if ($attribute->signature->extendedAttributes->{"ConvertToString"}) {
-                    $arg = "WTF::String($arg).toInt()";
-                }
-
                 my $attributeType = GetCPPType($attribute->signature->type, 1);
                 push(@implContent, "void $className\:\:$setterName($attributeType $argName)\n");
                 push(@implContent, "{\n");
@@ -783,9 +788,10 @@ sub GenerateImplementation
 
     # - Functions
     if ($numFunctions > 0) {
-        foreach my $function (@{$dataNode->functions}) {
-            # Treat PureInterface as Custom as well, since the WebCore versions will take a script context as well
-            next if ShouldSkipType($function) || $dataNode->extendedAttributes->{"PureInterface"};
+        foreach my $function (@{$interface->functions}) {
+            # Treat CPPPureInterface as Custom as well, since the WebCore versions will take a script context as well
+            next if SkipFunction($function) || $interface->extendedAttributes->{"CPPPureInterface"};
+            next if ($function->signature->name eq "set" and $interface->extendedAttributes->{"TypedArray"});
             AddIncludesForType($function->signature->type);
 
             my $functionName = $function->signature->name;
@@ -809,11 +815,11 @@ sub GenerateImplementation
 
                 AddIncludesForType($param->type);
 
-                my $idlType = $codeGenerator->StripModule($param->type);
+                my $idlType = $param->type;
                 my $implGetter = GetCPPTypeGetter($paramName, $idlType);
 
                 push(@parameterNames, $implGetter);
-                $needsCustom{"NodeToReturn"} = $paramName if $param->extendedAttributes->{"Return"};
+                $needsCustom{"NodeToReturn"} = $paramName if $param->extendedAttributes->{"CustomReturn"};
 
                 unless ($codeGenerator->IsPrimitiveType($idlType) or $codeGenerator->IsStringType($idlType)) {
                     push(@needsAssert, "    ASSERT($paramName);\n");
@@ -888,7 +894,7 @@ sub GenerateImplementation
                 }
             }
 
-            my $conditionalString = GenerateConditionalString($function->signature);
+            my $conditionalString = $codeGenerator->GenerateConditionalString($function->signature);
             push(@implContent, "\n#if ${conditionalString}\n") if $conditionalString;
 
             push(@implContent, "$functionSig\n");
@@ -922,15 +928,17 @@ sub GenerateImplementation
     push(@implContent, "\n#endif // ${conditionalString}\n") if $conditionalString;
 }
 
-# Internal helper
 sub WriteData
 {
     my $object = shift;
-    my $name = shift;
+    my $dataNode = shift;
+    my $outputDir = shift;
 
     # Open files for writing...
-    my $headerFileName = "$outputDir/" . $name . ".h";
-    my $implFileName = "$outputDir/" . $name . ".cpp";
+    my $name = $dataNode->name;
+    my $prefix = FileNamePrefix;
+    my $headerFileName = "$outputDir/$prefix$name.h";
+    my $implFileName = "$outputDir/$prefix$name.cpp";
 
     # Update a .h file if the contents are changed.
     my $contents = join "", @headerContentHeader;

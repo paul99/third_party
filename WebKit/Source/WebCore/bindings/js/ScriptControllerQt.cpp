@@ -42,8 +42,6 @@
 #include "qt_instance.h"
 #include "runtime_root.h"
 
-#include <QWidget>
-
 namespace WebCore {
 
 PassRefPtr<JSC::Bindings::Instance> ScriptController::createScriptInstanceForWidget(WebCore::Widget* widget)
@@ -61,7 +59,7 @@ PassRefPtr<JSC::Bindings::Instance> ScriptController::createScriptInstanceForWid
     if (!object)
         return 0;
 
-    return JSC::Bindings::QtInstance::getQtInstance(object, bindingRootObject(), QScriptEngine::QtOwnership);
+    return JSC::Bindings::QtInstance::getQtInstance(object, bindingRootObject(), JSC::Bindings::QtInstance::QtOwnership);
 }
 
 }

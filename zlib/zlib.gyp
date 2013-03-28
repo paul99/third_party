@@ -1,35 +1,28 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 {
   'variables': {
     'conditions': [
-      [ 'os_posix == 1 and OS != "mac" and OS != "openbsd"', {
-        # Link to system .so since we already use it due to GTK.
+      [ 'OS=="none"', {
+        # Because we have a patched zlib, we cannot use the system libz.
         # TODO(pvalchev): OpenBSD is purposefully left out, as the system
         # zlib brings up an incompatibility that breaks rendering.
         'use_system_zlib%': 1,
-      }, {  # os_posix != 1 or OS == "mac" or OS == "openbsd"
+      }, {
         'use_system_zlib%': 0,
       }],
     ],
+    'use_system_minizip%': 0,
   },
-  'conditions': [
-    ['use_system_zlib==0', {
-      'targets': [
-        {
-          'target_name': 'zlib',
-          'type': 'static_library',
+  'targets': [
+    {
+      'target_name': 'zlib',
+      'type': 'static_library',
+      'conditions': [
+        ['use_system_zlib==0', {
           'sources': [
-            'contrib/minizip/ioapi.c',
-            'contrib/minizip/ioapi.h',
-            'contrib/minizip/iowin32.c',
-            'contrib/minizip/iowin32.h',
-            'contrib/minizip/unzip.c',
-            'contrib/minizip/unzip.h',
-            'contrib/minizip/zip.c',
-            'contrib/minizip/zip.h',
             'adler32.c',
             'compress.c',
             'crc32.c',
@@ -56,8 +49,6 @@
           ],
           'include_dirs': [
             '.',
-            # For contrib/minizip
-            '../..',
           ],
           'direct_dependent_settings': {
             'include_dirs': [
@@ -67,37 +58,11 @@
           'conditions': [
             ['OS!="win"', {
               'product_name': 'chrome_zlib',
-              'sources!': [
-                'contrib/minizip/iowin32.c'
-              ],
-            }],
-            ['OS=="mac" or os_bsd==1 or OS=="android"', {
-              # Mac, Android and the BSDs don't have fopen64, ftello64, or
-              # fseeko64. We use fopen, ftell, and fseek instead on these
-              # systems.
-              'defines': [
-                'USE_FILE32API'
-              ],
-            }],
-            ['clang==1', {
-              'xcode_settings': {
-                'WARNING_CFLAGS': [
-                  # zlib uses `if ((a == b))` for some reason.
-                  '-Wno-parentheses-equality',
-                ],
-              },
-              'cflags': [
-                '-Wno-parentheses-equality',
-              ],
+            }], ['OS=="android"', {
+              'toolsets': ['target', 'host'],
             }],
           ],
-        },
-      ],
-    }, {
-      'targets': [
-        {
-          'target_name': 'zlib',
-          'type': 'static_library',
+        }, {
           'direct_dependent_settings': {
             'defines': [
               'USE_SYSTEM_ZLIB',
@@ -106,34 +71,83 @@
           'defines': [
             'USE_SYSTEM_ZLIB',
           ],
+          'link_settings': {
+            'libraries': [
+              '-lz',
+            ],
+          },
+        }],
+      ],
+    },
+    {
+      'target_name': 'minizip',
+      'type': 'static_library',
+      'conditions': [
+        ['use_system_minizip==0', {
           'sources': [
             'contrib/minizip/ioapi.c',
             'contrib/minizip/ioapi.h',
+            'contrib/minizip/iowin32.c',
+            'contrib/minizip/iowin32.h',
             'contrib/minizip/unzip.c',
             'contrib/minizip/unzip.h',
             'contrib/minizip/zip.c',
             'contrib/minizip/zip.h',
           ],
+          'include_dirs': [
+            '.',
+            '../..',
+          ],
+          'direct_dependent_settings': {
+            'include_dirs': [
+              '.',
+            ],
+          },
           'conditions': [
-            ['OS=="mac" or os_bsd==1 or OS=="android"', {
-              # Mac, Android and the BSDs don't have fopen64, ftello64, or
-              # fseeko64. We use fopen, ftell, and fseek instead on these
-              # systems.
-              'defines': [
-                'USE_FILE32API'
+            ['OS!="win"', {
+              'sources!': [
+                'contrib/minizip/iowin32.c'
               ],
             }],
             ['OS=="android"', {
               'toolsets': ['target', 'host'],
             }],
           ],
-          'link_settings': {
-            'libraries': [
-              '-lz',
+        }, {
+          'direct_dependent_settings': {
+            'defines': [
+              'USE_SYSTEM_MINIZIP',
             ],
           },
-        },
+          'defines': [
+            'USE_SYSTEM_MINIZIP',
+          ],
+          'link_settings': {
+            'libraries': [
+              '-lminizip',
+            ],
+          },
+        }],
+        ['OS=="mac" or OS=="ios" or os_bsd==1 or OS=="android"', {
+          # Mac, Android and the BSDs don't have fopen64, ftello64, or
+          # fseeko64. We use fopen, ftell, and fseek instead on these
+          # systems.
+          'defines': [
+            'USE_FILE32API'
+          ],
+        }],
+        ['clang==1', {
+          'xcode_settings': {
+            'WARNING_CFLAGS': [
+              # zlib uses `if ((a == b))` for some reason.
+              '-Wno-parentheses-equality',
+            ],
+          },
+          'cflags': [
+            '-Wno-parentheses-equality',
+          ],
+        }],
       ],
-    }],
+    }
   ],
 }

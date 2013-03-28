@@ -33,7 +33,9 @@
 #if ENABLE(SVG)
 #include "RenderSVGModelObject.h"
 
+#include "RenderLayerModelObject.h"
 #include "RenderSVGResource.h"
+#include "SVGNames.h"
 #include "SVGResourcesCache.h"
 #include "SVGStyledElement.h"
 
@@ -41,28 +43,34 @@ namespace WebCore {
 
 RenderSVGModelObject::RenderSVGModelObject(SVGStyledElement* node)
     : RenderObject(node)
+    , m_hasSVGShadow(false)
 {
 }
 
-LayoutRect RenderSVGModelObject::clippedOverflowRectForRepaint(RenderBoxModelObject* repaintContainer) const
+LayoutRect RenderSVGModelObject::clippedOverflowRectForRepaint(const RenderLayerModelObject* repaintContainer) const
 {
     return SVGRenderSupport::clippedOverflowRectForRepaint(this, repaintContainer);
 }
 
-void RenderSVGModelObject::computeFloatRectForRepaint(RenderBoxModelObject* repaintContainer, FloatRect& repaintRect, bool fixed) const
+void RenderSVGModelObject::computeFloatRectForRepaint(const RenderLayerModelObject* repaintContainer, FloatRect& repaintRect, bool fixed) const
 {
     SVGRenderSupport::computeFloatRectForRepaint(this, repaintContainer, repaintRect, fixed);
 }
 
-void RenderSVGModelObject::mapLocalToContainer(RenderBoxModelObject* repaintContainer, bool /* fixed */, bool /* useTransforms */, TransformState& transformState, bool* wasFixed) const
+void RenderSVGModelObject::mapLocalToContainer(const RenderLayerModelObject* repaintContainer, TransformState& transformState, MapCoordinatesFlags, bool* wasFixed) const
 {
     SVGRenderSupport::mapLocalToContainer(this, repaintContainer, transformState, wasFixed);
+}
+
+const RenderObject* RenderSVGModelObject::pushMappingToContainer(const RenderLayerModelObject* ancestorToStopAt, RenderGeometryMap& geometryMap) const
+{
+    return SVGRenderSupport::pushMappingToContainer(this, ancestorToStopAt, geometryMap);
 }
 
 // Copied from RenderBox, this method likely requires further refactoring to work easily for both SVG and CSS Box Model content.
 // FIXME: This may also need to move into SVGRenderSupport as the RenderBox version depends
 // on borderBoundingBox() which SVG RenderBox subclases (like SVGRenderBlock) do not implement.
-LayoutRect RenderSVGModelObject::outlineBoundsForRepaint(RenderBoxModelObject* repaintContainer, LayoutPoint*) const
+LayoutRect RenderSVGModelObject::outlineBoundsForRepaint(const RenderLayerModelObject* repaintContainer, const RenderGeometryMap*) const
 {
     LayoutRect box = enclosingLayoutRect(repaintRectInLocalCoordinates());
     adjustRectForOutlineAndShadow(box);
@@ -71,16 +79,16 @@ LayoutRect RenderSVGModelObject::outlineBoundsForRepaint(RenderBoxModelObject* r
     return containerRelativeQuad.enclosingBoundingBox();
 }
 
-void RenderSVGModelObject::absoluteRects(Vector<LayoutRect>& rects, const LayoutPoint& accumulatedOffset) const
+void RenderSVGModelObject::absoluteRects(Vector<IntRect>& rects, const LayoutPoint& accumulatedOffset) const
 {
-    LayoutRect rect = enclosingLayoutRect(strokeBoundingBox());
-    rect.moveBy(accumulatedOffset);
+    IntRect rect = enclosingIntRect(strokeBoundingBox());
+    rect.moveBy(roundedIntPoint(accumulatedOffset));
     rects.append(rect);
 }
 
 void RenderSVGModelObject::absoluteQuads(Vector<FloatQuad>& quads, bool* wasFixed) const
 {
-    quads.append(localToAbsoluteQuad(strokeBoundingBox(), false, wasFixed));
+    quads.append(localToAbsoluteQuad(strokeBoundingBox(), 0 /* mode */, wasFixed));
 }
 
 void RenderSVGModelObject::willBeDestroyed()
@@ -105,13 +113,7 @@ void RenderSVGModelObject::styleDidChange(StyleDifference diff, const RenderStyl
     SVGResourcesCache::clientStyleChanged(this, diff, style());
 }
 
-void RenderSVGModelObject::updateFromElement()
-{
-    RenderObject::updateFromElement();
-    SVGResourcesCache::clientUpdatedFromElement(this, style());
-}
-
-bool RenderSVGModelObject::nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint&, const LayoutPoint&, HitTestAction)
+bool RenderSVGModelObject::nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation&, const LayoutPoint&, HitTestAction)
 {
     ASSERT_NOT_REACHED();
     return false;
@@ -125,12 +127,15 @@ static void getElementCTM(SVGElement* element, AffineTransform& transform)
     SVGElement* stopAtElement = SVGLocatable::nearestViewportElement(element);
     ASSERT(stopAtElement);
 
+    AffineTransform localTransform;
     Node* current = element;
+
     while (current && current->isSVGElement()) {
         SVGElement* currentElement = static_cast<SVGElement*>(current);
-        if (currentElement->isStyled())
-            transform = const_cast<AffineTransform&>(currentElement->renderer()->localToParentTransform()).multiply(transform);
-
+        if (currentElement->isStyled()) {
+            localTransform = currentElement->renderer()->localToParentTransform();
+            transform = localTransform.multiply(transform);
+        }
         // For getCTM() computation, stop at the nearest viewport element
         if (currentElement == stopAtElement)
             break;
@@ -158,9 +163,16 @@ static bool intersectsAllowingEmpty(const FloatRect& r, const FloatRect& other)
 // image, line, path, polygon, polyline, rect, text and use.
 static bool isGraphicsElement(RenderObject* renderer)
 {
-    return renderer->isSVGShape() || renderer->isSVGText() || renderer->isSVGImage() || renderer->isSVGShadowTreeRootContainer();
+    return renderer->isSVGShape() || renderer->isSVGText() || renderer->isSVGImage() || renderer->node()->hasTagName(SVGNames::useTag);
 }
 
+// The SVG addFocusRingRects() method adds rects in local coordinates so the default absoluteFocusRingQuads
+// returns incorrect values for SVG objects. Overriding this method provides access to the absolute bounds.
+void RenderSVGModelObject::absoluteFocusRingQuads(Vector<FloatQuad>& quads)
+{
+    quads.append(localToAbsoluteQuad(FloatQuad(repaintRectInLocalCoordinates())));
+}
+    
 bool RenderSVGModelObject::checkIntersection(RenderObject* renderer, const FloatRect& rect)
 {
     if (!renderer || renderer->style()->pointerEvents() == PE_NONE)

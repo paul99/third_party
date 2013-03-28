@@ -32,7 +32,7 @@ class SVGPathTraversalStateBuilder : public SVGPathConsumer {
 public:
     SVGPathTraversalStateBuilder();
 
-    unsigned long pathSegmentIndex();
+    unsigned pathSegmentIndex();
     float totalLength();
     FloatPoint currentPoint();
 
@@ -59,7 +59,6 @@ private:
     virtual void arcTo(float, float, float, bool, bool, const FloatPoint&, PathCoordinateMode) { ASSERT_NOT_REACHED(); }
 
     PathTraversalState* m_traversalState;
-    float m_desiredLength;
 };
 
 } // namespace WebCore

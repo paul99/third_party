@@ -1,5 +1,6 @@
 # -*- Python -*-
 #
+#
 # All the helper functions are defined in:
 #  - site_scons/talk.py
 # Use 'import talk' in any .scons file to get access to it.
@@ -15,6 +16,7 @@
 #
 #
 #
+
 import talk
 import os
 import platform
@@ -52,11 +54,9 @@ root_env = Environment(
   DESTINATION_ROOT = '$MAIN_DIR/build',
   CPPPATH = [
     '$OBJ_ROOT',     # generated headers are relative to here
-    '$MAIN_DIR/..',  # TODO: how can we use GOOGLECLIENT instead?
+    '$MAIN_DIR/..',  # TODO(dape): how can we use GOOGLECLIENT instead?
   ],
   CPPDEFINES = [
-    # Temp flag while porting to hammer.
-    'HAMMER_TIME=1',
     'LOGGING=1',
 
     # Feature selection
@@ -78,11 +78,26 @@ if platform.architecture()[0] == "64bit":
 
 # This bit denotes that an env is for 64-bit builds. When set, all build
 # artifacts will be 64-bit. When unset, all build artifacts will be 32-bit.
-DeclareBit('host_platform_64bit', 'Platform of the host machine (where artifacts will execute) is 64-bit')
+DeclareBit('host_platform_64bit',
+           'Platform of the host machine (where artifacts will execute) is '
+               '64-bit')
 
-def CrossBuilding(env):
-  return env.Bit('host_platform_64bit') != env.Bit('build_platform_64bit')
-root_env.AddMethod(CrossBuilding)
+# This bit denotes that we are cross-compiling using a sysroot.
+DeclareBit('cross_compile',
+           'Cross compiling using the SYSROOT environment variable')
+
+def CrossArch(env):
+  """Return whether or not the host platform architecture differs from the build
+     environment architecture."""
+  if env.Bit('cross_compile'):
+    # The architecture of the Python process may not match the architecture of
+    # the sysroot, so we just assume it's not a cross-arch build or that it
+    # doesn't matter. Currently it only matters if you try to build a cross-arch
+    # Debian package, so just don't do that.
+    return False
+  else:
+    return env.Bit('host_platform_64bit') != env.Bit('build_platform_64bit')
+root_env.AddMethod(CrossArch)
 
 DeclareBit('use_static_openssl', 'Build OpenSSL as a static library')
 
@@ -94,11 +109,16 @@ DeclareBit('have_libpulse',
 
 # List all the locales we localize to.
 root_env.AppendUnique(locales = [
-    'ar', 'bg', 'bn', 'ca', 'cs', 'da', 'de', 'el', 'en', 'en-GB', 'es',
-    'es-419', 'et', 'fa', 'fi', 'fil', 'fr', 'gu', 'hi', 'hr', 'hu', 'id',
-    'is', 'it', 'iw', 'ja', 'kn', 'ko', 'lt', 'lv', 'ml', 'mr', 'ms', 'nl',
-    'no', 'or', 'pl', 'pt-BR', 'pt-PT', 'ro', 'ru', 'sk', 'sl', 'sr', 'sv',
-    'ta', 'te', 'th', 'tl', 'tr', 'uk', 'ur', 'vi', 'zh-CN', 'zh-TW'])
+    'af', 'am', 'ar', 'bg', 'bn', 'ca', 'cs', 'da', 'de', 'el', 'en', 'en-GB',
+    'es', 'es-419', 'et', 'eu', 'fa', 'fi', 'fil', 'fr', 'fr-CA', 'gl', 'gu',
+    'hi', 'hr', 'hu', 'id', 'is', 'it', 'iw', 'ja', 'kn', 'ko', 'lt', 'lv',
+    'ml', 'mr', 'ms', 'nl', 'no', 'or', 'pl', 'pt-BR', 'pt-PT', 'ro', 'ru',
+    'sk', 'sl', 'sr', 'sv', 'sw', 'ta', 'te', 'th', 'tl', 'tr', 'uk', 'ur',
+    'vi', 'zh-CN', 'zh-HK', 'zh-TW', 'zu'])
+
+AddTargetGroup('all_breakpads', 'breakpad files can be built')
+
+AddTargetGroup('all_dsym', 'dsym debug packages can be built')
 
 #-------------------------------------------------------------------------------
 # W I N D O W S
@@ -124,6 +144,8 @@ win_env = root_env.Clone(
   TARGET_ARCH = 'x86',
 )
 
+
+win_env.Decider('MD5-timestamp')
 win_env.Append(
   COMPONENT_LIBRARY_PUBLISH = True,  # Put dlls in output dir too
   CCFLAGS = [
@@ -153,17 +175,16 @@ win_env.Append(
   ],
   CPPDEFINES = [
     '_ATL_CSTRING_EXPLICIT_CONSTRUCTORS',
-    # TODO: encapsulate all string operations that are not based
+    # TODO(dape): encapsulate all string operations that are not based
     # on std::string/std::wstring and make sure we use the safest versions
     # available on all platforms.
     '_CRT_SECURE_NO_WARNINGS',
-    '_SCL_SECURE_NO_WARNINGS',
     '_USE_32BIT_TIME_T',
     '_UNICODE',
     'UNICODE',
     '_HAS_EXCEPTIONS=0',
     'WIN32',
-    # TODO: remove this from logging.cc and enable here instead.
+    # TODO(dape): remove this from logging.cc and enable here instead.
     #'WIN32_LEAN_AND_MEAN',
 
     'WINVER=0x0500',
@@ -185,7 +206,13 @@ win_env.Append(
     '$PLATFORM_SDK_VISTA_6_0_DIR/Lib'
   ],
   LINKFLAGS = [
-    '-manifest' # TODO: Why do we need this?
+    '-manifest', # TODO(thaloun): Why do we need this?
+    # Some of the third-party libraries we link in don't have public symbols, so
+    # ignore that linker warning.
+    '/ignore:4221',
+    '/nxcompat',    # Binary was tested to be be compatible with Windows DEP.
+    '/dynamicbase', # Use ASLR to dynamically rebase at load-time.
+    '/fixed:no',    # Binary can be loaded at any base-address.
   ],
   MIDLFLAGS = [
     '/win32',
@@ -193,7 +220,7 @@ win_env.Append(
   ]
 )
 
-# TODO: Figure out what this does; found it in
+# TODO(dape): Figure out what this does; found it in
 # omaha/main.scons. This fixes the problem with redefinition
 # of OS_WINDOWS symbol.
 win_env.FilterOut(CPPDEFINES = ['OS_WINDOWS=OS_WINDOWS'])
@@ -218,14 +245,61 @@ win_dbg_env = win_env.Clone(
 
 win_dbg_env.Prepend(
   CCFLAGS = [
-      '/ZI',     # enable debugging
-      '/Od',     # disable optimizations
-      '/MTd',    # link with LIBCMTD.LIB debug lib
-      '/RTC1',   # enable runtime checks
+    '/ZI',     # enable debugging
+    '/Od',     # disable optimizations
+    '/MTd',    # link with LIBCMTD.LIB debug lib
+    '/RTC1',   # enable runtime checks
   ],
 )
 
 envs.append(win_dbg_env)
+
+win_dbg64_env = win_dbg_env.Clone(
+  BUILD_TYPE = 'dbg64',
+  BUILD_TYPE_DESCRIPTION = 'Windows debug 64bit build',
+  BUILD_GROUPS = ['all'],
+)
+
+win_dbg64_env.FilterOut(CCFLAGS = ['/ZI'])
+
+win_dbg64_env.Append(
+  CCFLAGS = [
+    '/Zi',     # enable debugging that is 64 bit compatible.
+    # TODO(fbarchard): fix warnings and remove these disables.
+    '/wd4244', # disable cast warning
+    '/wd4267', # disable cast warning
+  ],
+  ARFLAGS = [
+    '/MACHINE:x64',
+  ],
+  CPPDEFINES = [
+    'WIN64',
+    'ARCH_CPU_64_BITS',
+  ],
+  LIBFLAGS = [
+    '/MACHINE:x64',
+  ],
+  LINKFLAGS = [
+    '/MACHINE:x64',
+  ],
+)
+
+win_dbg64_env.FilterOut(CPPDEFINES = ['_USE_32BIT_TIME_T'])
+
+win_dbg64_env.Prepend(
+  LIBPATH = [
+      '$VC80_DIR/vc/lib/amd64',
+      '$ATLMFC_VC80_DIR/lib/amd64',
+      '$PLATFORM_SDK_VISTA_6_0_DIR/Lib/x64',
+  ],
+)
+win_dbg64_env.PrependENVPath(
+  'PATH',
+  win_dbg64_env.Dir('$VC80_DIR/vc/bin/x86_amd64'))
+
+win_dbg64_env.SetBits('host_platform_64bit')
+
+envs.append(win_dbg64_env)
 
 win_coverage_env = win_dbg_env.Clone(
   tools = ['code_coverage'],
@@ -251,14 +325,15 @@ win_opt_env = win_env.Clone(
 
 win_opt_env.Prepend(
   CCFLAGS=[
-      '/Zi',     # enable debugging
-      '/O1',     # optimize for size
-      '/MT',     # link with LIBCMT.LIB (multi-threaded, static linked crt)
-      '/GS',     # enable security checks
+      '/Zi',       # enable debugging
+      '/O1',       # optimize for size
+      '/fp:fast',  # float faster but less precise
+      '/MT',       # link with LIBCMT.LIB (multi-threaded, static linked crt)
+      '/GS',       # enable security checks
   ],
   LINKFLAGS = [
-    '/safeseh',  # protect against attacks against exception handlers
-    '/opt:ref',  # Remove unused references (functions/data).
+    '/safeseh',     # protect against attacks against exception handlers
+    '/opt:ref',     # Remove unused references (functions/data).
   ],
 )
 
@@ -274,7 +349,6 @@ posix_env.Append(
     'HASH_NAMESPACE=__gnu_cxx',
     'POSIX',
     'DISABLE_DYNAMIC_CAST',
-    'HAVE_OPENSSL_SSL_H=1',
     # The POSIX standard says we have to define this.
     '_REENTRANT',
   ],
@@ -301,6 +375,14 @@ posix_env.Append(
   ],
 )
 
+# Switch-hit between NSS and OpenSSL
+if 'NSS_BUILD_PLATFORM' in root_env['ENV']:
+   posix_env.AppendUnique(CPPDEFINES=['HAVE_NSS_SSL_H=1',
+                                      'NSS_SSL_RELATIVE_PATH'])
+else:
+   posix_env.AppendUnique(CPPDEFINES=['HAVE_OPENSSL_SSL_H=1'])
+ 
+
 #-------------------------------------------------------------------------------
 # M A C OSX
 #
@@ -314,14 +396,18 @@ mac_env = posix_env.Clone(
 # Use static OpenSSL on mac so that we can use the latest APIs on all
 # supported mac platforms (10.5+).
 mac_env.SetBits('use_static_openssl')
+
+# For libjingle we don't specify a sysroot or minimum OS version.
+mac_osx_version_min_32 = ""
+mac_osx_version_min_64 = ""
+
+# Generic mac environment common to all targets
 mac_env.Append(
   CPPDEFINES = [
     'OSX',
   ],
   CCFLAGS = [
-    '-m32',
     '-arch', 'i386',
-    '-isysroot', '/Developer/SDKs/MacOSX10.5.sdk',
     '-fasm-blocks',
   ],
   LINKFLAGS = [
@@ -329,45 +415,101 @@ mac_env.Append(
     # This flag makes all members of a static library be included in the
     # final exe - that increases the size of the exe, but without it
     # Obj-C categories aren't properly included in the exe.
-    # TODO: consider only defining for libs that actually have objc.
+    # TODO(thaloun): consider only defining for libs that actually have objc.
     '-ObjC',
     '-arch', 'i386',
-    '-mmacosx-version-min=10.5',
-    '-isysroot', '/Developer/SDKs/MacOSX10.5.sdk',
-    '-m32',
     '-dead_strip',
   ],
   FRAMEWORKS = [
     'CoreServices',
-    'Carbon',
     'Security',
     'SystemConfiguration',
     'OpenGL',
     'CoreAudio',
     'Quartz',
-    'QuickTime',
     'Cocoa',
     'QTKit',
   ]
 )
 
+if 'NSS_BUILD_PLATFORM' in root_env['ENV']:
+  mac_env.AppendUnique(LINKFLAGS = ['-Lthird_party/mozilla/dist/' + root_env['ENV']['NSS_BUILD_PLATFORM'] + '/lib'])
+else:
+  mac_env.AppendUnique(LINKFLAGS = ['-Lthird_party/openssl'])
+                       
+
+# add debug flags to environment
+def mac_debug_include(env):
+  env.Append(
+    CCFLAGS = [
+      '-O0',
+    ],
+    CPPDEFINES = [
+      'DEBUG=1',
+    ],
+  )
+  # Remove -g set by hammer, which is not what we want (we have set -g3 above).
+  env.FilterOut(CCFLAGS = ['-g'])
+
+# add 32/64 bit specific options to specified environment
+def mac_common_include_x86_32(env):
+  env.Append(
+    CCFLAGS = [
+      '-m32',
+    ],
+    LINKFLAGS = [
+      '-m32',
+    ],
+    FRAMEWORKS = [
+      'Carbon',
+      'QuickTime',
+    ],
+  )
+  envs.append(env)
+
+def mac_common_include_x86_64(env):
+  env.Append(
+    CCFLAGS = [
+      '-m64',
+      '-fPIC',
+    ],
+    CPPDEFINES = [
+      'ARCH_CPU_64_BITS',
+      'CARBON_DEPRECATED',
+    ],
+    LINKFLAGS = [
+      '-m64',
+    ],
+    FRAMEWORKS = [
+      'AppKit',
+    ],
+  )
+  env.SetBits('host_platform_64bit')
+  envs.append(env)
+
+def mac_osx_version_min(env, ver):
+  if ver != "":
+    sdk_path = '/Developer/SDKs/MacOSX%s.sdk' % ver
+    env.Append(
+      CCFLAGS = [
+        '-mmacosx-version-min=' + ver,
+        '-isysroot', sdk_path,
+      ],
+      LINKFLAGS = [
+        '-mmacosx-version-min=' + ver,
+        '-isysroot', sdk_path,
+      ],
+      osx_sdk_path = sdk_path,
+      osx_version_min = ver,
+    )
+
+# Create all environments
 mac_dbg_env = mac_env.Clone(
   BUILD_TYPE = 'dbg',
   BUILD_TYPE_DESCRIPTION = 'Mac debug build',
   BUILD_GROUPS = ['default', 'all'],
   tools = ['target_debug'],
 )
-mac_dbg_env.Append(
-  CCFLAGS = [
-    '-O0',
-  ],
-  CPPDEFINES = [
-    'DEBUG=1',
-  ],
-)
-# Remove -g set by hammer, which is not what we want (we have set -g3 above).
-mac_dbg_env.FilterOut(CCFLAGS = ['-g'])
-envs.append(mac_dbg_env)
 
 mac_opt_env = mac_env.Clone(
   BUILD_TYPE = 'opt',
@@ -375,16 +517,30 @@ mac_opt_env = mac_env.Clone(
   BUILD_GROUPS = ['all'],
   tools = ['target_optimized'],
 )
-mac_opt_env.Append(
-  CCFLAGS = [
-    # TODO: Figure out how mk can compile without
-    # this flag, then remove.  Confirmed asserts are preprocessed
-    # out.  Maybe it's a different version of gcc?
-    '-Wno-unused-variable',
-  ],
-  # Hammer automatically specifies -Os for mac opt.
+
+mac_dbg64_env = mac_dbg_env.Clone(
+  BUILD_TYPE = 'dbg64',
+  BUILD_TYPE_DESCRIPTION = 'Mac debug 64bit build',
+  BUILD_GROUPS = ['all'],
 )
-envs.append(mac_opt_env)
+
+mac_opt64_env = mac_opt_env.Clone(
+  BUILD_TYPE = 'opt64',
+  BUILD_TYPE_DESCRIPTION = 'Mac opt 64bit build',
+  BUILD_GROUPS = ['all'],
+)
+
+mac_debug_include(mac_dbg_env)
+mac_debug_include(mac_dbg64_env)
+mac_common_include_x86_32(mac_dbg_env)
+mac_common_include_x86_32(mac_opt_env)
+mac_common_include_x86_64(mac_dbg64_env)
+mac_common_include_x86_64(mac_opt64_env)
+mac_osx_version_min(mac_dbg_env, mac_osx_version_min_32)
+mac_osx_version_min(mac_opt_env, mac_osx_version_min_32)
+mac_osx_version_min(mac_dbg64_env, mac_osx_version_min_64)
+mac_osx_version_min(mac_opt64_env, mac_osx_version_min_64)
+
 
 #-------------------------------------------------------------------------------
 # L I N U X
@@ -454,71 +610,6 @@ def linux_common_include_x86_64(env):
   env.SetBits('host_platform_64bit')
 
 #-------------------------------------------------------------------------------
-# L I N U X -- T R A D I T I O N A L -- X 8 6
-#
-# Settings that are specific to our desktop Linux x86 targets.
-linux_x86_32_env = linux_common_env.Clone()
-linux_common_include_x86_32(linux_x86_32_env)
-
-linux_x86_64_env = linux_common_env.Clone()
-linux_common_include_x86_64(linux_x86_64_env)
-
-def gen_linux_x86(base_env, type_suffix, desc_suffix):
-  linux_env = base_env.Clone()
-  # OpenSSL has infamously poor ABI stability, so that building against one
-  # version and running against a different one often will not work. Since our
-  # non-ChromeOS Linux builds are used on many different distros and distro
-  # versions, this means we can't safely dynamically link to OpenSSL because the
-  # product would end up being broken on any computer with a different version
-  # installed. So instead we build it ourself and statically link to it.
-  linux_env.SetBits('use_static_openssl')
-  # Enable the optional PulseAudio code if the build machine has the required
-  # dependency. (Not doing this for linux_common_env because we don't want
-  # PulseAudio used on ChromeOS.)
-  linux_env.EnableFeatureWherePackagePresent('have_libpulse',
-                                             'HAVE_LIBPULSE',
-                                             'libpulse')
-
-  groups = ['all']
-  if not linux_env.CrossBuilding():
-    groups = groups + ['all-native']
-    # The native-arch dbg build is the default.
-    dbg_groups = groups + ['default']
-    native_desc = ', native '
-    # No suffix for native modes.
-    type_suffix = ''
-  else:
-    groups = groups + ['all-cross']
-    dbg_groups = groups
-    native_desc = ', cross-built for '
-
-  linux_dbg_env = linux_env.Clone(
-    BUILD_TYPE = 'dbg' + type_suffix,
-    BUILD_TYPE_DESCRIPTION = 'Linux debug build%s%s' % (native_desc,
-        desc_suffix),
-    BUILD_GROUPS = dbg_groups,
-    tools = ['target_debug'],
-  )
-  # Remove -g set by hammer, which is not what we want (we have set -g3 above).
-  linux_dbg_env.FilterOut(CCFLAGS = ['-g'])
-  envs.append(linux_dbg_env)
-
-  linux_opt_env = linux_env.Clone(
-    BUILD_TYPE = 'opt' + type_suffix,
-    BUILD_TYPE_DESCRIPTION = 'Linux optimized build%s%s' % (native_desc,
-        desc_suffix),
-    BUILD_GROUPS = groups,
-    tools = ['target_optimized'],
-  )
-  # Remove -O2 set by hammer, which is not what we want.
-  linux_opt_env.FilterOut(CCFLAGS = ['-O2'])
-  linux_opt_env.Append(CCFLAGS = ['-Os'])
-  envs.append(linux_opt_env)
-
-gen_linux_x86(linux_x86_32_env, '32', '32-bit')
-gen_linux_x86(linux_x86_64_env, '64', '64-bit')
-
-#-------------------------------------------------------------------------------
 # L I N U X -- C R O S S -- B U I L D
 
 # Cross build requires the following tool names be provided by the environment:
@@ -533,6 +624,7 @@ linux_cross_common_env = linux_common_env.Clone(
   CXX = str(os.environ.get("CXX")) +
     ' --sysroot=' + str(os.environ.get("SYSROOT")),
 )
+linux_cross_common_env.SetBits('cross_compile')
 
 # The rest of these paths and flags are optional:
 if os.environ.get("CPPPATH"):
@@ -559,9 +651,128 @@ if os.environ.get("LIBFLAGS"):
   linux_cross_common_env.Append(
     _LIBFLAGS = os.environ.get("LIBFLAGS").split(' '),
   )
+if os.environ.get("LINKFLAGS"):
+  linux_cross_common_env.Prepend(
+    LINKFLAGS = os.environ.get("LINKFLAGS").split(' '),
+  )
+
+#-------------------------------------------------------------------------------
+# L I N U X -- T R A D I T I O N A L -- X 8 6
+#
+# Settings that are specific to our desktop Linux x86 targets.
+def linux_common_include_traditional(env):
+  """Include traditional Linux settings into an env based on linux_common."""
+  # OpenSSL has infamously poor ABI stability, so that building against one
+  # version and running against a different one often will not work. Since our
+  # non-ChromeOS Linux builds are used on many different distros and distro
+  # versions, this means we can't safely dynamically link to OpenSSL because the
+  # product would end up being broken on any computer with a different version
+  # installed. So instead we build it ourself and statically link to it.
+  env.SetBits('use_static_openssl')
+  # Enable the optional PulseAudio code if the build machine has the required
+  # dependency.
+  # TODO(?): This belongs in linux_common_env, but we can't safely move it there
+  # yet because pkg-config is not being used properly with ChromeOS builds (see
+  # TODO below).
+  env.EnableFeatureWherePackagePresent('have_libpulse',
+                                       'HAVE_LIBPULSE',
+                                       'libpulse')
+
+def linux_traditional_include_dbg(env):
+  """Include traditional Linux dbg settings into an env based on the above."""
+  # Remove -g set by hammer, which is not what we want (we have set -g3 above).
+  env.FilterOut(CCFLAGS = ['-g'])
+
+def linux_traditional_include_opt(env):
+  """Include traditional Linux opt settings into an env based on the above."""
+  # Remove -O2 set by hammer, which is not what we want.
+  env.FilterOut(CCFLAGS = ['-O2'])
+  env.Append(CCFLAGS = ['-Os'])
+
+def gen_linux_nonhermetic(linux_env, type_suffix, desc_suffix):
+  groups = ['nonhermetic']
+  if not linux_env.CrossArch():
+    groups = groups + ['nonhermetic-native']
+    # The non-hermetic, native-arch dbg build is the default.
+    dbg_groups = groups + ['default']
+    native_desc = ', native '
+    # No suffix for native modes.
+    type_suffix = ''
+  else:
+    groups = groups + ['nonhermetic-cross']
+    dbg_groups = groups
+    native_desc = ', cross-built for '
+
+  linux_dbg_env = linux_env.Clone(
+    BUILD_TYPE = 'dbg' + type_suffix,
+    BUILD_TYPE_DESCRIPTION = 'Linux debug build%s%s' % (native_desc,
+        desc_suffix),
+    BUILD_GROUPS = dbg_groups,
+    tools = ['target_debug'],
+  )
+  linux_traditional_include_dbg(linux_dbg_env)
+  envs.append(linux_dbg_env)
+
+  linux_opt_env = linux_env.Clone(
+    BUILD_TYPE = 'opt' + type_suffix,
+    BUILD_TYPE_DESCRIPTION = 'Linux optimized build%s%s' % (native_desc,
+        desc_suffix),
+    BUILD_GROUPS = groups,
+    tools = ['target_optimized'],
+  )
+  linux_traditional_include_opt(linux_opt_env)
+  envs.append(linux_opt_env)
+
+linux_nonhermetic_common_env = linux_common_env.Clone()
+linux_common_include_traditional(linux_nonhermetic_common_env)
+
+linux_nonhermetic_x86_32_env = linux_nonhermetic_common_env.Clone()
+linux_common_include_x86_32(linux_nonhermetic_x86_32_env)
+gen_linux_nonhermetic(linux_nonhermetic_x86_32_env, '32', '32-bit')
+
+linux_nonhermetic_x86_64_env = linux_nonhermetic_common_env.Clone()
+linux_common_include_x86_64(linux_nonhermetic_x86_64_env)
+gen_linux_nonhermetic(linux_nonhermetic_x86_64_env, '64', '64-bit')
+
+def gen_linux_hermetic(linux_env, type_suffix, desc):
+  groups = ['hermetic']
+
+  linux_dbg_env = linux_env.Clone(
+    BUILD_TYPE = 'hermetic-dbg' + type_suffix,
+    BUILD_TYPE_DESCRIPTION = 'Hermetic %s Linux debug build' % desc,
+    BUILD_GROUPS = groups,
+    tools = ['target_debug'],
+  )
+  linux_traditional_include_dbg(linux_dbg_env)
+  envs.append(linux_dbg_env)
+
+  linux_opt_env = linux_env.Clone(
+    BUILD_TYPE = 'hermetic-opt' + type_suffix,
+    BUILD_TYPE_DESCRIPTION = 'Hermetic %s Linux optimized build' % desc,
+    BUILD_GROUPS = groups,
+    tools = ['target_optimized'],
+  )
+  linux_traditional_include_opt(linux_opt_env)
+  envs.append(linux_opt_env)
+
+linux_hermetic_common_env = linux_cross_common_env.Clone()
+linux_common_include_traditional(linux_hermetic_common_env)
+
+linux_hermetic_x86_32_env = linux_hermetic_common_env.Clone()
+linux_common_include_x86_32(linux_hermetic_x86_32_env)
+gen_linux_hermetic(linux_hermetic_x86_32_env, '32', '32-bit')
+
+linux_hermetic_x86_64_env = linux_hermetic_common_env.Clone()
+linux_common_include_x86_64(linux_hermetic_x86_64_env)
+gen_linux_hermetic(linux_hermetic_x86_64_env, '64', '64-bit')
 
 #-------------------------------------------------------------------------------
 # L I N U X -- C R O S S -- B U I L D -- A R M
+
+# TODO(noahric): All the following Linux builds are running against a sysroot
+# but improperly using the host machine's pkg-config environment. The ChromeOS
+# ones should probably be using
+# https://cs.corp.google.com/#chrome/src/build/linux/pkg-config-wrapper.
 
 linux_cross_arm_env = linux_cross_common_env.Clone()
 linux_cross_arm_env.Append(
@@ -584,6 +795,13 @@ if '-mfpu=neon' in linux_cross_arm_env['CFLAGS'] or \
   print "Building with ARM NEON support."
   linux_cross_arm_env.SetBits('arm_neon')
 
+# Detect hardfp from the -mfloat-abi build flag
+DeclareBit('arm_hardfp', 'ARM supporting hardfp')
+if '-mfloat-abi=hard' in linux_cross_arm_env['CFLAGS'] or \
+   '-mfloat-abi=hard' in linux_cross_arm_env['CCFLAGS'] or \
+   '-mfloat-abi=hard' in linux_cross_arm_env['CXXFLAGS']:
+  print "Building with hard floating point support."
+  linux_cross_arm_env.SetBits('arm_hardfp')
 
 linux_cross_arm_dbg_env = linux_cross_arm_env.Clone(
   BUILD_TYPE = 'arm-dbg',
@@ -602,8 +820,6 @@ linux_cross_arm_opt_env = linux_cross_arm_env.Clone(
 envs.append(linux_cross_arm_opt_env)
 
 
-
-# TODO(): Clone linux envs for 64bit.  See 'variant' documentation.
 
 # Create a group for installers
 AddTargetGroup('all_installers', 'installers that can be built')

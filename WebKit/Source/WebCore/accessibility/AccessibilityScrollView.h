@@ -38,14 +38,17 @@ class AccessibilityScrollView : public AccessibilityObject {
 public:
     static PassRefPtr<AccessibilityScrollView> create(ScrollView*);    
     virtual AccessibilityRole roleValue() const { return ScrollAreaRole; }
-    ScrollView* scrollView() const { return m_scrollView.get(); }
+    ScrollView* scrollView() const { return m_scrollView; }
+
+    virtual ~AccessibilityScrollView();
+    virtual void detach();
 
 protected:
     virtual ScrollableArea* getScrollableAreaIfScrollable() const;
     virtual void scrollTo(const IntPoint&) const;
     
 private:
-    AccessibilityScrollView(ScrollView*);
+    explicit AccessibilityScrollView(ScrollView*);
     
     virtual bool accessibilityIsIgnored() const;
     virtual bool isAccessibilityScrollView() const { return true; }
@@ -57,7 +60,7 @@ private:
     virtual AccessibilityObject* scrollBar(AccessibilityOrientation);
     virtual void addChildren();
     virtual void clearChildren();
-    virtual AccessibilityObject* accessibilityHitTest(const LayoutPoint&) const;
+    virtual AccessibilityObject* accessibilityHitTest(const IntPoint&) const;
     virtual void updateChildrenIfNecessary();
     virtual void setNeedsToUpdateChildren() { m_childrenDirty = true; }
     void updateScrollbars();
@@ -72,7 +75,7 @@ private:
     AccessibilityScrollbar* addChildScrollbar(Scrollbar*);
     void removeChildScrollbar(AccessibilityObject*);
     
-    RefPtr<ScrollView> m_scrollView;
+    ScrollView* m_scrollView;
     RefPtr<AccessibilityObject> m_horizontalScrollbar;
     RefPtr<AccessibilityObject> m_verticalScrollbar;
     bool m_childrenDirty;

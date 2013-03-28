@@ -9,7 +9,7 @@
 
     This library is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERchANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
     Library General Public License for more details.
 
     You should have received a copy of the GNU Library General Public License
@@ -21,13 +21,20 @@
 #include "config.h"
 #include "ewk_view.h"
 
-#include "ewk_frame.h"
-#include "ewk_logging.h"
+#include "TiledBackingStore.h"
+#include "ewk_frame_private.h"
 #include "ewk_private.h"
+#include "ewk_view_private.h"
 
+#include <Ecore_Evas.h>
 #include <Evas.h>
 #include <eina_safety_checks.h>
 #include <string.h>
+
+#if ENABLE(INSPECTOR)
+#include "InspectorController.h"
+#include "Page.h"
+#endif
 
 static Ewk_View_Smart_Class _parent_sc = EWK_VIEW_SMART_CLASS_INIT_NULL;
 
@@ -57,6 +64,12 @@ static void _ewk_view_single_smart_add(Evas_Object* ewkView)
 static Evas_Object* _ewk_view_single_smart_backing_store_add(Ewk_View_Smart_Data* smartData)
 {
     Evas_Object* bs = evas_object_image_add(smartData->base.evas);
+    EINA_SAFETY_ON_NULL_RETURN_VAL(bs, 0);
+    const Ecore_Evas* ecoreEvas = ecore_evas_ecore_evas_get(smartData->base.evas);
+    const char* engine = ecore_evas_engine_name_get(ecoreEvas);
+    if (!strncmp(engine, "opengl_x11", strlen("opengl_x11")))
+        evas_object_image_content_hint_set(bs, EVAS_IMAGE_CONTENT_HINT_DYNAMIC);
+
     evas_object_image_alpha_set(bs, false);
     evas_object_image_smooth_scale_set(bs, smartData->zoom_weak_smooth_scale);
 
@@ -88,10 +101,10 @@ static void _ewk_view_single_smart_resize(Evas_Object* ewkView, Evas_Coord width
     }
 }
 
-static inline void _ewk_view_screen_move(uint32_t* image, size_t destinationX, size_t destinationY, size_t sourceX, size_t sourceY, size_t copyWidth, size_t copyHeight, size_t frameWidth)
+static inline void _ewk_view_screen_move(uint32_t* image, size_t destinationX, size_t destinationY, size_t sourceX, size_t sourceY, size_t copyWidth, size_t copyHeight, size_t imageWidth)
 {
-    uint32_t* sourceBegin = image + (frameWidth * sourceY) + sourceX;
-    uint32_t* destinationBegin = image + (frameWidth * destinationY) + destinationX;
+    uint32_t* sourceBegin = image + (imageWidth * sourceY) + sourceX;
+    uint32_t* destinationBegin = image + (imageWidth * destinationY) + destinationX;
 
     size_t copyLength = copyWidth * 4;
     const int moveLineUpDown = sourceY >= destinationY ? 1 : -1;
@@ -99,16 +112,16 @@ static inline void _ewk_view_screen_move(uint32_t* image, size_t destinationX, s
 
     uint32_t* source, * destination;
     if (sourceX >= destinationX) {
-        for (int i = 0; i < copyHeight; i++) {
-            source = sourceBegin + (frameWidth * startHeight);
-            destination = destinationBegin + (frameWidth * startHeight);
+        for (size_t i = 0; i < copyHeight; i++) {
+            source = sourceBegin + (imageWidth * startHeight);
+            destination = destinationBegin + (imageWidth * startHeight);
             startHeight = startHeight + moveLineUpDown;
             memcpy(destination, source, copyLength);
         }
     } else {
-        for (int i = 0; i < copyHeight; i++) {
-            source = sourceBegin + (frameWidth * startHeight);
-            destination = destinationBegin + (frameWidth * startHeight);
+        for (size_t i = 0; i < copyHeight; i++) {
+            source = sourceBegin + (imageWidth * startHeight);
+            destination = destinationBegin + (imageWidth * startHeight);
             startHeight = startHeight + moveLineUpDown;
             memmove(destination, source, copyLength);
         }
@@ -163,7 +176,7 @@ static inline void _ewk_view_single_scroll_process_single(Ewk_View_Smart_Data* s
     int copyWidth = scrollWidth - abs(scrollRequest->dx);
     int copyHeight = scrollHeight - abs(scrollRequest->dy);
     if (scrollRequest->dx || scrollRequest->dy) {
-        _ewk_view_screen_move(static_cast<uint32_t*>(pixels), destinationX, destinationY, sourceX, sourceY, copyWidth, copyHeight, scrollWidth);
+        _ewk_view_screen_move(static_cast<uint32_t*>(pixels), destinationX, destinationY, sourceX, sourceY, copyWidth, copyHeight, width);
         evas_object_image_data_update_add(smartData->backing_store, destinationX, destinationY, copyWidth, copyHeight);
     }
 
@@ -205,125 +218,82 @@ static Eina_Bool _ewk_view_single_smart_scrolls_process(Ewk_View_Smart_Data* sma
 
 static Eina_Bool _ewk_view_single_smart_repaints_process(Ewk_View_Smart_Data* smartData)
 {
-    Ewk_View_Paint_Context* context;
-    Evas_Coord ow, oh;
-    void* pixels;
-    Eina_Rectangle* rect;
-    const Eina_Rectangle* pr;
-    const Eina_Rectangle* pr_end;
-    Eina_Tiler* tiler;
-    Eina_Iterator* iterator;
-    cairo_status_t status;
-    cairo_surface_t* surface;
-    cairo_format_t format;
-    cairo_t* cairo;
-    size_t count;
-    Eina_Bool result = true;
-
     if (smartData->animated_zoom.zoom.current < 0.00001) {
         Evas_Object* clip = evas_object_clip_get(smartData->backing_store);
-        Evas_Coord width, height, centerWidth, centerHeight;
+
         // reset effects of zoom_weak_set()
-        evas_object_image_fill_set
-            (smartData->backing_store, 0, 0, smartData->view.w, smartData->view.h);
+        evas_object_image_fill_set(smartData->backing_store, 0, 0, smartData->view.w, smartData->view.h);
         evas_object_move(clip, smartData->view.x, smartData->view.y);
 
-        width = smartData->view.w;
-        height = smartData->view.h;
+        Evas_Coord width = smartData->view.w;
+        Evas_Coord height = smartData->view.h;
 
+        Evas_Coord centerWidth, centerHeight;
         ewk_frame_contents_size_get(smartData->main_frame, &centerWidth, &centerHeight);
         if (width > centerWidth)
             width = centerWidth;
+
         if (height > centerHeight)
             height = centerHeight;
+
         evas_object_resize(clip, width, height);
     }
 
-    pixels = evas_object_image_data_get(smartData->backing_store, 1);
-    evas_object_image_size_get(smartData->backing_store, &ow, &oh);
-    format = CAIRO_FORMAT_ARGB32;
+    Evas_Coord imageWidth, imageHeight;
+    evas_object_image_size_get(smartData->backing_store, &imageWidth, &imageHeight);
 
-    surface = cairo_image_surface_create_for_data
-                  (static_cast<unsigned char*>(pixels), format, ow, oh, ow * 4);
-    status = cairo_surface_status(surface);
-    if (status != CAIRO_STATUS_SUCCESS) {
-        ERR("could not create surface from data %dx%d: %s",
-            ow, oh, cairo_status_to_string(status));
-        result = false;
-        goto error_cairo_surface;
-    }
-    cairo = cairo_create(surface);
-    status = cairo_status(cairo);
-    if (status != CAIRO_STATUS_SUCCESS) {
-        ERR("could not create cairo from surface %dx%d: %s",
-            ow, oh, cairo_status_to_string(status));
-        result = false;
-        goto error_cairo;
-    }
-
-    context = ewk_view_paint_context_new(smartData->_priv, cairo);
-    if (!context) {
-        ERR("could not create paint context");
-        result = false;
-        goto error_paint_context;
-    }
-
-    tiler = eina_tiler_new(ow, oh);
+    Eina_Tiler* tiler = eina_tiler_new(imageWidth, imageHeight);
     if (!tiler) {
-        ERR("could not create tiler %dx%d", ow, oh);
-        result = false;
-        goto error_tiler;
+        ERR("could not create tiler %dx%d", imageWidth, imageHeight);
+        return false;
     }
 
     ewk_view_layout_if_needed_recursive(smartData->_priv);
 
-    pr = ewk_view_repaints_pop(smartData->_priv, &count);
-    pr_end = pr + count;
-    for (; pr < pr_end; pr++)
-        eina_tiler_rect_add(tiler, pr);
+    size_t count;
+    const Eina_Rectangle* paintRequest = ewk_view_repaints_pop(smartData->_priv, &count);
+    const Eina_Rectangle* paintRequestEnd = paintRequest + count;
+    for (; paintRequest < paintRequestEnd; paintRequest++)
+        eina_tiler_rect_add(tiler, paintRequest);
 
-    iterator = eina_tiler_iterator_new(tiler);
+    Eina_Iterator* iterator = eina_tiler_iterator_new(tiler);
     if (!iterator) {
         ERR("could not get iterator for tiler");
-        result = false;
-        goto error_iterator;
+        eina_tiler_free(tiler);
+        return false;
     }
 
-    int scrollX, scrollY;
-    ewk_frame_scroll_pos_get(smartData->main_frame, &scrollX, &scrollY);
+#if USE(TILED_BACKING_STORE)
+    WebCore::Frame* mainFrame = EWKPrivate::coreFrame(smartData->main_frame);
+    if (mainFrame && mainFrame->tiledBackingStore())
+        mainFrame->tiledBackingStore()->coverWithTilesIfNeeded();
+#endif
 
+    Ewk_Paint_Context* context = ewk_paint_context_from_image_new(smartData->backing_store);
+    ewk_paint_context_save(context);
+
+    Eina_Rectangle* rect;
     EINA_ITERATOR_FOREACH(iterator, rect) {
-        Eina_Rectangle scrolled_rect = {
-            rect->x + scrollX, rect->y + scrollY,
-            rect->w, rect->h
-        };
-
-        ewk_view_paint_context_save(context);
-
-        if ((scrollX) || (scrollY))
-            ewk_view_paint_context_translate(context, -scrollX, -scrollY);
-
-        ewk_view_paint_context_clip(context, &scrolled_rect);
-        ewk_view_paint_context_paint_contents(context, &scrolled_rect);
-
-        ewk_view_paint_context_restore(context);
-        evas_object_image_data_update_add
-            (smartData->backing_store, rect->x, rect->y, rect->w, rect->h);
+        ewk_view_paint(smartData->_priv, context, rect);
+        evas_object_image_data_update_add(smartData->backing_store, rect->x, rect->y, rect->w, rect->h);
     }
+
+#if ENABLE(INSPECTOR)
+    WebCore::Page* page = EWKPrivate::corePage(smartData->self);
+    if (page) {
+        WebCore::InspectorController* controller = page->inspectorController();
+        if (controller->highlightedNode())
+            controller->drawHighlight(*context->graphicContext);
+    }
+#endif
+
+    ewk_paint_context_restore(context);
+    ewk_paint_context_free(context);
+
+    eina_tiler_free(tiler);
     eina_iterator_free(iterator);
 
-error_iterator:
-    eina_tiler_free(tiler);
-error_tiler:
-    ewk_view_paint_context_free(context);
-error_paint_context:
-    cairo_destroy(cairo);
-error_cairo:
-    cairo_surface_destroy(surface);
-error_cairo_surface:
-    evas_object_image_data_set(smartData->backing_store, pixels); /* dec refcount */
-
-    return result;
+    return true;
 }
 
 static Eina_Bool _ewk_view_single_smart_zoom_weak_set(Ewk_View_Smart_Data* smartData, float zoom, Evas_Coord centerX, Evas_Coord centerY)
@@ -368,7 +338,7 @@ static void _ewk_view_single_smart_zoom_weak_smooth_scale_set(Ewk_View_Smart_Dat
     evas_object_image_smooth_scale_set(smartData->backing_store, smooth_scale);
 }
 
-static void _ewk_view_single_smart_bg_color_set(Ewk_View_Smart_Data* smartData, unsigned char red, unsigned char green, unsigned char blue, unsigned char alpha)
+static void _ewk_view_single_smart_bg_color_set(Ewk_View_Smart_Data* smartData, unsigned char /*red*/, unsigned char /*green*/, unsigned char /*blue*/, unsigned char alpha)
 {
     evas_object_image_alpha_set(smartData->backing_store, alpha < 255);
 }
@@ -396,7 +366,7 @@ Eina_Bool ewk_view_single_smart_set(Ewk_View_Smart_Class* api)
 
 static inline Evas_Smart* _ewk_view_single_smart_class_new(void)
 {
-    static Ewk_View_Smart_Class api = EWK_VIEW_SMART_CLASS_INIT_NAME_VERSION("Ewk_View_Single");
+    static Ewk_View_Smart_Class api = EWK_VIEW_SMART_CLASS_INIT_NAME_VERSION(ewkViewSingleName);
     static Evas_Smart* smart = 0;
 
     if (EINA_UNLIKELY(!smart)) {

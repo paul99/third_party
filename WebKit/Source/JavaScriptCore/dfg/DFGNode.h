@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,14 +32,17 @@
 
 #include "CodeBlock.h"
 #include "CodeOrigin.h"
+#include "DFGAdjacencyList.h"
+#include "DFGArrayMode.h"
 #include "DFGCommon.h"
-#include "DFGOperands.h"
+#include "DFGNodeFlags.h"
+#include "DFGNodeType.h"
 #include "DFGVariableAccessData.h"
 #include "JSValue.h"
-#include "PredictedType.h"
+#include "Operands.h"
+#include "SpeculatedType.h"
+#include "StructureSet.h"
 #include "ValueProfile.h"
-#include <wtf/BoundsCheckedPointer.h>
-#include <wtf/Vector.h>
 
 namespace JSC { namespace DFG {
 
@@ -56,274 +59,10 @@ struct StructureTransitionData {
     }
 };
 
-typedef unsigned ArithNodeFlags;
-#define NodeUseBottom      0x00
-#define NodeUsedAsNumber   0x01
-#define NodeNeedsNegZero   0x02
-#define NodeUsedAsMask     0x03
-#define NodeMayOverflow    0x04
-#define NodeMayNegZero     0x08
-#define NodeBehaviorMask   0x0c
-
-static inline bool nodeUsedAsNumber(ArithNodeFlags flags)
-{
-    return !!(flags & NodeUsedAsNumber);
-}
-
-static inline bool nodeCanTruncateInteger(ArithNodeFlags flags)
-{
-    return !nodeUsedAsNumber(flags);
-}
-
-static inline bool nodeCanIgnoreNegativeZero(ArithNodeFlags flags)
-{
-    return !(flags & NodeNeedsNegZero);
-}
-
-static inline bool nodeMayOverflow(ArithNodeFlags flags)
-{
-    return !!(flags & NodeMayOverflow);
-}
-
-static inline bool nodeCanSpeculateInteger(ArithNodeFlags flags)
-{
-    if (flags & NodeMayOverflow)
-        return !nodeUsedAsNumber(flags);
-    
-    if (flags & NodeMayNegZero)
-        return nodeCanIgnoreNegativeZero(flags);
-    
-    return true;
-}
-
-#ifndef NDEBUG
-static inline const char* arithNodeFlagsAsString(ArithNodeFlags flags)
-{
-    if (!flags)
-        return "<empty>";
-
-    static const int size = 64;
-    static char description[size];
-    BoundsCheckedPointer<char> ptr(description, size);
-    
-    bool hasPrinted = false;
-    
-    if (flags & NodeUsedAsNumber) {
-        ptr.strcat("UsedAsNum");
-        hasPrinted = true;
-    }
-    
-    if (flags & NodeNeedsNegZero) {
-        if (hasPrinted)
-            ptr.strcat("|");
-        ptr.strcat("NeedsNegZero");
-        hasPrinted = true;
-    }
-    
-    if (flags & NodeMayOverflow) {
-        if (hasPrinted)
-            ptr.strcat("|");
-        ptr.strcat("MayOverflow");
-        hasPrinted = true;
-    }
-    
-    if (flags & NodeMayNegZero) {
-        if (hasPrinted)
-            ptr.strcat("|");
-        ptr.strcat("MayNegZero");
-        hasPrinted = true;
-    }
-    
-    *ptr++ = 0;
-    
-    return description;
-}
-#endif
-
-// Entries in the NodeType enum (below) are composed of an id, a result type (possibly none)
-// and some additional informative flags (must generate, is constant, etc).
-#define NodeIdMask           0xFFF
-#define NodeResultMask      0xF000
-#define NodeMustGenerate   0x10000 // set on nodes that have side effects, and may not trivially be removed by DCE.
-#define NodeIsConstant     0x20000
-#define NodeIsJump         0x40000
-#define NodeIsBranch       0x80000
-#define NodeIsTerminal    0x100000
-#define NodeHasVarArgs    0x200000
-#define NodeClobbersWorld 0x400000
-#define NodeMightClobber  0x800000
-
-// These values record the result type of the node (as checked by NodeResultMask, above), 0 for no result.
-#define NodeResultJS        0x1000
-#define NodeResultNumber    0x2000
-#define NodeResultInt32     0x3000
-#define NodeResultBoolean   0x4000
-#define NodeResultStorage   0x5000
-
-// This macro defines a set of information about all known node types, used to populate NodeId, NodeType below.
-#define FOR_EACH_DFG_OP(macro) \
-    /* A constant in the CodeBlock's constant pool. */\
-    macro(JSConstant, NodeResultJS) \
-    \
-    /* A constant not in the CodeBlock's constant pool. Uses get patched to jumps that exit the */\
-    /* code block. */\
-    macro(WeakJSConstant, NodeResultJS) \
-    \
-    /* Nodes for handling functions (both as call and as construct). */\
-    macro(ConvertThis, NodeResultJS) \
-    macro(CreateThis, NodeResultJS) /* Note this is not MustGenerate since we're returning it anyway. */ \
-    macro(GetCallee, NodeResultJS) \
-    \
-    /* Nodes for local variable access. */\
-    macro(GetLocal, NodeResultJS) \
-    macro(SetLocal, 0) \
-    macro(Phantom, NodeMustGenerate) \
-    macro(Nop, 0) \
-    macro(Phi, 0) \
-    macro(Flush, NodeMustGenerate) \
-    \
-    /* Marker for arguments being set. */\
-    macro(SetArgument, 0) \
-    \
-    /* Hint that inlining begins here. No code is generated for this node. It's only */\
-    /* used for copying OSR data into inline frame data, to support reification of */\
-    /* call frames of inlined functions. */\
-    macro(InlineStart, 0) \
-    \
-    /* Nodes for bitwise operations. */\
-    macro(BitAnd, NodeResultInt32) \
-    macro(BitOr, NodeResultInt32) \
-    macro(BitXor, NodeResultInt32) \
-    macro(BitLShift, NodeResultInt32) \
-    macro(BitRShift, NodeResultInt32) \
-    macro(BitURShift, NodeResultInt32) \
-    /* Bitwise operators call ToInt32 on their operands. */\
-    macro(ValueToInt32, NodeResultInt32 | NodeMustGenerate) \
-    /* Used to box the result of URShift nodes (result has range 0..2^32-1). */\
-    macro(UInt32ToNumber, NodeResultNumber) \
-    \
-    /* Nodes for arithmetic operations. */\
-    macro(ArithAdd, NodeResultNumber) \
-    macro(ArithSub, NodeResultNumber) \
-    macro(ArithMul, NodeResultNumber) \
-    macro(ArithDiv, NodeResultNumber) \
-    macro(ArithMod, NodeResultNumber) \
-    macro(ArithAbs, NodeResultNumber) \
-    macro(ArithMin, NodeResultNumber) \
-    macro(ArithMax, NodeResultNumber) \
-    macro(ArithSqrt, NodeResultNumber) \
-    /* Arithmetic operators call ToNumber on their operands. */\
-    macro(ValueToNumber, NodeResultNumber | NodeMustGenerate) \
-    \
-    /* A variant of ValueToNumber, which a hint that the parents will always use this as a double. */\
-    macro(ValueToDouble, NodeResultNumber | NodeMustGenerate) \
-    \
-    /* Add of values may either be arithmetic, or result in string concatenation. */\
-    macro(ValueAdd, NodeResultJS | NodeMustGenerate | NodeMightClobber) \
-    \
-    /* Property access. */\
-    /* PutByValAlias indicates a 'put' aliases a prior write to the same property. */\
-    /* Since a put to 'length' may invalidate optimizations here, */\
-    /* this must be the directly subsequent property put. */\
-    macro(GetByVal, NodeResultJS | NodeMustGenerate | NodeMightClobber) \
-    macro(PutByVal, NodeMustGenerate | NodeClobbersWorld) \
-    macro(PutByValAlias, NodeMustGenerate | NodeClobbersWorld) \
-    macro(GetById, NodeResultJS | NodeMustGenerate | NodeClobbersWorld) \
-    macro(GetByIdFlush, NodeResultJS | NodeMustGenerate | NodeClobbersWorld) \
-    macro(PutById, NodeMustGenerate | NodeClobbersWorld) \
-    macro(PutByIdDirect, NodeMustGenerate | NodeClobbersWorld) \
-    macro(CheckStructure, NodeMustGenerate) \
-    macro(PutStructure, NodeMustGenerate | NodeClobbersWorld) \
-    macro(GetPropertyStorage, NodeResultStorage) \
-    macro(GetIndexedPropertyStorage, NodeMustGenerate | NodeResultStorage) \
-    macro(GetByOffset, NodeResultJS) \
-    macro(PutByOffset, NodeMustGenerate | NodeClobbersWorld) \
-    macro(GetArrayLength, NodeResultInt32) \
-    macro(GetStringLength, NodeResultInt32) \
-    macro(GetByteArrayLength, NodeResultInt32) \
-    macro(GetInt8ArrayLength, NodeResultInt32) \
-    macro(GetInt16ArrayLength, NodeResultInt32) \
-    macro(GetInt32ArrayLength, NodeResultInt32) \
-    macro(GetUint8ArrayLength, NodeResultInt32) \
-    macro(GetUint8ClampedArrayLength, NodeResultInt32) \
-    macro(GetUint16ArrayLength, NodeResultInt32) \
-    macro(GetUint32ArrayLength, NodeResultInt32) \
-    macro(GetFloat32ArrayLength, NodeResultInt32) \
-    macro(GetFloat64ArrayLength, NodeResultInt32) \
-    macro(GetScopeChain, NodeResultJS) \
-    macro(GetScopedVar, NodeResultJS | NodeMustGenerate) \
-    macro(PutScopedVar, NodeMustGenerate | NodeClobbersWorld) \
-    macro(GetGlobalVar, NodeResultJS | NodeMustGenerate) \
-    macro(PutGlobalVar, NodeMustGenerate | NodeClobbersWorld) \
-    macro(CheckFunction, NodeMustGenerate) \
-    \
-    /* Optimizations for array mutation. */\
-    macro(ArrayPush, NodeResultJS | NodeMustGenerate | NodeClobbersWorld) \
-    macro(ArrayPop, NodeResultJS | NodeMustGenerate | NodeClobbersWorld) \
-    \
-    /* Optimizations for string access */ \
-    macro(StringCharCodeAt, NodeResultInt32) \
-    macro(StringCharAt, NodeResultJS) \
-    \
-    /* Nodes for comparison operations. */\
-    macro(CompareLess, NodeResultBoolean | NodeMustGenerate | NodeMightClobber) \
-    macro(CompareLessEq, NodeResultBoolean | NodeMustGenerate | NodeMightClobber) \
-    macro(CompareGreater, NodeResultBoolean | NodeMustGenerate | NodeMightClobber) \
-    macro(CompareGreaterEq, NodeResultBoolean | NodeMustGenerate | NodeMightClobber) \
-    macro(CompareEq, NodeResultBoolean | NodeMustGenerate | NodeMightClobber) \
-    macro(CompareStrictEq, NodeResultBoolean) \
-    \
-    /* Calls. */\
-    macro(Call, NodeResultJS | NodeMustGenerate | NodeHasVarArgs | NodeClobbersWorld) \
-    macro(Construct, NodeResultJS | NodeMustGenerate | NodeHasVarArgs | NodeClobbersWorld) \
-    \
-    /* Allocations. */\
-    macro(NewObject, NodeResultJS) \
-    macro(NewArray, NodeResultJS | NodeHasVarArgs) \
-    macro(NewArrayBuffer, NodeResultJS) \
-    macro(NewRegexp, NodeResultJS) \
-    \
-    /* Resolve nodes. */\
-    macro(Resolve, NodeResultJS | NodeMustGenerate | NodeClobbersWorld) \
-    macro(ResolveBase, NodeResultJS | NodeMustGenerate | NodeClobbersWorld) \
-    macro(ResolveBaseStrictPut, NodeResultJS | NodeMustGenerate | NodeClobbersWorld) \
-    macro(ResolveGlobal, NodeResultJS | NodeMustGenerate | NodeClobbersWorld) \
-    \
-    /* Nodes for misc operations. */\
-    macro(Breakpoint, NodeMustGenerate | NodeClobbersWorld) \
-    macro(CheckHasInstance, NodeMustGenerate) \
-    macro(InstanceOf, NodeResultBoolean) \
-    macro(LogicalNot, NodeResultBoolean | NodeMightClobber) \
-    macro(ToPrimitive, NodeResultJS | NodeMustGenerate | NodeClobbersWorld) \
-    macro(StrCat, NodeResultJS | NodeMustGenerate | NodeHasVarArgs | NodeClobbersWorld) \
-    \
-    /* Block terminals. */\
-    macro(Jump, NodeMustGenerate | NodeIsTerminal | NodeIsJump) \
-    macro(Branch, NodeMustGenerate | NodeIsTerminal | NodeIsBranch) \
-    macro(Return, NodeMustGenerate | NodeIsTerminal) \
-    macro(Throw, NodeMustGenerate | NodeIsTerminal) \
-    macro(ThrowReferenceError, NodeMustGenerate | NodeIsTerminal) \
-    \
-    /* This is a pseudo-terminal. It means that execution should fall out of DFG at */\
-    /* this point, but execution does continue in the basic block - just in a */\
-    /* different compiler. */\
-    macro(ForceOSRExit, NodeMustGenerate)
-
-// This enum generates a monotonically increasing id for all Node types,
-// and is used by the subsequent enum to fill out the id (as accessed via the NodeIdMask).
-enum NodeId {
-#define DFG_OP_ENUM(opcode, flags) opcode##_id,
-    FOR_EACH_DFG_OP(DFG_OP_ENUM)
-#undef DFG_OP_ENUM
-    LastNodeId
-};
-
-// Entries in this enum describe all Node types.
-// The enum value contains a monotonically increasing id, a result type, and additional flags.
-enum NodeType {
-#define DFG_OP_ENUM(opcode, flags) opcode = opcode##_id | (flags),
-    FOR_EACH_DFG_OP(DFG_OP_ENUM)
-#undef DFG_OP_ENUM
+struct NewArrayBufferData {
+    unsigned startConstant;
+    unsigned numConstants;
+    IndexingType indexingType;
 };
 
 // This type used in passing an immediate argument to Node constructor;
@@ -344,86 +83,149 @@ struct OpInfo {
 // Node represents a single operation in the data flow graph.
 struct Node {
     enum VarArgTag { VarArg };
-
+    
+    Node() { }
+    
     // Construct a node with up to 3 children, no immediate value.
     Node(NodeType op, CodeOrigin codeOrigin, NodeIndex child1 = NoNode, NodeIndex child2 = NoNode, NodeIndex child3 = NoNode)
-        : op(op)
-        , codeOrigin(codeOrigin)
+        : codeOrigin(codeOrigin)
+        , children(AdjacencyList::Fixed, child1, child2, child3)
         , m_virtualRegister(InvalidVirtualRegister)
         , m_refCount(0)
-        , m_prediction(PredictNone)
+        , m_prediction(SpecNone)
     {
-        ASSERT(!(op & NodeHasVarArgs));
-        ASSERT(!hasArithNodeFlags());
-        children.fixed.child1 = child1;
-        children.fixed.child2 = child2;
-        children.fixed.child3 = child3;
+        setOpAndDefaultFlags(op);
+        ASSERT(!(m_flags & NodeHasVarArgs));
     }
 
     // Construct a node with up to 3 children and an immediate value.
     Node(NodeType op, CodeOrigin codeOrigin, OpInfo imm, NodeIndex child1 = NoNode, NodeIndex child2 = NoNode, NodeIndex child3 = NoNode)
-        : op(op)
-        , codeOrigin(codeOrigin)
+        : codeOrigin(codeOrigin)
+        , children(AdjacencyList::Fixed, child1, child2, child3)
         , m_virtualRegister(InvalidVirtualRegister)
         , m_refCount(0)
         , m_opInfo(imm.m_value)
-        , m_prediction(PredictNone)
+        , m_prediction(SpecNone)
     {
-        ASSERT(!(op & NodeHasVarArgs));
-        children.fixed.child1 = child1;
-        children.fixed.child2 = child2;
-        children.fixed.child3 = child3;
+        setOpAndDefaultFlags(op);
+        ASSERT(!(m_flags & NodeHasVarArgs));
     }
 
     // Construct a node with up to 3 children and two immediate values.
     Node(NodeType op, CodeOrigin codeOrigin, OpInfo imm1, OpInfo imm2, NodeIndex child1 = NoNode, NodeIndex child2 = NoNode, NodeIndex child3 = NoNode)
-        : op(op)
-        , codeOrigin(codeOrigin)
+        : codeOrigin(codeOrigin)
+        , children(AdjacencyList::Fixed, child1, child2, child3)
         , m_virtualRegister(InvalidVirtualRegister)
         , m_refCount(0)
         , m_opInfo(imm1.m_value)
         , m_opInfo2(safeCast<unsigned>(imm2.m_value))
-        , m_prediction(PredictNone)
+        , m_prediction(SpecNone)
     {
-        ASSERT(!(op & NodeHasVarArgs));
-        children.fixed.child1 = child1;
-        children.fixed.child2 = child2;
-        children.fixed.child3 = child3;
+        setOpAndDefaultFlags(op);
+        ASSERT(!(m_flags & NodeHasVarArgs));
     }
     
     // Construct a node with a variable number of children and two immediate values.
     Node(VarArgTag, NodeType op, CodeOrigin codeOrigin, OpInfo imm1, OpInfo imm2, unsigned firstChild, unsigned numChildren)
-        : op(op)
-        , codeOrigin(codeOrigin)
+        : codeOrigin(codeOrigin)
+        , children(AdjacencyList::Variable, firstChild, numChildren)
         , m_virtualRegister(InvalidVirtualRegister)
         , m_refCount(0)
         , m_opInfo(imm1.m_value)
         , m_opInfo2(safeCast<unsigned>(imm2.m_value))
-        , m_prediction(PredictNone)
+        , m_prediction(SpecNone)
     {
-        ASSERT(op & NodeHasVarArgs);
-        children.variable.firstChild = firstChild;
-        children.variable.numChildren = numChildren;
+        setOpAndDefaultFlags(op);
+        ASSERT(m_flags & NodeHasVarArgs);
+    }
+    
+    NodeType op() const { return static_cast<NodeType>(m_op); }
+    NodeFlags flags() const { return m_flags; }
+    
+    void setOp(NodeType op)
+    {
+        m_op = op;
+    }
+    
+    void setFlags(NodeFlags flags)
+    {
+        m_flags = flags;
+    }
+    
+    bool mergeFlags(NodeFlags flags)
+    {
+        ASSERT(!(flags & NodeDoesNotExit));
+        NodeFlags newFlags = m_flags | flags;
+        if (newFlags == m_flags)
+            return false;
+        m_flags = newFlags;
+        return true;
+    }
+    
+    bool filterFlags(NodeFlags flags)
+    {
+        ASSERT(flags & NodeDoesNotExit);
+        NodeFlags newFlags = m_flags & flags;
+        if (newFlags == m_flags)
+            return false;
+        m_flags = newFlags;
+        return true;
+    }
+    
+    bool clearFlags(NodeFlags flags)
+    {
+        return filterFlags(~flags);
+    }
+    
+    void setOpAndDefaultFlags(NodeType op)
+    {
+        m_op = op;
+        m_flags = defaultFlags(op);
     }
 
     bool mustGenerate()
     {
-        return op & NodeMustGenerate;
+        return m_flags & NodeMustGenerate;
     }
-
+    
+    void setCanExit(bool exits)
+    {
+        if (exits)
+            m_flags &= ~NodeDoesNotExit;
+        else
+            m_flags |= NodeDoesNotExit;
+    }
+    
+    bool canExit()
+    {
+        return !(m_flags & NodeDoesNotExit);
+    }
+    
     bool isConstant()
     {
-        return op == JSConstant;
+        return op() == JSConstant;
     }
     
     bool isWeakConstant()
     {
-        return op == WeakJSConstant;
+        return op() == WeakJSConstant;
+    }
+    
+    bool isPhantomArguments()
+    {
+        return op() == PhantomArguments;
     }
     
     bool hasConstant()
     {
-        return isConstant() || isWeakConstant();
+        switch (op()) {
+        case JSConstant:
+        case WeakJSConstant:
+        case PhantomArguments:
+            return true;
+        default:
+            return false;
+        }
     }
 
     unsigned constantNumber()
@@ -432,16 +234,80 @@ struct Node {
         return m_opInfo;
     }
     
+    void convertToConstant(unsigned constantNumber)
+    {
+        m_op = JSConstant;
+        if (m_flags & NodeMustGenerate)
+            m_refCount--;
+        m_flags &= ~(NodeMustGenerate | NodeMightClobber | NodeClobbersWorld);
+        m_opInfo = constantNumber;
+        children.reset();
+    }
+    
+    void convertToGetLocalUnlinked(VirtualRegister local)
+    {
+        m_op = GetLocalUnlinked;
+        if (m_flags & NodeMustGenerate)
+            m_refCount--;
+        m_flags &= ~(NodeMustGenerate | NodeMightClobber | NodeClobbersWorld);
+        m_opInfo = local;
+        children.reset();
+    }
+    
+    void convertToStructureTransitionWatchpoint(Structure* structure)
+    {
+        ASSERT(m_op == CheckStructure || m_op == ForwardCheckStructure || m_op == ArrayifyToStructure);
+        m_opInfo = bitwise_cast<uintptr_t>(structure);
+        if (m_op == CheckStructure || m_op == ArrayifyToStructure)
+            m_op = StructureTransitionWatchpoint;
+        else
+            m_op = ForwardStructureTransitionWatchpoint;
+    }
+    
+    void convertToStructureTransitionWatchpoint()
+    {
+        convertToStructureTransitionWatchpoint(structureSet().singletonStructure());
+    }
+    
+    void convertToGetByOffset(unsigned storageAccessDataIndex, NodeIndex storage)
+    {
+        ASSERT(m_op == GetById || m_op == GetByIdFlush);
+        m_opInfo = storageAccessDataIndex;
+        children.setChild1(Edge(storage));
+        m_op = GetByOffset;
+        m_flags &= ~NodeClobbersWorld;
+    }
+    
+    void convertToPutByOffset(unsigned storageAccessDataIndex, NodeIndex storage)
+    {
+        ASSERT(m_op == PutById || m_op == PutByIdDirect);
+        m_opInfo = storageAccessDataIndex;
+        children.setChild3(children.child2());
+        children.setChild2(children.child1());
+        children.setChild1(Edge(storage));
+        m_op = PutByOffset;
+        m_flags &= ~NodeClobbersWorld;
+    }
+    
     JSCell* weakConstant()
     {
+        ASSERT(op() == WeakJSConstant);
         return bitwise_cast<JSCell*>(m_opInfo);
     }
     
     JSValue valueOfJSConstant(CodeBlock* codeBlock)
     {
-        if (op == WeakJSConstant)
+        switch (op()) {
+        case WeakJSConstant:
             return JSValue(weakConstant());
-        return codeBlock->constantRegister(FirstConstantRegisterIndex + constantNumber()).get();
+        case JSConstant:
+            return codeBlock->constantRegister(FirstConstantRegisterIndex + constantNumber()).get();
+        case PhantomArguments:
+            return JSValue();
+        default:
+            ASSERT_NOT_REACHED();
+            return JSValue(); // Have to return something in release mode.
+        }
     }
 
     bool isInt32Constant(CodeBlock* codeBlock)
@@ -471,7 +337,7 @@ struct Node {
     
     bool hasVariableAccessData()
     {
-        switch (op) {
+        switch (op()) {
         case GetLocal:
         case SetLocal:
         case Phi:
@@ -498,24 +364,25 @@ struct Node {
     {
         return variableAccessData()->local();
     }
-
-#ifndef NDEBUG
+    
+    VirtualRegister unlinkedLocal()
+    {
+        ASSERT(op() == GetLocalUnlinked);
+        return static_cast<VirtualRegister>(m_opInfo);
+    }
+    
     bool hasIdentifier()
     {
-        switch (op) {
+        switch (op()) {
         case GetById:
         case GetByIdFlush:
         case PutById:
         case PutByIdDirect:
-        case Resolve:
-        case ResolveBase:
-        case ResolveBaseStrictPut:
             return true;
         default:
             return false;
         }
     }
-#endif
 
     unsigned identifierNumber()
     {
@@ -525,18 +392,23 @@ struct Node {
     
     unsigned resolveGlobalDataIndex()
     {
-        ASSERT(op == ResolveGlobal);
+        ASSERT(op() == ResolveGlobal);
+        return m_opInfo;
+    }
+
+    unsigned resolveOperationsDataIndex()
+    {
+        ASSERT(op() == Resolve || op() == ResolveBase || op() == ResolveBaseStrictPut);
         return m_opInfo;
     }
 
     bool hasArithNodeFlags()
     {
-        switch (op) {
-        case ValueToNumber:
-        case ValueToDouble:
+        switch (op()) {
         case UInt32ToNumber:
         case ArithAdd:
         case ArithSub:
+        case ArithNegate:
         case ArithMul:
         case ArithAbs:
         case ArithMin:
@@ -550,67 +422,67 @@ struct Node {
         }
     }
     
-    ArithNodeFlags rawArithNodeFlags()
-    {
-        ASSERT(hasArithNodeFlags());
-        return m_opInfo;
-    }
-    
     // This corrects the arithmetic node flags, so that irrelevant bits are
     // ignored. In particular, anything other than ArithMul does not need
     // to know if it can speculate on negative zero.
-    ArithNodeFlags arithNodeFlags()
+    NodeFlags arithNodeFlags()
     {
-        ArithNodeFlags result = rawArithNodeFlags();
-        if (op == ArithMul)
+        NodeFlags result = m_flags;
+        if (op() == ArithMul || op() == ArithDiv || op() == ArithMod)
             return result;
         return result & ~NodeNeedsNegZero;
     }
     
-    ArithNodeFlags arithNodeFlagsForCompare()
-    {
-        if (hasArithNodeFlags())
-            return arithNodeFlags();
-        return 0;
-    }
-    
-    void setArithNodeFlag(ArithNodeFlags flags)
-    {
-        ASSERT(hasArithNodeFlags());
-        m_opInfo = flags;
-    }
-    
-    bool mergeArithNodeFlags(ArithNodeFlags flags)
-    {
-        if (!hasArithNodeFlags())
-            return false;
-        ArithNodeFlags newFlags = m_opInfo | flags;
-        if (newFlags == m_opInfo)
-            return false;
-        m_opInfo = newFlags;
-        return true;
-    }
-    
     bool hasConstantBuffer()
     {
-        return op == NewArrayBuffer;
+        return op() == NewArrayBuffer;
+    }
+    
+    NewArrayBufferData* newArrayBufferData()
+    {
+        ASSERT(hasConstantBuffer());
+        return reinterpret_cast<NewArrayBufferData*>(m_opInfo);
     }
     
     unsigned startConstant()
     {
-        ASSERT(hasConstantBuffer());
-        return m_opInfo;
+        return newArrayBufferData()->startConstant;
     }
     
     unsigned numConstants()
     {
-        ASSERT(hasConstantBuffer());
-        return m_opInfo2;
+        return newArrayBufferData()->numConstants;
+    }
+    
+    bool hasIndexingType()
+    {
+        switch (op()) {
+        case NewArray:
+        case NewArrayWithSize:
+        case NewArrayBuffer:
+            return true;
+        default:
+            return false;
+        }
+    }
+    
+    IndexingType indexingType()
+    {
+        ASSERT(hasIndexingType());
+        if (op() == NewArrayBuffer)
+            return newArrayBufferData()->indexingType;
+        return m_opInfo;
+    }
+    
+    void setIndexingType(IndexingType indexingType)
+    {
+        ASSERT(hasIndexingType());
+        m_opInfo = indexingType;
     }
     
     bool hasRegexpIndex()
     {
-        return op == NewRegexp;
+        return op() == NewRegexp;
     }
     
     unsigned regexpIndex()
@@ -621,7 +493,7 @@ struct Node {
     
     bool hasVarNumber()
     {
-        return op == GetGlobalVar || op == PutGlobalVar || op == GetScopedVar || op == PutScopedVar;
+        return op() == GetScopedVar || op() == PutScopedVar;
     }
 
     unsigned varNumber()
@@ -629,56 +501,80 @@ struct Node {
         ASSERT(hasVarNumber());
         return m_opInfo;
     }
-
-    bool hasScopeChainDepth()
+    
+    bool hasIdentifierNumberForCheck()
     {
-        return op == GetScopeChain;
+        return op() == GlobalVarWatchpoint || op() == PutGlobalVarCheck;
     }
     
-    unsigned scopeChainDepth()
+    unsigned identifierNumberForCheck()
     {
-        ASSERT(hasScopeChainDepth());
-        return m_opInfo;
+        ASSERT(hasIdentifierNumberForCheck());
+        return m_opInfo2;
+    }
+    
+    bool hasRegisterPointer()
+    {
+        return op() == GetGlobalVar || op() == PutGlobalVar || op() == GlobalVarWatchpoint || op() == PutGlobalVarCheck;
+    }
+    
+    WriteBarrier<Unknown>* registerPointer()
+    {
+        return bitwise_cast<WriteBarrier<Unknown>*>(m_opInfo);
     }
 
     bool hasResult()
     {
-        return op & NodeResultMask;
+        return m_flags & NodeResultMask;
     }
 
     bool hasInt32Result()
     {
-        return (op & NodeResultMask) == NodeResultInt32;
+        return (m_flags & NodeResultMask) == NodeResultInt32;
     }
     
     bool hasNumberResult()
     {
-        return (op & NodeResultMask) == NodeResultNumber;
+        return (m_flags & NodeResultMask) == NodeResultNumber;
     }
     
     bool hasJSResult()
     {
-        return (op & NodeResultMask) == NodeResultJS;
+        return (m_flags & NodeResultMask) == NodeResultJS;
     }
     
     bool hasBooleanResult()
     {
-        return (op & NodeResultMask) == NodeResultBoolean;
+        return (m_flags & NodeResultMask) == NodeResultBoolean;
+    }
+
+    bool hasStorageResult()
+    {
+        return (m_flags & NodeResultMask) == NodeResultStorage;
     }
 
     bool isJump()
     {
-        return op & NodeIsJump;
+        return op() == Jump;
     }
 
     bool isBranch()
     {
-        return op & NodeIsBranch;
+        return op() == Branch;
     }
 
     bool isTerminal()
     {
-        return op & NodeIsTerminal;
+        switch (op()) {
+        case Jump:
+        case Branch:
+        case Return:
+        case Throw:
+        case ThrowReferenceError:
+            return true;
+        default:
+            return false;
+        }
     }
 
     unsigned takenBytecodeOffsetDuringParsing()
@@ -717,12 +613,45 @@ struct Node {
         return m_opInfo2;
     }
     
+    unsigned numSuccessors()
+    {
+        switch (op()) {
+        case Jump:
+            return 1;
+        case Branch:
+            return 2;
+        default:
+            return 0;
+        }
+    }
+    
+    BlockIndex successor(unsigned index)
+    {
+        switch (index) {
+        case 0:
+            return takenBlockIndex();
+        case 1:
+            return notTakenBlockIndex();
+        default:
+            ASSERT_NOT_REACHED();
+            return NoBlock;
+        }
+    }
+    
+    BlockIndex successorForCondition(bool condition)
+    {
+        ASSERT(isBranch());
+        return condition ? takenBlockIndex() : notTakenBlockIndex();
+    }
+    
     bool hasHeapPrediction()
     {
-        switch (op) {
+        switch (op()) {
         case GetById:
         case GetByIdFlush:
         case GetByVal:
+        case GetMyArgumentByVal:
+        case GetMyArgumentByValSafe:
         case Call:
         case Construct:
         case GetByOffset:
@@ -733,39 +662,58 @@ struct Node {
         case ResolveGlobal:
         case ArrayPop:
         case ArrayPush:
+        case RegExpExec:
+        case RegExpTest:
+        case GetGlobalVar:
             return true;
         default:
             return false;
         }
     }
     
-    PredictedType getHeapPrediction()
+    SpeculatedType getHeapPrediction()
     {
         ASSERT(hasHeapPrediction());
-        return static_cast<PredictedType>(m_opInfo2);
+        return static_cast<SpeculatedType>(m_opInfo2);
     }
     
-    bool predictHeap(PredictedType prediction)
+    bool predictHeap(SpeculatedType prediction)
     {
         ASSERT(hasHeapPrediction());
         
-        return mergePrediction(m_opInfo2, prediction);
+        return mergeSpeculation(m_opInfo2, prediction);
     }
     
-    bool hasFunctionCheckData()
+    bool hasFunction()
     {
-        return op == CheckFunction;
+        switch (op()) {
+        case CheckFunction:
+        case InheritorIDWatchpoint:
+            return true;
+        default:
+            return false;
+        }
     }
 
-    JSFunction* function()
+    JSCell* function()
     {
-        ASSERT(hasFunctionCheckData());
-        return reinterpret_cast<JSFunction*>(m_opInfo);
+        ASSERT(hasFunction());
+        JSCell* result = reinterpret_cast<JSFunction*>(m_opInfo);
+        ASSERT(JSValue(result).isFunction());
+        return result;
     }
 
     bool hasStructureTransitionData()
     {
-        return op == PutStructure;
+        switch (op()) {
+        case PutStructure:
+        case PhantomPutStructure:
+        case AllocatePropertyStorage:
+        case ReallocatePropertyStorage:
+            return true;
+        default:
+            return false;
+        }
     }
     
     StructureTransitionData& structureTransitionData()
@@ -776,7 +724,13 @@ struct Node {
     
     bool hasStructureSet()
     {
-        return op == CheckStructure;
+        switch (op()) {
+        case CheckStructure:
+        case ForwardCheckStructure:
+            return true;
+        default:
+            return false;
+        }
     }
     
     StructureSet& structureSet()
@@ -785,14 +739,95 @@ struct Node {
         return *reinterpret_cast<StructureSet*>(m_opInfo);
     }
     
+    bool hasStructure()
+    {
+        switch (op()) {
+        case StructureTransitionWatchpoint:
+        case ForwardStructureTransitionWatchpoint:
+        case ArrayifyToStructure:
+        case NewObject:
+            return true;
+        default:
+            return false;
+        }
+    }
+    
+    Structure* structure()
+    {
+        ASSERT(hasStructure());
+        return reinterpret_cast<Structure*>(m_opInfo);
+    }
+    
     bool hasStorageAccessData()
     {
-        return op == GetByOffset || op == PutByOffset;
+        return op() == GetByOffset || op() == PutByOffset;
     }
     
     unsigned storageAccessDataIndex()
     {
+        ASSERT(hasStorageAccessData());
         return m_opInfo;
+    }
+    
+    bool hasFunctionDeclIndex()
+    {
+        return op() == NewFunction
+            || op() == NewFunctionNoCheck;
+    }
+    
+    unsigned functionDeclIndex()
+    {
+        ASSERT(hasFunctionDeclIndex());
+        return m_opInfo;
+    }
+    
+    bool hasFunctionExprIndex()
+    {
+        return op() == NewFunctionExpression;
+    }
+    
+    unsigned functionExprIndex()
+    {
+        ASSERT(hasFunctionExprIndex());
+        return m_opInfo;
+    }
+    
+    bool hasArrayMode()
+    {
+        switch (op()) {
+        case GetIndexedPropertyStorage:
+        case GetArrayLength:
+        case PutByVal:
+        case PutByValAlias:
+        case GetByVal:
+        case StringCharAt:
+        case StringCharCodeAt:
+        case CheckArray:
+        case Arrayify:
+        case ArrayifyToStructure:
+        case ArrayPush:
+        case ArrayPop:
+            return true;
+        default:
+            return false;
+        }
+    }
+    
+    ArrayMode arrayMode()
+    {
+        ASSERT(hasArrayMode());
+        if (op() == ArrayifyToStructure)
+            return ArrayMode::fromWord(m_opInfo2);
+        return ArrayMode::fromWord(m_opInfo);
+    }
+    
+    bool setArrayMode(ArrayMode arrayMode)
+    {
+        ASSERT(hasArrayMode());
+        if (this->arrayMode() == arrayMode)
+            return false;
+        m_opInfo = arrayMode.asWord();
+        return true;
     }
     
     bool hasVirtualRegister()
@@ -806,17 +841,56 @@ struct Node {
         ASSERT(m_virtualRegister != InvalidVirtualRegister);
         return m_virtualRegister;
     }
-
+    
     void setVirtualRegister(VirtualRegister virtualRegister)
     {
         ASSERT(hasResult());
         ASSERT(m_virtualRegister == InvalidVirtualRegister);
         m_virtualRegister = virtualRegister;
     }
+    
+    bool hasArgumentPositionStart()
+    {
+        return op() == InlineStart;
+    }
+    
+    unsigned argumentPositionStart()
+    {
+        ASSERT(hasArgumentPositionStart());
+        return m_opInfo;
+    }
+    
+    bool hasExecutionCounter()
+    {
+        return op() == CountExecution;
+    }
+    
+    Profiler::ExecutionCounter* executionCounter()
+    {
+        return bitwise_cast<Profiler::ExecutionCounter*>(m_opInfo);
+    }
 
     bool shouldGenerate()
     {
-        return m_refCount && op != Phi && op != Flush;
+        return m_refCount;
+    }
+    
+    bool willHaveCodeGenOrOSR()
+    {
+        switch (op()) {
+        case SetLocal:
+        case Int32ToDouble:
+        case ValueToInt32:
+        case UInt32ToNumber:
+        case DoubleAsInt32:
+        case PhantomArguments:
+            return true;
+        case Phantom:
+        case Nop:
+            return false;
+        default:
+            return shouldGenerate();
+        }
     }
 
     unsigned refCount()
@@ -849,164 +923,187 @@ struct Node {
         return !--m_refCount;
     }
     
-    NodeIndex child1()
+    Edge child1()
     {
-        ASSERT(!(op & NodeHasVarArgs));
-        return children.fixed.child1;
+        ASSERT(!(m_flags & NodeHasVarArgs));
+        return children.child1();
     }
     
     // This is useful if you want to do a fast check on the first child
     // before also doing a check on the opcode. Use this with care and
     // avoid it if possible.
-    NodeIndex child1Unchecked()
+    Edge child1Unchecked()
     {
-        return children.fixed.child1;
+        return children.child1Unchecked();
     }
 
-    NodeIndex child2()
+    Edge child2()
     {
-        ASSERT(!(op & NodeHasVarArgs));
-        return children.fixed.child2;
+        ASSERT(!(m_flags & NodeHasVarArgs));
+        return children.child2();
     }
 
-    NodeIndex child3()
+    Edge child3()
     {
-        ASSERT(!(op & NodeHasVarArgs));
-        return children.fixed.child3;
+        ASSERT(!(m_flags & NodeHasVarArgs));
+        return children.child3();
     }
     
     unsigned firstChild()
     {
-        ASSERT(op & NodeHasVarArgs);
-        return children.variable.firstChild;
+        ASSERT(m_flags & NodeHasVarArgs);
+        return children.firstChild();
     }
     
     unsigned numChildren()
     {
-        ASSERT(op & NodeHasVarArgs);
-        return children.variable.numChildren;
+        ASSERT(m_flags & NodeHasVarArgs);
+        return children.numChildren();
     }
     
-    PredictedType prediction()
+    SpeculatedType prediction()
     {
         return m_prediction;
     }
     
-    bool predict(PredictedType prediction)
+    bool predict(SpeculatedType prediction)
     {
-        return mergePrediction(m_prediction, prediction);
+        return mergeSpeculation(m_prediction, prediction);
     }
     
     bool shouldSpeculateInteger()
     {
-        return isInt32Prediction(prediction());
+        return isInt32Speculation(prediction());
+    }
+    
+    bool shouldSpeculateIntegerForArithmetic()
+    {
+        return isInt32SpeculationForArithmetic(prediction());
+    }
+    
+    bool shouldSpeculateIntegerExpectingDefined()
+    {
+        return isInt32SpeculationExpectingDefined(prediction());
     }
     
     bool shouldSpeculateDouble()
     {
-        return isDoublePrediction(prediction());
+        return isDoubleSpeculation(prediction());
+    }
+    
+    bool shouldSpeculateDoubleForArithmetic()
+    {
+        return isDoubleSpeculationForArithmetic(prediction());
     }
     
     bool shouldSpeculateNumber()
     {
-        return isNumberPrediction(prediction()) || prediction() == PredictNone;
+        return isNumberSpeculation(prediction());
     }
     
-    bool shouldNotSpeculateInteger()
+    bool shouldSpeculateNumberExpectingDefined()
     {
-        return !!(prediction() & PredictDouble);
+        return isNumberSpeculationExpectingDefined(prediction());
     }
     
+    bool shouldSpeculateBoolean()
+    {
+        return isBooleanSpeculation(prediction());
+    }
+   
+    bool shouldSpeculateString()
+    {
+        return isStringSpeculation(prediction());
+    }
+ 
     bool shouldSpeculateFinalObject()
     {
-        return isFinalObjectPrediction(prediction());
+        return isFinalObjectSpeculation(prediction());
     }
     
+    bool shouldSpeculateNonStringCell()
+    {
+        return isNonStringCellSpeculation(prediction());
+    }
+
+    bool shouldSpeculateNonStringCellOrOther()
+    {
+        return isNonStringCellOrOtherSpeculation(prediction());
+    }
+
     bool shouldSpeculateFinalObjectOrOther()
     {
-        return isFinalObjectOrOtherPrediction(prediction());
+        return isFinalObjectOrOtherSpeculation(prediction());
     }
     
     bool shouldSpeculateArray()
     {
-        return isArrayPrediction(prediction());
+        return isArraySpeculation(prediction());
     }
     
-    bool shouldSpeculateByteArray()
+    bool shouldSpeculateArguments()
     {
-        return !!(prediction() & PredictByteArray);
+        return isArgumentsSpeculation(prediction());
     }
     
     bool shouldSpeculateInt8Array()
     {
-#if CPU(X86) || CPU(X86_64)
-        return isInt8ArrayPrediction(prediction());
-#else
-        return false;
-#endif
+        return isInt8ArraySpeculation(prediction());
     }
     
     bool shouldSpeculateInt16Array()
     {
-#if CPU(X86) || CPU(X86_64)
-        return isInt16ArrayPrediction(prediction());
-#else
-        return false;
-#endif
+        return isInt16ArraySpeculation(prediction());
     }
     
     bool shouldSpeculateInt32Array()
     {
-        return isInt32ArrayPrediction(prediction());
+        return isInt32ArraySpeculation(prediction());
     }
     
     bool shouldSpeculateUint8Array()
     {
-        return isUint8ArrayPrediction(prediction());
+        return isUint8ArraySpeculation(prediction());
     }
 
     bool shouldSpeculateUint8ClampedArray()
     {
-        return isUint8ClampedArrayPrediction(prediction());
+        return isUint8ClampedArraySpeculation(prediction());
     }
     
     bool shouldSpeculateUint16Array()
     {
-        return isUint16ArrayPrediction(prediction());
+        return isUint16ArraySpeculation(prediction());
     }
     
     bool shouldSpeculateUint32Array()
     {
-        return isUint32ArrayPrediction(prediction());
+        return isUint32ArraySpeculation(prediction());
     }
     
     bool shouldSpeculateFloat32Array()
     {
-#if CPU(X86) || CPU(X86_64)
-        return isFloat32ArrayPrediction(prediction());
-#else
-        return false;
-#endif
+        return isFloat32ArraySpeculation(prediction());
     }
     
     bool shouldSpeculateFloat64Array()
     {
-        return isFloat64ArrayPrediction(prediction());
+        return isFloat64ArraySpeculation(prediction());
     }
     
     bool shouldSpeculateArrayOrOther()
     {
-        return isArrayOrOtherPrediction(prediction());
+        return isArrayOrOtherSpeculation(prediction());
     }
     
     bool shouldSpeculateObject()
     {
-        return isObjectPrediction(prediction());
+        return isObjectSpeculation(prediction());
     }
     
     bool shouldSpeculateCell()
     {
-        return isCellPrediction(prediction());
+        return isCellSpeculation(prediction());
     }
     
     static bool shouldSpeculateInteger(Node& op1, Node& op2)
@@ -1014,21 +1111,39 @@ struct Node {
         return op1.shouldSpeculateInteger() && op2.shouldSpeculateInteger();
     }
     
+    static bool shouldSpeculateIntegerForArithmetic(Node& op1, Node& op2)
+    {
+        return op1.shouldSpeculateIntegerForArithmetic() && op2.shouldSpeculateIntegerForArithmetic();
+    }
+    
+    static bool shouldSpeculateIntegerExpectingDefined(Node& op1, Node& op2)
+    {
+        return op1.shouldSpeculateIntegerExpectingDefined() && op2.shouldSpeculateIntegerExpectingDefined();
+    }
+    
+    static bool shouldSpeculateDoubleForArithmetic(Node& op1, Node& op2)
+    {
+        return op1.shouldSpeculateDoubleForArithmetic() && op2.shouldSpeculateDoubleForArithmetic();
+    }
+    
     static bool shouldSpeculateNumber(Node& op1, Node& op2)
     {
         return op1.shouldSpeculateNumber() && op2.shouldSpeculateNumber();
     }
     
+    static bool shouldSpeculateNumberExpectingDefined(Node& op1, Node& op2)
+    {
+        return op1.shouldSpeculateNumberExpectingDefined() && op2.shouldSpeculateNumberExpectingDefined();
+    }
+    
     static bool shouldSpeculateFinalObject(Node& op1, Node& op2)
     {
-        return (op1.shouldSpeculateFinalObject() && op2.shouldSpeculateObject())
-            || (op1.shouldSpeculateObject() && op2.shouldSpeculateFinalObject());
+        return op1.shouldSpeculateFinalObject() && op2.shouldSpeculateFinalObject();
     }
 
     static bool shouldSpeculateArray(Node& op1, Node& op2)
     {
-        return (op1.shouldSpeculateArray() && op2.shouldSpeculateObject())
-            || (op1.shouldSpeculateObject() && op2.shouldSpeculateArray());
+        return op1.shouldSpeculateArray() && op2.shouldSpeculateArray();
     }
     
     bool canSpeculateInteger()
@@ -1036,37 +1151,27 @@ struct Node {
         return nodeCanSpeculateInteger(arithNodeFlags());
     }
     
-#ifndef NDEBUG
-    void dumpChildren(FILE* out)
+    void dumpChildren(PrintStream& out)
     {
-        if (child1() == NoNode)
+        if (!child1())
             return;
-        fprintf(out, "@%u", child1());
-        if (child2() == NoNode)
+        out.printf("@%u", child1().index());
+        if (!child2())
             return;
-        fprintf(out, ", @%u", child2());
-        if (child3() == NoNode)
+        out.printf(", @%u", child2().index());
+        if (!child3())
             return;
-        fprintf(out, ", @%u", child3());
+        out.printf(", @%u", child3().index());
     }
-#endif
     
-    // This enum value describes the type of the node.
-    NodeType op;
     // Used to look up exception handling information (currently implemented as a bytecode index).
     CodeOrigin codeOrigin;
-    // References to up to 3 children (0 for no child).
-    union {
-        struct {
-            NodeIndex child1, child2, child3;
-        } fixed;
-        struct {
-            unsigned firstChild;
-            unsigned numChildren;
-        } variable;
-    } children;
+    // References to up to 3 children, or links to a variable length set of children.
+    AdjacencyList children;
 
 private:
+    uint16_t m_op; // real type is NodeType
+    NodeFlags m_flags;
     // The virtual register number (spill location) associated with this .
     VirtualRegister m_virtualRegister;
     // The number of uses of the result of this operation (+1 for 'must generate' nodes, which have side-effects).
@@ -1076,7 +1181,7 @@ private:
     uintptr_t m_opInfo;
     unsigned m_opInfo2;
     // The prediction ascribed to this node after propagation.
-    PredictedType m_prediction;
+    SpeculatedType m_prediction;
 };
 
 } } // namespace JSC::DFG

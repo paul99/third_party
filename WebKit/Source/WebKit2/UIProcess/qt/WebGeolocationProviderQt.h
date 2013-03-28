@@ -26,8 +26,12 @@
 #include <WebKit2/WKGeolocationPosition.h>
 #include <WebKit2/WKRetainPtr.h>
 
+QT_BEGIN_NAMESPACE
 class QGeoPositionInfoSource;
 class QGeoPositionInfo;
+QT_END_NAMESPACE
+
+namespace WebKit {
 
 class WebGeolocationProviderQt : public QObject {
     Q_OBJECT
@@ -52,5 +56,7 @@ private:
     WKRetainPtr<WKGeolocationPositionRef> m_lastPosition;
     mutable QGeoPositionInfoSource* m_source;
 };
+
+} // namespace WebKit
 
 #endif /* WebGeolocationProviderQt_h */

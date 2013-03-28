@@ -54,7 +54,7 @@
 #include "TextRun.h"
 
 #if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
-#include "HTMLVideoElement.h"
+#include "HTMLMediaElement.h"
 #endif
 
 namespace WebCore {
@@ -78,15 +78,11 @@ static const Color& replacementTextRoundedRectPressedColor()
 RenderEmbeddedObject::RenderEmbeddedObject(Element* element)
     : RenderPart(element)
     , m_hasFallbackContent(false)
-    , m_showsMissingPluginIndicator(false)
-    , m_missingPluginIndicatorIsPressed(false)
-    , m_mouseDownWasInMissingPluginIndicator(false)
+    , m_showsUnavailablePluginIndicator(false)
+    , m_unavailablePluginIndicatorIsPressed(false)
+    , m_mouseDownWasInUnavailablePluginIndicator(false)
 {
     view()->frameView()->setIsVisuallyNonEmpty();
-#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
-    if (element->hasTagName(videoTag) || element->hasTagName(audioTag))
-        setHasIntrinsicSize();
-#endif
 }
 
 RenderEmbeddedObject::~RenderEmbeddedObject()
@@ -110,46 +106,70 @@ bool RenderEmbeddedObject::allowsAcceleratedCompositing() const
 }
 #endif
 
-void RenderEmbeddedObject::setShowsMissingPluginIndicator()
+static String unavailablePluginReplacementText(RenderEmbeddedObject::PluginUnavailabilityReason pluginUnavailabilityReason)
 {
-    ASSERT(m_replacementText.isEmpty());
-    m_replacementText = missingPluginText();
-    m_showsMissingPluginIndicator = true;
+    switch (pluginUnavailabilityReason) {
+    case RenderEmbeddedObject::PluginMissing:
+        return missingPluginText();
+    case RenderEmbeddedObject::PluginCrashed:
+        return crashedPluginText();
+    case RenderEmbeddedObject::PluginBlockedByContentSecurityPolicy:
+        return blockedPluginByContentSecurityPolicyText();
+    case RenderEmbeddedObject::InsecurePluginVersion:
+        return insecurePluginVersionText();
+    case RenderEmbeddedObject::PluginInactive:
+        return inactivePluginText();
+    }
+
+    ASSERT_NOT_REACHED();
+    return String();
 }
 
-void RenderEmbeddedObject::setShowsCrashedPluginIndicator()
+void RenderEmbeddedObject::setPluginUnavailabilityReason(PluginUnavailabilityReason pluginUnavailabilityReason)
 {
-    ASSERT(m_replacementText.isEmpty());
-    m_replacementText = crashedPluginText();
+    ASSERT(!m_showsUnavailablePluginIndicator);
+    m_showsUnavailablePluginIndicator = true;
+    m_pluginUnavailabilityReason = pluginUnavailabilityReason;
+
+    m_unavailablePluginReplacementText = unavailablePluginReplacementText(pluginUnavailabilityReason);
 }
 
-bool RenderEmbeddedObject::pluginCrashedOrWasMissing() const
+bool RenderEmbeddedObject::showsUnavailablePluginIndicator() const
 {
-    return !m_replacementText.isNull();
+    return m_showsUnavailablePluginIndicator;
 }
-    
-void RenderEmbeddedObject::setMissingPluginIndicatorIsPressed(bool pressed)
+
+void RenderEmbeddedObject::setUnavailablePluginIndicatorIsPressed(bool pressed)
 {
-    if (m_missingPluginIndicatorIsPressed == pressed)
+    if (m_unavailablePluginIndicatorIsPressed == pressed)
         return;
     
-    m_missingPluginIndicatorIsPressed = pressed;
+    m_unavailablePluginIndicatorIsPressed = pressed;
     repaint();
 }
 
 void RenderEmbeddedObject::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    if (pluginCrashedOrWasMissing()) {
+    Page* page = 0;
+    if (Frame* frame = this->frame())
+        page = frame->page();
+
+    if (showsUnavailablePluginIndicator()) {
+        if (page && paintInfo.phase == PaintPhaseForeground)
+            page->addRelevantUnpaintedObject(this, visualOverflowRect());
         RenderReplaced::paint(paintInfo, paintOffset);
         return;
     }
-    
+
+    if (page && paintInfo.phase == PaintPhaseForeground)
+        page->addRelevantRepaintedObject(this, visualOverflowRect());
+
     RenderPart::paint(paintInfo, paintOffset);
 }
 
 void RenderEmbeddedObject::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    if (!pluginCrashedOrWasMissing())
+    if (!showsUnavailablePluginIndicator())
         return;
 
     if (paintInfo.phase == PaintPhaseSelection)
@@ -170,14 +190,14 @@ void RenderEmbeddedObject::paintReplaced(PaintInfo& paintInfo, const LayoutPoint
     
     GraphicsContextStateSaver stateSaver(*context);
     context->clip(contentRect);
-    context->setAlpha(m_missingPluginIndicatorIsPressed ? replacementTextPressedRoundedRectOpacity : replacementTextRoundedRectOpacity);
-    context->setFillColor(m_missingPluginIndicatorIsPressed ? replacementTextRoundedRectPressedColor() : Color::white, style()->colorSpace());
+    context->setAlpha(m_unavailablePluginIndicatorIsPressed ? replacementTextPressedRoundedRectOpacity : replacementTextRoundedRectOpacity);
+    context->setFillColor(m_unavailablePluginIndicatorIsPressed ? replacementTextRoundedRectPressedColor() : Color::white, style()->colorSpace());
     context->fillPath(path);
 
     const FontMetrics& fontMetrics = font.fontMetrics();
     float labelX = roundf(replacementTextRect.location().x() + (replacementTextRect.size().width() - textWidth) / 2);
     float labelY = roundf(replacementTextRect.location().y() + (replacementTextRect.size().height() - fontMetrics.height()) / 2 + fontMetrics.ascent());
-    context->setAlpha(m_missingPluginIndicatorIsPressed ? replacementTextPressedTextOpacity : replacementTextTextOpacity);
+    context->setAlpha(m_unavailablePluginIndicatorIsPressed ? replacementTextPressedTextOpacity : replacementTextTextOpacity);
     context->setFillColor(Color::black, style()->colorSpace());
     context->drawBidiText(font, run, FloatPoint(labelX, labelY));
 }
@@ -185,7 +205,7 @@ void RenderEmbeddedObject::paintReplaced(PaintInfo& paintInfo, const LayoutPoint
 bool RenderEmbeddedObject::getReplacementTextGeometry(const LayoutPoint& accumulatedOffset, FloatRect& contentRect, Path& path, FloatRect& replacementTextRect, Font& font, TextRun& run, float& textWidth) const
 {
     contentRect = contentBoxRect();
-    contentRect.moveBy(accumulatedOffset);
+    contentRect.moveBy(roundedIntPoint(accumulatedOffset));
     
     FontDescription fontDescription;
     RenderTheme::defaultTheme()->systemFont(CSSValueWebkitSmallControl, fontDescription);
@@ -198,8 +218,8 @@ bool RenderEmbeddedObject::getReplacementTextGeometry(const LayoutPoint& accumul
     fontDescription.setComputedSize(fontDescription.specifiedSize());
     font = Font(fontDescription, 0, 0);
     font.update(0);
-    
-    run = TextRun(m_replacementText);
+
+    run = TextRun(m_unavailablePluginReplacementText);
     textWidth = font.width(run);
     
     replacementTextRect.setSize(FloatSize(textWidth + replacementTextRoundedRectLeftRightTextMargin * 2, replacementTextRoundedRectHeight));
@@ -214,10 +234,15 @@ bool RenderEmbeddedObject::getReplacementTextGeometry(const LayoutPoint& accumul
 
 void RenderEmbeddedObject::layout()
 {
+    StackStats::LayoutCheckPoint layoutCheckPoint;
     ASSERT(needsLayout());
 
-    computeLogicalWidth();
-    computeLogicalHeight();
+#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
+    LayoutSize oldSize = contentBoxRect().size();
+#endif
+
+    updateLogicalWidth();
+    updateLogicalHeight();
 
     RenderPart::layout();
 
@@ -230,6 +255,31 @@ void RenderEmbeddedObject::layout()
         frameView()->addWidgetToUpdate(this);
 
     setNeedsLayout(false);
+
+#if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
+    // This code copied from RenderMedia::layout().
+    RenderBox* controlsRenderer = toRenderBox(m_children.firstChild());
+    if (!controlsRenderer)
+        return;
+    
+    LayoutSize newSize = contentBoxRect().size();
+    if (newSize == oldSize && !controlsRenderer->needsLayout())
+        return;
+    
+    // When calling layout() on a child node, a parent must either push a LayoutStateMaintainter, or
+    // instantiate LayoutStateDisabler. Since using a LayoutStateMaintainer is slightly more efficient,
+    // and this method will be called many times per second during playback, use a LayoutStateMaintainer:
+    LayoutStateMaintainer statePusher(view(), this, locationOffset(), hasTransform() || hasReflection() || style()->isFlippedBlocksWritingMode());
+    
+    controlsRenderer->setLocation(LayoutPoint(borderLeft(), borderTop()) + LayoutSize(paddingLeft(), paddingTop()));
+    controlsRenderer->style()->setHeight(Length(newSize.height(), Fixed));
+    controlsRenderer->style()->setWidth(Length(newSize.width(), Fixed));
+    controlsRenderer->setNeedsLayout(true, MarkOnlyThis);
+    controlsRenderer->layout();
+    setChildNeedsLayout(false);
+    
+    statePusher.pop();
+#endif
 }
 
 void RenderEmbeddedObject::viewCleared()
@@ -251,25 +301,26 @@ void RenderEmbeddedObject::viewCleared()
     }
 }
 
-bool RenderEmbeddedObject::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction hitTestAction)
+bool RenderEmbeddedObject::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction hitTestAction)
 {
-    if (!RenderPart::nodeAtPoint(request, result, pointInContainer, accumulatedOffset, hitTestAction))
+    if (!RenderPart::nodeAtPoint(request, result, locationInContainer, accumulatedOffset, hitTestAction))
         return false;
 
     if (!widget() || !widget()->isPluginViewBase())
         return true;
 
     PluginViewBase* view = static_cast<PluginViewBase*>(widget());
+    IntPoint roundedPoint = locationInContainer.roundedPoint();
 
     if (Scrollbar* horizontalScrollbar = view->horizontalScrollbar()) {
-        if (horizontalScrollbar->shouldParticipateInHitTesting() && horizontalScrollbar->frameRect().contains(pointInContainer)) {
+        if (horizontalScrollbar->shouldParticipateInHitTesting() && horizontalScrollbar->frameRect().contains(roundedPoint)) {
             result.setScrollbar(horizontalScrollbar);
             return true;
         }
     }
 
     if (Scrollbar* verticalScrollbar = view->verticalScrollbar()) {
-        if (verticalScrollbar->shouldParticipateInHitTesting() && verticalScrollbar->frameRect().contains(pointInContainer)) {
+        if (verticalScrollbar->shouldParticipateInHitTesting() && verticalScrollbar->frameRect().contains(roundedPoint)) {
             result.setScrollbar(verticalScrollbar);
             return true;
         }
@@ -293,7 +344,7 @@ bool RenderEmbeddedObject::logicalScroll(ScrollLogicalDirection direction, Scrol
 }
 
 
-bool RenderEmbeddedObject::isInMissingPluginIndicator(const LayoutPoint& point) const
+bool RenderEmbeddedObject::isInUnavailablePluginIndicator(const LayoutPoint& point) const
 {
     FloatRect contentRect;
     Path path;
@@ -305,20 +356,20 @@ bool RenderEmbeddedObject::isInMissingPluginIndicator(const LayoutPoint& point) 
         && path.contains(point);
 }
 
-bool RenderEmbeddedObject::isInMissingPluginIndicator(MouseEvent* event) const
+bool RenderEmbeddedObject::isInUnavailablePluginIndicator(MouseEvent* event) const
 {
-    return isInMissingPluginIndicator(roundedLayoutPoint(absoluteToLocal(event->absoluteLocation(), false, true)));
+    return isInUnavailablePluginIndicator(roundedLayoutPoint(absoluteToLocal(event->absoluteLocation(), UseTransforms)));
 }
 
-static bool shouldMissingPluginMessageBeButton(Document* document)
+static bool shouldUnavailablePluginMessageBeButton(Document* document, RenderEmbeddedObject::PluginUnavailabilityReason pluginUnavailabilityReason)
 {
     Page* page = document->page();
-    return page && page->chrome()->client()->shouldMissingPluginMessageBeButton();
+    return page && page->chrome()->client()->shouldUnavailablePluginMessageBeButton(pluginUnavailabilityReason);
 }
 
-void RenderEmbeddedObject::handleMissingPluginIndicatorEvent(Event* event)
+void RenderEmbeddedObject::handleUnavailablePluginIndicatorEvent(Event* event)
 {
-    if (!shouldMissingPluginMessageBeButton(document()))
+    if (!shouldUnavailablePluginMessageBeButton(document(), m_pluginUnavailabilityReason))
         return;
     
     if (!event->isMouseEvent())
@@ -327,40 +378,40 @@ void RenderEmbeddedObject::handleMissingPluginIndicatorEvent(Event* event)
     MouseEvent* mouseEvent = static_cast<MouseEvent*>(event);
     HTMLPlugInElement* element = static_cast<HTMLPlugInElement*>(node());
     if (event->type() == eventNames().mousedownEvent && static_cast<MouseEvent*>(event)->button() == LeftButton) {
-        m_mouseDownWasInMissingPluginIndicator = isInMissingPluginIndicator(mouseEvent);
-        if (m_mouseDownWasInMissingPluginIndicator) {
+        m_mouseDownWasInUnavailablePluginIndicator = isInUnavailablePluginIndicator(mouseEvent);
+        if (m_mouseDownWasInUnavailablePluginIndicator) {
             if (Frame* frame = document()->frame()) {
                 frame->eventHandler()->setCapturingMouseEventsNode(element);
                 element->setIsCapturingMouseEvents(true);
             }
-            setMissingPluginIndicatorIsPressed(true);
+            setUnavailablePluginIndicatorIsPressed(true);
         }
         event->setDefaultHandled();
     }        
     if (event->type() == eventNames().mouseupEvent && static_cast<MouseEvent*>(event)->button() == LeftButton) {
-        if (m_missingPluginIndicatorIsPressed) {
+        if (m_unavailablePluginIndicatorIsPressed) {
             if (Frame* frame = document()->frame()) {
                 frame->eventHandler()->setCapturingMouseEventsNode(0);
                 element->setIsCapturingMouseEvents(false);
             }
-            setMissingPluginIndicatorIsPressed(false);
+            setUnavailablePluginIndicatorIsPressed(false);
         }
-        if (m_mouseDownWasInMissingPluginIndicator && isInMissingPluginIndicator(mouseEvent)) {
+        if (m_mouseDownWasInUnavailablePluginIndicator && isInUnavailablePluginIndicator(mouseEvent)) {
             if (Page* page = document()->page())
-                page->chrome()->client()->missingPluginButtonClicked(element);            
+                page->chrome()->client()->unavailablePluginButtonClicked(element, m_pluginUnavailabilityReason);
         }
-        m_mouseDownWasInMissingPluginIndicator = false;
+        m_mouseDownWasInUnavailablePluginIndicator = false;
         event->setDefaultHandled();
     }
     if (event->type() == eventNames().mousemoveEvent) {
-        setMissingPluginIndicatorIsPressed(m_mouseDownWasInMissingPluginIndicator && isInMissingPluginIndicator(mouseEvent));
+        setUnavailablePluginIndicatorIsPressed(m_mouseDownWasInUnavailablePluginIndicator && isInUnavailablePluginIndicator(mouseEvent));
         event->setDefaultHandled();
     }
 }
 
 CursorDirective RenderEmbeddedObject::getCursor(const LayoutPoint& point, Cursor& cursor) const
 {
-    if (m_showsMissingPluginIndicator && shouldMissingPluginMessageBeButton(document()) && isInMissingPluginIndicator(point)) {
+    if (showsUnavailablePluginIndicator() && shouldUnavailablePluginMessageBeButton(document(), m_pluginUnavailabilityReason) && isInUnavailablePluginIndicator(point)) {
         cursor = handCursor();
         return SetCursor;
     }

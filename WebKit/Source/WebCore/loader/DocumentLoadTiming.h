@@ -37,9 +37,12 @@ class DocumentLoadTiming {
 public:
     DocumentLoadTiming();
 
-    void markNavigationStart(Frame*);
+    double monotonicTimeToZeroBasedDocumentTime(double) const;
+    double monotonicTimeToPseudoWallTime(double) const;
+
+    void markNavigationStart();
+    void setNavigationStart(double);
     void addRedirect(const KURL& redirectingUrl, const KURL& redirectedUrl);
-    double convertMonotonicTimeToDocumentTime(double monotonicTime) const;
 
     void markUnloadEventStart() { m_unloadEventStart = monotonicallyIncreasingTime(); }
     void markUnloadEventEnd() { m_unloadEventEnd = monotonicallyIncreasingTime(); }
@@ -52,16 +55,16 @@ public:
 
     void setHasSameOriginAsPreviousDocument(bool value) { m_hasSameOriginAsPreviousDocument = value; }
 
-    double navigationStart() const { return convertMonotonicTimeToDocumentTime(m_navigationStart); }
-    double unloadEventStart() const { return convertMonotonicTimeToDocumentTime(m_unloadEventStart); }
-    double unloadEventEnd() const { return convertMonotonicTimeToDocumentTime(m_unloadEventEnd); }
-    double redirectStart() const { return convertMonotonicTimeToDocumentTime(m_redirectStart); }
-    double redirectEnd() const { return convertMonotonicTimeToDocumentTime(m_redirectEnd); }
+    double navigationStart() const { return m_navigationStart; }
+    double unloadEventStart() const { return m_unloadEventStart; }
+    double unloadEventEnd() const { return m_unloadEventEnd; }
+    double redirectStart() const { return m_redirectStart; }
+    double redirectEnd() const { return m_redirectEnd; }
     short redirectCount() const { return m_redirectCount; }
-    double fetchStart() const { return convertMonotonicTimeToDocumentTime(m_fetchStart); }
-    double responseEnd() const { return convertMonotonicTimeToDocumentTime(m_responseEnd); }
-    double loadEventStart() const { return convertMonotonicTimeToDocumentTime(m_loadEventStart); }
-    double loadEventEnd() const { return convertMonotonicTimeToDocumentTime(m_loadEventEnd); }
+    double fetchStart() const { return m_fetchStart; }
+    double responseEnd() const { return m_responseEnd; }
+    double loadEventStart() const { return m_loadEventStart; }
+    double loadEventEnd() const { return m_loadEventEnd; }
     bool hasCrossOriginRedirect() const { return m_hasCrossOriginRedirect; }
     bool hasSameOriginAsPreviousDocument() const { return m_hasSameOriginAsPreviousDocument; }
 

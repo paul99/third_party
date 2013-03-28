@@ -66,56 +66,6 @@ namespace JSC {
 namespace Bindings {
 
 /*
-    By default, a JavaScript method name is produced by concatenating the 
-    components of an ObjectiveC method name, replacing ':' with '_', and 
-    escaping '_' and '$' with a leading '$', such that '_' becomes "$_" and 
-    '$' becomes "$$". For example:
-
-    ObjectiveC name         Default JavaScript name
-        moveTo::                moveTo__
-        moveTo_                 moveTo$_
-        moveTo$_                moveTo$$$_
-
-    This function performs the inverse of that operation.
- 
-    @result Fills 'buffer' with the ObjectiveC method name that corresponds to 'JSName'. 
-            Returns true for success, false for failure. (Failure occurs when 'buffer' 
-            is not big enough to hold the result.)
-*/
-bool convertJSMethodNameToObjc(const char *JSName, char *buffer, size_t bufferSize)
-{
-    ASSERT(JSName && buffer);
-    
-    const char *sp = JSName; // source pointer
-    char *dp = buffer; // destination pointer
-        
-    char *end = buffer + bufferSize;
-    while (dp < end) {
-        if (*sp == '$') {
-            ++sp;
-            *dp = *sp;
-        } else if (*sp == '_')
-            *dp = ':';
-        else
-            *dp = *sp;
-
-        // If a future coder puts funny ++ operators above, we might write off the end 
-        // of the buffer in the middle of this loop. Let's make sure to check for that.
-        ASSERT(dp < end);
-        
-        if (*sp == 0) { // We finished converting JSName
-            ASSERT(strlen(JSName) < bufferSize);
-            return true;
-        }
-        
-        ++sp; 
-        ++dp;
-    }
-
-    return false; // We ran out of buffer before converting JSName
-}
-
-/*
 
     JavaScript to   ObjC
     Number          coerced to char, short, int, long, float, double, or NSNumber, as appropriate
@@ -136,14 +86,14 @@ ObjcValue convertValueToObjcValue(ExecState* exec, JSValue value, ObjcValueType 
 
     switch (type) {
         case ObjcObjectType: {
-            JSLock lock(SilenceAssertionsOnly);
+            JSLockHolder lock(exec);
             
             JSGlobalObject *originGlobalObject = exec->dynamicGlobalObject();
             RootObject* originRootObject = findRootObject(originGlobalObject);
 
             JSGlobalObject* globalObject = 0;
             if (value.isObject() && asObject(value)->isGlobalObject())
-                globalObject = static_cast<JSGlobalObject*>(asObject(value));
+                globalObject = jsCast<JSGlobalObject*>(asObject(value));
 
             if (!globalObject)
                 globalObject = originGlobalObject;
@@ -196,15 +146,8 @@ ObjcValue convertValueToObjcValue(ExecState* exec, JSValue value, ObjcValueType 
 
 JSValue convertNSStringToString(ExecState* exec, NSString *nsstring)
 {
-    JSLock lock(SilenceAssertionsOnly);
-    
-    unichar *chars;
-    unsigned int length = [nsstring length];
-    chars = (unichar *)malloc(sizeof(unichar)*length);
-    [nsstring getCharacters:chars];
-    UString u((const UChar*)chars, length);
-    JSValue aValue = jsString(exec, u);
-    free((void *)chars);
+    JSLockHolder lock(exec);
+    JSValue aValue = jsString(exec, String(nsstring));
     return aValue;
 }
 
@@ -228,7 +171,7 @@ JSValue convertNSStringToString(ExecState* exec, NSString *nsstring)
 */
 JSValue convertObjcValueToValue(ExecState* exec, void* buffer, ObjcValueType type, RootObject* rootObject)
 {
-    JSLock lock(SilenceAssertionsOnly);
+    JSLockHolder lock(exec);
     
     switch (type) {
         case ObjcObjectType: {
@@ -282,7 +225,7 @@ JSValue convertObjcValueToValue(ExecState* exec, void* buffer, ObjcValueType typ
         default:
             // Should never get here. Argument types are filtered.
             fprintf(stderr, "%s: invalid type (%d)\n", __PRETTY_FUNCTION__, (int)type);
-            ASSERT(false);
+            ASSERT_NOT_REACHED();
     }
     
     return jsUndefined();
@@ -348,7 +291,7 @@ ObjcValueType objcValueTypeForType(const char *type)
             default:
                 // Unhandled type. We don't handle C structs, unions, etc.
                 // FIXME: throw an exception?
-                ASSERT(false);
+                ASSERT_NOT_REACHED();
         }
 
         if (objcValueType != ObjcInvalidType)
@@ -361,11 +304,7 @@ ObjcValueType objcValueTypeForType(const char *type)
 JSObject *throwError(ExecState *exec, NSString *message)
 {
     ASSERT(message);
-    size_t length = [message length];
-    unichar *buffer = new unichar[length];
-    [message getCharacters:buffer];
-    JSObject *error = JSC::throwError(exec, JSC::createError(exec, UString(buffer, length)));
-    delete [] buffer;
+    JSObject *error = JSC::throwError(exec, JSC::createError(exec, String(message)));
     return error;
 }
 

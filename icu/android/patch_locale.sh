@@ -1,5 +1,5 @@
-#/bin/sh
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+#!/bin/sh
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -23,24 +23,31 @@ REGION_ALIAS_SOURCE =
 REGION_SOURCE =
 END
 
-# On Android Java API is used to get lang data, except for the script
-# names of Hans and Hant which is not supported by Java API.
-# Here remove all lang data except for Hans and Hant script names.
+# On Android Java API is used to get lang data, except for the language and
+# script names for zh_Hans and zh_Hant which are not supported by Java API.
+# Here remove all lang data except those names.
 # See the comments in GetDisplayNameForLocale() (in Chromium's
 # src/ui/base/l10n/l10n_util.cc) about why we need the scripts.
 for i in lang/*.txt; do
   echo Overwriting $i...
   sed '/^    Keys{$/,/^    }$/d
-       /^    Languages{$/,/^    }$/d
+       /^    Languages{$/,/^    }$/{
+         /^    Languages{$/p
+         /^        zh{/p
+         /^    }$/p
+         d
+       }
+       /^    LanguagesShort{$/,/^    }$/d
        /^    Scripts{$/,/^    }$/{
-           /^    Scripts{$/p
-           /^        Hans/p
-           /^        Hant/p
-           /^    }$/p
-           d
+         /^    Scripts{$/p
+         /^        Hans{/p
+         /^        Hant{/p
+         /^    }$/p
+         d
        }
        /^    Types{$/,/^    }$/d
        /^    Variants{$/,/^    }$/d
+       /^    calendar{$/,/^    }$/d
        /^    codePatterns{$/,/^    }$/d
        /^    localeDisplayPattern{$/,/^    }$/d' -i $i
 done

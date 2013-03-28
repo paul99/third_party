@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009, 2010, 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2009, 2010, 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -96,7 +96,7 @@ public:
     virtual float maxTimeSeekable() const = 0;
     virtual PassRefPtr<TimeRanges> buffered() const = 0;
 
-    virtual unsigned bytesLoaded() const = 0;
+    virtual bool didLoadingProgress() const = 0;
 
     virtual void setSize(const IntSize&) = 0;
 
@@ -104,24 +104,26 @@ public:
 
     virtual void paintCurrentFrameInContext(GraphicsContext* c, const IntRect& r) { paint(c, r); }
 
-    virtual void setPreload(MediaPlayer::Preload) { };
+    virtual void setPreload(MediaPlayer::Preload) { }
 
     virtual bool hasAvailableVideoFrame() const { return readyState() >= MediaPlayer::HaveCurrentData; }
 
     virtual bool canLoadPoster() const { return false; }
     virtual void setPoster(const String&) { }
 
-#if OS(ANDROID)
-    virtual void enterFullscreen() { }
-    virtual void exitFullscreen() { }
-    virtual void endFullscreen() { }
-#endif
 #if ENABLE(PLUGIN_PROXY_FOR_VIDEO)
     virtual void deliverNotification(MediaPlayerProxyNotificationType) = 0;
     virtual void setMediaPlayerProxy(WebMediaPlayerProxy*) = 0;
     virtual void setControls(bool) { }
+#endif
+
+#if ENABLE(PLUGIN_PROXY_FOR_VIDEO) || USE(NATIVE_FULLSCREEN_VIDEO)
     virtual void enterFullscreen() { }
     virtual void exitFullscreen() { }
+#endif
+
+#if USE(NATIVE_FULLSCREEN_VIDEO)
+    virtual bool canEnterFullscreen() const { return false; }
 #endif
 
 #if USE(ACCELERATED_COMPOSITING)
@@ -132,6 +134,8 @@ public:
 #endif
 
     virtual bool hasSingleSecurityOrigin() const { return false; }
+
+    virtual bool didPassCORSAccessCheck() const { return false; }
 
     virtual MediaPlayer::MovieLoadType movieLoadType() const { return MediaPlayer::Unknown; }
 
@@ -157,14 +161,32 @@ public:
 
     virtual void setPrivateBrowsingMode(bool) { }
 
+    virtual String engineDescription() const { return emptyString(); }
 
 #if ENABLE(WEB_AUDIO)
     virtual AudioSourceProvider* audioSourceProvider() { return 0; }
 #endif
 
 #if ENABLE(MEDIA_SOURCE)
-    virtual bool sourceAppend(const unsigned char*, unsigned) { return false; }
-    virtual void sourceEndOfStream(MediaPlayer::EndOfStreamStatus) { };
+    virtual MediaPlayer::AddIdStatus sourceAddId(const String& id, const String& type, const Vector<String>& codecs) { return MediaPlayer::NotSupported; }
+    virtual PassRefPtr<TimeRanges> sourceBuffered(const String& id) { return TimeRanges::create(); }
+    virtual bool sourceRemoveId(const String& id) { return false; }
+    virtual bool sourceAppend(const String& id, const unsigned char* data, unsigned length) { return false; }
+    virtual bool sourceAbort(const String& id) { return false; }
+    virtual void sourceSetDuration(double) { }
+    virtual void sourceEndOfStream(MediaPlayer::EndOfStreamStatus) { }
+    virtual bool sourceSetTimestampOffset(const String& id, double offset) { return false; }
+#endif
+
+#if ENABLE(ENCRYPTED_MEDIA)
+    virtual MediaPlayer::MediaKeyException addKey(const String&, const unsigned char*, unsigned, const unsigned char*, unsigned, const String&) { return MediaPlayer::KeySystemNotSupported; }
+    virtual MediaPlayer::MediaKeyException generateKeyRequest(const String&, const unsigned char*, unsigned) { return MediaPlayer::KeySystemNotSupported; }
+    virtual MediaPlayer::MediaKeyException cancelKeyRequest(const String&, const String&) { return MediaPlayer::KeySystemNotSupported; }
+#endif
+
+#if ENABLE(VIDEO_TRACK)
+    virtual bool requiresTextTrackRepresentation() const { return false; }
+    virtual void setTextTrackRepresentation(TextTrackRepresentation*) { }
 #endif
 };
 

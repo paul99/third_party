@@ -33,7 +33,7 @@
 #include <wtf/ThreadingPrimitives.h>
 
 namespace WebCore {
-    class ScrollingCoordinator;
+    class ScrollingTree;
 }
 
 namespace WebKit {
@@ -54,19 +54,19 @@ public:
     ~EventDispatcher();
 
 #if ENABLE(THREADED_SCROLLING)
-    void addScrollingCoordinatorForPage(WebPage*);
-    void removeScrollingCoordinatorForPage(WebPage*);
+    void addScrollingTreeForPage(WebPage*);
+    void removeScrollingTreeForPage(WebPage*);
 #endif
 
 private:
     // CoreIPC::Connection::QueueClient
-    virtual void didReceiveMessageOnConnectionWorkQueue(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*, bool& didHandleMessage) OVERRIDE;
+    virtual void didReceiveMessageOnConnectionWorkQueue(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&, bool& didHandleMessage) OVERRIDE;
 
     // Implemented in generated EventDispatcherMessageReceiver.cpp
-    void didReceiveEventDispatcherMessageOnConnectionWorkQueue(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder* arguments, bool& didHandleMessage);
+    void didReceiveEventDispatcherMessageOnConnectionWorkQueue(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&, bool& didHandleMessage);
 
     // Message handlers
-    void wheelEvent(CoreIPC::Connection*, uint64_t pageID, const WebWheelEvent&);
+    void wheelEvent(CoreIPC::Connection*, uint64_t pageID, const WebWheelEvent&, bool canGoBack, bool canGoForward);
 #if ENABLE(GESTURE_EVENTS)
     void gestureEvent(CoreIPC::Connection*, uint64_t pageID, const WebGestureEvent&);
 #endif
@@ -78,10 +78,10 @@ private:
 #endif
 
 #if ENABLE(THREADED_SCROLLING)
-    void sendDidHandleEvent(uint64_t pageID, const WebEvent&);
+    void sendDidReceiveEvent(uint64_t pageID, const WebEvent&, bool didHandleEvent);
 
-    Mutex m_scrollingCoordinatorsMutex;
-    HashMap<uint64_t, RefPtr<WebCore::ScrollingCoordinator> > m_scrollingCoordinators;
+    Mutex m_scrollingTreesMutex;
+    HashMap<uint64_t, RefPtr<WebCore::ScrollingTree> > m_scrollingTrees;
 #endif
 };
 

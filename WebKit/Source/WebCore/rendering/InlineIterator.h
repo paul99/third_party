@@ -77,7 +77,7 @@ public:
     inline bool atTextParagraphSeparator()
     {
         return m_obj && m_obj->preservesNewline() && m_obj->isText() && toRenderText(m_obj)->textLength()
-            && !toRenderText(m_obj)->isWordBreak() && toRenderText(m_obj)->characters()[m_pos] == '\n';
+            && !toRenderText(m_obj)->isWordBreak() && toRenderText(m_obj)->characterAt(m_pos) == '\n';
     }
     
     inline bool atParagraphSeparator()
@@ -85,6 +85,7 @@ public:
         return (m_obj && m_obj->isBR()) || atTextParagraphSeparator();
     }
 
+    UChar characterAt(unsigned) const;
     UChar current() const;
     UChar previousInSameNode() const;
     ALWAYS_INLINE WTF::Unicode::Direction direction() const;
@@ -131,14 +132,15 @@ static inline void notifyObserverEnteredObject(Observer* observer, RenderObject*
         // Thus we ignore any possible dir= attribute on the span.
         return;
     }
-    if (unicodeBidi == Isolate) {
+    if (isIsolated(unicodeBidi)) {
+        // Make sure that explicit embeddings are committed before we enter the isolated content.
+        observer->commitExplicitEmbedding();
         observer->enterIsolate();
-        // Embedding/Override characters implied by dir= are handled when
+        // Embedding/Override characters implied by dir= will be handled when
         // we process the isolated span, not when laying out the "parent" run.
         return;
     }
 
-    // FIXME: Should unicode-bidi: plaintext really be embedding override/embed characters here?
     if (!observer->inIsolate())
         observer->embed(embedCharFromDirection(style->direction(), unicodeBidi), FromStyleOrDOM);
 }
@@ -152,7 +154,7 @@ static inline void notifyObserverWillExitObject(Observer* observer, RenderObject
     EUnicodeBidi unicodeBidi = object->style()->unicodeBidi();
     if (unicodeBidi == UBNormal)
         return; // Nothing to do for unicode-bidi: normal
-    if (unicodeBidi == Isolate) {
+    if (isIsolated(unicodeBidi)) {
         observer->exitIsolate();
         return;
     }
@@ -165,7 +167,7 @@ static inline void notifyObserverWillExitObject(Observer* observer, RenderObject
 static inline bool isIteratorTarget(RenderObject* object)
 {
     ASSERT(object); // The iterator will of course return 0, but its not an expected argument to this function.
-    return object->isText() || object->isFloating() || object->isPositioned() || object->isReplaced();
+    return object->isText() || object->isFloating() || object->isOutOfFlowPositioned() || object->isReplaced();
 }
 
 // This enum is only used for bidiNextShared()
@@ -255,9 +257,8 @@ static inline RenderObject* bidiNextIncludingEmptyInlines(RenderObject* root, Re
     return bidiNextShared(root, current, observer, IncludeEmptyInlines, endOfInlinePtr);
 }
 
-static inline RenderObject* bidiFirstSkippingEmptyInlines(RenderObject* root, InlineBidiResolver* resolver)
+static inline RenderObject* bidiFirstSkippingEmptyInlines(RenderObject* root, InlineBidiResolver* resolver = 0)
 {
-    ASSERT(resolver);
     RenderObject* o = root->firstChild();
     if (!o)
         return 0;
@@ -278,7 +279,8 @@ static inline RenderObject* bidiFirstSkippingEmptyInlines(RenderObject* root, In
     if (o && !isIteratorTarget(o))
         o = bidiNextSkippingEmptyInlines(root, o, resolver);
 
-    resolver->commitExplicitEmbedding();
+    if (resolver)
+        resolver->commitExplicitEmbedding();
     return o;
 }
 
@@ -351,25 +353,29 @@ inline bool InlineIterator::atEnd() const
     return !m_obj;
 }
 
-inline UChar InlineIterator::current() const
+inline UChar InlineIterator::characterAt(unsigned index) const
 {
     if (!m_obj || !m_obj->isText())
         return 0;
 
     RenderText* text = toRenderText(m_obj);
-    if (m_pos >= text->textLength())
+    if (index >= text->textLength())
         return 0;
 
-    return text->characters()[m_pos];
+    return text->characterAt(index);
+}
+
+inline UChar InlineIterator::current() const
+{
+    return characterAt(m_pos);
 }
 
 inline UChar InlineIterator::previousInSameNode() const
 {
-    if (!m_obj || !m_obj->isText() || !m_pos)
+    if (!m_pos)
         return 0;
 
-    RenderText* text = toRenderText(m_obj);
-    return text->characters()[m_pos - 1];
+    return characterAt(m_pos - 1);
 }
 
 ALWAYS_INLINE WTF::Unicode::Direction InlineIterator::direction() const
@@ -392,7 +398,7 @@ inline void InlineBidiResolver::increment()
 static inline bool isIsolatedInline(RenderObject* object)
 {
     ASSERT(object);
-    return object->isRenderInline() && object->style()->unicodeBidi() == Isolate;
+    return object->isRenderInline() && isIsolated(object->style()->unicodeBidi());
 }
 
 static inline RenderObject* containingIsolate(RenderObject* object, RenderObject* root)
@@ -452,12 +458,14 @@ public:
 
     // We don't care if we encounter bidi directional overrides.
     void embed(WTF::Unicode::Direction, BidiEmbeddingSource) { }
+    void commitExplicitEmbedding() { }
 
     void addFakeRunIfNecessary(RenderObject* obj, unsigned pos, InlineBidiResolver& resolver)
     {
         // We only need to add a fake run for a given isolated span once during each call to createBidiRunsForLine.
         // We'll be called for every span inside the isolated span so we just ignore subsequent calls.
-        if (m_haveAddedFakeRunForRootIsolate)
+        // We also avoid creating a fake run until we hit a child that warrants one, e.g. we skip floats.
+        if (m_haveAddedFakeRunForRootIsolate || RenderBlock::shouldSkipCreatingRunsForObject(obj))
             return;
         m_haveAddedFakeRunForRootIsolate = true;
         // obj and pos together denote a single position in the inline, from which the parsing of the isolate will start.

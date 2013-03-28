@@ -47,10 +47,19 @@
     background-color: rgb(66, 129, 235);
 }
 
+.evaluate-snippet-status-bar-item .glyph {
+    -webkit-mask-position: -64px -48px;
+}
+
+.evaluate-snippet-status-bar-item.toggled .glyph {
+    background-color: rgb(66, 129, 235);
+}
+
 #scripts-debug-toolbar {
     position: relative;
     margin-top: -1px;
     height: 24px;
+    border-bottom: 1px solid rgb(202, 202, 202);
 }
 
 #scripts-debug-sidebar-contents {
@@ -84,14 +93,6 @@
     margin-top: 2px;
 }
 
-#scripts-back img {
-    content: url(Images/back.png);
-}
-
-#scripts-forward img {
-    content: url(Images/forward.png);
-}
-
 #scripts-pause img {
     content: url(Images/debuggerPause.png);
 }
@@ -115,7 +116,14 @@
 .toggle-breakpoints .glyph {
     -webkit-mask-image: url(Images/statusbarButtonGlyphs.png);
     -webkit-mask-position: -32px 0;
+    -webkit-mask-size: 320px 72px;
     background-color: rgb(96, 96, 96) !important;
+}
+
+@media (-webkit-min-device-pixel-ratio: 1.5) {
+.toggle-breakpoints .glyph {
+    -webkit-mask-image: url(Images/statusbarButtonGlyphs2x.png);        
+}
 }
 
 .toggle-breakpoints.toggled-on .glyph {
@@ -142,7 +150,7 @@
     z-index: 13;
 }
 
-#scripts-navigator-resizer-widget {
+.scripts-navigator-resizer-widget {
     position: absolute;
     top: 0;
     right: 0;
@@ -152,6 +160,43 @@
     background-image: url(Images/statusbarResizerHorizontal.png);
     background-repeat: no-repeat;
     background-position: center;
+}
+
+.status-bar-item.scripts-navigator-show-hide-button > .glyph {
+    background-color: rgba(0, 0, 0, 0.5);
+    -webkit-mask-image: url(Images/navigatorShowHideButton.png);
+    -webkit-mask-position: 0 0;
+    -webkit-mask-size: 48px 32px;
+}
+
+.status-bar-item.scripts-navigator-show-hide-button.toggled-pinned > .glyph {
+    -webkit-mask-position: -16px 0;
+}
+
+.status-bar-item.scripts-navigator-show-hide-button.toggled-overlay > .glyph {
+    -webkit-mask-position: -32px 0;
+}
+
+button.status-bar-item.scripts-navigator-show-hide-button {
+    position: absolute;
+    top: 0;
+    left: 0;
+    background-image: none;
+    height: 16px;
+    width: 16px;
+    margin: 4px 2px 2px 2px;
+    border: none;
+}
+
+button.status-bar-item.scripts-navigator-show-hide-button:active {
+    top: 1px;
+    left: 1px;
+}
+
+button.status-bar-item.scripts-navigator-show-hide-button.toggled-overlay
+{
+    left: auto;
+    right: 15px;
 }
 
 .scripts-views-container {
@@ -190,110 +235,17 @@
     top: 2px;
 }
 
-.scripts-navigator-domain-tree-item .icon {
-    content: url(Images/domain.png);
-}
-
-.scripts-navigator-folder-tree-item .icon {
-    opacity: 0.7;
-    content: url(Images/frame.png);
-}
-
-.scripts-navigator-script-tree-item .icon {
-    content: url(Images/resourceJSIcon.png);
-}
-
-.scripts.panel .navigator {
-    padding-left: 0;
-}
-
-#scripts-navigator-tree-search-box {
-    display: none;
-    position: absolute;
-    top: 23px;
-    right: 0;
-    height: 26px;
-    width: 100px;
-    z-index: 1;
-    padding: 1px;
-    background-color: rgb(111, 140, 210);
-    border: 2px solid lightgray;
-}
-
-#scripts-navigator-tree-search-box.visible {
-    display: block;
-}
-
-#scripts-navigator-tree-search-box > input {
-    width: 100%;
-    height: 100%;
-}
-
-#scripts-navigator-tabbed-pane .tabbed-pane-header {
-    background-image: -webkit-gradient(linear, 0% 0%, 0% 100%, from(#F5F5F5), to(#E5E5E5));
-}
-
-#scripts-navigator-tabbed-pane .tabbed-pane-header-contents {
-    margin-left: 1px;
-    margin-right: 16px;
-}
-
 #scripts-editor-container-tabbed-pane .tabbed-pane-header {
     background-image: -webkit-gradient(linear, 0% 0%, 0% 100%, from(#F5F5F5), to(#E5E5E5));
 }
 
 #scripts-editor-container-tabbed-pane .tabbed-pane-header-contents {
-    margin-left: 1px;
-    margin-right: 16px;
+    margin-left: 20px;
+    margin-right: 36px;
 }
 
 #scripts-editor-container-tabbed-pane .tabbed-pane-header-tab {
     border-bottom: 1px solid #BBB;
-}
-
-.scripts.panel .navigator li {
-    height: 17px;
-    white-space: nowrap;
-}
-
-.scripts.panel .navigator :focus li.selected {
-    color: white;
-}
-
-.scripts.panel .navigator li.selected .selection {
-    height: 17px;
-    background-color: rgb(180, 180, 180);
-}
-
-.scripts.panel .navigator :focus li.selected .selection {
-    background-color: rgb(111, 140, 210);
-}
-
-.scripts.panel .navigator .search-match-found li.selected .selection {
-    background-color: rgb(111, 140, 210);
-}
-
-.scripts.panel .navigator .search-match-not-found li.selected .selection {
-    border-color: rgb(111, 140, 210);
-    background-color: white;
-}
-
-.scripts.panel .navigator .searching li.selected .selection {
-    background-color: rgb(111, 140, 210);
-}
-
-.scripts.panel .navigator .icon {
-    width: 16px;
-    height: 16px;
-    float: left;
-}
-
-.scripts.panel .base-navigator-tree-element-title {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    position: relative;
-    padding-left: 2px;
-    top: 1px;
 }
 
 .function-location-link {
@@ -309,4 +261,49 @@
 
 .function-popover-title .function-name {
     font-weight: bold;
+}
+
+button.status-bar-item.scripts-debugger-show-hide-button {
+    position: absolute;
+    top: 0;
+    background-image: none;
+    height: 16px;
+    width: 16px;
+    margin: 4px 2px 2px 2px;
+    border: none;
+}
+
+button.status-bar-item.scripts-debugger-show-hide-button:active {
+    top: 1px;
+}
+
+.status-bar-item.scripts-debugger-show-hide-button > .glyph {
+    background-color: rgba(0, 0, 0, 0.5);
+    -webkit-mask-image: url(Images/navigatorShowHideButton.png);
+    -webkit-mask-position: 0 0;
+    -webkit-mask-size: 48px 32px;
+}
+
+button.status-bar-item.scripts-debugger-show-hide-button.toggled-shown {
+    right: 16px;
+}
+
+button.status-bar-item.scripts-debugger-show-hide-button.toggled-shown:active {
+    right: 15px;
+}
+
+.status-bar-item.scripts-debugger-show-hide-button.toggled-shown > .glyph {
+    -webkit-mask-position: 0 -16px;
+}
+
+button.status-bar-item.scripts-debugger-show-hide-button.toggled-hidden {
+    right: 1px;
+}
+
+button.status-bar-item.scripts-debugger-show-hide-button.toggled-hidden:active {
+    right: 0px;
+}
+
+.status-bar-item.scripts-debugger-show-hide-button.toggled-hidden > .glyph {
+    -webkit-mask-position: -16px -16px;
 }

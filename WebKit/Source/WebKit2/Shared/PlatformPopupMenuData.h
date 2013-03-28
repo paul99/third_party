@@ -40,7 +40,7 @@ namespace WebKit {
 struct PlatformPopupMenuData {
     PlatformPopupMenuData();
 
-    void encode(CoreIPC::ArgumentEncoder*) const;
+    void encode(CoreIPC::ArgumentEncoder&) const;
     static bool decode(CoreIPC::ArgumentDecoder*, PlatformPopupMenuData&);
 
 #if PLATFORM(WIN)
@@ -55,6 +55,8 @@ struct PlatformPopupMenuData {
 #elif PLATFORM(MAC)
     FontInfo fontInfo;
     bool shouldPopOver;
+#elif PLATFORM(QT)
+    bool multipleSelections;
 #endif
 };
 

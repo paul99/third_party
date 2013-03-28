@@ -27,10 +27,38 @@
 #include "WebKitCSSTransformValue.h"
 
 #include "CSSValueList.h"
-#include "PlatformString.h"
+#include "WebCoreMemoryInstrumentation.h"
 #include <wtf/PassRefPtr.h>
+#include <wtf/text/StringBuilder.h>
+#include <wtf/text/WTFString.h>
 
 namespace WebCore {
+
+// These names must be kept in sync with TransformOperationType.
+const char* const transformName[] = {
+     0,
+     "translate",
+     "translateX",
+     "translateY",
+     "rotate",
+     "scale",
+     "scaleX",
+     "scaleY",
+     "skew",
+     "skewX",
+     "skewY",
+     "matrix",
+     "translateZ",
+     "translate3d",
+     "rotateX",
+     "rotateY",
+     "rotateZ",
+     "rotate3d",
+     "scaleZ",
+     "scale3d",
+     "perspective",
+     "matrix3d"
+};
 
 WebKitCSSTransformValue::WebKitCSSTransformValue(TransformOperationType op)
     : CSSValueList(WebKitCSSTransformClass, CommaSeparator)
@@ -40,79 +68,47 @@ WebKitCSSTransformValue::WebKitCSSTransformValue(TransformOperationType op)
 
 String WebKitCSSTransformValue::customCssText() const
 {
-    String result;
-    switch (m_type) {
-        case TranslateTransformOperation:
-            result += "translate(";
-            break;
-        case TranslateXTransformOperation:
-            result += "translateX(";
-            break;
-        case TranslateYTransformOperation:
-            result += "translateY(";
-            break;
-        case RotateTransformOperation:
-            result += "rotate(";
-            break;
-        case ScaleTransformOperation:
-            result += "scale(";
-            break;
-        case ScaleXTransformOperation:
-            result += "scaleX(";
-            break;
-        case ScaleYTransformOperation:
-            result += "scaleY(";
-            break;
-        case SkewTransformOperation:
-            result += "skew(";
-            break;
-        case SkewXTransformOperation:
-            result += "skewX(";
-            break;
-        case SkewYTransformOperation:
-            result += "skewY(";
-            break;
-        case MatrixTransformOperation:
-            result += "matrix(";
-            break;
-        case TranslateZTransformOperation:
-            result += "translateZ(";
-            break;
-        case Translate3DTransformOperation:
-            result += "translate3d(";
-            break;
-        case RotateXTransformOperation:
-            result += "rotateX(";
-            break;
-        case RotateYTransformOperation:
-            result += "rotateY(";
-            break;
-        case RotateZTransformOperation:
-            result += "rotateZ(";
-            break;
-        case Rotate3DTransformOperation:
-            result += "rotate3d(";
-            break;
-        case ScaleZTransformOperation:
-            result += "scaleZ(";
-            break;
-        case Scale3DTransformOperation:
-            result += "scale3d(";
-            break;
-        case PerspectiveTransformOperation:
-            result += "perspective(";
-            break;
-        case Matrix3DTransformOperation:
-            result += "matrix3d(";
-            break;
-        default:
-            break;
+    StringBuilder result;
+    if (m_type != UnknownTransformOperation) {
+        ASSERT(static_cast<size_t>(m_type) < WTF_ARRAY_LENGTH(transformName));
+        result.append(transformName[m_type]);
+        result.append('(');
+        result.append(CSSValueList::customCssText());
+        result.append(')');
     }
+    return result.toString();
+}
 
-    result += CSSValueList::customCssText();
+#if ENABLE(CSS_VARIABLES)
+String WebKitCSSTransformValue::customSerializeResolvingVariables(const HashMap<AtomicString, String>& variables) const
+{
+    StringBuilder result;
+    if (m_type != UnknownTransformOperation) {
+        ASSERT(static_cast<size_t>(m_type) < WTF_ARRAY_LENGTH(transformName));
+        result.append(transformName[m_type]);
+        result.append('(');
+        result.append(CSSValueList::customSerializeResolvingVariables(variables));
+        result.append(')');
+    }
+    return result.toString();
+}
+#endif
 
-    result += ")";
-    return result;
+WebKitCSSTransformValue::WebKitCSSTransformValue(const WebKitCSSTransformValue& cloneFrom)
+    : CSSValueList(cloneFrom)
+    , m_type(cloneFrom.m_type)
+{
+}
+
+PassRefPtr<WebKitCSSTransformValue> WebKitCSSTransformValue::cloneForCSSOM() const
+{
+    return adoptRef(new WebKitCSSTransformValue(*this));
+}
+
+void WebKitCSSTransformValue::reportDescendantMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CSS);
+    CSSValueList::reportDescendantMemoryUsage(memoryObjectInfo);
 }
 
 }

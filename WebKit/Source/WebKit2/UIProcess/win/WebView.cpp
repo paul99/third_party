@@ -55,6 +55,7 @@
 #include <WebCore/WebCoreInstanceHandle.h>
 #include <WebCore/WindowMessageBroadcaster.h>
 #include <WebCore/WindowsTouch.h>
+#include <wtf/text/StringBuilder.h>
 #include <wtf/text/WTFString.h>
 
 #if USE(CG)
@@ -1080,7 +1081,7 @@ void WebView::setScrollOffsetOnNextResize(const IntSize& scrollOffset)
     m_nextResizeScrollOffset = scrollOffset;
 }
 
-void WebView::didChangeViewportProperties(const WebCore::ViewportArguments&)
+void WebView::didChangeViewportProperties(const WebCore::ViewportAttributes&)
 {
 }
 
@@ -1240,14 +1241,14 @@ static void compositionToUnderlines(const Vector<DWORD>& clauses, const Vector<B
 #define APPEND_ARGUMENT_NAME(name) \
     if (lparam & name) { \
         if (needsComma) \
-            result += ", "; \
-            result += #name; \
+            result.appendLiteral(", "); \
+        result.appendLiteral(#name); \
         needsComma = true; \
     }
 
 static String imeCompositionArgumentNames(LPARAM lparam)
 {
-    String result;
+    StringBuilder result;
     bool needsComma = false;
 
     APPEND_ARGUMENT_NAME(GCS_COMPATTR);
@@ -1265,7 +1266,7 @@ static String imeCompositionArgumentNames(LPARAM lparam)
     APPEND_ARGUMENT_NAME(CS_INSERTCHAR);
     APPEND_ARGUMENT_NAME(CS_NOMOVECARET);
 
-    return result;
+    return result.toString();
 }
 
 static String imeRequestName(WPARAM wparam)
@@ -1429,6 +1430,14 @@ PassRefPtr<WebContextMenuProxy> WebView::createContextMenuProxy(WebPageProxy* pa
     return WebContextMenuProxyWin::create(m_window, page);
 }
 
+#if ENABLE(INPUT_TYPE_COLOR)
+PassRefPtr<WebColorChooserProxy> WebView::createColorChooserProxy(WebPageProxy*, const WebCore::Color&, const WebCore::IntRect&)
+{
+    notImplemented();
+    return 0;
+}
+#endif
+
 void WebView::setFindIndicator(PassRefPtr<FindIndicator> prpFindIndicator, bool fadeOut, bool animate)
 {
     UNUSED_PARAM(animate);
@@ -1507,10 +1516,6 @@ void WebView::setCustomRepresentationZoomFactor(double)
 {
 }
 
-void WebView::didChangeScrollbarsForMainFrame() const
-{
-}
-
 void WebView::findStringInCustomRepresentation(const String&, FindOptions, unsigned)
 {
 }
@@ -1564,6 +1569,9 @@ void WebView::exitAcceleratedCompositingMode()
 #endif
 }
 
+void WebView::updateAcceleratedCompositingMode(const LayerTreeContext&)
+{
+}
 #endif // USE(ACCELERATED_COMPOSITING)
 
 HWND WebView::nativeWindow()
@@ -1735,7 +1743,8 @@ HRESULT STDMETHODCALLTYPE WebView::Drop(IDataObject* pDataObject, DWORD grfKeySt
     bool createdExtension = maybeCreateSandboxExtensionFromDragData(data, sandboxExtensionHandle);
     if (createdExtension)
         m_page->process()->willAcquireUniversalFileReadSandboxExtension();
-    m_page->performDrag(&data, String(), sandboxExtensionHandle);
+    SandboxExtension::HandleArray sandboxExtensionForUpload;
+    m_page->performDrag(&data, String(), sandboxExtensionHandle, sandboxExtensionForUpload);
     return S_OK;
 }
 

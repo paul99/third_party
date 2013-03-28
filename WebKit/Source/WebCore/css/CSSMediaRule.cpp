@@ -1,7 +1,7 @@
 /**
  * (C) 1999-2003 Lars Knoll (knoll@kde.org)
  * (C) 2002-2003 Dirk Mueller (mueller@kde.org)
- * Copyright (C) 2002, 2005, 2006 Apple Computer, Inc.
+ * Copyright (C) 2002, 2005, 2006, 2012 Apple Computer, Inc.
  * Copyright (C) 2006 Samuel Weinig (sam@webkit.org)
  *
  * This library is free software; you can redistribute it and/or
@@ -24,50 +24,48 @@
 #include "CSSMediaRule.h"
 
 #include "CSSParser.h"
+#include "CSSRuleList.h"
+#include "CSSStyleSheet.h"
 #include "ExceptionCode.h"
+#include "StyleRule.h"
+#include "WebCoreMemoryInstrumentation.h"
+#include <wtf/MemoryInstrumentationVector.h>
+#include <wtf/text/StringBuilder.h>
 
 namespace WebCore {
 
-CSSMediaRule::CSSMediaRule(CSSStyleSheet* parent, PassRefPtr<MediaList> media, PassRefPtr<CSSRuleList> rules)
-    : CSSRule(parent, CSSRule::MEDIA_RULE)
-    , m_lstMedia(media)
-    , m_lstCSSRules(rules)
+CSSMediaRule::CSSMediaRule(StyleRuleMedia* mediaRule, CSSStyleSheet* parent)
+    : CSSRule(parent)
+    , m_mediaRule(mediaRule)
+    , m_childRuleCSSOMWrappers(mediaRule->childRules().size())
 {
-    m_lstMedia->setParentStyleSheet(parent);
-    int length = m_lstCSSRules->length();
-    for (int i = 0; i < length; i++)
-        m_lstCSSRules->item(i)->setParentRule(this);
 }
 
 CSSMediaRule::~CSSMediaRule()
 {
-    if (m_lstMedia)
-        m_lstMedia->setParentStyleSheet(0);
+    ASSERT(m_childRuleCSSOMWrappers.size() == m_mediaRule->childRules().size());
 
-    int length = m_lstCSSRules->length();
-    for (int i = 0; i < length; i++)
-        m_lstCSSRules->item(i)->setParentRule(0);
+    for (unsigned i = 0; i < m_childRuleCSSOMWrappers.size(); ++i) {
+        if (m_childRuleCSSOMWrappers[i])
+            m_childRuleCSSOMWrappers[i]->setParentRule(0);
+    }
+    if (m_mediaCSSOMWrapper)
+        m_mediaCSSOMWrapper->clearParentRule();
 }
 
-unsigned CSSMediaRule::append(CSSRule* rule)
+unsigned CSSMediaRule::insertRule(const String& ruleString, unsigned index, ExceptionCode& ec)
 {
-    if (!rule)
-        return 0;
+    ASSERT(m_childRuleCSSOMWrappers.size() == m_mediaRule->childRules().size());
 
-    rule->setParentRule(this);
-    return m_lstCSSRules->insertRule(rule, m_lstCSSRules->length());
-}
-
-unsigned CSSMediaRule::insertRule(const String& rule, unsigned index, ExceptionCode& ec)
-{
-    if (index > m_lstCSSRules->length()) {
+    if (index > m_mediaRule->childRules().size()) {
         // INDEX_SIZE_ERR: Raised if the specified index is not a valid insertion point.
         ec = INDEX_SIZE_ERR;
         return 0;
     }
 
-    CSSParser p(useStrictParsing());
-    RefPtr<CSSRule> newRule = p.parseRule(parentStyleSheet(), rule);
+    CSSParser parser(parserContext());
+    CSSStyleSheet* styleSheet = parentStyleSheet();
+    RefPtr<StyleRuleBase> newRule = parser.parseRule(styleSheet ? styleSheet->contents() : 0, ruleString);
     if (!newRule) {
         // SYNTAX_ERR: Raised if the specified rule has a syntax error and is unparsable.
         ec = SYNTAX_ERR;
@@ -85,46 +83,107 @@ unsigned CSSMediaRule::insertRule(const String& rule, unsigned index, ExceptionC
         ec = HIERARCHY_REQUEST_ERR;
         return 0;
     }
+    CSSStyleSheet::RuleMutationScope mutationScope(this);
 
-    newRule->setParentRule(this);
-    unsigned returnedIndex = m_lstCSSRules->insertRule(newRule.get(), index);
+    m_mediaRule->wrapperInsertRule(index, newRule);
 
-    if (CSSStyleSheet* styleSheet = parentStyleSheet())
-        styleSheet->styleSheetChanged();
-
-    return returnedIndex;
+    m_childRuleCSSOMWrappers.insert(index, RefPtr<CSSRule>());
+    return index;
 }
 
 void CSSMediaRule::deleteRule(unsigned index, ExceptionCode& ec)
 {
-    if (index >= m_lstCSSRules->length()) {
+    ASSERT(m_childRuleCSSOMWrappers.size() == m_mediaRule->childRules().size());
+
+    if (index >= m_mediaRule->childRules().size()) {
         // INDEX_SIZE_ERR: Raised if the specified index does not correspond to a
         // rule in the media rule list.
         ec = INDEX_SIZE_ERR;
         return;
     }
 
-    m_lstCSSRules->item(index)->setParentRule(0);
-    m_lstCSSRules->deleteRule(index);
+    CSSStyleSheet::RuleMutationScope mutationScope(this);
 
-    if (CSSStyleSheet* styleSheet = parentStyleSheet())
-        styleSheet->styleSheetChanged();
+    m_mediaRule->wrapperRemoveRule(index);
+
+    if (m_childRuleCSSOMWrappers[index])
+        m_childRuleCSSOMWrappers[index]->setParentRule(0);
+    m_childRuleCSSOMWrappers.remove(index);
 }
 
 String CSSMediaRule::cssText() const
 {
-    String result = "@media ";
-    if (m_lstMedia) {
-        result += m_lstMedia->mediaText();
-        result += " ";
+    StringBuilder result;
+    result.append("@media ");
+    if (m_mediaRule->mediaQueries()) {
+        result.append(m_mediaRule->mediaQueries()->mediaText());
+        result.append(' ');
     }
-    result += "{ \n";
+    result.append("{ \n");
+    
+    unsigned size = length();
+    for (unsigned i = 0; i < size; ++i) {
+        result.append("  ");
+        result.append(item(i)->cssText());
+        result.append('\n');
+    }
 
-    if (m_lstCSSRules)
-        result += m_lstCSSRules->rulesText();
+    result.append('}');
+    return result.toString();
+}
 
-    result += "}";
-    return result;
+MediaList* CSSMediaRule::media() const
+{
+    if (!m_mediaRule->mediaQueries())
+        return 0;
+    if (!m_mediaCSSOMWrapper)
+        m_mediaCSSOMWrapper = MediaList::create(m_mediaRule->mediaQueries(), const_cast<CSSMediaRule*>(this));
+    return m_mediaCSSOMWrapper.get();
+}
+
+unsigned CSSMediaRule::length() const
+{ 
+    return m_mediaRule->childRules().size(); 
+}
+
+CSSRule* CSSMediaRule::item(unsigned index) const
+{ 
+    if (index >= length())
+        return 0;
+    ASSERT(m_childRuleCSSOMWrappers.size() == m_mediaRule->childRules().size());
+    RefPtr<CSSRule>& rule = m_childRuleCSSOMWrappers[index];
+    if (!rule)
+        rule = m_mediaRule->childRules()[index]->createCSSOMWrapper(const_cast<CSSMediaRule*>(this));
+    return rule.get();
+}
+
+CSSRuleList* CSSMediaRule::cssRules() const
+{
+    if (!m_ruleListCSSOMWrapper)
+        m_ruleListCSSOMWrapper = adoptPtr(new LiveCSSRuleList<CSSMediaRule>(const_cast<CSSMediaRule*>(this)));
+    return m_ruleListCSSOMWrapper.get();
+}
+
+void CSSMediaRule::reattach(StyleRuleBase* rule)
+{
+    ASSERT(rule);
+    ASSERT(rule->isMediaRule());
+    m_mediaRule = static_cast<StyleRuleMedia*>(rule);
+    if (m_mediaCSSOMWrapper && m_mediaRule->mediaQueries())
+        m_mediaCSSOMWrapper->reattach(m_mediaRule->mediaQueries());
+    for (unsigned i = 0; i < m_childRuleCSSOMWrappers.size(); ++i) {
+        if (m_childRuleCSSOMWrappers[i])
+            m_childRuleCSSOMWrappers[i]->reattach(m_mediaRule->childRules()[i].get());
+    }
+}
+
+void CSSMediaRule::reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
+{
+    MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::CSS);
+    CSSRule::reportMemoryUsage(memoryObjectInfo);
+    info.addMember(m_mediaCSSOMWrapper);
+    info.addMember(m_childRuleCSSOMWrappers);
+    info.addMember(m_ruleListCSSOMWrapper);
 }
 
 } // namespace WebCore

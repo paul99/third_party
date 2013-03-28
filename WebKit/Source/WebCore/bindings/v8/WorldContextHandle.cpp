@@ -31,25 +31,53 @@
 #include "config.h"
 #include "WorldContextHandle.h"
 
-#include "V8IsolatedContext.h"
+#include "ScriptController.h"
+#include "V8Binding.h"
+#include "V8DOMWindow.h"
+#include "V8DedicatedWorkerContext.h"
+#include "V8SharedWorkerContext.h"
 
 namespace WebCore {
 
 WorldContextHandle::WorldContextHandle(WorldToUse worldToUse)
     : m_worldToUse(worldToUse)
 {
-    if (worldToUse == UseMainWorld)
+    ASSERT(worldToUse != UseWorkerWorld);
+
+    if (worldToUse == UseMainWorld || worldToUse == UseWorkerWorld)
         return;
 
-    if (V8IsolatedContext* context = V8IsolatedContext::getEntered())
-        m_context = context->sharedContext();
+    if (!v8::Context::InContext())
+        CRASH();
+
+    v8::Handle<v8::Context> context = v8::Context::GetCurrent();
+#if ENABLE(WORKERS)
+    if (UNLIKELY(!V8DOMWrapper::isWrapperOfType(toInnerGlobalObject(context), &V8DOMWindow::info))) {
+#if ENABLE(SHARED_WORKERS)
+        ASSERT(V8DOMWrapper::isWrapperOfType(toInnerGlobalObject(context)->GetPrototype(), &V8DedicatedWorkerContext::info) || V8DOMWrapper::isWrapperOfType(toInnerGlobalObject(context)->GetPrototype(), &V8SharedWorkerContext::info));
+#else
+        ASSERT(V8DOMWrapper::isWrapperOfType(toInnerGlobalObject(context)->GetPrototype(), &V8DedicatedWorkerContext::info));
+#endif
+        m_worldToUse = UseWorkerWorld;
+        return;
+    }
+#endif
+
+    if (DOMWrapperWorld::isolated(context)) {
+        m_context = SharedPersistent<v8::Context>::create(context);
+        return;
+    }
+
+    m_worldToUse = UseMainWorld;
 }
 
-v8::Local<v8::Context> WorldContextHandle::adjustedContext(V8Proxy* proxy) const
+v8::Local<v8::Context> WorldContextHandle::adjustedContext(ScriptController* script) const
 {
-    if (m_worldToUse == UseMainWorld || !m_context || m_context->get().IsEmpty())
-        return proxy->mainWorldContext();
+    ASSERT(m_worldToUse != UseWorkerWorld);
+    if (m_worldToUse == UseMainWorld)
+        return script->mainWorldContext();
 
+    ASSERT(!m_context->get().IsEmpty());
     return v8::Local<v8::Context>::New(m_context->get());
 }
 

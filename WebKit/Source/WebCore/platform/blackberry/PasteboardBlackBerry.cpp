@@ -56,11 +56,16 @@ void Pasteboard::writeImage(Node*, KURL const&, String const&)
     notImplemented();
 }
 
+void Pasteboard::writeClipboard(Clipboard*)
+{
+    notImplemented();
+}
+
 void Pasteboard::writeSelection(Range* selectedRange, bool, Frame* frame)
 {
-    std::string text = frame->editor()->selectedText().utf8().data();
-    std::string html = createMarkup(selectedRange, 0, AnnotateForInterchange).utf8().data();
-    std::string url = frame->document()->url().string().utf8().data();
+    WTF::String text = frame->editor()->selectedText();
+    WTF::String html = createMarkup(selectedRange, 0, AnnotateForInterchange);
+    WTF::String url = frame->document()->url().string();
 
     BlackBerry::Platform::Clipboard::write(text, html, url);
 }
@@ -68,17 +73,17 @@ void Pasteboard::writeSelection(Range* selectedRange, bool, Frame* frame)
 void Pasteboard::writeURL(KURL const& url, String const&, Frame*)
 {
     ASSERT(!url.isEmpty());
-    BlackBerry::Platform::Clipboard::writeURL(url.string().utf8().data());
+    BlackBerry::Platform::Clipboard::writeURL(url.string());
 }
 
-void Pasteboard::writePlainText(const String& text)
+void Pasteboard::writePlainText(const String& text, SmartReplaceOption)
 {
-    BlackBerry::Platform::Clipboard::writePlainText(text.utf8().data());
+    BlackBerry::Platform::Clipboard::writePlainText(text);
 }
 
 String Pasteboard::plainText(Frame*)
 {
-    return String::fromUTF8(BlackBerry::Platform::Clipboard::readPlainText().c_str());
+    return BlackBerry::Platform::Clipboard::readPlainText();
 }
 
 PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefPtr<Range> context, bool allowPlainText, bool& chosePlainText)
@@ -88,18 +93,18 @@ PassRefPtr<DocumentFragment> Pasteboard::documentFragment(Frame* frame, PassRefP
     // Note: We are able to check if the format exists prior to reading but the check & the early return
     // path of get_clipboard_data are the exact same, so just use get_clipboard_data and validate the
     // return value to determine if the data was present.
-    String html = String::fromUTF8(BlackBerry::Platform::Clipboard::readHTML().c_str());
+    String html = BlackBerry::Platform::Clipboard::readHTML();
     RefPtr<DocumentFragment> fragment;
     if (!html.isEmpty()) {
-        String url = String::fromUTF8(BlackBerry::Platform::Clipboard::readURL().c_str());
-        if (fragment = createFragmentFromMarkup(frame->document(), html, url, FragmentScriptingNotAllowed))
+        String url = BlackBerry::Platform::Clipboard::readURL();
+        if (fragment = createFragmentFromMarkup(frame->document(), html, url, DisallowScriptingContent))
             return fragment.release();
     }
 
     if (!allowPlainText)
         return 0;
 
-    String text = String::fromUTF8(BlackBerry::Platform::Clipboard::readPlainText().c_str());
+    String text = BlackBerry::Platform::Clipboard::readPlainText();
     if (fragment = createFragmentFromText(context.get(), text)) {
         chosePlainText = true;
         return fragment.release();

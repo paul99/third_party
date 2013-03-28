@@ -32,22 +32,26 @@
 #ifndef FileInputType_h
 #define FileInputType_h
 
-#include "BaseButtonInputType.h"
+#include "BaseClickableWithKeyInputType.h"
 #include "FileChooser.h"
 #include "FileIconLoader.h"
 #include <wtf/RefPtr.h>
 
 namespace WebCore {
 
+class DragData;
 class FileList;
 
-class FileInputType : public BaseButtonInputType, private FileChooserClient, private FileIconLoaderClient {
+class FileInputType : public BaseClickableWithKeyInputType, private FileChooserClient, private FileIconLoaderClient {
 public:
     static PassOwnPtr<InputType> create(HTMLInputElement*);
+    static Vector<FileChooserFileInfo> filesFromFormControlState(const FormControlState&);
 
 private:
     FileInputType(HTMLInputElement*);
     virtual const AtomicString& formControlType() const OVERRIDE;
+    virtual FormControlState saveFormControlState() const OVERRIDE;
+    virtual void restoreFormControlState(const FormControlState&) OVERRIDE;
     virtual bool appendFormData(FormDataList&, bool) const OVERRIDE;
     virtual bool valueMissing(const String&) const OVERRIDE;
     virtual String valueMissingText() const OVERRIDE;
@@ -56,24 +60,28 @@ private:
     virtual bool canSetStringValue() const OVERRIDE;
     virtual bool canChangeFromAnotherType() const OVERRIDE;
     virtual FileList* files() OVERRIDE;
+    virtual void setFiles(PassRefPtr<FileList>) OVERRIDE;
     virtual bool canSetValue(const String&) OVERRIDE;
     virtual bool getTypeSpecificValue(String&) OVERRIDE; // Checked first, before internal storage or the value attribute.
-    virtual bool storesValueSeparateFromAttribute() OVERRIDE;
-    virtual void setValue(const String&, bool valueChanged, bool sendChangeEvent) OVERRIDE;
-    virtual void receiveDroppedFiles(const Vector<String>&) OVERRIDE;
+    virtual void setValue(const String&, bool valueChanged, TextFieldEventBehavior) OVERRIDE;
+    virtual bool receiveDroppedFiles(const DragData*) OVERRIDE;
+#if ENABLE(FILE_SYSTEM)
+    virtual String droppedFileSystemId() OVERRIDE;
+#endif
     virtual Icon* icon() const OVERRIDE;
     virtual bool isFileUpload() const OVERRIDE;
     virtual void createShadowSubtree() OVERRIDE;
+    virtual void disabledAttributeChanged() OVERRIDE;
     virtual void multipleAttributeChanged() OVERRIDE;
     virtual String defaultToolTip() const OVERRIDE;
 
     // FileChooserClient implementation.
-    virtual void filesChosen(const Vector<String>&) OVERRIDE;
+    virtual void filesChosen(const Vector<FileChooserFileInfo>&) OVERRIDE;
 
     // FileIconLoaderClient implementation.
     virtual void updateRendering(PassRefPtr<Icon>) OVERRIDE;
 
-    void setFileList(const Vector<String>& paths);
+    PassRefPtr<FileList> createFileList(const Vector<FileChooserFileInfo>& files) const;
 #if ENABLE(DIRECTORY_UPLOAD)
     void receiveDropForDirectoryUpload(const Vector<String>&);
 #endif
@@ -81,6 +89,10 @@ private:
 
     RefPtr<FileList> m_fileList;
     RefPtr<Icon> m_icon;
+
+#if ENABLE(FILE_SYSTEM)
+    String m_droppedFileSystemId;
+#endif
 };
 
 } // namespace WebCore

@@ -33,22 +33,20 @@
 #include "NotificationPresenterClientQt.h"
 
 #include "Document.h"
-#include "DumpRenderTreeSupportQt.h"
 #include "EventNames.h"
 #include "KURL.h"
 #include "Page.h"
+#include "QWebFrameAdapter.h"
+#include "QWebPageAdapter.h"
 #include "QtPlatformPlugin.h"
 #include "ScriptExecutionContext.h"
 #include "SecurityOrigin.h"
 #include "UserGestureIndicator.h"
-
-#include "qwebframe_p.h"
 #include "qwebkitglobal.h"
-#include "qwebpage.h"
 
 namespace WebCore {
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 
 const double notificationTimeout = 10.0;
 
@@ -69,60 +67,61 @@ NotificationPresenterClientQt* NotificationPresenterClientQt::notificationPresen
 
 NotificationWrapper::NotificationWrapper()
     : m_closeTimer(this, &NotificationWrapper::close)
+    , m_displayEventTimer(this, &NotificationWrapper::sendDisplayEvent)
 {
-#if ENABLE(NOTIFICATIONS)
-
-#ifndef QT_NO_SYSTEMTRAYICON
-    m_notificationIcon = nullptr;
-#endif
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     m_presenter = nullptr;
 #endif
 }
 
 void NotificationWrapper::close(Timer<NotificationWrapper>*)
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     NotificationPresenterClientQt::notificationPresenter()->cancel(this);
+#endif
+}
+
+void NotificationWrapper::sendDisplayEvent(Timer<NotificationWrapper>*)
+{
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
+    NotificationPresenterClientQt::notificationPresenter()->sendDisplayEvent(this);
 #endif
 }
 
 const QString NotificationWrapper::title() const
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     Notification* notification = NotificationPresenterClientQt::notificationPresenter()->notificationForWrapper(this);
     if (notification)
-        return notification->contents().title;
+        return notification->title();
 #endif
     return QString();
 }
 
 const QString NotificationWrapper::message() const
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     Notification* notification = NotificationPresenterClientQt::notificationPresenter()->notificationForWrapper(this);
     if (notification)
-        return notification->contents().body;
+        return notification->body();
 #endif
     return QString();
 }
 
-const QByteArray NotificationWrapper::iconData() const
+const QUrl NotificationWrapper::iconUrl() const
 {
-    QByteArray iconData;
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     Notification* notification = NotificationPresenterClientQt::notificationPresenter()->notificationForWrapper(this);
-    if (notification) {
-        if (notification->iconData())
-            iconData = QByteArray::fromRawData(notification->iconData()->data(), notification->iconData()->size());
-    }
+    if (notification)
+        return notification->iconURL();
 #endif
-    return iconData;
+    return QUrl();
 }
 
 const QUrl NotificationWrapper::openerPageUrl() const
 {
     QUrl url;
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     Notification* notification = NotificationPresenterClientQt::notificationPresenter()->notificationForWrapper(this);
     if (notification) {
         if (notification->scriptExecutionContext()) 
@@ -134,19 +133,19 @@ const QUrl NotificationWrapper::openerPageUrl() const
 
 void NotificationWrapper::notificationClicked()
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     NotificationPresenterClientQt::notificationPresenter()->notificationClicked(this);
 #endif
 }
 
 void NotificationWrapper::notificationClosed()
 {
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
     NotificationPresenterClientQt::notificationPresenter()->cancel(this);
 #endif
 }
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 
 NotificationPresenterClientQt::NotificationPresenterClientQt() : m_clientCount(0)
 {
@@ -175,19 +174,15 @@ bool NotificationPresenterClientQt::show(Notification* notification)
     if (notification->scriptExecutionContext()->isWorkerContext())
         return false;
     notification->setPendingActivity(notification);
-    if (!notification->replaceId().isEmpty())
+    if (!notification->tag().isEmpty())
         removeReplacedNotificationFromQueue(notification);
     if (dumpNotification)
         dumpShowText(notification);
-    QByteArray iconData;
-    if (notification->iconData())
-        iconData = QByteArray::fromRawData(notification->iconData()->data(), notification->iconData()->size());
-    displayNotification(notification, iconData);
-    notification->releaseIconData();
+    displayNotification(notification);
     return true;
 }
 
-void NotificationPresenterClientQt::displayNotification(Notification* notification, const QByteArray& bytes)
+void NotificationPresenterClientQt::displayNotification(Notification* notification)
 {
     NotificationWrapper* wrapper = new NotificationWrapper();
     m_notifications.insert(notification, wrapper);
@@ -197,8 +192,8 @@ void NotificationPresenterClientQt::displayNotification(Notification* notificati
     if (notification->isHTML())
         message = notification->url().string();
     else {
-        title = notification->contents().title;
-        message = notification->contents().body;
+        title = notification->title();
+        message = notification->body();
     }
 
     if (m_platformPlugin.plugin() && m_platformPlugin.plugin()->supportsExtension(QWebKitPlatformPlugin::Notifications))
@@ -208,16 +203,10 @@ void NotificationPresenterClientQt::displayNotification(Notification* notificati
 #ifndef QT_NO_SYSTEMTRAYICON
         if (!dumpNotification)
             wrapper->m_closeTimer.startOneShot(notificationTimeout);
-        QPixmap pixmap;
-        if (bytes.length() && pixmap.loadFromData(bytes)) {
-            QIcon icon(pixmap);
-            wrapper->m_notificationIcon = adoptPtr(new QSystemTrayIcon(icon));
-        } else
-            wrapper->m_notificationIcon = adoptPtr(new QSystemTrayIcon());
 #endif
     }
 
-    sendEvent(notification, "display");
+    wrapper->m_displayEventTimer.startOneShot(0);
 
     // Make sure the notification was not cancelled during handling the display event
     if (m_notifications.find(notification) == m_notifications.end())
@@ -231,9 +220,9 @@ void NotificationPresenterClientQt::displayNotification(Notification* notificati
     }
 
 #ifndef QT_NO_SYSTEMTRAYICON
-    wrapper->connect(wrapper->m_notificationIcon.get(), SIGNAL(messageClicked()), wrapper, SLOT(notificationClicked()));
-    wrapper->m_notificationIcon->show();
-    wrapper->m_notificationIcon->showMessage(notification->contents().title, notification->contents().body);
+    wrapper->connect(m_systemTrayIcon.data(), SIGNAL(messageClicked()), wrapper, SLOT(notificationClicked()));
+    QMetaObject::invokeMethod(m_systemTrayIcon.data(), "show");
+    QMetaObject::invokeMethod(m_systemTrayIcon.data(), "showMessage", Q_ARG(QString, notification->title()), Q_ARG(QString, notification->body()));
 #endif
 }
 
@@ -243,7 +232,7 @@ void NotificationPresenterClientQt::cancel(Notification* notification)
         if (notification->isHTML())
             printf("DESKTOP NOTIFICATION CLOSED: %s\n", QString(notification->url().string()).toUtf8().constData());
         else
-            printf("DESKTOP NOTIFICATION CLOSED: %s\n", QString(notification->contents().title).toUtf8().constData());
+            printf("DESKTOP NOTIFICATION CLOSED: %s\n", QString(notification->title()).toUtf8().constData());
     }
 
     NotificationsQueue::Iterator iter = m_notifications.find(notification);
@@ -283,7 +272,7 @@ void NotificationPresenterClientQt::notificationClicked(const QString& title)
         if (notification->isHTML())
             notificationTitle = notification->url().string();
         else
-            notificationTitle = notification->contents().title;
+            notificationTitle = notification->title();
         if (notificationTitle == title)
             break;
         iter++;
@@ -328,18 +317,17 @@ void NotificationPresenterClientQt::requestPermission(ScriptExecutionContext* co
         CallbacksInfo info;
         info.m_frame = toFrame(context);
         info.m_callbacks.append(cb);
-        m_pendingPermissionRequests.insert(context, info);
 
         if (toPage(context) && toFrame(context)) {
             m_pendingPermissionRequests.insert(context, info);
-            emit toPage(context)->featurePermissionRequested(toFrame(context), QWebPage::Notifications);
+            toPage(context)->notificationsPermissionRequested(toFrame(context));
         }
     }
 }
 
-NotificationPresenter::Permission NotificationPresenterClientQt::checkPermission(ScriptExecutionContext* context)
+NotificationClient::Permission NotificationPresenterClientQt::checkPermission(ScriptExecutionContext* context)
 {
-    return m_cachedPermissions.value(context, NotificationPresenter::PermissionNotAllowed);
+    return m_cachedPermissions.value(context, NotificationClient::PermissionNotAllowed);
 }
 
 void NotificationPresenterClientQt::cancelRequestsForPermission(ScriptExecutionContext* context)
@@ -350,10 +338,10 @@ void NotificationPresenterClientQt::cancelRequestsForPermission(ScriptExecutionC
     if (iter == m_pendingPermissionRequests.end())
         return;
 
-    QWebFrame* frame = iter.value().m_frame;
+    QWebFrameAdapter* frame = iter.value().m_frame;
     if (!frame)
         return;
-    QWebPage* page = frame->page();
+    QWebPageAdapter* page = QWebPageAdapter::kit(frame->frame->page());
     m_pendingPermissionRequests.erase(iter);
 
     if (!page)
@@ -362,12 +350,12 @@ void NotificationPresenterClientQt::cancelRequestsForPermission(ScriptExecutionC
     if (dumpNotification)
         printf("DESKTOP NOTIFICATION PERMISSION REQUEST CANCELLED: %s\n", QString(context->securityOrigin()->toString()).toUtf8().constData());
 
-    emit page->featurePermissionRequestCanceled(frame, QWebPage::Notifications);
+    page->notificationsPermissionRequestCancelled(frame);
 }
 
 void NotificationPresenterClientQt::allowNotificationForFrame(Frame* frame)
 {
-    m_cachedPermissions.insert(frame->document(), NotificationPresenter::PermissionAllowed);
+    m_cachedPermissions.insert(frame->document(), NotificationClient::PermissionAllowed);
 
     QHash<ScriptExecutionContext*,  CallbacksInfo>::iterator iter = m_pendingPermissionRequests.begin();
     while (iter != m_pendingPermissionRequests.end()) {
@@ -384,6 +372,14 @@ void NotificationPresenterClientQt::allowNotificationForFrame(Frame* frame)
     m_pendingPermissionRequests.remove(iter.key());
 }
 
+void NotificationPresenterClientQt::sendDisplayEvent(NotificationWrapper* wrapper)
+{
+    Notification* notification = notificationForWrapper(wrapper);
+    if (notification)
+        sendEvent(notification, "show");
+}
+
+
 void NotificationPresenterClientQt::sendEvent(Notification* notification, const AtomicString& eventName)
 {
     if (notification->scriptExecutionContext())
@@ -398,7 +394,7 @@ void NotificationPresenterClientQt::removeReplacedNotificationFromQueue(Notifica
 
     while (iter != end) {
         Notification* existingNotification = iter.key();
-        if (existingNotification->replaceId() == notification->replaceId() && existingNotification->url().protocol() == notification->url().protocol() && existingNotification->url().host() == notification->url().host()) {
+        if (existingNotification->tag() == notification->tag() && existingNotification->url().protocol() == notification->url().protocol() && existingNotification->url().host() == notification->url().host()) {
             oldNotification = iter.key();
             break;
         }
@@ -423,7 +419,7 @@ void NotificationPresenterClientQt::detachNotification(Notification* notificatio
 void NotificationPresenterClientQt::dumpReplacedIdText(Notification* notification)
 {
     if (notification)
-        printf("REPLACING NOTIFICATION %s\n", notification->isHTML() ? QString(notification->url().string()).toUtf8().constData() : QString(notification->contents().title).toUtf8().constData());
+        printf("REPLACING NOTIFICATION %s\n", notification->isHTML() ? QString(notification->url().string()).toUtf8().constData() : QString(notification->title()).toUtf8().constData());
 }
 
 void NotificationPresenterClientQt::dumpShowText(Notification* notification)
@@ -432,13 +428,13 @@ void NotificationPresenterClientQt::dumpShowText(Notification* notification)
         printf("DESKTOP NOTIFICATION: contents at %s\n", QString(notification->url().string()).toUtf8().constData());
     else {
         printf("DESKTOP NOTIFICATION:%s icon %s, title %s, text %s\n",
-                notification->dir() == "rtl" ? "(RTL)" : "",
-            QString(notification->contents().icon.string()).toUtf8().constData(), QString(notification->contents().title).toUtf8().constData(),
-            QString(notification->contents().body).toUtf8().constData());
+            notification->dir() == "rtl" ? "(RTL)" : "",
+            QString(notification->iconURL().string()).toUtf8().constData(), QString(notification->title()).toUtf8().constData(),
+            QString(notification->body()).toUtf8().constData());
     }
 }
 
-QWebPage* NotificationPresenterClientQt::toPage(ScriptExecutionContext* context)
+QWebPageAdapter* NotificationPresenterClientQt::toPage(ScriptExecutionContext* context)
 {
     if (!context || context->isWorkerContext())
         return 0;
@@ -449,10 +445,10 @@ QWebPage* NotificationPresenterClientQt::toPage(ScriptExecutionContext* context)
     if (!page || !page->mainFrame())
         return 0;
 
-    return QWebFramePrivate::kit(page->mainFrame())->page();
+    return QWebPageAdapter::kit(page);
 }
 
-QWebFrame* NotificationPresenterClientQt::toFrame(ScriptExecutionContext* context)
+QWebFrameAdapter* NotificationPresenterClientQt::toFrame(ScriptExecutionContext* context)
 {
     if (!context || context->isWorkerContext())
         return 0;
@@ -461,10 +457,10 @@ QWebFrame* NotificationPresenterClientQt::toFrame(ScriptExecutionContext* contex
     if (!document || !document->frame())
         return 0;
 
-    return QWebFramePrivate::kit(document->frame());
+    return QWebFrameAdapter::kit(document->frame());
 }
 
-#endif // ENABLE(NOTIFICATIONS)
+#endif // ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 }
 
 #include "moc_NotificationPresenterClientQt.cpp"

@@ -29,35 +29,27 @@
 
 #include "BackingStore.h"
 #include "DrawingAreaInfo.h"
+#include <WebCore/FloatPoint.h>
 #include <WebCore/IntRect.h>
 #include <WebCore/IntSize.h>
 #include <stdint.h>
 #include <wtf/Noncopyable.h>
 
-#if PLATFORM(QT)
-class QPainter;
-#elif PLATFORM(GTK)
-typedef struct _cairo cairo_t;
-#endif
-
 namespace CoreIPC {
-    class ArgumentDecoder;
     class Connection;
+    class MessageDecoder;
     class MessageID;
 }
 
 namespace WebCore {
-    class FloatPoint;
     class TransformationMatrix;
 }
 
 namespace WebKit {
 
 class LayerTreeContext;
-class LayerTreeHostProxy;
+class CoordinatedLayerTreeHostProxy;
 class UpdateInfo;
-class WebLayerTreeInfo;
-class WebLayerUpdateInfo;
 class WebPageProxy;
 
 class DrawingAreaProxy {
@@ -68,12 +60,14 @@ public:
 
     DrawingAreaType type() const { return m_type; }
 
-    void didReceiveDrawingAreaProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+    void didReceiveDrawingAreaProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
 
     virtual void deviceScaleFactorDidChange() = 0;
 
     // FIXME: These should be pure virtual.
     virtual void visibilityDidChange() { }
+    virtual void layerHostingModeDidChange() { }
+
     virtual void setBackingStoreIsDiscardable(bool) { }
 
     virtual void waitForBackingStoreUpdateOnNextPaint() { }
@@ -82,26 +76,20 @@ public:
     void setSize(const WebCore::IntSize&, const WebCore::IntSize& scrollOffset);
 
     virtual void pageCustomRepresentationChanged() { }
+    virtual void waitForPossibleGeometryUpdate() { }
 
-#if USE(ACCELERATED_COMPOSITING) && USE(TEXTURE_MAPPER)
+    virtual void colorSpaceDidChange() { }
+    virtual void minimumLayoutWidthDidChange() { }
+
+#if USE(COORDINATED_GRAPHICS)
     virtual void updateViewport();
     virtual WebCore::IntRect viewportVisibleRect() const { return contentsRect(); }
     virtual WebCore::IntRect contentsRect() const;
-    virtual bool isBackingStoreReady() const { return true; }
-    virtual void paintToCurrentGLContext(const WebCore::TransformationMatrix&, float opacity) { }
-    virtual void paintLayerTree(BackingStore::PlatformGraphicsContext) { }
-    LayerTreeHostProxy* layerTreeHostProxy() const { return m_layerTreeHostProxy.get(); }
-
-#if USE(TILED_BACKING_STORE)
-    virtual void setVisibleContentsRectAndScale(const WebCore::IntRect& visibleContentsRect, float scale) { }
-    virtual void setVisibleContentRectTrajectoryVector(const WebCore::FloatPoint&) { }
-    virtual void createTileForLayer(int layerID, int tileID, const WebKit::UpdateInfo&) { }
-    virtual void updateTileForLayer(int layerID, int tileID, const WebKit::UpdateInfo&) { }
-    virtual void removeTileForLayer(int layerID, int tileID) { }
-    virtual void didReceiveLayerTreeHostProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::ArgumentDecoder*);
+    CoordinatedLayerTreeHostProxy* coordinatedLayerTreeHostProxy() const { return m_coordinatedLayerTreeHostProxy.get(); }
+    virtual void setVisibleContentsRect(const WebCore::FloatRect& /* visibleContentsRect */, float /* scale */, const WebCore::FloatPoint& /* trajectoryVector */) { }
+    virtual void didReceiveCoordinatedLayerTreeHostProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
 
     WebPageProxy* page() { return m_webPageProxy; }
-#endif
 #endif
 protected:
     explicit DrawingAreaProxy(DrawingAreaType, WebPageProxy*);
@@ -112,8 +100,8 @@ protected:
     WebCore::IntSize m_size;
     WebCore::IntSize m_scrollOffset;
 
-#if USE(ACCELERATED_COMPOSITING) && USE(TEXTURE_MAPPER)
-    OwnPtr<LayerTreeHostProxy> m_layerTreeHostProxy;
+#if USE(COORDINATED_GRAPHICS)
+    OwnPtr<CoordinatedLayerTreeHostProxy> m_coordinatedLayerTreeHostProxy;
 #endif
 
 private:
@@ -121,22 +109,16 @@ private:
 
     // CoreIPC message handlers.
     // FIXME: These should be pure virtual.
-    virtual void update(uint64_t backingStoreStateID, const UpdateInfo&) { }
-    virtual void didUpdateBackingStoreState(uint64_t backingStoreStateID, const UpdateInfo&, const LayerTreeContext&) { }
+    virtual void update(uint64_t /* backingStoreStateID */, const UpdateInfo&) { }
+    virtual void didUpdateBackingStoreState(uint64_t /* backingStoreStateID */, const UpdateInfo&, const LayerTreeContext&) { }
 #if USE(ACCELERATED_COMPOSITING)
-    virtual void enterAcceleratedCompositingMode(uint64_t backingStoreStateID, const LayerTreeContext&) { }
-    virtual void exitAcceleratedCompositingMode(uint64_t backingStoreStateID, const UpdateInfo&) { }
+    virtual void enterAcceleratedCompositingMode(uint64_t /* backingStoreStateID */, const LayerTreeContext&) { }
+    virtual void exitAcceleratedCompositingMode(uint64_t /* backingStoreStateID */, const UpdateInfo&) { }
+    virtual void updateAcceleratedCompositingMode(uint64_t /* backingStoreStateID */, const LayerTreeContext&) { }
 #endif
 #if PLATFORM(MAC)
-    virtual void didUpdateGeometry() { }
-#endif
-#if USE(TILED_BACKING_STORE)
-    virtual void snapshotTaken(const UpdateInfo&) { }
-    virtual void createTile(int tileID, const UpdateInfo& updateInfo) { }
-    virtual void updateTile(int tileID, const UpdateInfo& updateInfo) { }
-    virtual void didRenderFrame() { }
-    virtual void removeTile(int tileID) { }
-    virtual void allTileUpdatesProcessed() { }
+    virtual void didUpdateGeometry(const WebCore::IntSize& newIntrinsicContentSize) { }
+    virtual void intrinsicContentSizeDidChange(const WebCore::IntSize& newIntrinsicContentSize) { }
 #endif
 };
 

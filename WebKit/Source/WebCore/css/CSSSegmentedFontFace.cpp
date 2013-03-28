@@ -81,19 +81,41 @@ void CSSSegmentedFontFace::appendFontFace(PassRefPtr<CSSFontFace> fontFace)
     m_fontFaces.append(fontFace);
 }
 
-FontData* CSSSegmentedFontFace::getFontData(const FontDescription& fontDescription)
+static void appendFontDataWithInvalidUnicodeRangeIfLoading(SegmentedFontData* newFontData, PassRefPtr<SimpleFontData> prpFaceFontData, const Vector<CSSFontFace::UnicodeRange>& ranges)
+{
+    RefPtr<SimpleFontData> faceFontData = prpFaceFontData;
+    if (faceFontData->isLoading()) {
+        newFontData->appendRange(FontDataRange(0, 0, faceFontData));
+        return;
+    }
+
+    unsigned numRanges = ranges.size();
+    if (!numRanges) {
+        newFontData->appendRange(FontDataRange(0, 0x7FFFFFFF, faceFontData));
+        return;
+    }
+
+    for (unsigned j = 0; j < numRanges; ++j)
+        newFontData->appendRange(FontDataRange(ranges[j].from(), ranges[j].to(), faceFontData));
+}
+
+PassRefPtr<FontData> CSSSegmentedFontFace::getFontData(const FontDescription& fontDescription)
 {
     if (!isValid())
         return 0;
 
     FontTraitsMask desiredTraitsMask = fontDescription.traitsMask();
-    unsigned hashKey = ((fontDescription.computedPixelSize() + 1) << (FontTraitsMaskWidth + 1)) | ((fontDescription.orientation() == Vertical ? 1 : 0) << FontTraitsMaskWidth) | desiredTraitsMask;
+    unsigned hashKey = ((fontDescription.computedPixelSize() + 1) << (FontTraitsMaskWidth + FontWidthVariantWidth + 1))
+        | ((fontDescription.orientation() == Vertical ? 1 : 0) << (FontTraitsMaskWidth + FontWidthVariantWidth))
+        | fontDescription.widthVariant() << FontTraitsMaskWidth
+        | desiredTraitsMask;
 
-    SegmentedFontData*& fontData = m_fontDataTable.add(hashKey, 0).first->second;
-    if (fontData)
-        return fontData;
+    RefPtr<SegmentedFontData>& fontData = m_fontDataTable.add(hashKey, 0).iterator->value;
+    if (fontData && fontData->numRanges())
+        return fontData; // No release, we have a reference to an object in the cache which should retain the ref count it has.
 
-    OwnPtr<SegmentedFontData> newFontData = adoptPtr(new SegmentedFontData);
+    if (!fontData)
+        fontData = SegmentedFontData::create();
 
     unsigned size = m_fontFaces.size();
     for (unsigned i = 0; i < size; i++) {
@@ -102,29 +124,15 @@ FontData* CSSSegmentedFontFace::getFontData(const FontDescription& fontDescripti
         FontTraitsMask traitsMask = m_fontFaces[i]->traitsMask();
         bool syntheticBold = !(traitsMask & (FontWeight600Mask | FontWeight700Mask | FontWeight800Mask | FontWeight900Mask)) && (desiredTraitsMask & (FontWeight600Mask | FontWeight700Mask | FontWeight800Mask | FontWeight900Mask));
         bool syntheticItalic = !(traitsMask & FontStyleItalicMask) && (desiredTraitsMask & FontStyleItalicMask);
-        if (const SimpleFontData* faceFontData = m_fontFaces[i]->getFontData(fontDescription, syntheticBold, syntheticItalic)) {
+        if (RefPtr<SimpleFontData> faceFontData = m_fontFaces[i]->getFontData(fontDescription, syntheticBold, syntheticItalic)) {
             ASSERT(!faceFontData->isSegmented());
-            const Vector<CSSFontFace::UnicodeRange>& ranges = m_fontFaces[i]->ranges();
-            unsigned numRanges = ranges.size();
-            if (!numRanges)
-                newFontData->appendRange(FontDataRange(0, 0x7FFFFFFF, faceFontData));
-            else {
-                for (unsigned j = 0; j < numRanges; ++j)
-                    newFontData->appendRange(FontDataRange(ranges[j].from(), ranges[j].to(), faceFontData));
-            }
+            appendFontDataWithInvalidUnicodeRangeIfLoading(fontData.get(), faceFontData.release(), m_fontFaces[i]->ranges());
         }
     }
-    if (newFontData->numRanges()) {
-#if !OS(ANDROID) // FIXME: Enable this assert http://b/5634166.
-        ASSERT(m_fontSelector->document());
-#endif
-        if (Document* document = m_fontSelector->document()) {
-            fontData = newFontData.get();
-            document->registerCustomFont(newFontData.release());
-        }
-    }
+    if (fontData->numRanges())
+        return fontData; // No release, we have a reference to an object in the cache which should retain the ref count it has.
 
-    return fontData;
+    return 0;
 }
 
 }

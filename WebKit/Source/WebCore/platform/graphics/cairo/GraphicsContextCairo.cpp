@@ -6,6 +6,7 @@
  * Copyright (C) 2009 Brent Fulgham <bfulgham@webkit.org>
  * Copyright (C) 2010, 2011 Igalia S.L.
  * Copyright (C) Research In Motion Limited 2010. All rights reserved.
+ * Copyright (C) 2012, Intel Corporation
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,9 +41,9 @@
 #include "FloatRect.h"
 #include "Font.h"
 #include "GraphicsContextPlatformPrivateCairo.h"
-#include "OwnPtrCairo.h"
 #include "IntRect.h"
 #include "NotImplemented.h"
+#include "OwnPtrCairo.h"
 #include "Path.h"
 #include "Pattern.h"
 #include "PlatformContextCairo.h"
@@ -64,20 +65,15 @@
 
 using namespace std;
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
 namespace WebCore {
 
 // A helper which quickly fills a rectangle with a simple color fill.
 static inline void fillRectWithColor(cairo_t* cr, const FloatRect& rect, const Color& color)
 {
-    if (!color.alpha())
+    if (!color.alpha() && cairo_get_operator(cr) == CAIRO_OPERATOR_OVER)
         return;
     setSourceRGBAFromColor(cr, color);
     cairo_rectangle(cr, rect.x(), rect.y(), rect.width(), rect.height());
-    cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
     cairo_fill(cr);
 }
 
@@ -192,7 +188,7 @@ void GraphicsContext::platformDestroy()
     delete m_data;
 }
 
-AffineTransform GraphicsContext::getCTM() const
+AffineTransform GraphicsContext::getCTM(IncludeDeviceScale) const
 {
     if (paintingDisabled())
         return AffineTransform();
@@ -231,6 +227,8 @@ void GraphicsContext::drawRect(const IntRect& rect)
 {
     if (paintingDisabled())
         return;
+
+    ASSERT(!rect.isEmpty());
 
     cairo_t* cr = platformContext()->cr();
     cairo_save(cr);
@@ -351,7 +349,7 @@ void GraphicsContext::drawEllipse(const IntRect& rect)
     float xRadius = .5 * rect.width();
     cairo_translate(cr, rect.x() + xRadius, rect.y() + yRadius);
     cairo_scale(cr, xRadius, yRadius);
-    cairo_arc(cr, 0., 0., 1., 0., 2 * M_PI);
+    cairo_arc(cr, 0., 0., 1., 0., 2 * piFloat);
     cairo_restore(cr);
 
     if (fillColor().alpha()) {
@@ -390,7 +388,7 @@ void GraphicsContext::strokeArc(const IntRect& rect, int startAngle, int angleSp
     if (w != h)
         cairo_scale(cr, 1., scaleFactor);
 
-    cairo_arc_negative(cr, x + hRadius, (y + vRadius) * reverseScaleFactor, hRadius, -fa * M_PI/180, -falen * M_PI/180);
+    cairo_arc_negative(cr, x + hRadius, (y + vRadius) * reverseScaleFactor, hRadius, deg2rad(-fa), deg2rad(-falen));
 
     if (w != h)
         cairo_scale(cr, 1., reverseScaleFactor);
@@ -479,7 +477,7 @@ void GraphicsContext::clipConvexPolygon(size_t numPoints, const FloatPoint* poin
 
 void GraphicsContext::fillPath(const Path& path)
 {
-    if (paintingDisabled())
+    if (paintingDisabled() || path.isEmpty())
         return;
 
     cairo_t* cr = platformContext()->cr();
@@ -489,7 +487,7 @@ void GraphicsContext::fillPath(const Path& path)
 
 void GraphicsContext::strokePath(const Path& path)
 {
-    if (paintingDisabled())
+    if (paintingDisabled() || path.isEmpty())
         return;
 
     cairo_t* cr = platformContext()->cr();
@@ -527,8 +525,16 @@ void GraphicsContext::clip(const FloatRect& rect)
     cairo_rectangle(cr, rect.x(), rect.y(), rect.width(), rect.height());
     cairo_fill_rule_t savedFillRule = cairo_get_fill_rule(cr);
     cairo_set_fill_rule(cr, CAIRO_FILL_RULE_WINDING);
+    // The rectangular clip function is traditionally not expected to
+    // antialias. If we don't force antialiased clipping here,
+    // edge fringe artifacts may occur at the layer edges
+    // when a transformation is applied to the GraphicsContext
+    // while drawing the transformed layer.
+    cairo_antialias_t savedAntialiasRule = cairo_get_antialias(cr);
+    cairo_set_antialias(cr, CAIRO_ANTIALIAS_NONE);
     cairo_clip(cr);
     cairo_set_fill_rule(cr, savedFillRule);
+    cairo_set_antialias(cr, savedAntialiasRule);
     m_data->clip(rect);
 }
 
@@ -538,7 +544,8 @@ void GraphicsContext::clipPath(const Path& path, WindRule clipRule)
         return;
 
     cairo_t* cr = platformContext()->cr();
-    setPathOnCairoContext(cr, path.platformPath()->context());
+    if (!path.isNull())
+        setPathOnCairoContext(cr, path.platformPath()->context());
     cairo_set_fill_rule(cr, clipRule == RULE_EVENODD ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING);
     cairo_clip(cr);
 }
@@ -562,6 +569,8 @@ static inline void adjustFocusRingLineWidth(int& width)
 {
 #if PLATFORM(GTK)
     width = 2;
+#else
+    UNUSED_PARAM(width);
 #endif
 }
 
@@ -656,7 +665,7 @@ void GraphicsContext::drawFocusRing(const Vector<IntRect>& rects, int width, int
     cairo_restore(cr);
 }
 
-void GraphicsContext::drawLineForText(const FloatPoint& origin, float width, bool printing)
+void GraphicsContext::drawLineForText(const FloatPoint& origin, float width, bool)
 {
     if (paintingDisabled())
         return;
@@ -682,7 +691,7 @@ void GraphicsContext::drawLineForText(const FloatPoint& origin, float width, boo
 #include "DrawErrorUnderline.h"
 #endif
 
-void GraphicsContext::drawLineForTextChecking(const FloatPoint& origin, float width, TextCheckingLineStyle style)
+void GraphicsContext::drawLineForDocumentMarker(const FloatPoint& origin, float width, DocumentMarkerLineStyle style)
 {
     if (paintingDisabled())
         return;
@@ -691,10 +700,10 @@ void GraphicsContext::drawLineForTextChecking(const FloatPoint& origin, float wi
     cairo_save(cr);
 
     switch (style) {
-    case TextCheckingSpellingLineStyle:
+    case DocumentMarkerSpellingLineStyle:
         cairo_set_source_rgb(cr, 1, 0, 0);
         break;
-    case TextCheckingGrammarLineStyle:
+    case DocumentMarkerGrammarLineStyle:
         cairo_set_source_rgb(cr, 0, 1, 0);
         break;
     default:
@@ -759,13 +768,13 @@ void GraphicsContext::translate(float x, float y)
     m_data->translate(x, y);
 }
 
-void GraphicsContext::setPlatformFillColor(const Color& col, ColorSpace colorSpace)
+void GraphicsContext::setPlatformFillColor(const Color&, ColorSpace)
 {
     // Cairo contexts can't hold separate fill and stroke colors
     // so we set them just before we actually fill or stroke
 }
 
-void GraphicsContext::setPlatformStrokeColor(const Color& col, ColorSpace colorSpace)
+void GraphicsContext::setPlatformStrokeColor(const Color&, ColorSpace)
 {
     // Cairo contexts can't hold separate fill and stroke colors
     // so we set them just before we actually fill or stroke
@@ -793,6 +802,10 @@ void GraphicsContext::setPlatformStrokeStyle(StrokeStyle strokeStyle)
         cairo_set_line_width(platformContext()->cr(), 0);
         break;
     case SolidStroke:
+#if ENABLE(CSS3_TEXT)
+    case DoubleStroke:
+    case WavyStroke: // FIXME: https://bugs.webkit.org/show_bug.cgi?id=94110 - Needs platform support.
+#endif // CSS3_TEXT
         cairo_set_dash(platformContext()->cr(), 0, 0, 0);
         break;
     case DottedStroke:
@@ -804,7 +817,7 @@ void GraphicsContext::setPlatformStrokeStyle(StrokeStyle strokeStyle)
     }
 }
 
-void GraphicsContext::setURLForRect(const KURL& link, const IntRect& destRect)
+void GraphicsContext::setURLForRect(const KURL&, const IntRect&)
 {
     notImplemented();
 }
@@ -854,7 +867,7 @@ void GraphicsContext::addInnerRoundedRectClip(const IntRect& rect, int thickness
     cairo_set_fill_rule(cr, savedFillRule);
 }
 
-void GraphicsContext::setPlatformShadow(FloatSize const& size, float blur, Color const& color, ColorSpace)
+void GraphicsContext::setPlatformShadow(FloatSize const& size, float, Color const&, ColorSpace)
 {
     if (paintingDisabled())
         return;
@@ -993,7 +1006,7 @@ void GraphicsContext::setAlpha(float alpha)
     platformContext()->setGlobalAlpha(alpha);
 }
 
-void GraphicsContext::setPlatformCompositeOperation(CompositeOperator op)
+void GraphicsContext::setPlatformCompositeOperation(CompositeOperator op, BlendMode)
 {
     if (paintingDisabled())
         return;
@@ -1007,8 +1020,11 @@ void GraphicsContext::clip(const Path& path)
         return;
 
     cairo_t* cr = platformContext()->cr();
-    OwnPtr<cairo_path_t> pathCopy = adoptPtr(cairo_copy_path(path.platformPath()->context()));
-    cairo_append_path(cr, pathCopy.get());
+    OwnPtr<cairo_path_t> pathCopy;
+    if (!path.isNull()) {
+        pathCopy = adoptPtr(cairo_copy_path(path.platformPath()->context()));
+        cairo_append_path(cr, pathCopy.get());
+    }
     cairo_fill_rule_t savedFillRule = cairo_get_fill_rule(cr);
     cairo_set_fill_rule(cr, CAIRO_FILL_RULE_WINDING);
     cairo_clip(cr);
@@ -1080,7 +1096,7 @@ static inline FloatPoint getPhase(const FloatRect& dest, const FloatRect& tile)
     return phase;
 }
 
-void GraphicsContext::fillRoundedRect(const IntRect& r, const IntSize& topLeft, const IntSize& topRight, const IntSize& bottomLeft, const IntSize& bottomRight, const Color& color, ColorSpace colorSpace)
+void GraphicsContext::fillRoundedRect(const IntRect& r, const IntSize& topLeft, const IntSize& topRight, const IntSize& bottomLeft, const IntSize& bottomRight, const Color& color, ColorSpace)
 {
     if (paintingDisabled())
         return;
@@ -1138,6 +1154,24 @@ InterpolationQuality GraphicsContext::imageInterpolationQuality() const
 {
     return platformContext()->imageInterpolationQuality();
 }
+
+#if ENABLE(3D_RENDERING) && USE(TEXTURE_MAPPER)
+TransformationMatrix GraphicsContext::get3DTransform() const
+{
+    // FIXME: Can we approximate the transformation better than this?
+    return getCTM().toTransformationMatrix();
+}
+
+void GraphicsContext::concat3DTransform(const TransformationMatrix& transform)
+{
+    concatCTM(transform.toAffineTransform());
+}
+
+void GraphicsContext::set3DTransform(const TransformationMatrix& transform)
+{
+    setCTM(transform.toAffineTransform());
+}
+#endif
 
 } // namespace WebCore
 

@@ -18,37 +18,40 @@
  * Boston, MA 02110-1301, USA.
  */
 
-module css {
+// Introduced in DOM Level 2:
+[
+    JSCustomMarkFunction,
+    JSGenerateIsReachable,
+    CustomToJSObject,
+    ObjCPolymorphic,
+    V8DependentLifetime,
+    V8SkipVTableValidation
+] interface CSSRule {
 
-    // Introduced in DOM Level 2:
-    interface [
-        CustomMarkFunction,
-        GenerateIsReachable,
-        CustomToJS,
-        Polymorphic,
-        V8DependentLifetime
-    ] CSSRule {
+    // RuleType
+    const unsigned short UNKNOWN_RULE = 0;
+    const unsigned short STYLE_RULE = 1;
+    const unsigned short CHARSET_RULE = 2;
+    const unsigned short IMPORT_RULE = 3;
+    const unsigned short MEDIA_RULE = 4;
+    const unsigned short FONT_FACE_RULE = 5;
+    const unsigned short PAGE_RULE = 6;
+    const unsigned short WEBKIT_KEYFRAMES_RULE = 7;
+    const unsigned short WEBKIT_KEYFRAME_RULE = 8;
+#if defined(ENABLE_CSS_DEVICE_ADAPTATION) && ENABLE_CSS_DEVICE_ADAPTATION
+    const unsigned short WEBKIT_VIEWPORT_RULE = 15;
+#endif
+#if defined(ENABLE_CSS_REGIONS) && ENABLE_CSS_REGIONS
+    const unsigned short WEBKIT_REGION_RULE = 16;
+#endif
 
-        // RuleType
-        const unsigned short UNKNOWN_RULE = 0;
-        const unsigned short STYLE_RULE = 1;
-        const unsigned short CHARSET_RULE = 2;
-        const unsigned short IMPORT_RULE = 3;
-        const unsigned short MEDIA_RULE = 4;
-        const unsigned short FONT_FACE_RULE = 5;
-        const unsigned short PAGE_RULE = 6;
-        const unsigned short WEBKIT_KEYFRAMES_RULE = 8;
-        const unsigned short WEBKIT_KEYFRAME_RULE = 9;
-        const unsigned short WEBKIT_REGION_RULE = 10;
+    readonly attribute unsigned short   type;
 
-        readonly attribute unsigned short   type;
+             [TreatReturnedNullStringAs=Null, TreatNullAs=NullString] attribute DOMString        cssText
+                 setter raises (DOMException);
 
-                 attribute [ConvertNullStringTo=Null, ConvertNullToNullString] DOMString        cssText
-                     setter raises (DOMException);
+    readonly attribute CSSStyleSheet    parentStyleSheet;
+    readonly attribute CSSRule          parentRule;
 
-        readonly attribute CSSStyleSheet    parentStyleSheet;
-        readonly attribute CSSRule          parentRule;
+};
 
-    };
-
-}

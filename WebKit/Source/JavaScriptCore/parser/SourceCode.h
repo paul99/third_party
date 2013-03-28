@@ -47,7 +47,7 @@ namespace JSC {
         SourceCode(PassRefPtr<SourceProvider> provider, int firstLine = 1)
             : m_provider(provider)
             , m_startChar(0)
-            , m_endChar(m_provider->length())
+            , m_endChar(m_provider->source().length())
             , m_firstLine(std::max(firstLine, 1))
         {
         }
@@ -60,11 +60,18 @@ namespace JSC {
         {
         }
 
-        UString toString() const
+        String toString() const
         {
             if (!m_provider)
-                return UString();
+                return String();
             return m_provider->getRange(m_startChar, m_endChar);
+        }
+        
+        intptr_t providerID() const
+        {
+            if (!m_provider)
+                return SourceProvider::nullID;
+            return m_provider->asID();
         }
         
         bool isNull() const { return !m_provider; }
@@ -72,11 +79,6 @@ namespace JSC {
         int firstLine() const { return m_firstLine; }
         int startOffset() const { return m_startChar; }
         int endOffset() const { return m_endChar; }
-        const UChar* data() const
-        {
-            ASSERT(m_provider->data());
-            return m_provider->data()->characters16() + m_startChar;
-        }
         int length() const { return m_endChar - m_startChar; }
         
         SourceCode subExpression(unsigned openBrace, unsigned closeBrace, int firstLine);
@@ -88,15 +90,15 @@ namespace JSC {
         int m_firstLine;
     };
 
-    inline SourceCode makeSource(const UString& source, const UString& url = UString(), const TextPosition& startPosition = TextPosition::minimumPosition())
+    inline SourceCode makeSource(const String& source, const String& url = String(), const TextPosition& startPosition = TextPosition::minimumPosition())
     {
-        return SourceCode(UStringSourceProvider::create(source, url, startPosition), startPosition.m_line.oneBasedInt());
+        return SourceCode(StringSourceProvider::create(source, url, startPosition), startPosition.m_line.oneBasedInt());
     }
 
     inline SourceCode SourceCode::subExpression(unsigned openBrace, unsigned closeBrace, int firstLine)
     {
-        ASSERT((*provider()->data())[openBrace] == '{');
-        ASSERT((*provider()->data())[closeBrace] == '}');
+        ASSERT(provider()->source()[openBrace] == '{');
+        ASSERT(provider()->source()[closeBrace] == '}');
         return SourceCode(provider(), openBrace, closeBrace + 1, firstLine);
     }
 

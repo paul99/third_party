@@ -27,6 +27,7 @@
 #define StorageAreaImpl_h
 
 #include "StorageArea.h"
+#include "Timer.h"
 
 #include <wtf/PassRefPtr.h>
 #include <wtf/RefPtr.h>
@@ -43,15 +44,21 @@ namespace WebCore {
         virtual ~StorageAreaImpl();
 
         // The HTML5 DOM Storage API (and contains)
-        virtual unsigned length(Frame* sourceFrame) const;
-        virtual String key(unsigned index, Frame* sourceFrame) const;
-        virtual String getItem(const String& key, Frame* sourceFrame) const;
-        virtual String setItem(const String& key, const String& value, ExceptionCode& ec, Frame* sourceFrame);
-        virtual String removeItem(const String& key, Frame* sourceFrame);
-        virtual bool clear(Frame* sourceFrame);
-        virtual bool contains(const String& key, Frame* sourceFrame) const;
+        virtual unsigned length(ExceptionCode&, Frame* sourceFrame) const;
+        virtual String key(unsigned index, ExceptionCode&, Frame* sourceFrame) const;
+        virtual String getItem(const String& key, ExceptionCode&, Frame* sourceFrame) const;
+        virtual void setItem(const String& key, const String& value, ExceptionCode&, Frame* sourceFrame);
+        virtual void removeItem(const String& key, ExceptionCode&, Frame* sourceFrame);
+        virtual void clear(ExceptionCode&, Frame* sourceFrame);
+        virtual bool contains(const String& key, ExceptionCode&, Frame* sourceFrame) const;
 
-        virtual bool disabledByPrivateBrowsingInFrame(const Frame* sourceFrame) const;
+        virtual bool canAccessStorage(Frame* sourceFrame) const;
+
+        virtual size_t memoryBytesUsedByCache() const;
+
+        virtual void incrementAccessCount();
+        virtual void decrementAccessCount();
+        virtual void closeDatabaseIfIdle();
 
         PassRefPtr<StorageAreaImpl> copy();
         void close();
@@ -66,9 +73,11 @@ namespace WebCore {
 
     private:
         StorageAreaImpl(StorageType, PassRefPtr<SecurityOrigin>, PassRefPtr<StorageSyncManager>, unsigned quota);
-        StorageAreaImpl(StorageAreaImpl*);
+        explicit StorageAreaImpl(StorageAreaImpl*);
 
         void blockUntilImportComplete() const;
+        void closeDatabaseTimerFired(Timer<StorageAreaImpl>*);
+        bool disabledByPrivateBrowsingInFrame(const Frame* sourceFrame) const;
 
         StorageType m_storageType;
         RefPtr<SecurityOrigin> m_securityOrigin;
@@ -80,6 +89,8 @@ namespace WebCore {
 #ifndef NDEBUG
         bool m_isShutdown;
 #endif
+        unsigned m_accessCount;
+        Timer<StorageAreaImpl> m_closeDatabaseTimer;
     };
 
 } // namespace WebCore

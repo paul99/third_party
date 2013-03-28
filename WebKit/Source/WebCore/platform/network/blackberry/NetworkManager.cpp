@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009, 2010, 2011 Research In Motion Limited. All rights reserved.
+ * Copyright (C) 2009, 2010, 2011, 2012 Research In Motion Limited. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,7 +20,6 @@
 #include "NetworkManager.h"
 
 #include "Chrome.h"
-#include "CookieManager.h"
 #include "CredentialStorage.h"
 #include "Frame.h"
 #include "FrameLoaderClientBlackBerry.h"
@@ -28,22 +27,18 @@
 #include "Page.h"
 #include "ResourceHandleInternal.h"
 #include "ResourceRequest.h"
+#include "SecurityOrigin.h"
 
+#include <BlackBerryPlatformLog.h>
+#include <BuildInformation.h>
+#include <network/FilterStream.h>
 #include <network/NetworkRequest.h>
 
 namespace WebCore {
 
-NetworkManager* NetworkManager::instance()
-{
-    static NetworkManager* sInstance;
-    if (!sInstance) {
-        sInstance = new NetworkManager;
-        ASSERT(sInstance);
-    }
-    return sInstance;
-}
+SINGLETON_INITIALIZER_THREADUNSAFE(NetworkManager)
 
-bool NetworkManager::startJob(int playerId, PassRefPtr<ResourceHandle> job, const Frame& frame, bool defersLoading)
+bool NetworkManager::startJob(int playerId, PassRefPtr<ResourceHandle> job, Frame* frame, bool defersLoading)
 {
     ASSERT(job.get());
     // We shouldn't call methods on PassRefPtr so make a new RefPt.
@@ -51,16 +46,16 @@ bool NetworkManager::startJob(int playerId, PassRefPtr<ResourceHandle> job, cons
     return startJob(playerId, refJob, refJob->firstRequest(), frame, defersLoading);
 }
 
-bool NetworkManager::startJob(int playerId, PassRefPtr<ResourceHandle> job, const ResourceRequest& request, const Frame& frame, bool defersLoading)
+bool NetworkManager::startJob(int playerId, PassRefPtr<ResourceHandle> job, const ResourceRequest& request, Frame* frame, bool defersLoading)
 {
-    Page* page = frame.page();
+    Page* page = frame->page();
     if (!page)
         return false;
     BlackBerry::Platform::NetworkStreamFactory* streamFactory = page->chrome()->platformPageClient()->networkStreamFactory();
     return startJob(playerId, page->groupName(), job, request, streamFactory, frame, defersLoading ? 1 : 0);
 }
 
-bool NetworkManager::startJob(int playerId, const String& pageGroupName, PassRefPtr<ResourceHandle> job, const ResourceRequest& request, BlackBerry::Platform::NetworkStreamFactory* streamFactory, const Frame& frame, int deferLoadingCount, int redirectCount)
+bool NetworkManager::startJob(int playerId, const String& pageGroupName, PassRefPtr<ResourceHandle> job, const ResourceRequest& request, BlackBerry::Platform::NetworkStreamFactory* streamFactory, Frame* frame, int deferLoadingCount, int redirectCount)
 {
     // Make sure the ResourceHandle doesn't go out of scope while calling callbacks.
     RefPtr<ResourceHandle> guardJob(job);
@@ -73,7 +68,14 @@ bool NetworkManager::startJob(int playerId, const String& pageGroupName, PassRef
         m_initialURL = KURL();
 
     BlackBerry::Platform::NetworkRequest platformRequest;
-    request.initializePlatformRequest(platformRequest, isInitial);
+    request.initializePlatformRequest(platformRequest, frame->loader() && frame->loader()->client() && static_cast<FrameLoaderClientBlackBerry*>(frame->loader()->client())->cookiesEnabled(), isInitial, redirectCount);
+
+    const String& documentUrl = frame->document()->url().string();
+    if (!documentUrl.isEmpty()) {
+        platformRequest.setReferrer(documentUrl);
+    }
+
+    platformRequest.setSecurityOrigin(frame->document()->securityOrigin()->toRawString());
 
     // Attach any applicable auth credentials to the NetworkRequest.
     AuthenticationChallenge& challenge = guardJob->getInternal()->m_currentWebChallenge;
@@ -86,13 +88,16 @@ bool NetworkManager::startJob(int playerId, const String& pageGroupName, PassRef
         String password = credential.password();
 
         BlackBerry::Platform::NetworkRequest::AuthType authType = BlackBerry::Platform::NetworkRequest::AuthNone;
-        if (type == ProtectionSpaceServerHTTP) {
+        if (type == ProtectionSpaceServerHTTP || type == ProtectionSpaceServerHTTPS) {
             switch (protectionSpace.authenticationScheme()) {
             case ProtectionSpaceAuthenticationSchemeHTTPBasic:
                 authType = BlackBerry::Platform::NetworkRequest::AuthHTTPBasic;
                 break;
             case ProtectionSpaceAuthenticationSchemeHTTPDigest:
                 authType = BlackBerry::Platform::NetworkRequest::AuthHTTPDigest;
+                break;
+            case ProtectionSpaceAuthenticationSchemeNegotiate:
+                authType = BlackBerry::Platform::NetworkRequest::AuthNegotiate;
                 break;
             case ProtectionSpaceAuthenticationSchemeNTLM:
                 authType = BlackBerry::Platform::NetworkRequest::AuthHTTPNTLM;
@@ -102,30 +107,13 @@ bool NetworkManager::startJob(int playerId, const String& pageGroupName, PassRef
                 // Defaults to AuthNone as per above.
                 break;
             }
-        } else if (type == ProtectionSpaceServerFTP)
+        } else if (type == ProtectionSpaceServerFTP || type == ProtectionSpaceServerFTPS)
             authType = BlackBerry::Platform::NetworkRequest::AuthFTP;
-        else if (type == ProtectionSpaceProxyHTTP)
+        else if (type == ProtectionSpaceProxyHTTP || type == ProtectionSpaceProxyHTTPS)
             authType = BlackBerry::Platform::NetworkRequest::AuthProxy;
 
         if (authType != BlackBerry::Platform::NetworkRequest::AuthNone)
             platformRequest.setCredentials(username.utf8().data(), password.utf8().data(), authType);
-    } else if (url.protocolInHTTPFamily()) {
-        // For URLs that match the paths of those previously challenged for HTTP Basic authentication,
-        // try and reuse the credential preemptively, as allowed by RFC 2617.
-        Credential credential = CredentialStorage::get(url);
-        if (!credential.isEmpty())
-            platformRequest.setCredentials(credential.user().utf8().data(), credential.password().utf8().data(), BlackBerry::Platform::NetworkRequest::AuthHTTPBasic);
-    }
-
-    if ((&frame) && (&frame)->loader() && (&frame)->loader()->client()
-        && static_cast<FrameLoaderClientBlackBerry*>((&frame)->loader()->client())->cookiesEnabled()) {
-        // Prepare a cookie header if there are cookies related to this url.
-        String cookiePairs = cookieManager().getCookie(url, WithHttpOnlyCookies);
-        if (!cookiePairs.isEmpty()) {
-            // We encode the cookie header data using utf8 to support unicode characters.
-            // For more information, look at RFC5987 - 4.1 (http://tools.ietf.org/html/rfc5987#ref-ISO-8859-1).
-            platformRequest.setCookieData(cookiePairs.utf8().data());
-        }
     }
 
     if (!request.overrideContentType().isEmpty())
@@ -143,17 +131,6 @@ bool NetworkManager::startJob(int playerId, const String& pageGroupName, PassRef
     ASSERT(!findJobForHandle(guardJob));
 
     m_jobs.append(networkJob);
-
-    if (url.protocolIs("data")) {
-        networkJob->loadDataURL();
-        return true;
-    }
-
-    if (url.protocolIs("about")) {
-        // Try to handle the url internally; if it isn't recognized, continue and pass it to the client.
-        if (networkJob->loadAboutURL())
-            return true;
-    }
 
     int result = networkJob->streamOpen();
     if (result)
@@ -173,10 +150,10 @@ NetworkJob* NetworkManager::findJobForHandle(PassRefPtr<ResourceHandle> job)
 {
     for (unsigned i = 0; i < m_jobs.size(); ++i) {
         NetworkJob* networkJob = m_jobs[i];
-        if (networkJob->handle() == job) {
-            // We have only one job for one handle.
+        // We have only one job for one handle (not including cancelled jobs which may hang
+        // around briefly), so return the first non-cancelled job.
+        if (!networkJob->isCancelled() && networkJob->handle() == job)
             return networkJob;
-        }
     }
     return 0;
 }

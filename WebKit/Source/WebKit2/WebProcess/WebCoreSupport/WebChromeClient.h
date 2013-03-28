@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2010, 2011, 2012 Apple Inc. All rights reserved.
  * Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,6 +28,7 @@
 #define WebChromeClient_h
 
 #include <WebCore/ChromeClient.h>
+#include <WebCore/Image.h>
 #include <WebCore/ViewportArguments.h>
 #include <wtf/text/WTFString.h>
 
@@ -90,7 +91,7 @@ private:
     
     virtual void setResizable(bool) OVERRIDE;
     
-    virtual void addMessageToConsole(WebCore::MessageSource, WebCore::MessageType, WebCore::MessageLevel, const String& message, unsigned int lineNumber, const String& sourceID) OVERRIDE;
+    virtual void addMessageToConsole(WebCore::MessageSource, WebCore::MessageLevel, const String& message, unsigned lineNumber, const String& sourceID) OVERRIDE;
     
     virtual bool canRunBeforeUnloadConfirmPanel() OVERRIDE;
     virtual bool runBeforeUnloadConfirmPanel(const String& message, WebCore::Frame*) OVERRIDE;
@@ -121,8 +122,8 @@ private:
     virtual void contentsSizeChanged(WebCore::Frame*, const WebCore::IntSize&) const OVERRIDE;
     virtual void scrollRectIntoView(const WebCore::IntRect&) const OVERRIDE; // Currently only Mac has a non empty implementation.
 
-    virtual bool shouldMissingPluginMessageBeButton() const OVERRIDE;
-    virtual void missingPluginButtonClicked(WebCore::Element*) const OVERRIDE;
+    virtual bool shouldUnavailablePluginMessageBeButton(WebCore::RenderEmbeddedObject::PluginUnavailabilityReason) const OVERRIDE;
+    virtual void unavailablePluginButtonClicked(WebCore::Element*, WebCore::RenderEmbeddedObject::PluginUnavailabilityReason) const OVERRIDE;
 
     virtual void scrollbarsModeDidChange() const OVERRIDE;
     virtual void mouseDidMoveOverElement(const WebCore::HitTestResult&, unsigned modifierFlags) OVERRIDE;
@@ -139,7 +140,7 @@ private:
     virtual void reachedApplicationCacheOriginQuota(WebCore::SecurityOrigin*, int64_t spaceNeeded) OVERRIDE;
 
 #if ENABLE(DASHBOARD_SUPPORT)
-    virtual void dashboardRegionsChanged() OVERRIDE;
+    virtual void annotatedRegionsChanged() OVERRIDE;
 #endif
 
     virtual void populateVisitedLinks() OVERRIDE;
@@ -153,16 +154,18 @@ private:
     
     virtual bool paintCustomOverhangArea(WebCore::GraphicsContext*, const WebCore::IntRect&, const WebCore::IntRect&, const WebCore::IntRect&) OVERRIDE;
 
-    // This is an asynchronous call. The ChromeClient can display UI asking the user for permission
-    // to use Geolococation. The ChromeClient must call Geolocation::setShouldClearCache() appropriately.
-    virtual void requestGeolocationPermissionForFrame(WebCore::Frame*, WebCore::Geolocation*) OVERRIDE;
-    virtual void cancelGeolocationPermissionRequestForFrame(WebCore::Frame*, WebCore::Geolocation*) OVERRIDE;
+#if ENABLE(INPUT_TYPE_COLOR)
+    virtual PassOwnPtr<WebCore::ColorChooser> createColorChooser(WebCore::ColorChooserClient*, const WebCore::Color&) OVERRIDE;
+#endif
 
     virtual void runOpenPanel(WebCore::Frame*, PassRefPtr<WebCore::FileChooser>) OVERRIDE;
     virtual void loadIconForFiles(const Vector<String>&, WebCore::FileIconLoader*) OVERRIDE;
 
     virtual void setCursor(const WebCore::Cursor&) OVERRIDE;
     virtual void setCursorHiddenUntilMouseMoves(bool) OVERRIDE;
+#if ENABLE(REQUEST_ANIMATION_FRAME) && !USE(REQUEST_ANIMATION_FRAME_TIMER)
+    virtual void scheduleAnimation() OVERRIDE;
+#endif
 
     // Notification that the given form element has changed. This function
     // will be called frequently, so handling should be very fast.
@@ -174,14 +177,11 @@ private:
     virtual PassRefPtr<WebCore::PopupMenu> createPopupMenu(WebCore::PopupMenuClient*) const OVERRIDE;
     virtual PassRefPtr<WebCore::SearchPopupMenu> createSearchPopupMenu(WebCore::PopupMenuClient*) const OVERRIDE;
 
-#if ENABLE(CONTEXT_MENUS)
-    virtual void showContextMenu() OVERRIDE;
-#endif
-
 #if USE(ACCELERATED_COMPOSITING)
+    virtual WebCore::GraphicsLayerFactory* graphicsLayerFactory() const OVERRIDE;
     virtual void attachRootGraphicsLayer(WebCore::Frame*, WebCore::GraphicsLayer*) OVERRIDE;
     virtual void setNeedsOneShotDrawingSynchronization() OVERRIDE;
-    virtual void scheduleCompositingLayerSync() OVERRIDE;
+    virtual void scheduleCompositingLayerFlush() OVERRIDE;
 
     virtual CompositingTriggerFlags allowedCompositingTriggers() const
     {
@@ -192,6 +192,10 @@ private:
             CanvasTrigger |
             AnimationTrigger);
     }
+#endif
+
+#if PLATFORM(WIN) && USE(AVFOUNDATION)
+    virtual WebCore::GraphicsDeviceAdapter* graphicsDeviceAdapter() const OVERRIDE;
 #endif
 
 #if ENABLE(TOUCH_EVENTS)
@@ -206,7 +210,6 @@ private:
     virtual bool supportsFullScreenForElement(const WebCore::Element*, bool withKeyboard) OVERRIDE;
     virtual void enterFullScreenForElement(WebCore::Element*) OVERRIDE;
     virtual void exitFullScreenForElement(WebCore::Element*) OVERRIDE;
-    virtual void setRootFullScreenLayer(WebCore::GraphicsLayer*) OVERRIDE;
 #endif
 
 #if PLATFORM(MAC)
@@ -220,6 +223,10 @@ private:
     virtual bool shouldRubberBandInDirection(WebCore::ScrollDirection) const OVERRIDE;
     
     virtual void numWheelEventHandlersChanged(unsigned) OVERRIDE;
+
+    virtual void logDiagnosticMessage(const String& message, const String& description, const String& success) OVERRIDE;
+
+    virtual PassRefPtr<WebCore::Image> plugInStartLabelImage(WebCore::RenderSnapshottedPlugIn::LabelSize) const OVERRIDE;
 
     String m_cachedToolTip;
     mutable RefPtr<WebFrame> m_cachedFrameSetLargestFrame;

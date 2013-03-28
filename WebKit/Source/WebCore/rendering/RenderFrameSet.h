@@ -58,6 +58,9 @@ public:
     RenderFrameSet(HTMLFrameSetElement*);
     virtual ~RenderFrameSet();
 
+    RenderObject* firstChild() const { ASSERT(children() == virtualChildren()); return children()->firstChild(); }
+    RenderObject* lastChild() const { ASSERT(children() == virtualChildren()); return children()->lastChild(); }
+
     const RenderObjectChildList* children() const { return &m_children; }
     RenderObjectChildList* children() { return &m_children; }
 
@@ -68,10 +71,12 @@ public:
     bool isResizingRow() const;
     bool isResizingColumn() const;
 
-    bool canResizeRow(const LayoutPoint&) const;
-    bool canResizeColumn(const LayoutPoint&) const;
+    bool canResizeRow(const IntPoint&) const;
+    bool canResizeColumn(const IntPoint&) const;
 
     void notifyFrameEdgeInfoChanged();
+
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
 
 private:
     static const int noSplit = -1;
@@ -81,6 +86,9 @@ private:
     public:
         GridAxis();
         void resize(int);
+
+        void reportMemoryUsage(MemoryObjectInfo*) const;
+
         Vector<int> m_sizes;
         Vector<int> m_deltas;
         Vector<bool> m_preventResize;
@@ -96,7 +104,7 @@ private:
     virtual bool isFrameSet() const { return true; }
 
     virtual void layout();
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const LayoutPoint& pointInContainer, const LayoutPoint& accumulatedOffset, HitTestAction);
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) OVERRIDE;
     virtual void paint(PaintInfo&, const LayoutPoint&);
     virtual bool isChildAllowed(RenderObject*, RenderStyle*) const;
     virtual CursorDirective getCursor(const LayoutPoint&, Cursor&) const;

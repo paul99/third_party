@@ -27,28 +27,35 @@
 
 #include "NonCompositedContentHost.h"
 
+#include "FloatPoint.h"
 #include "FloatRect.h"
 #include "GraphicsLayer.h"
-#include "LayerChromium.h"
-#include "LayerPainterChromium.h"
-#include "cc/CCLayerTreeHost.h"
+#include "GraphicsLayerChromium.h"
+#include "PlatformContextSkia.h"
+#include "Settings.h"
+#include "WebViewImpl.h"
+#include <public/WebContentLayer.h>
+#include <public/WebFloatPoint.h>
 
 namespace WebKit {
 
-NonCompositedContentHost::NonCompositedContentHost(PassOwnPtr<WebCore::LayerPainterChromium> contentPaint)
-    : m_contentPaint(contentPaint)
+NonCompositedContentHost::NonCompositedContentHost(WebViewImpl* webView)
+    : m_webView(webView)
     , m_showDebugBorders(false)
 {
-    m_graphicsLayer = WebCore::GraphicsLayer::create(this);
+    m_graphicsLayer = WebCore::GraphicsLayer::create(0, this);
 #ifndef NDEBUG
     m_graphicsLayer->setName("non-composited content");
 #endif
     m_graphicsLayer->setDrawsContent(true);
-    m_graphicsLayer->platformLayer()->setIsNonCompositedContent(true);
-#if !ENABLE(RUBBER_BANDING)
-    m_graphicsLayer->platformLayer()->setBackgroundCoversViewport(true);
+    m_graphicsLayer->setAppliesPageScale(!m_webView->page()->settings()->applyPageScaleFactorInCompositor());
+    m_graphicsLayer->setContentsOpaque(true);
+    // FIXME: Remove LCD text setting after it is implemented in chromium.
+    WebContentLayer* layer = static_cast<WebCore::GraphicsLayerChromium*>(m_graphicsLayer.get())->contentLayer();
+    layer->setUseLCDText(true);
+#if !OS(ANDROID)
+    layer->setDrawCheckerboardForMissingTiles(true);
 #endif
-    m_graphicsLayer->platformLayer()->setOpaque(true);
 }
 
 NonCompositedContentHost::~NonCompositedContentHost()
@@ -57,10 +64,12 @@ NonCompositedContentHost::~NonCompositedContentHost()
 
 void NonCompositedContentHost::setBackgroundColor(const WebCore::Color& color)
 {
-    if (color.isValid())
-        m_graphicsLayer->platformLayer()->setBackgroundColor(color);
-    else
-        m_graphicsLayer->platformLayer()->setBackgroundColor(WebCore::Color::white);
+    m_graphicsLayer->platformLayer()->setBackgroundColor(color.rgb());
+}
+
+void NonCompositedContentHost::setOpaque(bool opaque)
+{
+    m_graphicsLayer->setContentsOpaque(opaque);
 }
 
 void NonCompositedContentHost::setScrollLayer(WebCore::GraphicsLayer* layer)
@@ -69,7 +78,6 @@ void NonCompositedContentHost::setScrollLayer(WebCore::GraphicsLayer* layer)
 
     if (!layer) {
         m_graphicsLayer->removeFromParent();
-        m_graphicsLayer->platformLayer()->setLayerTreeHost(0);
         return;
     }
 
@@ -77,41 +85,47 @@ void NonCompositedContentHost::setScrollLayer(WebCore::GraphicsLayer* layer)
         return;
 
     layer->addChildAtIndex(m_graphicsLayer.get(), 0);
-    ASSERT(scrollLayer());
+    ASSERT(haveScrollLayer());
 }
 
-static void reserveScrollbarLayers(WebCore::LayerChromium* layer, WebCore::LayerChromium* clipLayer)
+static void setScrollbarBoundsContainPageScale(WebCore::GraphicsLayer* layer, WebCore::GraphicsLayer* clipLayer)
 {
-    // Scrollbars and corners are known to be attached outside the root clip
-    // rect, so skip the clipLayer subtree.
+    // Scrollbars are attached outside the root clip rect, so skip the
+    // clipLayer subtree.
     if (layer == clipLayer)
         return;
 
     for (size_t i = 0; i < layer->children().size(); ++i)
-        reserveScrollbarLayers(layer->children()[i].get(), clipLayer);
+        setScrollbarBoundsContainPageScale(layer->children()[i], clipLayer);
 
-    if (layer->drawsContent())
-        layer->setAlwaysReserveTextures(true);
+    if (layer->children().isEmpty())
+        layer->setAppliesPageScale(true);
 }
 
-void NonCompositedContentHost::setViewport(const WebCore::IntSize& viewportSize, const WebCore::IntSize& contentsSize, const WebCore::IntPoint& scrollPosition, float pageScale, int layerAdjustX)
+void NonCompositedContentHost::setViewport(const WebCore::IntSize& viewportSize, const WebCore::IntSize& contentsSize, const WebCore::IntPoint& scrollPosition, const WebCore::IntPoint& scrollOrigin)
 {
-    if (!scrollLayer())
+    if (!haveScrollLayer())
         return;
 
     bool visibleRectChanged = m_viewportSize != viewportSize;
 
     m_viewportSize = viewportSize;
-    scrollLayer()->setScrollPosition(scrollPosition);
+    WebLayer* layer = scrollLayer();
+    layer->setScrollPosition(scrollPosition + scrollOrigin);
+    layer->setPosition(WebFloatPoint(-scrollPosition));
     // Due to the possibility of pinch zoom, the noncomposited layer is always
     // assumed to be scrollable.
-    scrollLayer()->setScrollable(true);
+    layer->setScrollable(true);
     m_graphicsLayer->setSize(contentsSize);
 
-    m_layerAdjustX = layerAdjustX;
-    if (m_graphicsLayer->transform().m41() != m_layerAdjustX) {
+    // In RTL-style pages, the origin of the initial containing block for the
+    // root layer may be positive; translate the layer to avoid negative
+    // coordinates.
+    m_layerAdjust = -toSize(scrollOrigin);
+    if (m_graphicsLayer->transform().m41() != m_layerAdjust.width() || m_graphicsLayer->transform().m42() != m_layerAdjust.height()) {
         WebCore::TransformationMatrix transform = m_graphicsLayer->transform();
-        transform.setM41(m_layerAdjustX);
+        transform.setM41(m_layerAdjust.width());
+        transform.setM42(m_layerAdjust.height());
         m_graphicsLayer->setTransform(transform);
 
         // If a tiled layer is shifted left or right, the content that goes into
@@ -120,31 +134,30 @@ void NonCompositedContentHost::setViewport(const WebCore::IntSize& viewportSize,
     } else if (visibleRectChanged)
         m_graphicsLayer->setNeedsDisplay();
 
-//    if (m_graphicsLayer->pageScaleFactor() != pageScale)
-//        m_graphicsLayer->deviceOrPageScaleFactorChanged();
-
-    WebCore::LayerChromium* clipLayer = scrollLayer()->parent();
-    WebCore::LayerChromium* rootLayer = clipLayer;
+    WebCore::GraphicsLayer* clipLayer = m_graphicsLayer->parent()->parent();
+    WebCore::GraphicsLayer* rootLayer = clipLayer;
     while (rootLayer->parent())
         rootLayer = rootLayer->parent();
-    reserveScrollbarLayers(rootLayer, clipLayer);
+    setScrollbarBoundsContainPageScale(rootLayer, clipLayer);
 }
 
-WebCore::LayerChromium* NonCompositedContentHost::scrollLayer()
+bool NonCompositedContentHost::haveScrollLayer()
+{
+    return m_graphicsLayer->parent();
+}
+
+WebLayer* NonCompositedContentHost::scrollLayer()
 {
     if (!m_graphicsLayer->parent())
         return 0;
     return m_graphicsLayer->parent()->platformLayer();
 }
 
-void NonCompositedContentHost::protectVisibleTileTextures()
-{
-    m_graphicsLayer->platformLayer()->protectVisibleTileTextures();
-}
-
 void NonCompositedContentHost::invalidateRect(const WebCore::IntRect& rect)
 {
-    m_graphicsLayer->setNeedsDisplayInRect(WebCore::FloatRect(rect));
+    WebCore::IntRect layerRect = rect;
+    layerRect.move(-m_layerAdjust);
+    m_graphicsLayer->setNeedsDisplayInRect(WebCore::FloatRect(layerRect));
 }
 
 void NonCompositedContentHost::notifyAnimationStarted(const WebCore::GraphicsLayer*, double /* time */)
@@ -152,19 +165,24 @@ void NonCompositedContentHost::notifyAnimationStarted(const WebCore::GraphicsLay
     // Intentionally left empty since we don't support animations on the non-composited content.
 }
 
-void NonCompositedContentHost::notifySyncRequired(const WebCore::GraphicsLayer*)
+void NonCompositedContentHost::notifyFlushRequired(const WebCore::GraphicsLayer*)
 {
-    WebCore::CCLayerTreeHost* layerTreeHost = m_graphicsLayer->platformLayer()->layerTreeHost();
-    if (layerTreeHost)
-        layerTreeHost->setNeedsCommit();
+    m_webView->scheduleCompositingLayerSync();
 }
 
 void NonCompositedContentHost::paintContents(const WebCore::GraphicsLayer*, WebCore::GraphicsContext& context, WebCore::GraphicsLayerPaintingPhase, const WebCore::IntRect& clipRect)
 {
-    context.translate(-m_layerAdjustX, 0);
+    // FIXME: Remove LCD text setting after it is implemented in chromium.
+    // On non-android platforms, we want to render text with subpixel antialiasing on the root layer
+    // so long as the root is opaque. On android all text is grayscale.
+#if !OS(ANDROID)
+    if (m_graphicsLayer->contentsOpaque())
+        context.platformContext()->setDrawingToImageBuffer(false);
+#endif
+    context.translate(-m_layerAdjust);
     WebCore::IntRect adjustedClipRect = clipRect;
-    adjustedClipRect.move(m_layerAdjustX, 0);
-    m_contentPaint->paint(context, adjustedClipRect);
+    adjustedClipRect.move(m_layerAdjust);
+    m_webView->paintRootLayer(context, adjustedClipRect);
 }
 
 void NonCompositedContentHost::setShowDebugBorders(bool showDebugBorders)
@@ -173,14 +191,9 @@ void NonCompositedContentHost::setShowDebugBorders(bool showDebugBorders)
     m_graphicsLayer->updateDebugIndicators();
 }
 
-bool NonCompositedContentHost::showDebugBorders(const WebCore::GraphicsLayer*) const
+bool NonCompositedContentHost::isTrackingRepaints() const
 {
-    return m_showDebugBorders;
-}
-
-bool NonCompositedContentHost::showRepaintCounter(const WebCore::GraphicsLayer*) const
-{
-    return false;
+    return m_webView->isTrackingRepaints();
 }
 
 } // namespace WebKit

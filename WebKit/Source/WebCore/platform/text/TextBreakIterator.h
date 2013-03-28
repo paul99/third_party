@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2006 Lars Knoll <lars@trolltech.com>
- * Copyright (C) 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2007, 2011, 2012 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -31,12 +31,6 @@ namespace WebCore {
 
     // Note: The returned iterator is good only until you get another iterator, with the exception of acquireLineBreakIterator.
 
-    // Iterates over "extended grapheme clusters", as defined in UAX #29.
-    // Note that platform implementations may be less sophisticated - e.g. ICU prior to
-    // version 4.0 only supports "legacy grapheme clusters".
-    // Use this for general text processing, e.g. string truncation.
-    TextBreakIterator* characterBreakIterator(const UChar*, int length);
-
     // This is similar to character break iterator in most cases, but is subject to
     // platform UI conventions. One notable example where this can be different
     // from character break iterator is Thai prepend characters, see bug 24342.
@@ -44,6 +38,7 @@ namespace WebCore {
     TextBreakIterator* cursorMovementIterator(const UChar*, int length);
 
     TextBreakIterator* wordBreakIterator(const UChar*, int length);
+    TextBreakIterator* acquireLineBreakIterator(const LChar*, int length, const AtomicString& locale);
     TextBreakIterator* acquireLineBreakIterator(const UChar*, int length, const AtomicString& locale);
     void releaseLineBreakIterator(TextBreakIterator*);
     TextBreakIterator* sentenceBreakIterator(const UChar*, int length);
@@ -56,14 +51,19 @@ namespace WebCore {
     int textBreakPreceding(TextBreakIterator*, int);
     int textBreakFollowing(TextBreakIterator*, int);
     bool isTextBreak(TextBreakIterator*, int);
+    bool isWordTextBreak(TextBreakIterator*);
 
     const int TextBreakDone = -1;
 
 class LazyLineBreakIterator {
 public:
-    LazyLineBreakIterator(const UChar* string = 0, int length = 0, const AtomicString& locale = AtomicString())
+    LazyLineBreakIterator()
+        : m_iterator(0)
+    {
+    }
+
+    LazyLineBreakIterator(String string, const AtomicString& locale = AtomicString())
         : m_string(string)
-        , m_length(length)
         , m_locale(locale)
         , m_iterator(0)
     {
@@ -75,33 +75,59 @@ public:
             releaseLineBreakIterator(m_iterator);
     }
 
-    const UChar* string() const { return m_string; }
-    int length() const { return m_length; }
+    String string() const { return m_string; }
 
     TextBreakIterator* get()
     {
-        if (!m_iterator)
-            m_iterator = acquireLineBreakIterator(m_string, m_length, m_locale);
+        if (!m_iterator) {
+            if (m_string.is8Bit())
+                m_iterator = acquireLineBreakIterator(m_string.characters8(), m_string.length(), m_locale);
+            else
+                m_iterator = acquireLineBreakIterator(m_string.characters16(), m_string.length(), m_locale);
+        }
         return m_iterator;
     }
 
-    void reset(const UChar* string, int length, const AtomicString& locale)
+    void reset(String string, const AtomicString& locale)
     {
         if (m_iterator)
             releaseLineBreakIterator(m_iterator);
 
         m_string = string;
-        m_length = length;
         m_locale = locale;
         m_iterator = 0;
     }
 
 private:
-    const UChar* m_string;
-    int m_length;
+    String m_string;
     AtomicString m_locale;
     TextBreakIterator* m_iterator;
 };
+
+// Iterates over "extended grapheme clusters", as defined in UAX #29.
+// Note that platform implementations may be less sophisticated - e.g. ICU prior to
+// version 4.0 only supports "legacy grapheme clusters".
+// Use this for general text processing, e.g. string truncation.
+
+class NonSharedCharacterBreakIterator {
+    WTF_MAKE_NONCOPYABLE(NonSharedCharacterBreakIterator);
+public:
+    NonSharedCharacterBreakIterator(const UChar*, int length);
+    ~NonSharedCharacterBreakIterator();
+
+    operator TextBreakIterator*() const { return m_iterator; }
+
+private:
+    TextBreakIterator* m_iterator;
+};
+
+// Counts the number of grapheme clusters. A surrogate pair or a sequence
+// of a non-combining character and following combining characters is
+// counted as 1 grapheme cluster.
+unsigned numGraphemeClusters(const String&);
+// Returns the number of characters which will be less than or equal to
+// the specified grapheme cluster length.
+unsigned numCharactersInGraphemeClusters(const String&, unsigned);
 
 }
 

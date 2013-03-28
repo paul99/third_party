@@ -54,45 +54,22 @@ IDBTransactionBackendProxy::~IDBTransactionBackendProxy()
 {
 }
 
-PassRefPtr<IDBObjectStoreBackendInterface> IDBTransactionBackendProxy::objectStore(const String& name, ExceptionCode& ec)
+PassRefPtr<WebCore::IDBObjectStoreBackendInterface> IDBTransactionBackendProxy::objectStore(int64_t indexId, ExceptionCode& ec)
 {
-    OwnPtr<WebIDBObjectStore> objectStore = adoptPtr(m_webIDBTransaction->objectStore(name, ec));
+    OwnPtr<WebIDBObjectStore> objectStore = adoptPtr(m_webIDBTransaction->objectStore(indexId, ec));
     if (!objectStore)
         return 0;
     return IDBObjectStoreBackendProxy::create(objectStore.release());
 }
 
-unsigned short IDBTransactionBackendProxy::mode() const
+void IDBTransactionBackendProxy::commit()
 {
-    return m_webIDBTransaction->mode();
+    m_webIDBTransaction->commit();
 }
 
 void IDBTransactionBackendProxy::abort()
 {
     m_webIDBTransaction->abort();
-}
-
-void IDBTransactionBackendProxy::registerOpenCursor(WebCore::IDBCursorBackendImpl*)
-{
-    ASSERT_NOT_REACHED();
-}
-
-void IDBTransactionBackendProxy::unregisterOpenCursor(WebCore::IDBCursorBackendImpl*)
-{
-    ASSERT_NOT_REACHED();
-}
-
-bool IDBTransactionBackendProxy::scheduleTask(PassOwnPtr<ScriptExecutionContext::Task>, PassOwnPtr<ScriptExecutionContext::Task>)
-{
-    // This should never be reached as it's the impl objects who get to
-    // execute tasks in the browser process.
-    ASSERT_NOT_REACHED();
-    return false;
-}
-
-void IDBTransactionBackendProxy::didCompleteTaskEvents()
-{
-    m_webIDBTransaction->didCompleteTaskEvents();
 }
 
 void IDBTransactionBackendProxy::setCallbacks(IDBTransactionCallbacks* callbacks)

@@ -105,7 +105,7 @@ WebInspector.DOMStorageItemsView.prototype = {
         var dataGrid = new WebInspector.DataGrid(columns, this._editingCallback.bind(this), this._deleteCallback.bind(this));
         length = nodes.length;
         for (var i = 0; i < length; ++i)
-            dataGrid.appendChild(nodes[i]);
+            dataGrid.rootNode().appendChild(nodes[i]);
         dataGrid.addCreationNode(false);
         if (length > 0)
             nodes[0].selected = true;
@@ -149,7 +149,7 @@ WebInspector.DOMStorageItemsView.prototype = {
             this.domStorage.removeItem(node.data[0]);
 
         this.update();
-    }
-}
+    },
 
-WebInspector.DOMStorageItemsView.prototype.__proto__ = WebInspector.View.prototype;
+    __proto__: WebInspector.View.prototype
+}

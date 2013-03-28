@@ -126,7 +126,7 @@ DocumentFragment* WebEditorClient::documentFragmentFromAttributedString(NSAttrib
     return core(fragment);
 }
 
-void WebEditorClient::setInsertionPasteboard(NSPasteboard *)
+void WebEditorClient::setInsertionPasteboard(const String&)
 {
     // This is used only by Mail, no need to implement it now.
     notImplemented();
@@ -145,6 +145,7 @@ static void changeWordCase(WebPage* page, SEL selector)
     page->replaceSelectionWithText(frame, [selectedString performSelector:selector]);
 }
 
+#if USE(APPKIT)
 void WebEditorClient::uppercaseWord()
 {
     changeWordCase(m_page, @selector(uppercaseString));
@@ -159,7 +160,9 @@ void WebEditorClient::capitalizeWord()
 {
     changeWordCase(m_page, @selector(capitalizedString));
 }
+#endif
 
+#if USE(AUTOMATIC_TEXT_REPLACEMENT)
 void WebEditorClient::showSubstitutionsPanel(bool)
 {
     notImplemented();
@@ -231,35 +234,12 @@ void WebEditorClient::toggleAutomaticSpellingCorrection()
 {
     notImplemented();
 }
+#endif // USE(AUTOMATIC_TEXT_REPLACEMENT)
 
 void WebEditorClient::checkTextOfParagraph(const UChar* text, int length, WebCore::TextCheckingTypeMask checkingTypes, Vector<TextCheckingResult>& results)
 {
     // FIXME: It would be nice if we wouldn't have to copy the text here.
     m_page->sendSync(Messages::WebPageProxy::CheckTextOfParagraph(String(text, length), checkingTypes), Messages::WebPageProxy::CheckTextOfParagraph::Reply(results));
 }
-
-#if !defined(BUILDING_ON_SNOW_LEOPARD)
-void WebEditorClient::showCorrectionPanel(WebCore::CorrectionPanelInfo::PanelType type, const WebCore::FloatRect& boundingBoxOfReplacedString, const String& replacedString, const String& replacementString, const Vector<String>& alternativeReplacementStrings)
-{
-    m_page->send(Messages::WebPageProxy::ShowCorrectionPanel(type, boundingBoxOfReplacedString, replacedString, replacementString, alternativeReplacementStrings));
-}
-
-void WebEditorClient::dismissCorrectionPanel(WebCore::ReasonForDismissingCorrectionPanel reason)
-{
-    m_page->send(Messages::WebPageProxy::DismissCorrectionPanel(reason));
-}
-
-String WebEditorClient::dismissCorrectionPanelSoon(WebCore::ReasonForDismissingCorrectionPanel reason)
-{
-    String result;
-    m_page->sendSync(Messages::WebPageProxy::DismissCorrectionPanelSoon(reason), Messages::WebPageProxy::DismissCorrectionPanelSoon::Reply(result));
-    return result;
-}
-
-void WebEditorClient::recordAutocorrectionResponse(EditorClient::AutocorrectionResponseType responseType, const String& replacedString, const String& replacementString)
-{
-    m_page->send(Messages::WebPageProxy::RecordAutocorrectionResponse(responseType, replacedString, replacementString));
-}
-#endif
 
 } // namespace WebKit

@@ -31,9 +31,9 @@
 #include "GraphicsContextCG.h"
 #include "HWndDC.h"
 #include "Image.h"
-#include "RetainPtr.h"
 
 #include <CoreGraphics/CoreGraphics.h>
+#include <wtf/RetainPtr.h>
 
 #include <windows.h>
 
@@ -120,7 +120,7 @@ exit:
     return hbmp;
 }
     
-DragImageRef createDragImageFromImage(Image* img)
+DragImageRef createDragImageFromImage(Image* img, RespectImageOrientationEnum)
 {
     HBITMAP hbmp = 0;
     HWndDC dc(0);
@@ -148,8 +148,10 @@ DragImageRef createDragImageFromImage(Image* img)
     CGContextScaleCTM(drawContext, 1, -1);
     CGContextSetFillColor(drawContext, white);
     CGContextFillRect(drawContext, rect);
-    CGContextSetBlendMode(drawContext, kCGBlendModeNormal);
-    CGContextDrawImage(drawContext, rect, srcImage);
+    if (srcImage) {
+        CGContextSetBlendMode(drawContext, kCGBlendModeNormal);
+        CGContextDrawImage(drawContext, rect, srcImage);
+    }
     CGContextRelease(drawContext);
 
 exit:

@@ -30,14 +30,14 @@
 #include "Interpreter.h"
 #include "Parser.h"
 #include "Debugger.h"
-#include "WTFThreadData.h"
+#include <wtf/WTFThreadData.h>
 #include <stdio.h>
 
 namespace JSC {
 
 bool checkSyntax(ExecState* exec, const SourceCode& source, JSValue* returnedException)
 {
-    JSLock lock(exec);
+    JSLockHolder lock(exec);
     ASSERT(exec->globalData().identifierTable == wtfThreadData().currentIdentifierTable());
 
     ProgramExecutable* program = ProgramExecutable::create(exec, source);
@@ -51,10 +51,12 @@ bool checkSyntax(ExecState* exec, const SourceCode& source, JSValue* returnedExc
     return true;
 }
 
-JSValue evaluate(ExecState* exec, ScopeChainNode* scopeChain, const SourceCode& source, JSValue thisValue, JSValue* returnedException)
+JSValue evaluate(ExecState* exec, const SourceCode& source, JSValue thisValue, JSValue* returnedException)
 {
-    JSLock lock(exec);
+    JSLockHolder lock(exec);
     ASSERT(exec->globalData().identifierTable == wtfThreadData().currentIdentifierTable());
+    if (exec->globalData().isCollectorBusy())
+        CRASH();
 
     CodeProfiling profile(source);
 
@@ -70,7 +72,7 @@ JSValue evaluate(ExecState* exec, ScopeChainNode* scopeChain, const SourceCode& 
     if (!thisValue || thisValue.isUndefinedOrNull())
         thisValue = exec->dynamicGlobalObject();
     JSObject* thisObj = thisValue.toThisObject(exec);
-    JSValue result = exec->interpreter()->execute(program, exec, scopeChain, thisObj);
+    JSValue result = exec->interpreter()->execute(program, exec, thisObj);
 
     if (exec->hadException()) {
         if (returnedException)

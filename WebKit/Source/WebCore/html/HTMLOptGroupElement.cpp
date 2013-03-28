@@ -25,28 +25,35 @@
 #include "config.h"
 #include "HTMLOptGroupElement.h"
 
-#include "CSSStyleSelector.h"
 #include "Document.h"
+#include "ElementShadow.h"
 #include "HTMLNames.h"
 #include "HTMLSelectElement.h"
 #include "RenderMenuList.h"
 #include "NodeRenderStyle.h"
 #include "NodeRenderingContext.h"
+#include "StyleResolver.h"
 #include <wtf/StdLibExtras.h>
 
 namespace WebCore {
 
 using namespace HTMLNames;
 
-inline HTMLOptGroupElement::HTMLOptGroupElement(const QualifiedName& tagName, Document* document, HTMLFormElement* form)
-    : HTMLFormControlElement(tagName, document, form)
+inline HTMLOptGroupElement::HTMLOptGroupElement(const QualifiedName& tagName, Document* document)
+    : HTMLElement(tagName, document)
 {
     ASSERT(hasTagName(optgroupTag));
+    setHasCustomCallbacks();
 }
 
-PassRefPtr<HTMLOptGroupElement> HTMLOptGroupElement::create(const QualifiedName& tagName, Document* document, HTMLFormElement* form)
+PassRefPtr<HTMLOptGroupElement> HTMLOptGroupElement::create(const QualifiedName& tagName, Document* document)
 {
-    return adoptRef(new HTMLOptGroupElement(tagName, document, form));
+    return adoptRef(new HTMLOptGroupElement(tagName, document));
+}
+
+bool HTMLOptGroupElement::disabled() const
+{
+    return fastHasAttribute(disabledAttr);
 }
 
 bool HTMLOptGroupElement::supportsFocus() const
@@ -62,20 +69,23 @@ bool HTMLOptGroupElement::isFocusable() const
 
 const AtomicString& HTMLOptGroupElement::formControlType() const
 {
-    DEFINE_STATIC_LOCAL(const AtomicString, optgroup, ("optgroup"));
+    DEFINE_STATIC_LOCAL(const AtomicString, optgroup, ("optgroup", AtomicString::ConstructFromLiteral));
     return optgroup;
 }
 
 void HTMLOptGroupElement::childrenChanged(bool changedByParser, Node* beforeChange, Node* afterChange, int childCountDelta)
 {
     recalcSelectOptions();
-    HTMLFormControlElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
+    HTMLElement::childrenChanged(changedByParser, beforeChange, afterChange, childCountDelta);
 }
 
-void HTMLOptGroupElement::parseMappedAttribute(Attribute* attr)
+void HTMLOptGroupElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
-    HTMLFormControlElement::parseMappedAttribute(attr);
+    HTMLElement::parseAttribute(name, value);
     recalcSelectOptions();
+
+    if (name == disabledAttr)
+        invalidateParentDistributionIfNecessary(this, SelectRuleFeatureSet::RuleFeatureDisabled | SelectRuleFeatureSet::RuleFeatureEnabled);
 }
 
 void HTMLOptGroupElement::recalcSelectOptions()
@@ -89,25 +99,36 @@ void HTMLOptGroupElement::recalcSelectOptions()
 
 void HTMLOptGroupElement::attach()
 {
-    if (parentNode()->renderStyle())
-        setRenderStyle(styleForRenderer());
-    HTMLFormControlElement::attach();
+    HTMLElement::attach();
+    // If after attaching nothing called styleForRenderer() on this node we
+    // manually cache the value. This happens if our parent doesn't have a
+    // renderer like <optgroup> or if it doesn't allow children like <select>.
+    if (!m_style && parentNode()->renderStyle())
+        updateNonRenderStyle();
 }
 
 void HTMLOptGroupElement::detach()
 {
     m_style.clear();
-    HTMLFormControlElement::detach();
+    HTMLElement::detach();
 }
 
-void HTMLOptGroupElement::setRenderStyle(PassRefPtr<RenderStyle> newStyle)
+void HTMLOptGroupElement::updateNonRenderStyle()
 {
-    m_style = newStyle;
+    m_style = document()->styleResolver()->styleForElement(this);
 }
-    
-RenderStyle* HTMLOptGroupElement::nonRendererRenderStyle() const 
-{ 
-    return m_style.get(); 
+
+RenderStyle* HTMLOptGroupElement::nonRendererStyle() const
+{
+    return m_style.get();
+}
+
+PassRefPtr<RenderStyle> HTMLOptGroupElement::customStyleForRenderer()
+{
+    // styleForRenderer is called whenever a new style should be associated
+    // with an Element so now is a good time to update our cached style.
+    updateNonRenderStyle();
+    return m_style;
 }
 
 String HTMLOptGroupElement::groupLabelText() const

@@ -36,20 +36,25 @@ namespace cricket {
 TCPPort::TCPPort(talk_base::Thread* thread,
                  talk_base::PacketSocketFactory* factory,
                  talk_base::Network* network, const talk_base::IPAddress& ip,
-                 int min_port, int max_port, bool allow_listen)
-    : Port(thread, LOCAL_PORT_TYPE, factory, network, ip, min_port, max_port),
+                 int min_port, int max_port, const std::string& username,
+                 const std::string& password, bool allow_listen)
+    : Port(thread, LOCAL_PORT_TYPE, ICE_TYPE_PREFERENCE_HOST_TCP,
+           factory, network, ip, min_port, max_port,
+           username, password),
       incoming_only_(false),
       allow_listen_(allow_listen),
       socket_(NULL),
       error_(0) {
+  // TODO(mallinath) - Set preference value as per RFC 6544.
+  // http://b/issue?id=7141794
 }
 
 bool TCPPort::Init() {
   if (allow_listen_) {
     // Treat failure to create or bind a TCP socket as fatal.  This
     // should never happen.
-    socket_ = factory_->CreateServerTcpSocket(
-        talk_base::SocketAddress(ip_, 0), min_port_, max_port_,
+    socket_ = socket_factory()->CreateServerTcpSocket(
+        talk_base::SocketAddress(ip(), 0), min_port(), max_port(),
         false /* ssl */);
     if (!socket_) {
       LOG_J(LS_ERROR, this) << "TCP socket creation failed.";
@@ -83,6 +88,10 @@ Connection* TCPPort::CreateConnection(const Candidate& address,
   if ((address.protocol() == "ssltcp") && (origin == ORIGIN_THIS_PORT))
     return NULL;
 
+  if (!IsCompatibleAddress(address.address())) {
+    return NULL;
+  }
+
   TCPConnection* conn = NULL;
   if (talk_base::AsyncPacketSocket* socket =
       GetIncoming(address.address(), true)) {
@@ -98,17 +107,21 @@ Connection* TCPPort::CreateConnection(const Candidate& address,
 void TCPPort::PrepareAddress() {
   if (socket_) {
     // If socket isn't bound yet the address will be added in
-    // OnAddressReady(). Socket may be in the CLOSED state if Listed()
+    // OnAddressReady(). Socket may be in the CLOSED state if Listen()
     // failed, we still want ot add the socket address.
-    LOG(LS_ERROR) << socket_->GetState();
+    LOG(LS_VERBOSE) << "Preparing TCP address, current state: "
+                    << socket_->GetState();
     if (socket_->GetState() == talk_base::AsyncPacketSocket::STATE_BOUND ||
         socket_->GetState() == talk_base::AsyncPacketSocket::STATE_CLOSED)
-      AddAddress(socket_->GetLocalAddress(), "tcp", true);
+      AddAddress(socket_->GetLocalAddress(), socket_->GetLocalAddress(),
+                 "tcp", LOCAL_PORT_TYPE, ICE_TYPE_PREFERENCE_HOST_TCP, true);
   } else {
     LOG_J(LS_INFO, this) << "Not listening due to firewall restrictions.";
     // Note: We still add the address, since otherwise the remote side won't
     // recognize our incoming TCP connections.
-    AddAddress(talk_base::SocketAddress(ip_, 0), "tcp", true);
+    AddAddress(talk_base::SocketAddress(ip(), 0),
+               talk_base::SocketAddress(ip(), 0), "tcp",
+               LOCAL_PORT_TYPE, ICE_TYPE_PREFERENCE_HOST_TCP, true);
   }
 }
 
@@ -187,12 +200,14 @@ talk_base::AsyncPacketSocket* TCPPort::GetIncoming(
 void TCPPort::OnReadPacket(talk_base::AsyncPacketSocket* socket,
                            const char* data, size_t size,
                            const talk_base::SocketAddress& remote_addr) {
-  Port::OnReadPacket(data, size, remote_addr);
+  Port::OnReadPacket(data, size, remote_addr, PROTO_TCP);
 }
 
 void TCPPort::OnAddressReady(talk_base::AsyncPacketSocket* socket,
                              const talk_base::SocketAddress& address) {
-  AddAddress(address, "tcp", true);
+  AddAddress(address, address, "tcp",
+             LOCAL_PORT_TYPE, ICE_TYPE_PREFERENCE_HOST_TCP,
+             true);
 }
 
 TCPConnection::TCPConnection(TCPPort* port, const Candidate& candidate,
@@ -203,7 +218,7 @@ TCPConnection::TCPConnection(TCPPort* port, const Candidate& candidate,
     // TODO: Handle failures here (unlikely since TCP).
 
     socket_ = port->socket_factory()->CreateClientTcpSocket(
-        talk_base::SocketAddress(port_->network()->ip(), 0),
+        talk_base::SocketAddress(port_->Network()->ip(), 0),
         candidate.address(), port->proxy(), port->user_agent(),
         candidate.protocol() == "ssltcp");
     if (socket_) {
@@ -218,7 +233,7 @@ TCPConnection::TCPConnection(TCPPort* port, const Candidate& candidate,
     }
   } else {
     // Incoming connections should match the network address.
-    ASSERT(socket_->GetLocalAddress().ipaddr() == port->ip_);
+    ASSERT(socket_->GetLocalAddress().ipaddr() == port->ip());
   }
 
   if (socket_) {

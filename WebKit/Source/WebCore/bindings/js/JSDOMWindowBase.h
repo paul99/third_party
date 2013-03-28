@@ -63,16 +63,9 @@ namespace WebCore {
         static bool supportsProfiling(const JSC::JSGlobalObject*);
         static bool supportsRichSourceInfo(const JSC::JSGlobalObject*);
         static bool shouldInterruptScript(const JSC::JSGlobalObject*);
-
-        bool allowsAccessFrom(JSC::ExecState*) const;
-        bool allowsAccessFromNoErrorMessage(JSC::ExecState*) const;
-        bool allowsAccessFrom(JSC::ExecState*, String& message) const;
+        static bool javaScriptExperimentsEnabled(const JSC::JSGlobalObject*);
         void printErrorMessage(const String&) const;
 
-        // Don't call this version of allowsAccessFrom -- it's a slightly incorrect implementation used only by WebScriptObject
-        bool allowsAccessFrom(const JSC::JSGlobalObject*) const;
-        
-        static JSC::JSObject* toThisObject(JSC::JSCell*, JSC::ExecState*);
         JSDOMWindowShell* shell() const;
 
         static JSC::JSGlobalData* commonJSGlobalData();
@@ -80,9 +73,6 @@ namespace WebCore {
     private:
         RefPtr<DOMWindow> m_impl;
         JSDOMWindowShell* m_shell;
-
-        bool allowsAccessFromPrivate(const JSC::JSGlobalObject*) const;
-        String crossDomainAccessErrorMessage(const JSC::JSGlobalObject*) const;
     };
 
     // Returns a JSDOMWindow or jsNull()

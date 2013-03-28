@@ -1,5 +1,5 @@
 /*
- * Copyright © 2011  Google, Inc.
+ * Copyright © 2011,2012  Google, Inc.
  *
  *  This is part of HarfBuzz, a text shaping library.
  *
@@ -30,6 +30,8 @@
 #include "hb-open-type-private.hh"
 
 
+namespace OT {
+
 
 /*
  * hmtx -- The Horizontal Metrics Table
@@ -54,10 +56,10 @@ struct hmtx
     TRACE_SANITIZE ();
     /* We don't check for anything specific here.  The users of the
      * struct do all the hard work... */
-    return true;
+    return TRACE_RETURN (true);
   }
 
-  private:
+  protected:
   LongHorMetric	longHorMetric[VAR];	/* Paired advance width and left side
 					 * bearing values for each glyph. The
 					 * value numOfHMetrics comes from
@@ -82,5 +84,9 @@ struct hmtx
   public:
   DEFINE_SIZE_ARRAY2 (0, longHorMetric, leftSideBearingX);
 };
+
+
+} // namespace OT
+
 
 #endif /* HB_OT_HMTX_TABLE_HH */

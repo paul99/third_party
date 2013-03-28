@@ -32,8 +32,6 @@
 #include "WKBundlePrivate.h"
 #include <WebCore/EditorInsertAction.h>
 #include <WebCore/TextAffinity.h>
-#include <WebCore/UserContentTypes.h>
-#include <WebCore/UserScriptTypes.h>
 
 namespace WebCore {
     class CSSStyleDeclaration;
@@ -44,7 +42,10 @@ namespace WebKit {
 class InjectedBundle;
 class InjectedBundleBackForwardList;
 class InjectedBundleBackForwardListItem;
+class InjectedBundleDOMWindowExtension;
 class InjectedBundleHitTestResult;
+class InjectedBundleIntent;
+class InjectedBundleIntentRequest;
 class InjectedBundleNavigationAction;
 class InjectedBundleNodeHandle;
 class InjectedBundleRangeHandle;
@@ -58,9 +59,12 @@ class WebPageGroupProxy;
 WK_ADD_API_MAPPING(WKBundleBackForwardListItemRef, InjectedBundleBackForwardListItem)
 WK_ADD_API_MAPPING(WKBundleBackForwardListRef, InjectedBundleBackForwardList)
 WK_ADD_API_MAPPING(WKBundleCSSStyleDeclarationRef, WebCore::CSSStyleDeclaration)
+WK_ADD_API_MAPPING(WKBundleDOMWindowExtensionRef, InjectedBundleDOMWindowExtension)
 WK_ADD_API_MAPPING(WKBundleFrameRef, WebFrame)
 WK_ADD_API_MAPPING(WKBundleHitTestResultRef, InjectedBundleHitTestResult)
 WK_ADD_API_MAPPING(WKBundleInspectorRef, WebInspector)
+WK_ADD_API_MAPPING(WKBundleIntentRef, InjectedBundleIntent)
+WK_ADD_API_MAPPING(WKBundleIntentRequestRef, InjectedBundleIntentRequest)
 WK_ADD_API_MAPPING(WKBundleNavigationActionRef, InjectedBundleNavigationAction)
 WK_ADD_API_MAPPING(WKBundleNodeHandleRef, InjectedBundleNodeHandle)
 WK_ADD_API_MAPPING(WKBundlePageGroupRef, WebPageGroupProxy)
@@ -99,32 +103,6 @@ inline WKAffinityType toAPI(WebCore::EAffinity affinity)
     }
     ASSERT_NOT_REACHED();
     return kWKAffinityUpstream;
-}
-
-inline WebCore::UserScriptInjectionTime toUserScriptInjectionTime(WKUserScriptInjectionTime wkInjectedTime)
-{
-    switch (wkInjectedTime) {
-    case kWKInjectAtDocumentStart:
-        return WebCore::InjectAtDocumentStart;
-    case kWKInjectAtDocumentEnd:
-        return WebCore::InjectAtDocumentEnd;
-    }
-
-    ASSERT_NOT_REACHED();
-    return WebCore::InjectAtDocumentStart;
-}
-
-inline WebCore::UserContentInjectedFrames toUserContentInjectedFrames(WKUserContentInjectedFrames wkInjectedFrames)
-{
-    switch (wkInjectedFrames) {
-    case kWKInjectInAllFrames:
-        return WebCore::InjectInAllFrames;
-    case kWKInjectInTopFrameOnly:
-        return WebCore::InjectInTopFrameOnly;
-    }
-
-    ASSERT_NOT_REACHED();
-    return WebCore::InjectInAllFrames;
 }
 
 } // namespace WebKit

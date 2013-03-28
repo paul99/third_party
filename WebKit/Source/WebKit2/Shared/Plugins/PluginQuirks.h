@@ -33,26 +33,20 @@ public:
     enum PluginQuirk {
         // Mac specific quirks:
 #if PLUGIN_ARCHITECTURE(MAC)
-        // The plug-in wants the call to getprogame() to return "WebKitPluginHost".
+        // The plug-in wants the call to getprogname() to return "WebKitPluginHost".
         // Adobe Flash Will not handle key down events otherwise.
         PrognameShouldBeWebKitPluginHost,
 
         // Supports receiving a paint event, even when using CoreAnimation rendering.
         SupportsSnapshotting,
 
-        // Make the plug-in transparent if it has a "background" attribute set.
+        // Make the plug-in opaque unless it has a "background" attribute set to a transparent color
+        // according to http://msdn.microsoft.com/en-us/library/cc838148(VS.95).aspx
+        // A non-existent "background" attribute is interpreted as the named color White which is opaque.
         // Microsoft Silverlight doesn't opt into transparency using NPN_SetValue and
-        // NPPVpluginTransparentBool, so we'll always force if the plug-in has a "background"
-        // attribute specified, regardless of it's value.
-        // FIXME: We could get more fancy here and check for specific values that we know are
-        // transparent.
-        MakeTransparentIfBackgroundAttributeExists,
-
-        // Whether we can short circuit some NPRuntime calls during plug-in initialization.
-        // The Flash plug-in uses NPRuntime to figure out the URL of the frame it is in, as well
-        // as the URL of the main frame. Since we know the exact NPRuntime calls the plug-in makes,
-        // we can return the right values without having to do sync IPC back into the web process.
-        CanShortCircuitSomeNPRuntimeCallsDuringInitialization,
+        // NPPVpluginTransparentBool, so we'll always force it unless the plug-in has a "background"
+        // attribute that specifies a opaque color.
+        MakeOpaqueUnlessTransparentSilverlightBackgroundAttributeExists,
 
         // Whether calling NPP_GetValue with NPPVpluginCoreAnimationLayer returns a retained Core Animation
         // layer or not. According to the NPAPI specifications, plug-in shouldn't return a retained layer but
@@ -98,6 +92,10 @@ public:
         // if we return a Mozilla user agent.
         WantsMozillaUserAgent,
 #endif
+
+        // This isn't really a quirk as much as the opposite of a quirk. By default, we don't send wheel events
+        // to plug-ins unless we know that they handle them correctly. Adobe Reader on Mac handles wheel events correctly.
+        WantsWheelEvents,
 
         NumPluginQuirks
     };

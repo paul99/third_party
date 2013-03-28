@@ -50,26 +50,37 @@ public:
 
     size_t length() const { return m_values.size(); }
     CSSValue* item(size_t index) { return index < m_values.size() ? m_values[index].get() : 0; }
+    const CSSValue* item(size_t index) const { return index < m_values.size() ? m_values[index].get() : 0; }
     CSSValue* itemWithoutBoundsCheck(size_t index) { return m_values[index].get(); }
 
-    void append(PassRefPtr<CSSValue>);
-    void prepend(PassRefPtr<CSSValue>);
+    void append(PassRefPtr<CSSValue> value) { m_values.append(value); }
+    void prepend(PassRefPtr<CSSValue> value) { m_values.prepend(value); }
     bool removeAll(CSSValue*);
     bool hasValue(CSSValue*) const;
     PassRefPtr<CSSValueList> copy();
 
     String customCssText() const;
+#if ENABLE(CSS_VARIABLES)
+    String customSerializeResolvingVariables(const HashMap<AtomicString, String>&) const;
+#endif
 
-    void addSubresourceStyleURLs(ListHashSet<KURL>&, const CSSStyleSheet*);
+    void addSubresourceStyleURLs(ListHashSet<KURL>&, const StyleSheetContents*) const;
+
+    bool hasFailedOrCanceledSubresources() const;
+    
+    PassRefPtr<CSSValueList> cloneForCSSOM() const;
+
+    void reportDescendantMemoryUsage(MemoryObjectInfo*) const;
 
 protected:
     CSSValueList(ClassType, ValueListSeparator);
+    CSSValueList(const CSSValueList& cloneFrom);
 
 private:
     explicit CSSValueList(ValueListSeparator);
     explicit CSSValueList(CSSParserValueList*);
 
-    Vector<RefPtr<CSSValue> > m_values;
+    Vector<RefPtr<CSSValue>, 4> m_values;
 };
 
 // Objects of this class are intended to be stack-allocated and scoped to a single function.

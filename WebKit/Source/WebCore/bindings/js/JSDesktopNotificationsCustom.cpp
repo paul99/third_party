@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009 Google Inc. All rights reserved.
+ * Copyright (C) 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -30,14 +31,12 @@
 
 #include "config.h"
 
-#if ENABLE(NOTIFICATIONS)
+#if ENABLE(LEGACY_NOTIFICATIONS)
 
 #include "Document.h"
-#include "JSCustomVoidCallback.h"
 #include "JSEventListener.h"
-#include "JSNotification.h"
 #include "JSNotificationCenter.h"
-#include "Notification.h"
+#include "JSVoidCallback.h"
 #include "NotificationCenter.h"
 #include <runtime/Error.h>
 
@@ -59,15 +58,17 @@ JSValue JSNotificationCenter::requestPermission(ExecState* exec)
     if (context->isWorkerContext())
         return throwSyntaxError(exec);
 
-    if (!exec->argument(0).isObject())
-        return throwTypeError(exec);
-
-    PassRefPtr<JSCustomVoidCallback> callback = JSCustomVoidCallback::create(exec->argument(0).getObject(), toJSDOMGlobalObject(static_cast<Document*>(context), exec));
-
-    impl()->requestPermission(callback);
+    // If a callback function is provided as first argument, convert to a VoidCallback.
+    RefPtr<JSVoidCallback> callback;
+    if (exec->argument(0).isObject()) {
+        callback = JSVoidCallback::create(exec->argument(0).getObject(), toJSDOMGlobalObject(static_cast<Document*>(context), exec));
+        if (exec->hadException())
+            return jsUndefined();
+    }
+    impl()->requestPermission(callback.release());
     return jsUndefined();
 }
 
-} // namespace
+} // namespace WebCore
 
-#endif // ENABLE(NOTIFICATIONS)
+#endif // ENABLE(LEGACY_NOTIFICATIONS)

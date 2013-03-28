@@ -23,6 +23,7 @@
 
 #include "FontSelector.h"
 #include "SimpleFontData.h"
+#include "WidthCache.h"
 #include <wtf/Forward.h>
 #include <wtf/MainThread.h>
 
@@ -39,7 +40,31 @@ class FontSelector;
 const int cAllFamiliesScanned = -1;
 
 class FontFallbackList : public RefCounted<FontFallbackList> {
+    WTF_MAKE_NONCOPYABLE(FontFallbackList);
 public:
+    typedef HashMap<int, GlyphPageTreeNode*, DefaultHash<int>::Hash> GlyphPages;
+
+    class GlyphPagesStateSaver {
+    public:
+        GlyphPagesStateSaver(FontFallbackList& fallbackList)
+            : m_fallbackList(fallbackList)
+            , m_pages(fallbackList.m_pages)
+            , m_pageZero(fallbackList.m_pageZero)
+        {
+        }
+
+        ~GlyphPagesStateSaver()
+        {
+            m_fallbackList.m_pages = m_pages;
+            m_fallbackList.m_pageZero = m_pageZero;
+        }
+
+    private:
+        FontFallbackList& m_fallbackList;
+        GlyphPages& m_pages;
+        GlyphPageTreeNode* m_pageZero;
+    };
+
     static PassRefPtr<FontFallbackList> create() { return adoptRef(new FontFallbackList()); }
 
     ~FontFallbackList() { releaseFontData(); }
@@ -55,18 +80,9 @@ public:
     unsigned fontSelectorVersion() const { return m_fontSelectorVersion; }
     unsigned generation() const { return m_generation; }
 
-    struct GlyphPagesHashTraits : HashTraits<int> {
-        static const int minimumTableSize = 16;
-    };
-    typedef HashMap<int, GlyphPageTreeNode*, DefaultHash<int>::Hash, GlyphPagesHashTraits> GlyphPages;
-    GlyphPageTreeNode* glyphPageZero() const { return m_pageZero; }
-    const GlyphPages& glyphPages() const { return m_pages; }
+    WidthCache& widthCache() const { return m_widthCache; }
 
 private:
-    friend class SVGTextRunRenderingContext;
-    void setGlyphPageZero(GlyphPageTreeNode* pageZero) { m_pageZero = pageZero; }
-    void setGlyphPages(const GlyphPages& pages) { m_pages = pages; }
-
     FontFallbackList();
 
     const SimpleFontData* primarySimpleFontData(const Font* f)
@@ -83,12 +99,13 @@ private:
     void setPlatformFont(const FontPlatformData&);
 
     void releaseFontData();
-
-    mutable Vector<pair<const FontData*, bool>, 1> m_fontList;
+    
+    mutable Vector<RefPtr<FontData>, 1> m_fontList;
     mutable GlyphPages m_pages;
     mutable GlyphPageTreeNode* m_pageZero;
     mutable const SimpleFontData* m_cachedPrimarySimpleFontData;
     RefPtr<FontSelector> m_fontSelector;
+    mutable WidthCache m_widthCache;
     unsigned m_fontSelectorVersion;
     mutable int m_familyIndex;
     unsigned short m_generation;

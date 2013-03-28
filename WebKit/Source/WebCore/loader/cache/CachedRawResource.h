@@ -27,22 +27,34 @@
 #include "CachedResourceClient.h"
 
 namespace WebCore {
+class CachedRawResourceCallback;
+class CachedRawResourceClient;
+class SubresourceLoader;
 
 class CachedRawResource : public CachedResource {
 public:
-    CachedRawResource(ResourceRequest&);
+    CachedRawResource(ResourceRequest&, Type);
 
     // FIXME: AssociatedURLLoader shouldn't be a DocumentThreadableLoader and therefore shouldn't
     // use CachedRawResource. However, it is, and it needs to be able to defer loading.
     // This can be fixed by splitting CORS preflighting out of DocumentThreacableLoader.
     virtual void setDefersLoading(bool);
+
+    virtual void setShouldBufferData(DataBufferingPolicy);
     
     // FIXME: This is exposed for the InpsectorInstrumentation for preflights in DocumentThreadableLoader. It's also really lame.
-    unsigned long identifier() const;
+    unsigned long identifier() const { return m_identifier; }
+
+    SubresourceLoader* loader() const;
+    void clear();
+
+    bool canReuse(const ResourceRequest&) const;
+
+    virtual void reportMemoryUsage(MemoryObjectInfo*) const OVERRIDE;
 
 private:
     virtual void didAddClient(CachedResourceClient*);
-    virtual void data(PassRefPtr<SharedBuffer> data, bool allDataReceived);
+    virtual void data(PassRefPtr<ResourceBuffer> data, bool allDataReceived);
 
     virtual bool shouldIgnoreHTTPStatusCodeErrors() const { return true; }
     virtual void allClientsRemoved();
@@ -54,7 +66,7 @@ private:
     virtual void didDownloadData(int);
 #endif
 
-    size_t m_dataLength;
+    unsigned long m_identifier;
 };
 
 
@@ -62,7 +74,7 @@ class CachedRawResourceClient : public CachedResourceClient {
 public:
     virtual ~CachedRawResourceClient() { }
     static CachedResourceClientType expectedType() { return RawResourceType; }
-    virtual CachedResourceClientType resourceClientType() { return expectedType(); }
+    virtual CachedResourceClientType resourceClientType() const { return expectedType(); }
 
     virtual void dataSent(CachedResource*, unsigned long long /* bytesSent */, unsigned long long /* totalBytesToBeSent */) { }
     virtual void responseReceived(CachedResource*, const ResourceResponse&) { }

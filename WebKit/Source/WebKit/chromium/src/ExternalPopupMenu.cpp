@@ -38,8 +38,8 @@
 #include "WebExternalPopupMenu.h"
 #include "WebMenuItemInfo.h"
 #include "WebPopupMenuInfo.h"
-#include "platform/WebVector.h"
 #include "WebViewClient.h"
+#include <public/WebVector.h>
 
 using namespace WebCore;
 
@@ -69,11 +69,10 @@ void ExternalPopupMenu::show(const IntRect& rect, FrameView* v, int index)
         return;
     m_webExternalPopupMenu =
         m_webViewClient->createExternalPopupMenu(info, this);
-
     if (m_webExternalPopupMenu)
         m_webExternalPopupMenu->show(v->contentsToWindow(rect));
     else {
-        // The client refused to create the popup (typically if it has one already showing or pending to be shown).
+        // The client might refuse to create a popup (when there is already one pending to be shown for example).
         didCancel();
     }
 }

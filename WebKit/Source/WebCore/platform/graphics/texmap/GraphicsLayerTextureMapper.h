@@ -24,23 +24,16 @@
 #include "GraphicsLayer.h"
 #include "GraphicsLayerClient.h"
 #include "Image.h"
-#include "TextureMapperNode.h"
-
-#if ENABLE(WEBGL)
-#include "GraphicsContext3D.h"
-#endif
+#include "TextureMapperLayer.h"
+#include "Timer.h"
 
 namespace WebCore {
 
-class TextureMapperNode;
-class BitmapTexture;
-class TextureMapper;
-
 class GraphicsLayerTextureMapper : public GraphicsLayer {
-    friend class TextureMapperNode;
+    friend class TextureMapperLayer;
 
 public:
-    GraphicsLayerTextureMapper(GraphicsLayerClient*);
+    explicit GraphicsLayerTextureMapper(GraphicsLayerClient*);
     virtual ~GraphicsLayerTextureMapper();
 
     // reimps from GraphicsLayer.h
@@ -64,39 +57,70 @@ public:
     virtual void setPreserves3D(bool b);
     virtual void setMasksToBounds(bool b);
     virtual void setDrawsContent(bool b);
-    virtual void setBackgroundColor(const Color&);
-    virtual void clearBackgroundColor();
+    virtual void setContentsVisible(bool);
     virtual void setContentsOpaque(bool b);
     virtual void setBackfaceVisibility(bool b);
     virtual void setOpacity(float opacity);
     virtual void setContentsRect(const IntRect& r);
     virtual void setReplicatedByLayer(GraphicsLayer*);
     virtual void setContentsToImage(Image*);
+    virtual void setContentsToSolidColor(const Color&);
+    Color solidColor() const { return m_solidColor; }
     virtual void setContentsToMedia(PlatformLayer*);
     virtual void setContentsToCanvas(PlatformLayer* canvas) { setContentsToMedia(canvas); }
-    virtual void syncCompositingState(const FloatRect&);
-    virtual void syncCompositingStateForThisLayerOnly();
+    virtual void flushCompositingState(const FloatRect&);
+    virtual void flushCompositingStateForThisLayerOnly();
     virtual void setName(const String& name);
-    virtual PlatformLayer* platformLayer() const;
+    virtual PlatformLayer* platformLayer() const { return m_contentsLayer; }
 
-    void notifyChange(TextureMapperNode::ChangeMask changeMask);
-    inline TextureMapperNode::ContentData& pendingContent() { return m_pendingContent; }
+    void notifyChange(TextureMapperLayer::ChangeMask);
     inline int changeMask() const { return m_changeMask; }
-    void didSynchronize();
 
     virtual bool addAnimation(const KeyframeValueList&, const IntSize&, const Animation*, const String&, double);
     virtual void pauseAnimation(const String&, double);
     virtual void removeAnimation(const String&);
+    void setAnimations(const GraphicsLayerAnimations&);
 
-    TextureMapperNode* node() const { return m_node.get(); }
+    TextureMapperLayer* layer() const { return m_layer.get(); }
 
+    virtual void setDebugBorder(const Color&, float width);
+
+#if ENABLE(CSS_FILTERS)
+    virtual bool setFilters(const FilterOperations&);
+#endif
+
+    // FIXME: It will be removed after removing dependency of LayerTreeRenderer on GraphicsLayerTextureMapper.
+    void setHasOwnBackingStore(bool b) { m_hasOwnBackingStore = b; }
+
+    void setFixedToViewport(bool fixed) { m_fixedToViewport = fixed; }
+    bool fixedToViewport() const { return m_fixedToViewport; }
+
+    void drawRepaintCounter(GraphicsContext*);
 private:
-    OwnPtr<TextureMapperNode> m_node;
-    bool m_syncQueued;
-    int m_changeMask;
-    TextureMapperNode::ContentData m_pendingContent;
-    TextureMapperAnimations m_animations;
+    virtual void willBeDestroyed();
+    void didFlushCompositingState();
+    void updateBackingStore();
+    void prepareBackingStore();
+    bool shouldHaveBackingStore() const;
     void animationStartedTimerFired(Timer<GraphicsLayerTextureMapper>*);
+
+    OwnPtr<TextureMapperLayer> m_layer;
+    RefPtr<TextureMapperTiledBackingStore> m_compositedImage;
+    NativeImagePtr m_compositedNativeImagePtr;
+    RefPtr<TextureMapperBackingStore> m_backingStore;
+
+    int m_changeMask;
+    bool m_needsDisplay;
+    bool m_hasOwnBackingStore;
+    bool m_fixedToViewport;
+    Color m_solidColor;
+
+    Color m_debugBorderColor;
+    float m_debugBorderWidth;
+
+    TextureMapperPlatformLayer* m_contentsLayer;
+    FloatRect m_needsDisplayRect;
+    GraphicsLayerAnimations m_animations;
     Timer<GraphicsLayerTextureMapper> m_animationStartedTimer;
 };
 

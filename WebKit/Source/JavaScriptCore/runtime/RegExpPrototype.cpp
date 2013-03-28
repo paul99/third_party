@@ -34,7 +34,6 @@
 #include "RegExp.h"
 #include "RegExpCache.h"
 #include "StringRecursionChecker.h"
-#include "UStringConcatenate.h"
 
 namespace JSC {
 
@@ -60,19 +59,17 @@ const ClassInfo RegExpPrototype::s_info = { "RegExp", &RegExpObject::s_info, 0, 
 @end
 */
 
-ASSERT_CLASS_FITS_IN_CELL(RegExpPrototype);
-
 RegExpPrototype::RegExpPrototype(JSGlobalObject* globalObject, Structure* structure, RegExp* regExp)
     : RegExpObject(globalObject, structure, regExp)
 {
 }
 
-bool RegExpPrototype::getOwnPropertySlot(JSCell* cell, ExecState* exec, const Identifier& propertyName, PropertySlot &slot)
+bool RegExpPrototype::getOwnPropertySlot(JSCell* cell, ExecState* exec, PropertyName propertyName, PropertySlot &slot)
 {
     return getStaticFunctionSlot<RegExpObject>(exec, ExecState::regExpPrototypeTable(exec), jsCast<RegExpPrototype*>(cell), propertyName, slot);
 }
 
-bool RegExpPrototype::getOwnPropertyDescriptor(JSObject* object, ExecState* exec, const Identifier& propertyName, PropertyDescriptor& descriptor)
+bool RegExpPrototype::getOwnPropertyDescriptor(JSObject* object, ExecState* exec, PropertyName propertyName, PropertyDescriptor& descriptor)
 {
     return getStaticFunctionDescriptor<RegExpObject>(exec, ExecState::regExpPrototypeTable(exec), jsCast<RegExpPrototype*>(object), propertyName, descriptor);
 }
@@ -84,7 +81,7 @@ EncodedJSValue JSC_HOST_CALL regExpProtoFuncTest(ExecState* exec)
     JSValue thisValue = exec->hostThisValue();
     if (!thisValue.inherits(&RegExpObject::s_info))
         return throwVMTypeError(exec);
-    return JSValue::encode(asRegExpObject(thisValue)->test(exec));
+    return JSValue::encode(jsBoolean(asRegExpObject(thisValue)->test(exec, exec->argument(0).toString(exec))));
 }
 
 EncodedJSValue JSC_HOST_CALL regExpProtoFuncExec(ExecState* exec)
@@ -92,7 +89,7 @@ EncodedJSValue JSC_HOST_CALL regExpProtoFuncExec(ExecState* exec)
     JSValue thisValue = exec->hostThisValue();
     if (!thisValue.inherits(&RegExpObject::s_info))
         return throwVMTypeError(exec);
-    return JSValue::encode(asRegExpObject(thisValue)->exec(exec));
+    return JSValue::encode(asRegExpObject(thisValue)->exec(exec, exec->argument(0).toString(exec)));
 }
 
 EncodedJSValue JSC_HOST_CALL regExpProtoFuncCompile(ExecState* exec)
@@ -107,10 +104,10 @@ EncodedJSValue JSC_HOST_CALL regExpProtoFuncCompile(ExecState* exec)
     
     if (arg0.inherits(&RegExpObject::s_info)) {
         if (!arg1.isUndefined())
-            return throwVMError(exec, createTypeError(exec, "Cannot supply flags when constructing one RegExp from another."));
+            return throwVMError(exec, createTypeError(exec, ASCIILiteral("Cannot supply flags when constructing one RegExp from another.")));
         regExp = asRegExpObject(arg0)->regExp();
     } else {
-        UString pattern = !exec->argumentCount() ? UString("") : arg0.toString(exec)->value(exec);
+        String pattern = !exec->argumentCount() ? String("") : arg0.toString(exec)->value(exec);
         if (exec->hadException())
             return JSValue::encode(jsUndefined());
 
@@ -120,7 +117,7 @@ EncodedJSValue JSC_HOST_CALL regExpProtoFuncCompile(ExecState* exec)
             if (exec->hadException())
                 return JSValue::encode(jsUndefined());
             if (flags == InvalidFlags)
-                return throwVMError(exec, createSyntaxError(exec, "Invalid flags supplied to RegExp constructor."));
+                return throwVMError(exec, createSyntaxError(exec, ASCIILiteral("Invalid flags supplied to RegExp constructor.")));
         }
         regExp = RegExp::create(exec->globalData(), pattern, flags);
     }
@@ -129,7 +126,7 @@ EncodedJSValue JSC_HOST_CALL regExpProtoFuncCompile(ExecState* exec)
         return throwVMError(exec, createSyntaxError(exec, regExp->errorMessage()));
 
     asRegExpObject(thisValue)->setRegExp(exec->globalData(), regExp);
-    asRegExpObject(thisValue)->setLastIndex(0);
+    asRegExpObject(thisValue)->setLastIndex(exec, 0);
     return JSValue::encode(jsUndefined());
 }
 
@@ -153,9 +150,9 @@ EncodedJSValue JSC_HOST_CALL regExpProtoFuncToString(ExecState* exec)
         postfix[index++] = 'i';
     if (thisObject->get(exec, exec->propertyNames().multiline).toBoolean(exec))
         postfix[index] = 'm';
-    UString source = thisObject->get(exec, exec->propertyNames().source).toString(exec)->value(exec);
+    String source = thisObject->get(exec, exec->propertyNames().source).toString(exec)->value(exec);
     // If source is empty, use "/(?:)/" to avoid colliding with comment syntax
-    return JSValue::encode(jsMakeNontrivialString(exec, "/", source.length() ? source : UString("(?:)"), postfix));
+    return JSValue::encode(jsMakeNontrivialString(exec, "/", source, postfix));
 }
 
 } // namespace JSC

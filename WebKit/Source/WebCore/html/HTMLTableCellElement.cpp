@@ -67,6 +67,9 @@ int HTMLTableCellElement::rowSpan() const
 int HTMLTableCellElement::cellIndex() const
 {
     int index = 0;
+    if (!parentElement() || !parentElement()->hasTagName(trTag))
+        return -1;
+
     for (const Node * node = previousSibling(); node; node = node->previousSibling()) {
         if (node->hasTagName(tdTag) || node->hasTagName(thTag))
             index++;
@@ -75,62 +78,55 @@ int HTMLTableCellElement::cellIndex() const
     return index;
 }
 
-bool HTMLTableCellElement::mapToEntry(const QualifiedName& attrName, MappedAttributeEntry& result) const
+bool HTMLTableCellElement::isPresentationAttribute(const QualifiedName& name) const
 {
-    if (attrName == nowrapAttr) {
-        result = eUniversal;
-        return false;
-    }
-    
-    if (attrName == widthAttr ||
-        attrName == heightAttr) {
-        result = eCell; // Because of the quirky behavior of ignoring 0 values, cells are special.
-        return false;
-    }
-
-    return HTMLTablePartElement::mapToEntry(attrName, result);
+    if (name == nowrapAttr || name == widthAttr || name == heightAttr)
+        return true;
+    return HTMLTablePartElement::isPresentationAttribute(name);
 }
 
-void HTMLTableCellElement::parseMappedAttribute(Attribute* attr)
+void HTMLTableCellElement::collectStyleForPresentationAttribute(const Attribute& attribute, StylePropertySet* style)
 {
-    if (attr->name() == rowspanAttr) {
-        if (renderer() && renderer()->isTableCell())
-            toRenderTableCell(renderer())->colSpanOrRowSpanChanged();
-    } else if (attr->name() == colspanAttr) {
-        if (renderer() && renderer()->isTableCell())
-            toRenderTableCell(renderer())->colSpanOrRowSpanChanged();
-    } else if (attr->name() == nowrapAttr) {
-        if (!attr->isNull())
-            addCSSProperty(attr, CSSPropertyWhiteSpace, CSSValueWebkitNowrap);
-    } else if (attr->name() == widthAttr) {
-        if (!attr->value().isEmpty()) {
-            int widthInt = attr->value().toInt();
+    if (attribute.name() == nowrapAttr) {
+        addPropertyToPresentationAttributeStyle(style, CSSPropertyWhiteSpace, CSSValueWebkitNowrap);
+    } else if (attribute.name() == widthAttr) {
+        if (!attribute.value().isEmpty()) {
+            int widthInt = attribute.value().toInt();
             if (widthInt > 0) // width="0" is ignored for compatibility with WinIE.
-                addCSSLength(attr, CSSPropertyWidth, attr->value());
+                addHTMLLengthToStyle(style, CSSPropertyWidth, attribute.value());
         }
-    } else if (attr->name() == heightAttr) {
-        if (!attr->value().isEmpty()) {
-            int heightInt = attr->value().toInt();
+    } else if (attribute.name() == heightAttr) {
+        if (!attribute.value().isEmpty()) {
+            int heightInt = attribute.value().toInt();
             if (heightInt > 0) // height="0" is ignored for compatibility with WinIE.
-                addCSSLength(attr, CSSPropertyHeight, attr->value());
+                addHTMLLengthToStyle(style, CSSPropertyHeight, attribute.value());
         }
     } else
-        HTMLTablePartElement::parseMappedAttribute(attr);
+        HTMLTablePartElement::collectStyleForPresentationAttribute(attribute, style);
 }
 
-PassRefPtr<CSSMutableStyleDeclaration> HTMLTableCellElement::additionalAttributeStyle()
+void HTMLTableCellElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
-    ContainerNode* p = parentNode();
-    while (p && !p->hasTagName(tableTag))
-        p = p->parentNode();
-    if (!p)
-        return 0;
-    return static_cast<HTMLTableElement*>(p)->additionalCellStyle();
+    if (name == rowspanAttr) {
+        if (renderer() && renderer()->isTableCell())
+            toRenderTableCell(renderer())->colSpanOrRowSpanChanged();
+    } else if (name == colspanAttr) {
+        if (renderer() && renderer()->isTableCell())
+            toRenderTableCell(renderer())->colSpanOrRowSpanChanged();
+    } else
+        HTMLTablePartElement::parseAttribute(name, value);
 }
 
-bool HTMLTableCellElement::isURLAttribute(Attribute *attr) const
+const StylePropertySet* HTMLTableCellElement::additionalPresentationAttributeStyle()
 {
-    return attr->name() == backgroundAttr || HTMLTablePartElement::isURLAttribute(attr);
+    if (HTMLTableElement* table = findParentTable())
+        return table->additionalCellStyle();
+    return 0;
+}
+
+bool HTMLTableCellElement::isURLAttribute(const Attribute& attribute) const
+{
+    return attribute.name() == backgroundAttr || HTMLTablePartElement::isURLAttribute(attribute);
 }
 
 String HTMLTableCellElement::abbr() const

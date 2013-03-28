@@ -36,6 +36,10 @@
 #include <stdlib.h>
 #include <wtf/text/CString.h>
 
+#if PLATFORM(BLACKBERRY)
+#include <BlackBerryPlatformSettings.h>
+#endif
+
 namespace WebCore {
 
 typedef HashMap<String, RefPtr<PluginPackage> > PluginPackageByNameMap;
@@ -162,7 +166,7 @@ bool PluginDatabase::refresh()
         MIMEToDescriptionsMap::const_iterator map_it = (*it)->mimeToDescriptions().begin();
         MIMEToDescriptionsMap::const_iterator map_end = (*it)->mimeToDescriptions().end();
         for (; map_it != map_end; ++map_it)
-            m_registeredMIMETypes.add(map_it->first);
+            m_registeredMIMETypes.add(map_it->key);
     }
 
     return true;
@@ -243,9 +247,9 @@ String PluginDatabase::MIMETypeForExtension(const String& extension) const
         MIMEToExtensionsMap::const_iterator mime_end = (*it)->mimeToExtensions().end();
 
         for (MIMEToExtensionsMap::const_iterator mime_it = (*it)->mimeToExtensions().begin(); mime_it != mime_end; ++mime_it) {
-            mimeType = mime_it->first;
+            mimeType = mime_it->key;
             PluginPackage* preferredPlugin = m_preferredPlugins.get(mimeType).get();
-            const Vector<String>& extensions = mime_it->second;
+            const Vector<String>& extensions = mime_it->value;
             bool foundMapping = false;
             for (unsigned i = 0; i < extensions.size(); i++) {
                 if (equalIgnoringCase(extensions[i], extension)) {
@@ -283,7 +287,7 @@ PluginPackage* PluginDatabase::findPlugin(const KURL& url, String& mimeType)
         return pluginForMIMEType(mimeType);
     
     String filename = url.lastPathComponent();
-    if (filename.endsWith("/"))
+    if (filename.endsWith('/'))
         return 0;
     
     int extensionPos = filename.reverseFind('.');
@@ -308,11 +312,20 @@ void PluginDatabase::setPreferredPluginForMIMEType(const String& mimeType, Plugi
         m_preferredPlugins.set(mimeType.lower(), plugin);
 }
 
+bool PluginDatabase::fileExistsAndIsNotDisabled(const String& filePath) const
+{
+    // Skip plugin files that are disabled by filename.
+    if (m_disabledPluginFiles.contains(pathGetFileName(filePath)))
+        return false;
+
+    return fileExists(filePath);
+}
+
 void PluginDatabase::getDeletedPlugins(PluginSet& plugins) const
 {
     PluginSet::const_iterator end = m_plugins.end();
     for (PluginSet::const_iterator it = m_plugins.begin(); it != end; ++it) {
-        if (!fileExists((*it)->path()))
+        if (!fileExistsAndIsNotDisabled((*it)->path()))
             plugins.add(*it);
     }
 }
@@ -323,7 +336,7 @@ bool PluginDatabase::add(PassRefPtr<PluginPackage> prpPackage)
 
     RefPtr<PluginPackage> package = prpPackage;
 
-    if (!m_plugins.add(package).second)
+    if (!m_plugins.add(package).isNewEntry)
         return false;
 
     m_pluginsByPath.add(package->path(), package);
@@ -335,8 +348,8 @@ void PluginDatabase::remove(PluginPackage* package)
     MIMEToExtensionsMap::const_iterator it = package->mimeToExtensions().begin();
     MIMEToExtensionsMap::const_iterator end = package->mimeToExtensions().end();
     for ( ; it != end; ++it) {
-        PluginPackageByNameMap::iterator packageInMap = m_preferredPlugins.find(it->first);
-        if (packageInMap != m_preferredPlugins.end() && packageInMap->second == package)
+        PluginPackageByNameMap::iterator packageInMap = m_preferredPlugins.find(it->key);
+        if (packageInMap != m_preferredPlugins.end() && packageInMap->value == package)
             m_preferredPlugins.remove(packageInMap);
     }
 
@@ -354,6 +367,20 @@ void PluginDatabase::clear()
 #if ENABLE(NETSCAPE_PLUGIN_METADATA_CACHE)
     m_persistentMetadataCacheIsLoaded = false;
 #endif
+}
+
+bool PluginDatabase::removeDisabledPluginFile(const String& fileName)
+{
+    if (!m_disabledPluginFiles.contains(fileName))
+        return false;
+
+    m_disabledPluginFiles.remove(fileName);
+    return true;
+}
+
+bool PluginDatabase::addDisabledPluginFile(const String& fileName)
+{
+    return m_disabledPluginFiles.add(fileName).isNewEntry;
 }
 
 #if (!OS(WINCE)) && (!OS(WINDOWS) || !ENABLE(NETSCAPE_PLUGIN_API))
@@ -428,7 +455,9 @@ bool PluginDatabase::isPreferredPluginDirectory(const String& path)
 {
     String preferredPath = homeDirectoryPath();
 
-#if defined(XP_UNIX)
+#if PLATFORM(BLACKBERRY)
+    preferredPath = BlackBerry::Platform::Settings::instance()->applicationPluginDirectory().c_str();
+#elif defined(XP_UNIX)
     preferredPath.append(String("/.mozilla/plugins"));
 #elif defined(XP_MACOSX)
     preferredPath.append(String("/Library/Internet Plug-Ins"));
@@ -456,7 +485,7 @@ void PluginDatabase::getPluginPathsInDirectories(HashSet<String>& paths) const
         Vector<String> pluginPaths = listDirectory(*dIt, fileNameFilter);
         Vector<String>::const_iterator pluginsEnd = pluginPaths.end();
         for (Vector<String>::const_iterator pIt = pluginPaths.begin(); pIt != pluginsEnd; ++pIt) {
-            if (!fileExists(*pIt))
+            if (!fileExistsAndIsNotDisabled(*pIt))
                 continue;
 
             paths.add(*pIt);
@@ -508,7 +537,8 @@ static bool readTime(time_t& resultTime, char*& start, const char* end)
     if (start + sizeof(time_t) >= end)
         return false;
 
-    resultTime = *reinterpret_cast_ptr<time_t*>(start);
+    // The stream is not necessary aligned.
+    memcpy(&resultTime, start, sizeof(time_t));
     start += sizeof(time_t);
 
     return true;
@@ -574,7 +604,7 @@ void PluginDatabase::loadPersistentMetadataCache()
 
         RefPtr<PluginPackage> package = PluginPackage::createPackageFromCache(path, lastModified, name, desc, mimeDesc);
 
-        if (package && cachedPlugins.add(package).second) {
+        if (package && cachedPlugins.add(package).isNewEntry) {
             cachedPluginPathsWithTimes.add(package->path(), package->lastModified());
             cachedPluginsByPath.add(package->path(), package);
         }

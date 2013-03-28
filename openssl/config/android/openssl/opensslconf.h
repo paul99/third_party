@@ -5,8 +5,17 @@
 #ifndef OPENSSL_DOING_MAKEDEPEND
 
 
+#ifndef OPENSSL_NO_CAMELLIA
+# define OPENSSL_NO_CAMELLIA
+#endif
 #ifndef OPENSSL_NO_CAST
 # define OPENSSL_NO_CAST
+#endif
+#ifndef OPENSSL_NO_CMS
+# define OPENSSL_NO_CMS
+#endif
+#ifndef OPENSSL_NO_EC_NISTP_64_GCC_128
+# define OPENSSL_NO_EC_NISTP_64_GCC_128
 #endif
 #ifndef OPENSSL_NO_GMP
 # define OPENSSL_NO_GMP
@@ -23,11 +32,17 @@
 #ifndef OPENSSL_NO_MD2
 # define OPENSSL_NO_MD2
 #endif
+#ifndef OPENSSL_NO_MDC2
+# define OPENSSL_NO_MDC2
+#endif
 #ifndef OPENSSL_NO_RC5
 # define OPENSSL_NO_RC5
 #endif
 #ifndef OPENSSL_NO_RFC3779
 # define OPENSSL_NO_RFC3779
+#endif
+#ifndef OPENSSL_NO_SCTP
+# define OPENSSL_NO_SCTP
 #endif
 #ifndef OPENSSL_NO_SEED
 # define OPENSSL_NO_SEED
@@ -38,11 +53,45 @@
 #ifndef OPENSSL_NO_STORE
 # define OPENSSL_NO_STORE
 #endif
-#ifndef OPENSSL_NO_WHRLPOOL
-# define OPENSSL_NO_WHRLPOOL
+#ifndef OPENSSL_NO_WHIRLPOOL
+# define OPENSSL_NO_WHIRLPOOL
 #endif
 
 #endif /* OPENSSL_DOING_MAKEDEPEND */
+
+#if defined(__arm__)
+
+# define OPENSSL_BN_ASM_GF2m
+# define OPENSSL_BN_ASM_MONT
+# define GHASH_ASM
+# define AES_ASM
+# define SHA1_ASM
+# define SHA256_ASM
+# define SHA512_ASM
+
+#elif defined(__i386__)
+
+# define OPENSSL_BN_ASM_GF2m
+# define OPENSSL_BN_ASM_MONT
+# define OPENSSL_BN_ASM_PART_WORDS
+# define AES_ASM 
+# define GHASH_ASM
+# define SHA1_ASM
+# define SHA256_ASM
+# define SHA512_ASM
+# define MD5_ASM
+# define DES_PTR 
+# define DES_RISC1
+# define DES_UNROLL
+
+#elif defined(__mips__)
+
+# define OPENSSL_BN_ASM_MONT
+# define AES_ASM
+# define SHA1_ASM
+# define SHA256_ASM
+
+#endif
 
 #ifndef OPENSSL_THREADS
 # define OPENSSL_THREADS

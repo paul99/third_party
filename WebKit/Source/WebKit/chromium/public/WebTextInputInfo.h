@@ -26,13 +26,12 @@
 #ifndef WebTextInputInfo_h
 #define WebTextInputInfo_h
 
-#include "platform/WebString.h"
 #include "WebTextInputType.h"
+#include "platform/WebString.h"
 
 namespace WebKit {
 
 struct WebTextInputInfo {
-
     WebTextInputType type;
 
     // The value of the currently focused input field.
@@ -52,6 +51,8 @@ struct WebTextInputInfo {
     // The end position of the current composition, or -1 if there is none.
     int compositionEnd;
 
+    WEBKIT_EXPORT bool equals(const WebTextInputInfo&) const;
+
     WebTextInputInfo()
         : type(WebTextInputTypeNone)
         , selectionStart(0)
@@ -64,9 +65,7 @@ struct WebTextInputInfo {
 
 inline bool operator==(const WebTextInputInfo& a, const WebTextInputInfo& b)
 {
-    return a.type == b.type && a.value == b.value
-        && a.selectionStart == b.selectionStart && a.selectionEnd == b.selectionEnd
-        && a.compositionStart == b.compositionStart && a.compositionEnd == b.compositionEnd;
+    return a.equals(b);
 }
 
 inline bool operator!=(const WebTextInputInfo& a, const WebTextInputInfo& b)

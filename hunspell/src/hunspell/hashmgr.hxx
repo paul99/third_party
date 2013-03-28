@@ -51,8 +51,8 @@ class LIBHUNSPELL_DLL_EXPORTED HashMgr
 public:
 #ifdef HUNSPELL_CHROME_CLIENT
   HashMgr(hunspell::BDictReader* reader);
-  
-  // Return the hentry corresponding to the given word. Returns NULL if the 
+
+  // Return the hentry corresponding to the given word. Returns NULL if the
   // word is not there in the cache.
   hentry* GetHentryFromHEntryCache(char* word);
 

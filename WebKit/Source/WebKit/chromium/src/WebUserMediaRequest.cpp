@@ -35,15 +35,18 @@
 #include "WebUserMediaRequest.h"
 
 #include "Document.h"
-#include "Frame.h"
+#include "MediaConstraints.h"
+#include "MediaStreamDescriptor.h"
 #include "MediaStreamSource.h"
-#include "Page.h"
 #include "SecurityOrigin.h"
 #include "UserMediaRequest.h"
+#include "WebDocument.h"
 #include "WebSecurityOrigin.h"
-#include "platform/WebMediaStreamSource.h"
-#include "platform/WebString.h"
-#include "platform/WebVector.h"
+#include <public/WebMediaConstraints.h>
+#include <public/WebMediaStreamDescriptor.h>
+#include <public/WebMediaStreamSource.h>
+#include <public/WebString.h>
+#include <public/WebVector.h>
 #include <wtf/Vector.h>
 
 using namespace WebCore;
@@ -62,69 +65,49 @@ void WebUserMediaRequest::reset()
 
 bool WebUserMediaRequest::audio() const
 {
+    ASSERT(!isNull());
     return m_private->audio();
 }
 
 bool WebUserMediaRequest::video() const
 {
+    ASSERT(!isNull());
     return m_private->video();
 }
 
-bool WebUserMediaRequest::cameraPreferenceUser() const
+WebMediaConstraints WebUserMediaRequest::audioConstraints() const
 {
-    return m_private->cameraPreferenceUser();
+    ASSERT(!isNull());
+    return m_private->audioConstraints();
 }
 
-bool WebUserMediaRequest::cameraPreferenceEnvironment() const
+WebMediaConstraints WebUserMediaRequest::videoConstraints() const
 {
-    return m_private->cameraPreferenceEnvironment();
+    ASSERT(!isNull());
+    return m_private->videoConstraints();
 }
 
 WebSecurityOrigin WebUserMediaRequest::securityOrigin() const
 {
-    ASSERT(m_private->scriptExecutionContext());
+    ASSERT(!isNull() && m_private->scriptExecutionContext());
     return WebSecurityOrigin(m_private->scriptExecutionContext()->securityOrigin());
 }
 
-void WebUserMediaRequest::requestSucceeded(const WebVector<WebMediaStreamSource>& audioSources, const WebVector<WebMediaStreamSource>& videoSources)
+WebDocument WebUserMediaRequest::ownerDocument() const
 {
-    if (m_private.isNull())
-        return;
-
-    MediaStreamSourceVector audio;
-    for (size_t i = 0; i < audioSources.size(); ++i) {
-        MediaStreamSource* curr = audioSources[i];
-        audio.append(curr);
-    }
-    MediaStreamSourceVector video;
-    for (size_t i = 0; i < videoSources.size(); ++i) {
-        MediaStreamSource* curr = videoSources[i];
-        video.append(curr);
-    }
-
-    m_private->succeed(audio, video);
+    ASSERT(!isNull());
+    return WebDocument(m_private->ownerDocument());
 }
 
-// FIXME: Cleanup when the chromium code has switched to the split sources implementation.
-void WebUserMediaRequest::requestSucceeded(const WebVector<WebMediaStreamSource>& sources)
+void WebUserMediaRequest::requestSucceeded(const WebMediaStreamDescriptor& streamDescriptor)
 {
-    if (m_private.isNull())
-        return;
-
-    MediaStreamSourceVector audio, video;
-    for (size_t i = 0; i < sources.size(); ++i) {
-        MediaStreamSource* curr = sources[i];
-        if (curr->type() == MediaStreamSource::TypeAudio)
-            audio.append(curr);
-        else if (curr->type() == MediaStreamSource::TypeVideo)
-            video.append(curr);
-    }
-
-    m_private->succeed(audio, video);
+    ASSERT(!isNull() && !streamDescriptor.isNull());
+    m_private->succeed(streamDescriptor);
 }
 
 void WebUserMediaRequest::requestFailed()
 {
+    ASSERT(!isNull());
     m_private->fail();
 }
 
@@ -137,10 +120,7 @@ bool WebUserMediaRequest::equals(const WebUserMediaRequest& other) const
 
 void WebUserMediaRequest::assign(const WebUserMediaRequest& other)
 {
-    UserMediaRequest* p = other.m_private.get();
-    if (p)
-        p->ref();
-    m_private = p;
+    m_private = other.m_private;
 }
 
 WebUserMediaRequest::operator UserMediaRequest*() const

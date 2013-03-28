@@ -42,11 +42,11 @@ namespace WebCore {
 
         void clearData(const String& type);
         void clearAllData();
-        String getData(const String& type, bool& success) const;
+        String getData(const String& type) const;
         bool setData(const String& type, const String& data);
     
         // extensions beyond IE's API
-        virtual HashSet<String> types() const;
+        virtual ListHashSet<String> types() const;
         virtual PassRefPtr<FileList> files() const;
     
         IntPoint dragLocation() const;

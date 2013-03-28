@@ -37,29 +37,30 @@
 #include "V8NamedNodesCollection.h"
 #include "V8Node.h"
 #include "V8NodeList.h"
-#include "V8Proxy.h"
 
 namespace WebCore {
 
-static v8::Handle<v8::Value> getNamedItems(HTMLAllCollection* collection, AtomicString name)
+static v8::Handle<v8::Value> getNamedItems(HTMLAllCollection* collection, AtomicString name, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
 {
     Vector<RefPtr<Node> > namedItems;
     collection->namedItems(name, namedItems);
 
     if (!namedItems.size())
-        return v8::Handle<v8::Value>();
+        return v8Undefined();
 
     if (namedItems.size() == 1)
-        return toV8(namedItems.at(0).release());
+        return toV8(namedItems.at(0).release(), creationContext, isolate);
 
-    return toV8(V8NamedNodesCollection::create(namedItems));
+    // FIXME: HTML5 specification says this should be a HTMLCollection.
+    // http://www.whatwg.org/specs/web-apps/current-work/multipage/common-dom-interfaces.html#htmlallcollection
+    return toV8(V8NamedNodesCollection::create(namedItems), creationContext, isolate);
 }
 
-static v8::Handle<v8::Value> getItem(HTMLAllCollection* collection, v8::Handle<v8::Value> argument)
+static v8::Handle<v8::Value> getItem(HTMLAllCollection* collection, v8::Handle<v8::Value> argument, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
 {
     v8::Local<v8::Uint32> index = argument->ToArrayIndex();
     if (index.IsEmpty()) {
-        v8::Handle<v8::Value> result = getNamedItems(collection, toWebCoreString(argument->ToString()));
+        v8::Handle<v8::Value> result = getNamedItems(collection, toWebCoreString(argument->ToString()), creationContext, isolate);
 
         if (result.IsEmpty())
             return v8::Undefined();
@@ -68,7 +69,7 @@ static v8::Handle<v8::Value> getItem(HTMLAllCollection* collection, v8::Handle<v
     }
 
     RefPtr<Node> result = collection->item(index->Uint32Value());
-    return toV8(result.release());
+    return toV8(result.release(), creationContext, isolate);
 }
 
 v8::Handle<v8::Value> V8HTMLAllCollection::namedPropertyGetter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
@@ -76,26 +77,26 @@ v8::Handle<v8::Value> V8HTMLAllCollection::namedPropertyGetter(v8::Local<v8::Str
     INC_STATS("DOM.HTMLAllCollection.NamedPropertyGetter");
 
     if (!info.Holder()->GetRealNamedPropertyInPrototypeChain(name).IsEmpty())
-        return notHandledByInterceptor();
+        return v8Undefined();
     if (info.Holder()->HasRealNamedCallbackProperty(name))
-        return notHandledByInterceptor();
+        return v8Undefined();
 
     HTMLAllCollection* imp = V8HTMLAllCollection::toNative(info.Holder());
-    return getNamedItems(imp, v8StringToAtomicWebCoreString(name));
+    return getNamedItems(imp, toWebCoreAtomicString(name), info.Holder(), info.GetIsolate());
 }
 
 v8::Handle<v8::Value> V8HTMLAllCollection::itemCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.HTMLAllCollection.item()");
     HTMLAllCollection* imp = V8HTMLAllCollection::toNative(args.Holder());
-    return getItem(imp, args[0]);
+    return getItem(imp, args[0], args.Holder(), args.GetIsolate());
 }
 
 v8::Handle<v8::Value> V8HTMLAllCollection::namedItemCallback(const v8::Arguments& args)
 {
     INC_STATS("DOM.HTMLAllCollection.namedItem()");
     HTMLAllCollection* imp = V8HTMLAllCollection::toNative(args.Holder());
-    v8::Handle<v8::Value> result = getNamedItems(imp, toWebCoreString(args[0]));
+    v8::Handle<v8::Value> result = getNamedItems(imp, toWebCoreString(args[0]), args.Holder(), args.GetIsolate());
 
     if (result.IsEmpty())
         return v8::Undefined();
@@ -112,7 +113,7 @@ v8::Handle<v8::Value> V8HTMLAllCollection::callAsFunctionCallback(const v8::Argu
     HTMLAllCollection* imp = V8HTMLAllCollection::toNative(args.Holder());
 
     if (args.Length() == 1)
-        return getItem(imp, args[0]);
+        return getItem(imp, args[0], args.Holder(), args.GetIsolate());
 
     // If there is a second argument it is the index of the item we want.
     String name = toWebCoreString(args[0]);
@@ -121,7 +122,7 @@ v8::Handle<v8::Value> V8HTMLAllCollection::callAsFunctionCallback(const v8::Argu
         return v8::Undefined();
 
     if (Node* node = imp->namedItemWithIndex(name, index->Uint32Value()))
-        return toV8(node);
+        return toV8(node, args.Holder(), args.GetIsolate());
 
     return v8::Undefined();
 }

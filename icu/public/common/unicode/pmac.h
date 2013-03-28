@@ -50,6 +50,16 @@
 #endif
 
 #include <AvailabilityMacros.h>
+#include <TargetConditionals.h>
+
+/**
+ * Add a second platform define to handle differences between Mac OS X and iOS
+ */
+#if TARGET_OS_IPHONE
+#ifndef U_IOS
+#define U_IOS
+#endif
+#endif
 
 /**
  * \def U_HAVE_DIRENT_H
@@ -288,11 +298,16 @@
 #if 1
 #define U_TZSET         tzset
 #endif
+#ifndef U_IOS
+/* The iOS version of timezone is busted (at least in the simulator, it is
+   never set to anything useful). Leave it undefined to avoid a code path
+   in putil.c. */
 #if MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_5
 #define U_TIMEZONE 0
 #else
 #define U_TIMEZONE timezone
 #endif
+#endif  // !U_IOS
 #if 1
 #define U_TZNAME        tzname
 #endif

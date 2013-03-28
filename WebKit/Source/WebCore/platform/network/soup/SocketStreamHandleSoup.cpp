@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2009, 2011 Google Inc.  All rights reserved.
+ * Copyright (C) 2012 Samsung Electronics Ltd. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -31,16 +32,18 @@
 #include "config.h"
 #include "SocketStreamHandle.h"
 
-#include "GOwnPtr.h"
 #include "KURL.h"
 #include "Logging.h"
-#include "NotFound.h"
 #include "NotImplemented.h"
 #include "SocketStreamError.h"
 #include "SocketStreamHandleClient.h"
-#include "Vector.h"
+
 #include <gio/gio.h>
 #include <glib.h>
+
+#include <wtf/NotFound.h>
+#include <wtf/Vector.h>
+#include <wtf/gobject/GOwnPtr.h>
 #include <wtf/text/CString.h>
 
 #define READ_BUFFER_SIZE 1024
@@ -82,6 +85,7 @@ SocketStreamHandle::SocketStreamHandle(const KURL& url, SocketStreamHandleClient
     : SocketStreamHandleBase(url, client)
     , m_readBuffer(0)
 {
+    LOG(Network, "SocketStreamHandle %p new client %p", this, m_client);
     unsigned int port = url.hasPort() ? url.port() : (url.protocolIs("wss") ? 443 : 80);
 
     m_id = activateHandle(this);
@@ -92,8 +96,18 @@ SocketStreamHandle::SocketStreamHandle(const KURL& url, SocketStreamHandleClient
         reinterpret_cast<GAsyncReadyCallback>(connectedCallback), m_id);
 }
 
+SocketStreamHandle::SocketStreamHandle(GSocketConnection* socketConnection, SocketStreamHandleClient* client)
+    : SocketStreamHandleBase(KURL(), client)
+    , m_readBuffer(0)
+{
+    LOG(Network, "SocketStreamHandle %p new client %p", this, m_client);
+    m_id = activateHandle(this);
+    connected(socketConnection, 0);
+}
+
 SocketStreamHandle::~SocketStreamHandle()
 {
+    LOG(Network, "SocketStreamHandle %p delete", this);
     // If for some reason we were destroyed without closing, ensure that we are deactivated.
     deactivateHandle(this);
     setClient(0);
@@ -106,7 +120,7 @@ void SocketStreamHandle::connected(GSocketConnection* socketConnection, GError* 
         return;
     }
 
-    m_socketConnection = adoptGRef(socketConnection);
+    m_socketConnection = socketConnection;
     m_outputStream = G_POLLABLE_OUTPUT_STREAM(g_io_stream_get_output_stream(G_IO_STREAM(m_socketConnection.get())));
     m_inputStream = g_io_stream_get_input_stream(G_IO_STREAM(m_socketConnection.get()));
 
@@ -114,12 +128,8 @@ void SocketStreamHandle::connected(GSocketConnection* socketConnection, GError* 
     g_input_stream_read_async(m_inputStream.get(), m_readBuffer, READ_BUFFER_SIZE, G_PRIORITY_DEFAULT, 0,
         reinterpret_cast<GAsyncReadyCallback>(readReadyCallback), m_id);
 
-    // The client can close the handle, potentially removing the last reference.
-    RefPtr<SocketStreamHandle> protect(this); 
     m_state = Open;
     m_client->didOpenSocketStream(this);
-    if (!m_socketConnection) // Client closed the connection.
-        return;
 }
 
 void SocketStreamHandle::readBytes(signed long bytesRead, GError* error)
@@ -155,6 +165,10 @@ void SocketStreamHandle::writeReady()
 
 int SocketStreamHandle::platformSend(const char* data, int length)
 {
+    LOG(Network, "SocketStreamHandle %p platformSend", this);
+    if (!m_outputStream || !data)
+        return 0;
+
     GOwnPtr<GError> error;
     gssize written = g_pollable_output_stream_write_nonblocking(m_outputStream.get(), data, length, 0, &error.outPtr());
     if (error) {
@@ -175,6 +189,7 @@ int SocketStreamHandle::platformSend(const char* data, int length)
 
 void SocketStreamHandle::platformClose()
 {
+    LOG(Network, "SocketStreamHandle %p platformClose", this);
     // We remove this handle from the active handles list first, to disable all callbacks.
     deactivateHandle(this);
     stopWaitingForSocketWritability();
@@ -190,6 +205,7 @@ void SocketStreamHandle::platformClose()
     m_outputStream = 0;
     m_inputStream = 0;
     delete m_readBuffer;
+    m_readBuffer = 0;
 
     m_client->didCloseSocketStream(this);
 }
@@ -242,7 +258,8 @@ static void connectedCallback(GSocketClient* client, GAsyncResult* result, void*
     // The SocketStreamHandle has been deactivated, so just close the connection, ignoring errors.
     SocketStreamHandle* handle = getHandleFromId(id);
     if (!handle) {
-        g_io_stream_close(G_IO_STREAM(socketConnection), 0, &error.outPtr());
+        if (socketConnection)
+            g_io_stream_close(G_IO_STREAM(socketConnection), 0, 0);
         return;
     }
 

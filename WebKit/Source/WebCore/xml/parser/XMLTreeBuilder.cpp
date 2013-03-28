@@ -32,6 +32,7 @@
 #include "Document.h"
 #include "DocumentFragment.h"
 #include "DocumentType.h"
+#include "Element.h"
 #include "Frame.h"
 // FIXME: Why are we including HTML entity information in the XML parser?
 #include "HTMLEntitySearch.h"
@@ -80,13 +81,13 @@ XMLTreeBuilder::XMLTreeBuilder(NewXMLDocumentParser* parser, DocumentFragment* f
 
     for (Element* element; !nodeStack.isEmpty(); nodeStack.removeLast()) {
         element = nodeStack.last();
-        if (NamedNodeMap* attrs = element->attributes()) {
-            for (size_t i = 0; i < attrs->length(); ++i) {
-                Attribute* attr = attrs->attributeItem(i);
-                if (attr->localName() == xmlnsAtom)
-                    stackItem.setNamespaceURI(attr->value());
-                else if (attr->prefix() == xmlnsAtom)
-                    stackItem.setNamespaceURI(attr->localName(), attr->value());
+        if (element->hasAttributes()) {
+            for (size_t i = 0; i < element->attributeCount(); ++i) {
+                const Attribute* attribute = element->attributeItem(i);
+                if (attribute->localName() == xmlnsAtom)
+                    stackItem.setNamespaceURI(attribute->value());
+                else if (attribute->prefix() == xmlnsAtom)
+                    stackItem.setNamespaceURI(attribute->localName(), attribute->value());
             }
         }
     }
@@ -197,14 +198,14 @@ void XMLTreeBuilder::processXMLDeclaration(const AtomicXMLToken& token)
 
 void XMLTreeBuilder::processDOCTYPE(const AtomicXMLToken& token)
 {
-    DEFINE_STATIC_LOCAL(AtomicString, xhtmlTransitional, ("-//W3C//DTD XHTML 1.0 Transitional//EN"));
-    DEFINE_STATIC_LOCAL(AtomicString, xhtml11, ("-//W3C//DTD XHTML 1.1//EN"));
-    DEFINE_STATIC_LOCAL(AtomicString, xhtmlStrict, ("-//W3C//DTD XHTML 1.0 Strict//EN"));
-    DEFINE_STATIC_LOCAL(AtomicString, xhtmlFrameset, ("-//W3C//DTD XHTML 1.0 Frameset//EN"));
-    DEFINE_STATIC_LOCAL(AtomicString, xhtmlBasic, ("-//W3C//DTD XHTML Basic 1.0//EN"));
-    DEFINE_STATIC_LOCAL(AtomicString, xhtmlMathML, ("-//W3C//DTD XHTML 1.1 plus MathML 2.0//EN"));
-    DEFINE_STATIC_LOCAL(AtomicString, xhtmlMathMLSVG, ("-//W3C//DTD XHTML 1.1 plus MathML 2.0 plus SVG 1.1//EN"));
-    DEFINE_STATIC_LOCAL(AtomicString, xhtmlMobile, ("-//WAPFORUM//DTD XHTML Mobile 1.0//EN"));
+    DEFINE_STATIC_LOCAL(AtomicString, xhtmlTransitional, ("-//W3C//DTD XHTML 1.0 Transitional//EN", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, xhtml11, ("-//W3C//DTD XHTML 1.1//EN", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, xhtmlStrict, ("-//W3C//DTD XHTML 1.0 Strict//EN", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, xhtmlFrameset, ("-//W3C//DTD XHTML 1.0 Frameset//EN", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, xhtmlBasic, ("-//W3C//DTD XHTML Basic 1.0//EN", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, xhtmlMathML, ("-//W3C//DTD XHTML 1.1 plus MathML 2.0//EN", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, xhtmlMathMLSVG, ("-//W3C//DTD XHTML 1.1 plus MathML 2.0 plus SVG 1.1//EN", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, xhtmlMobile, ("-//WAPFORUM//DTD XHTML Mobile 1.0//EN", AtomicString::ConstructFromLiteral));
 
     if (!failOnText())
         return;
@@ -213,7 +214,7 @@ void XMLTreeBuilder::processDOCTYPE(const AtomicXMLToken& token)
     AtomicString systemIdentifier(token.systemIdentifier().data(), token.systemIdentifier().size());
     RefPtr<DocumentType> doctype = DocumentType::create(m_document, token.name(), publicIdentifier, systemIdentifier);
     m_document->setDocType(doctype);
-    m_document->parserAddChild(doctype);
+    m_document->parserAppendChild(doctype);
 
     if ((publicIdentifier == xhtmlTransitional)
         || (publicIdentifier == xhtml11)
@@ -243,7 +244,7 @@ void XMLTreeBuilder::processStartTag(const AtomicXMLToken& token)
     processAttributes(token, top, newElement);
 
     newElement->beginParsingChildren();
-    m_currentNodeStack.last().node()->parserAddChild(newElement.get());
+    m_currentNodeStack.last().node()->parserAppendChild(newElement.get());
 
     top.setNode(newElement);
     pushCurrentNode(top);
@@ -298,33 +299,27 @@ void XMLTreeBuilder::processEntity(const AtomicXMLToken& token)
 
 void XMLTreeBuilder::processNamespaces(const AtomicXMLToken& token, NodeStackItem& stackItem)
 {
-    if (!token.attributes())
-        return;
-
-    for (size_t i = 0; i < token.attributes()->length(); ++i) {
-        Attribute* attribute = token.attributes()->attributeItem(i);
-        if (attribute->name().prefix() == xmlnsAtom)
-            stackItem.setNamespaceURI(attribute->name().localName(), attribute->value());
-        else if (attribute->name() == xmlnsAtom)
-            stackItem.setNamespaceURI(attribute->value());
+    for (unsigned i = 0; i < token.attributes().size(); ++i) {
+        const Attribute& tokenAttribute = token.attributes().at(i);
+        if (tokenAttribute.name().prefix() == xmlnsAtom)
+            stackItem.setNamespaceURI(tokenAttribute.name().localName(), tokenAttribute.value());
+        else if (tokenAttribute.name() == xmlnsAtom)
+            stackItem.setNamespaceURI(tokenAttribute.value());
     }
 }
 
 void XMLTreeBuilder::processAttributes(const AtomicXMLToken& token, NodeStackItem& stackItem, PassRefPtr<Element> newElement)
 {
-    if (!token.attributes())
-        return;
-
-    for (size_t i = 0; i < token.attributes()->length(); ++i) {
-        Attribute* attribute = token.attributes()->attributeItem(i);
+    for (unsigned i = 0; i < token.attributes().size(); ++i) {
+        const Attribute& tokenAttribute = token.attributes().at(i);
         ExceptionCode ec = 0;
-        if (attribute->name().prefix() == xmlnsAtom)
-            newElement->setAttributeNS(XMLNSNames::xmlnsNamespaceURI, "xmlns:" + attribute->name().localName(), attribute->value(), ec);
-        else if (attribute->name() == xmlnsAtom)
-            newElement->setAttributeNS(XMLNSNames::xmlnsNamespaceURI, xmlnsAtom, attribute->value(), ec);
+        if (tokenAttribute.name().prefix() == xmlnsAtom)
+            newElement->setAttributeNS(XMLNSNames::xmlnsNamespaceURI, "xmlns:" + tokenAttribute.name().localName(), tokenAttribute.value(), ec);
+        else if (tokenAttribute.name() == xmlnsAtom)
+            newElement->setAttributeNS(XMLNSNames::xmlnsNamespaceURI, xmlnsAtom, tokenAttribute.value(), ec);
         else {
-            QualifiedName qName(attribute->prefix(), attribute->localName(), stackItem.namespaceForPrefix(attribute->prefix(), nullAtom));
-            newElement->setAttribute(qName, attribute->value());
+            QualifiedName qName(tokenAttribute.prefix(), tokenAttribute.localName(), stackItem.namespaceForPrefix(tokenAttribute.prefix(), nullAtom));
+            newElement->setAttribute(qName, tokenAttribute.value());
         }
         if (ec) {
             m_parser->stopParsing();
@@ -335,16 +330,16 @@ void XMLTreeBuilder::processAttributes(const AtomicXMLToken& token, NodeStackIte
 
 void XMLTreeBuilder::processXMLEntity(const AtomicXMLToken& token)
 {
-    DEFINE_STATIC_LOCAL(AtomicString, amp, ("amp"));
-    DEFINE_STATIC_LOCAL(AtomicString, apos, ("apos"));
-    DEFINE_STATIC_LOCAL(AtomicString, gt, ("gt"));
-    DEFINE_STATIC_LOCAL(AtomicString, lt, ("lt"));
-    DEFINE_STATIC_LOCAL(AtomicString, quot, ("quot"));
-    DEFINE_STATIC_LOCAL(String, ampS, ("&"));
-    DEFINE_STATIC_LOCAL(String, aposS, ("'"));
-    DEFINE_STATIC_LOCAL(String, gtS, (">"));
-    DEFINE_STATIC_LOCAL(String, ltS, ("<"));
-    DEFINE_STATIC_LOCAL(String, quotS, ("\""));
+    DEFINE_STATIC_LOCAL(AtomicString, amp, ("amp", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, apos, ("apos", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, gt, ("gt", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, lt, ("lt", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(AtomicString, quot, ("quot", AtomicString::ConstructFromLiteral));
+    DEFINE_STATIC_LOCAL(String, ampS, (ASCIILiteral("&")));
+    DEFINE_STATIC_LOCAL(String, aposS, (ASCIILiteral("'")));
+    DEFINE_STATIC_LOCAL(String, gtS, (ASCIILiteral(">")));
+    DEFINE_STATIC_LOCAL(String, ltS, (ASCIILiteral("<")));
+    DEFINE_STATIC_LOCAL(String, quotS, (ASCIILiteral("\"")));
 
     if (token.name() == amp)
         appendToText(ampS.characters(), 1);
@@ -393,7 +388,7 @@ void XMLTreeBuilder::processHTMLEntity(const AtomicXMLToken& token)
 
 inline void XMLTreeBuilder::add(PassRefPtr<Node> node)
 {
-    m_currentNodeStack.last().node()->parserAddChild(node.get());
+    m_currentNodeStack.last().node()->parserAppendChild(node.get());
     if (!node->attached())
         node->attach();
 }
