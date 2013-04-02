@@ -191,7 +191,7 @@
                 '-EL -static -mips32',
               ],
               'include_dirs': [
-                'source/config/<(OS)/<(target_arch)',
+                'source/config/<(OS_CATEGORY)/<(target_arch)',
                 'source/config',
                 '<(libvpx_source)',
                 '<(libvpx_source)/vp8/common',
@@ -204,7 +204,7 @@
                 ],
               },
               'sources': [
-                'source/config/<(OS)/<(target_arch)/vpx_config.c',
+                'source/config/<(OS_CATEGORY)/<(target_arch)/vpx_config.c',
               ],
             },
           ],
