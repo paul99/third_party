@@ -38,17 +38,21 @@ enum {
   MSG_LABEL,
   MSG_ADD_AUDIO_TRACK,
   MSG_ADD_VIDEO_TRACK,
-  MSG_READY_STATE,
+  MSG_REMOVE_AUDIO_TRACK,
+  MSG_REMOVE_VIDEO_TRACK,
+  MSG_GET_AUDIO_TRACKS,
+  MSG_FIND_AUDIO_TRACK,
+  MSG_GET_VIDEO_TRACKS,
+  MSG_FIND_VIDEO_TRACK,
   MSG_COUNT,
-  MSG_AT
+  MSG_AT,
+  MSG_FIND,
 };
 
 typedef talk_base::TypedMessageData<std::string*> LabelMessageData;
 typedef talk_base::TypedMessageData<size_t> SizeTMessageData;
 typedef talk_base::TypedMessageData<webrtc::ObserverInterface*>
     ObserverMessageData;
-typedef talk_base::TypedMessageData<webrtc::MediaStreamInterface::ReadyState>
-    ReadyStateMessageData;
 
 template<typename T>
 class MediaStreamTrackMessageData : public talk_base::MessageData {
@@ -58,6 +62,7 @@ class MediaStreamTrackMessageData : public talk_base::MessageData {
         result_(false) {
   }
 
+  std::string id;
   talk_base::scoped_refptr<T> track_;
   bool result_;
 };
@@ -78,10 +83,30 @@ class MediaStreamTrackAtMessageData : public talk_base::MessageData {
   talk_base::scoped_refptr<TrackType> track_;
 };
 
+template <class TrackType>
+class MediaStreamTrackFindMessageData : public talk_base::MessageData {
+ public:
+  explicit MediaStreamTrackFindMessageData(const std::string& id)
+      : id_(id) {
+  }
+
+  std::string id_;
+  talk_base::scoped_refptr<TrackType> track_;
+};
+
 class MediaStreamTrackListsMessageData : public talk_base::MessageData {
  public:
   talk_base::scoped_refptr<webrtc::AudioTracks> audio_tracks_;
   talk_base::scoped_refptr<webrtc::VideoTracks> video_tracks_;
+};
+
+template <class TrackVector>
+class MediaStreamTracksMessageData : public talk_base::MessageData {
+ public:
+  explicit MediaStreamTracksMessageData() {
+  }
+
+  TrackVector tracks;
 };
 
 }  // namespace anonymous
@@ -107,7 +132,7 @@ talk_base::scoped_refptr<MediaStreamProxy> MediaStreamProxy::Create(
   ASSERT(media_stream_impl != NULL);
   talk_base::RefCountedObject<MediaStreamProxy>* stream =
       new talk_base::RefCountedObject<MediaStreamProxy>(label, signaling_thread,
-                                                media_stream_impl);
+                                                        media_stream_impl);
   return stream;
 }
 
@@ -142,25 +167,6 @@ std::string MediaStreamProxy::label() const {
   return media_stream_impl_->label();
 }
 
-MediaStreamInterface::ReadyState MediaStreamProxy::ready_state() const {
-  if (!signaling_thread_->IsCurrent()) {
-    ReadyStateMessageData msg(MediaStreamInterface::kInitializing);
-    Send(MSG_READY_STATE, &msg);
-    return msg.data();
-  }
-  return media_stream_impl_->ready_state();
-}
-
-void MediaStreamProxy::set_ready_state(
-    MediaStreamInterface::ReadyState new_state) {
-  if (!signaling_thread_->IsCurrent()) {
-    // State should only be allowed to be changed from the signaling thread.
-    ASSERT(!"Not Allowed!");
-    return;
-  }
-  media_stream_impl_->set_ready_state(new_state);
-}
-
 bool MediaStreamProxy::AddTrack(AudioTrackInterface* track) {
   if (!signaling_thread_->IsCurrent()) {
     AudioTrackMsgData msg(track);
@@ -170,6 +176,15 @@ bool MediaStreamProxy::AddTrack(AudioTrackInterface* track) {
   return media_stream_impl_->AddTrack(track);
 }
 
+bool MediaStreamProxy::RemoveTrack(AudioTrackInterface* track) {
+  if (!signaling_thread_->IsCurrent()) {
+    AudioTrackMsgData msg(track);
+    Send(MSG_REMOVE_AUDIO_TRACK, &msg);
+    return msg.result_;
+  }
+  return media_stream_impl_->RemoveTrack(track);
+}
+
 bool MediaStreamProxy::AddTrack(VideoTrackInterface* track) {
   if (!signaling_thread_->IsCurrent()) {
     VideoTrackMsgData msg(track);
@@ -177,6 +192,55 @@ bool MediaStreamProxy::AddTrack(VideoTrackInterface* track) {
     return msg.result_;
   }
   return media_stream_impl_->AddTrack(track);
+}
+
+bool MediaStreamProxy::RemoveTrack(VideoTrackInterface* track) {
+  if (!signaling_thread_->IsCurrent()) {
+    VideoTrackMsgData msg(track);
+    Send(MSG_REMOVE_VIDEO_TRACK, &msg);
+    return msg.result_;
+  }
+  return media_stream_impl_->RemoveTrack(track);
+}
+
+AudioTrackVector MediaStreamProxy::GetAudioTracks() {
+  if (!signaling_thread_->IsCurrent()) {
+    MediaStreamTracksMessageData<AudioTrackVector> msg;
+    Send(MSG_GET_AUDIO_TRACKS, &msg);
+    return msg.tracks;
+  }
+  return media_stream_impl_->GetAudioTracks();
+}
+
+VideoTrackVector MediaStreamProxy::GetVideoTracks() {
+  if (!signaling_thread_->IsCurrent()) {
+    MediaStreamTracksMessageData<VideoTrackVector> msg;
+    Send(MSG_GET_VIDEO_TRACKS, &msg);
+    return msg.tracks;
+  }
+  return media_stream_impl_->GetVideoTracks();
+}
+
+talk_base::scoped_refptr<AudioTrackInterface>
+MediaStreamProxy::FindAudioTrack(const std::string& track_id) {
+  if (!signaling_thread_->IsCurrent()) {
+    MediaStreamTrackMessageData<AudioTrackInterface> msg(NULL);
+    msg.id = track_id;
+    Send(MSG_FIND_AUDIO_TRACK, &msg);
+    return msg.track_;
+  }
+  return media_stream_impl_->FindAudioTrack(track_id);
+}
+
+talk_base::scoped_refptr<VideoTrackInterface>
+MediaStreamProxy::FindVideoTrack(const std::string& track_id) {
+  if (!signaling_thread_->IsCurrent()) {
+    MediaStreamTrackMessageData<VideoTrackInterface> msg(NULL);
+    msg.id = track_id;
+    Send(MSG_FIND_VIDEO_TRACK, &msg);
+    return msg.track_;
+  }
+  return media_stream_impl_->FindVideoTrack(track_id);
 }
 
 void MediaStreamProxy::RegisterObserver(ObserverInterface* observer) {
@@ -228,6 +292,30 @@ void MediaStreamProxy::OnMessage(talk_base::Message* msg) {
       *(label->data()) = media_stream_impl_->label();
       break;
     }
+    case MSG_GET_AUDIO_TRACKS: {
+      MediaStreamTracksMessageData<AudioTrackVector>* tracks =
+          static_cast<MediaStreamTracksMessageData<AudioTrackVector> *>(data);
+      tracks->tracks = media_stream_impl_->GetAudioTracks();
+      break;
+    }
+    case MSG_GET_VIDEO_TRACKS: {
+      MediaStreamTracksMessageData<VideoTrackVector>* tracks =
+          static_cast<MediaStreamTracksMessageData<VideoTrackVector> *>(data);
+      tracks->tracks = media_stream_impl_->GetVideoTracks();
+      break;
+    }
+    case MSG_FIND_AUDIO_TRACK: {
+      AudioTrackMsgData * track =
+          static_cast<AudioTrackMsgData *>(data);
+      track->track_ = media_stream_impl_->FindAudioTrack(track->id);
+      break;
+    }
+    case MSG_FIND_VIDEO_TRACK: {
+      VideoTrackMsgData * track =
+          static_cast<VideoTrackMsgData *>(data);
+      track->track_ = media_stream_impl_->FindVideoTrack(track->id);
+      break;
+    }
     case MSG_ADD_AUDIO_TRACK: {
       AudioTrackMsgData * track =
           static_cast<AudioTrackMsgData *>(data);
@@ -240,9 +328,16 @@ void MediaStreamProxy::OnMessage(talk_base::Message* msg) {
       track->result_ = media_stream_impl_->AddTrack(track->track_.get());
       break;
     }
-    case MSG_READY_STATE: {
-      ReadyStateMessageData* state = static_cast<ReadyStateMessageData*>(data);
-      state->data() = media_stream_impl_->ready_state();
+    case MSG_REMOVE_AUDIO_TRACK: {
+      AudioTrackMsgData * track =
+          static_cast<AudioTrackMsgData *>(data);
+      track->result_ = media_stream_impl_->RemoveTrack(track->track_.get());
+      break;
+    }
+    case MSG_REMOVE_VIDEO_TRACK: {
+      VideoTrackMsgData * track =
+          static_cast<VideoTrackMsgData *>(data);
+      track->result_ = media_stream_impl_->RemoveTrack(track->track_.get());
       break;
     }
     default:
@@ -285,6 +380,17 @@ T* MediaStreamProxy::MediaStreamTrackListProxy<T>::at(
 }
 
 template <class T>
+T* MediaStreamProxy::MediaStreamTrackListProxy<T>::Find(
+    const std::string& id) {
+  if (!signaling_thread_->IsCurrent()) {
+    MediaStreamTrackFindMessageData<T> msg(id);
+    Send(MSG_FIND, &msg);
+    return msg.track_;
+  }
+  return track_list_->Find(id);
+}
+
+template <class T>
 void MediaStreamProxy::MediaStreamTrackListProxy<T>::Send(
     uint32 id, talk_base::MessageData* data) const {
   signaling_thread_->Send(
@@ -307,6 +413,12 @@ void MediaStreamProxy::MediaStreamTrackListProxy<T>::OnMessage(
       MediaStreamTrackAtMessageData<T>* track =
           static_cast<MediaStreamTrackAtMessageData<T>*>(data);
       track->track_ = track_list_->at(track->index_);
+      break;
+    }
+    case MSG_FIND: {
+      MediaStreamTrackFindMessageData<T>* track =
+          static_cast<MediaStreamTrackFindMessageData<T>*>(data);
+      track->track_ = track_list_->Find(track->id_);
       break;
     }
     default:

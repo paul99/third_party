@@ -28,6 +28,11 @@ LIBYUV_API
 void CopyPlane(const uint8* src_y, int src_stride_y,
                uint8* dst_y, int dst_stride_y,
                int width, int height) {
+  if (src_stride_y == width && dst_stride_y == width) {
+    CopyPlane(src_y, 0, dst_y, 0, width * height, 1);
+    return;
+  }
+
   void (*CopyRow)(const uint8* src, uint8* dst, int width) = CopyRow_C;
 #if defined(HAS_COPYROW_NEON)
   if (TestCpuFlag(kCpuHasNEON) && IS_ALIGNED(width, 32)) {
@@ -111,13 +116,14 @@ void MirrorPlane(const uint8* src_y, int src_stride_y,
 #if defined(HAS_MIRRORROW_SSE2)
   if (TestCpuFlag(kCpuHasSSE2) && IS_ALIGNED(width, 16)) {
     MirrorRow = MirrorRow_SSE2;
+  }
+#endif
 #if defined(HAS_MIRRORROW_SSSE3)
-    if (TestCpuFlag(kCpuHasSSSE3) &&
-        IS_ALIGNED(src_y, 16) && IS_ALIGNED(src_stride_y, 16)) {
+    if (TestCpuFlag(kCpuHasSSSE3) && IS_ALIGNED(width, 16) &&
+        IS_ALIGNED(src_y, 16) && IS_ALIGNED(src_stride_y, 16) &&
+        IS_ALIGNED(dst_y, 16) && IS_ALIGNED(dst_stride_y, 16)) {
       MirrorRow = MirrorRow_SSSE3;
     }
-#endif
-  }
 #endif
 
   // Mirror plane
@@ -330,6 +336,10 @@ int ARGBMirror(const uint8* src_argb, int src_stride_argb,
       IS_ALIGNED(dst_argb, 16) && IS_ALIGNED(dst_stride_argb, 16)) {
     ARGBMirrorRow = ARGBMirrorRow_SSSE3;
   }
+#elif defined(HAS_ARGBMIRRORROW_NEON)
+  if (TestCpuFlag(kCpuHasNEON) && IS_ALIGNED(width, 4)) {
+    ARGBMirrorRow = ARGBMirrorRow_NEON;
+  }
 #endif
 
   // Mirror plane
@@ -357,6 +367,11 @@ ARGBBlendRow GetARGBBlend() {
 #if defined(HAS_ARGBBLENDROW_SSE2)
   if (TestCpuFlag(kCpuHasSSE2)) {
     ARGBBlendRow = ARGBBlendRow_SSE2;
+  }
+#endif
+#if defined(HAS_ARGBBLENDROW_NEON)
+  if (TestCpuFlag(kCpuHasNEON)) {
+    ARGBBlendRow = ARGBBlendRow_NEON;
   }
 #endif
   return ARGBBlendRow;
@@ -651,17 +666,17 @@ LIBYUV_API
 void SetPlane(uint8* dst_y, int dst_stride_y,
               int width, int height,
               uint32 value) {
-  void (*SetRow)(uint8* dst, uint32 value, int pix) = SetRow8_C;
+  void (*SetRow)(uint8* dst, uint32 value, int pix) = SetRow_C;
 #if defined(HAS_SETROW_NEON)
   if (TestCpuFlag(kCpuHasNEON) &&
       IS_ALIGNED(width, 16) &&
       IS_ALIGNED(dst_y, 16) && IS_ALIGNED(dst_stride_y, 16)) {
-    SetRow = SetRow8_NEON;
+    SetRow = SetRow_NEON;
   }
 #endif
 #if defined(HAS_SETROW_X86)
   if (TestCpuFlag(kCpuHasX86) && IS_ALIGNED(width, 4)) {
-    SetRow = SetRow8_X86;
+    SetRow = SetRow_X86;
   }
 #endif
 
@@ -716,17 +731,17 @@ int ARGBRect(uint8* dst_argb, int dst_stride_argb,
 #if defined(HAS_SETROW_NEON)
   if (TestCpuFlag(kCpuHasNEON) && IS_ALIGNED(width, 16) &&
       IS_ALIGNED(dst, 16) && IS_ALIGNED(dst_stride_argb, 16)) {
-    SetRows32_NEON(dst, value, width, dst_stride_argb, height);
+    ARGBSetRows_NEON(dst, value, width, dst_stride_argb, height);
     return 0;
   }
 #endif
 #if defined(HAS_SETROW_X86)
   if (TestCpuFlag(kCpuHasX86)) {
-    SetRows32_X86(dst, value, width, dst_stride_argb, height);
+    ARGBSetRows_X86(dst, value, width, dst_stride_argb, height);
     return 0;
   }
 #endif
-  SetRows32_C(dst, value, width, dst_stride_argb, height);
+  ARGBSetRows_C(dst, value, width, dst_stride_argb, height);
   return 0;
 }
 
@@ -757,18 +772,32 @@ int ARGBAttenuate(const uint8* src_argb, int src_stride_argb,
   }
   void (*ARGBAttenuateRow)(const uint8* src_argb, uint8* dst_argb,
                            int width) = ARGBAttenuateRow_C;
-#if defined(HAS_ARGBATTENUATE_SSE2)
-  if (TestCpuFlag(kCpuHasSSE2) && IS_ALIGNED(width, 4) &&
+#if defined(HAS_ARGBATTENUATEROW_SSE2)
+  if (TestCpuFlag(kCpuHasSSE2) && width >= 4 &&
       IS_ALIGNED(src_argb, 16) && IS_ALIGNED(src_stride_argb, 16) &&
       IS_ALIGNED(dst_argb, 16) && IS_ALIGNED(dst_stride_argb, 16)) {
-    ARGBAttenuateRow = ARGBAttenuateRow_SSE2;
+    ARGBAttenuateRow = ARGBAttenuateRow_Any_SSE2;
+    if (IS_ALIGNED(width, 4)) {
+      ARGBAttenuateRow = ARGBAttenuateRow_SSE2;
+    }
   }
 #endif
 #if defined(HAS_ARGBATTENUATEROW_SSSE3)
-  if (TestCpuFlag(kCpuHasSSSE3) && IS_ALIGNED(width, 4) &&
+  if (TestCpuFlag(kCpuHasSSSE3) && width >= 4 &&
       IS_ALIGNED(src_argb, 16) && IS_ALIGNED(src_stride_argb, 16) &&
       IS_ALIGNED(dst_argb, 16) && IS_ALIGNED(dst_stride_argb, 16)) {
-    ARGBAttenuateRow = ARGBAttenuateRow_SSSE3;
+    ARGBAttenuateRow = ARGBAttenuateRow_Any_SSSE3;
+    if (IS_ALIGNED(width, 4)) {
+      ARGBAttenuateRow = ARGBAttenuateRow_SSSE3;
+    }
+  }
+#endif
+#if defined(HAS_ARGBATTENUATEROW_NEON)
+  if (TestCpuFlag(kCpuHasNEON) && width >= 8) {
+    ARGBAttenuateRow = ARGBAttenuateRow_Any_NEON;
+    if (IS_ALIGNED(width, 8)) {
+      ARGBAttenuateRow = ARGBAttenuateRow_NEON;
+    }
   }
 #endif
 
@@ -832,6 +861,10 @@ int ARGBGrayTo(const uint8* src_argb, int src_stride_argb,
       IS_ALIGNED(dst_argb, 16) && IS_ALIGNED(dst_stride_argb, 16)) {
     ARGBGrayRow = ARGBGrayRow_SSSE3;
   }
+#elif defined(HAS_ARGBGRAYROW_NEON)
+  if (TestCpuFlag(kCpuHasNEON) && IS_ALIGNED(width, 8)) {
+    ARGBGrayRow = ARGBGrayRow_NEON;
+  }
 #endif
 
   for (int y = 0; y < height; ++y) {
@@ -857,6 +890,10 @@ int ARGBGray(uint8* dst_argb, int dst_stride_argb,
       IS_ALIGNED(dst_argb, 16) && IS_ALIGNED(dst_stride_argb, 16)) {
     ARGBGrayRow = ARGBGrayRow_SSSE3;
   }
+#elif defined(HAS_ARGBGRAYROW_NEON)
+  if (TestCpuFlag(kCpuHasNEON) && IS_ALIGNED(width, 8)) {
+    ARGBGrayRow = ARGBGrayRow_NEON;
+  }
 #endif
   uint8* dst = dst_argb + dst_y * dst_stride_argb + dst_x * 4;
   for (int y = 0; y < height; ++y) {
@@ -878,6 +915,10 @@ int ARGBSepia(uint8* dst_argb, int dst_stride_argb,
   if (TestCpuFlag(kCpuHasSSSE3) && IS_ALIGNED(width, 8) &&
       IS_ALIGNED(dst_argb, 16) && IS_ALIGNED(dst_stride_argb, 16)) {
     ARGBSepiaRow = ARGBSepiaRow_SSSE3;
+  }
+#elif defined(HAS_ARGBSEPIAROW_NEON)
+  if (TestCpuFlag(kCpuHasNEON) && IS_ALIGNED(width, 8)) {
+    ARGBSepiaRow = ARGBSepiaRow_NEON;
   }
 #endif
   uint8* dst = dst_argb + dst_y * dst_stride_argb + dst_x * 4;
@@ -903,6 +944,10 @@ int ARGBColorMatrix(uint8* dst_argb, int dst_stride_argb,
   if (TestCpuFlag(kCpuHasSSSE3) && IS_ALIGNED(width, 8) &&
       IS_ALIGNED(dst_argb, 16) && IS_ALIGNED(dst_stride_argb, 16)) {
     ARGBColorMatrixRow = ARGBColorMatrixRow_SSSE3;
+  }
+#elif defined(HAS_ARGBCOLORMATRIXROW_NEON)
+  if (TestCpuFlag(kCpuHasNEON) && IS_ALIGNED(width, 8)) {
+    ARGBColorMatrixRow = ARGBColorMatrixRow_NEON;
   }
 #endif
   uint8* dst = dst_argb + dst_y * dst_stride_argb + dst_x * 4;
@@ -942,6 +987,8 @@ int ARGBColorTable(uint8* dst_argb, int dst_stride_argb,
 // e.g. rgb / qvalue * qvalue + qvalue / 2
 // But the low levels implement efficiently with 3 parameters, and could be
 // used for other high level operations.
+// dst_argb[0] = (b * scale >> 16) * interval_size + interval_offset;
+// where scale is 1 / interval_size as a fixed point value.
 // The divide is replaces with a multiply by reciprocal fixed point multiply.
 // Caveat - although SSE2 saturates, the C function does not and should be used
 // with care if doing anything but quantization.
@@ -959,6 +1006,10 @@ int ARGBQuantize(uint8* dst_argb, int dst_stride_argb,
   if (TestCpuFlag(kCpuHasSSE2) && IS_ALIGNED(width, 4) &&
       IS_ALIGNED(dst_argb, 16) && IS_ALIGNED(dst_stride_argb, 16)) {
     ARGBQuantizeRow = ARGBQuantizeRow_SSE2;
+  }
+#elif defined(HAS_ARGBQUANTIZEROW_NEON)
+  if (TestCpuFlag(kCpuHasNEON) && IS_ALIGNED(width, 8)) {
+    ARGBQuantizeRow = ARGBQuantizeRow_NEON;
   }
 #endif
   uint8* dst = dst_argb + dst_y * dst_stride_argb + dst_x * 4;
@@ -980,7 +1031,7 @@ int ARGBComputeCumulativeSum(const uint8* src_argb, int src_stride_argb,
   }
   void (*ComputeCumulativeSumRow)(const uint8* row, int32* cumsum,
       const int32* previous_cumsum, int width) = ComputeCumulativeSumRow_C;
-#if defined(HAS_CUMULATIVESUMTOAVERAGE_SSE2)
+#if defined(HAS_CUMULATIVESUMTOAVERAGEROW_SSE2)
   if (TestCpuFlag(kCpuHasSSE2)) {
     ComputeCumulativeSumRow = ComputeCumulativeSumRow_SSE2;
   }
@@ -1010,12 +1061,12 @@ int ARGBBlur(const uint8* src_argb, int src_stride_argb,
   }
   void (*ComputeCumulativeSumRow)(const uint8* row, int32* cumsum,
       const int32* previous_cumsum, int width) = ComputeCumulativeSumRow_C;
-  void (*CumulativeSumToAverage)(const int32* topleft, const int32* botleft,
-      int width, int area, uint8* dst, int count) = CumulativeSumToAverage_C;
-#if defined(HAS_CUMULATIVESUMTOAVERAGE_SSE2)
+  void (*CUMULATIVESUMTOAVERAGEROW)(const int32* topleft, const int32* botleft,
+      int width, int area, uint8* dst, int count) = CumulativeSumToAverageRow_C;
+#if defined(HAS_CUMULATIVESUMTOAVERAGEROW_SSE2)
   if (TestCpuFlag(kCpuHasSSE2)) {
     ComputeCumulativeSumRow = ComputeCumulativeSumRow_SSE2;
-    CumulativeSumToAverage = CumulativeSumToAverage_SSE2;
+    CUMULATIVESUMTOAVERAGEROW = CumulativeSumToAverageRow_SSE2;
   }
 #endif
   // Compute enough CumulativeSum for first row to be blurred. After this
@@ -1060,7 +1111,7 @@ int ARGBBlur(const uint8* src_argb, int src_stride_argb,
     int boxwidth = radius * 4;
     int x;
     for (x = 0; x < radius + 1; ++x) {
-      CumulativeSumToAverage(cumsum_top_row, cumsum_bot_row,
+      CUMULATIVESUMTOAVERAGEROW(cumsum_top_row, cumsum_bot_row,
                               boxwidth, area, &dst_argb[x * 4], 1);
       area += (bot_y - top_y);
       boxwidth += 4;
@@ -1068,14 +1119,14 @@ int ARGBBlur(const uint8* src_argb, int src_stride_argb,
 
     // Middle unclipped.
     int n = (width - 1) - radius - x + 1;
-    CumulativeSumToAverage(cumsum_top_row, cumsum_bot_row,
+    CUMULATIVESUMTOAVERAGEROW(cumsum_top_row, cumsum_bot_row,
                            boxwidth, area, &dst_argb[x * 4], n);
 
     // Right clipped.
     for (x += n; x <= width - 1; ++x) {
       area -= (bot_y - top_y);
       boxwidth -= 4;
-      CumulativeSumToAverage(cumsum_top_row + (x - radius - 1) * 4,
+      CUMULATIVESUMTOAVERAGEROW(cumsum_top_row + (x - radius - 1) * 4,
                              cumsum_bot_row + (x - radius - 1) * 4,
                              boxwidth, area, &dst_argb[x * 4], 1);
     }
@@ -1099,11 +1150,15 @@ int ARGBShade(const uint8* src_argb, int src_stride_argb,
   }
   void (*ARGBShadeRow)(const uint8* src_argb, uint8* dst_argb,
                        int width, uint32 value) = ARGBShadeRow_C;
-#if defined(HAS_ARGBSHADE_SSE2)
+#if defined(HAS_ARGBSHADEROW_SSE2)
   if (TestCpuFlag(kCpuHasSSE2) && IS_ALIGNED(width, 4) &&
       IS_ALIGNED(src_argb, 16) && IS_ALIGNED(src_stride_argb, 16) &&
       IS_ALIGNED(dst_argb, 16) && IS_ALIGNED(dst_stride_argb, 16)) {
     ARGBShadeRow = ARGBShadeRow_SSE2;
+  }
+#elif defined(HAS_ARGBSHADEROW_NEON)
+  if (TestCpuFlag(kCpuHasNEON) && IS_ALIGNED(width, 8)) {
+    ARGBShadeRow = ARGBShadeRow_NEON;
   }
 #endif
 
@@ -1116,6 +1171,8 @@ int ARGBShade(const uint8* src_argb, int src_stride_argb,
 }
 
 // Interpolate 2 ARGB images by specified amount (0 to 255).
+// TODO(fbarchard): Consider selecting a specialization for interpolation so
+//     row function doesn't need to check interpolation on each row.
 LIBYUV_API
 int ARGBInterpolate(const uint8* src_argb0, int src_stride_argb0,
                     const uint8* src_argb1, int src_stride_argb1,
@@ -1131,14 +1188,18 @@ int ARGBInterpolate(const uint8* src_argb0, int src_stride_argb0,
     dst_stride_argb = -dst_stride_argb;
   }
   void (*ARGBInterpolateRow)(uint8* dst_ptr, const uint8* src_ptr,
-                              ptrdiff_t src_stride, int dst_width,
-                              int source_y_fraction) = ARGBInterpolateRow_C;
+                             ptrdiff_t src_stride, int dst_width,
+                             int source_y_fraction) = ARGBInterpolateRow_C;
 #if defined(HAS_ARGBINTERPOLATEROW_SSSE3)
-  if (TestCpuFlag(kCpuHasSSSE3) &&
+  if (TestCpuFlag(kCpuHasSSSE3) && IS_ALIGNED(width, 4) &&
       IS_ALIGNED(src_argb0, 16) && IS_ALIGNED(src_stride_argb0, 16) &&
       IS_ALIGNED(src_argb1, 16) && IS_ALIGNED(src_stride_argb1, 16) &&
       IS_ALIGNED(dst_argb, 16) && IS_ALIGNED(dst_stride_argb, 16)) {
     ARGBInterpolateRow = ARGBInterpolateRow_SSSE3;
+  }
+#elif defined(HAS_ARGBINTERPOLATEROW_NEON)
+  if (TestCpuFlag(kCpuHasNEON) && IS_ALIGNED(width, 4)) {
+    ARGBInterpolateRow = ARGBInterpolateRow_NEON;
   }
 #endif
   for (int y = 0; y < height; ++y) {

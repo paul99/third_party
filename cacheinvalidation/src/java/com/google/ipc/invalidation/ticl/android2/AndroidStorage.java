@@ -47,7 +47,7 @@ public class AndroidStorage implements Storage {
 
   private final Context context;
 
-  AndroidStorage(Context context) {
+  public AndroidStorage(Context context) {
     this.context = Preconditions.checkNotNull(context);
   }
 

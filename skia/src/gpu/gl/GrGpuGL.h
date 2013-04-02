@@ -39,13 +39,12 @@ public:
     // Used by GrGLProgram to bind necessary textures for GrGLEffects.
     void bindTexture(int unitIdx, const GrTextureParams& params, GrGLTexture* texture);
 
-    bool programUnitTest();
+    bool programUnitTest(int maxStages);
 
     // GrGpu overrides
-    virtual GrPixelConfig preferredReadPixelsConfig(GrPixelConfig config)
-                                                            const SK_OVERRIDE;
-    virtual GrPixelConfig preferredWritePixelsConfig(GrPixelConfig config)
-                                                            const SK_OVERRIDE;
+    virtual GrPixelConfig preferredReadPixelsConfig(GrPixelConfig config) const SK_OVERRIDE;
+    virtual GrPixelConfig preferredWritePixelsConfig(GrPixelConfig config) const SK_OVERRIDE;
+    virtual bool canWriteTexturePixels(const GrTexture*, GrPixelConfig srcConfig) const SK_OVERRIDE;
     virtual bool readPixelsWillPayForYFlip(
                                     GrRenderTarget* renderTarget,
                                     int left, int top,
@@ -86,10 +85,9 @@ private:
                               int width, int height,
                               GrPixelConfig,
                               void* buffer,
-                              size_t rowBytes,
-                              bool invertY) SK_OVERRIDE;
+                              size_t rowBytes) SK_OVERRIDE;
 
-    virtual void onWriteTexturePixels(GrTexture* texture,
+    virtual bool onWriteTexturePixels(GrTexture* texture,
                                       int left, int top, int width, int height,
                                       GrPixelConfig config, const void* buffer,
                                       size_t rowBytes) SK_OVERRIDE;
@@ -322,11 +320,13 @@ private:
     } fHWAAState;
 
     struct {
-        SkMatrix    fViewMatrix;
-        SkISize     fRTSize;
+        SkMatrix            fViewMatrix;
+        SkISize             fRTSize;
+        GrSurfaceOrigin     fLastOrigin;
         void invalidate() {
             fViewMatrix = SkMatrix::InvalidMatrix();
             fRTSize.fWidth = -1; // just make the first value compared illegal.
+            fLastOrigin = (GrSurfaceOrigin) -1;
         }
     } fHWPathMatrixState;
 

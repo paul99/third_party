@@ -612,9 +612,6 @@ void LayerRenderer::drawHolePunchRect(LayerCompositingThread* layer)
     glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
     checkGLError();
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-
-    IntRect holeWC = toWebKitWindowCoordinates(hole.boundingBox());
-    m_lastRenderingResults.addHolePunchRect(holeWC);
 }
 
 void LayerRenderer::prepareFrameRecursive(LayerCompositingThread* layer, double animationTime, bool isContextCurrent)
@@ -694,15 +691,18 @@ void LayerRenderer::updateLayersRecursive(LayerCompositingThread* layer, const T
         // This trick allows us to display fixed positioned elements aligned to top or
         // bottom correctly when panning and zooming, without actually knowing the
         // numeric values of the top and bottom CSS attributes.
-        // In fact, the position is the location of the anchor, so to find the top left
-        // we have to subtract the anchor times the bounds. The anchor defaults to
-        // (0.5, 0.5) for most layers.
-        if (position.y() - anchorPoint.y() * bounds.height() > layoutY + m_layoutRect.height() / 2) {
+        // In fact, the position is the location of the anchor, so to find the mid-point
+        // we have to subtract the anchor offset from the middle (0.5) times the bounds.
+        // The anchor defaults to (0.5, 0.5) for most layers.
+        if (position.y() + (0.5 - anchorPoint.y()) * bounds.height() > layoutY + m_layoutRect.height() / 2) {
             visibleY = min<float>(m_contentsSize.height(), m_visibleRect.y() + m_visibleRect.height());
             layoutY = min(m_contentsSize.height(), max(0, m_layoutRect.y()) + m_layoutRect.height());
         }
 
         position.setY(position.y() + (visibleY - layoutY));
+
+        float visibleX = max(0.0f, visibleRect.x());
+        position.setX(position.x() + visibleX);
     }
 
     // Offset between anchor point and the center of the quad.
@@ -1193,24 +1193,6 @@ bool LayerRenderer::initializeSharedGLObjects()
     m_checkerSurfaceHeightLocation = glGetUniformLocation(m_checkerProgramObject, "surfaceHeight");
 
     return true;
-}
-
-IntRect LayerRenderingResults::holePunchRect(unsigned index) const
-{
-    if (index >= m_holePunchRects.size())
-        return IntRect();
-
-    return m_holePunchRects.at(index);
-}
-
-void LayerRenderingResults::addHolePunchRect(const IntRect& rect)
-{
-#if DEBUG_CLIPPING
-    printf("LayerRenderingResults::addHolePunchRect (%d,%d %dx%d)\n", rect.x(), rect.y(), rect.width(), rect.height());
-    fflush(stdout);
-#endif
-    if (!rect.isEmpty())
-        m_holePunchRects.append(rect);
 }
 
 void LayerRenderingResults::addDirtyRect(const IntRect& rect)

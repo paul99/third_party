@@ -71,9 +71,9 @@ extern "C" {
 #define HAS_I422TOUYVYROW_SSE2
 #define HAS_I422TOYUY2ROW_SSE2
 #define HAS_I444TOARGBROW_SSSE3
-#define HAS_MERGEUV_SSE2
+#define HAS_MERGEUVROW_SSE2
 #define HAS_MIRRORROW_SSSE3
-#define HAS_MirrorUVRow_SSSE3
+#define HAS_MIRRORUVROW_SSSE3
 #define HAS_NV12TOARGBROW_SSSE3
 #define HAS_NV12TORGB565ROW_SSSE3
 #define HAS_NV21TOARGBROW_SSSE3
@@ -87,7 +87,7 @@ extern "C" {
 #define HAS_RGBATOUVROW_SSSE3
 #define HAS_RGBATOYROW_SSSE3
 #define HAS_SETROW_X86
-#define HAS_SPLITUV_SSE2
+#define HAS_SPLITUVROW_SSE2
 #define HAS_UYVYTOARGBROW_SSSE3
 #define HAS_UYVYTOUV422ROW_SSE2
 #define HAS_UYVYTOUVROW_SSE2
@@ -108,16 +108,18 @@ extern "C" {
 #define HAS_ARGBMIRRORROW_SSSE3
 #define HAS_ARGBQUANTIZEROW_SSE2
 #define HAS_ARGBSEPIAROW_SSSE3
-#define HAS_ARGBSHADE_SSE2
+#define HAS_ARGBSHADEROW_SSE2
 #define HAS_ARGBUNATTENUATEROW_SSE2
 #define HAS_COMPUTECUMULATIVESUMROW_SSE2
-#define HAS_CUMULATIVESUMTOAVERAGE_SSE2
+#define HAS_CUMULATIVESUMTOAVERAGEROW_SSE2
 #endif
 
 // The following are Windows only.
 // TODO(fbarchard): Port to gcc.
 #if !defined(YUV_DISABLE_ASM) && defined(_M_IX86)
 #define HAS_ARGBCOLORTABLEROW_X86
+#define HAS_ARGBMULTIPLYROW_SSE2
+#define HAS_ARGBTOUV444ROW_SSSE3
 #endif
 
 // The following are Yasm x86 only.
@@ -125,21 +127,21 @@ extern "C" {
 #if !defined(YUV_DISABLE_ASM) && defined(HAVE_YASM)
     (defined(_M_IX86) || defined(_M_X64) || \
     defined(__x86_64__) || defined(__i386__))
-#define HAS_SPLITUV_AVX2
-#define HAS_SPLITUV_MMX
+#define HAS_SPLITUVROW_AVX2
+#define HAS_SPLITUVROW_MMX
 #define HAS_YUY2TOYROW_AVX2
 #define HAS_UYVYTOYROW_AVX2
 #define HAS_YUY2TOYROW_MMX
 #define HAS_UYVYTOYROW_MMX
-#define HAS_MERGEUV_AVX2
-#define HAS_MERGEUV_MMX
+#define HAS_MERGEUVROW_AVX2
+#define HAS_MERGEUVROW_MMX
 #endif
 
 // The following are disabled when SSSE3 is available:
 #if !defined(YUV_DISABLE_ASM) && \
     (defined(_M_IX86) || defined(__x86_64__) || defined(__i386__)) && \
     !defined(LIBYUV_SSSE3_ONLY)
-#define HAS_ARGBATTENUATE_SSE2
+#define HAS_ARGBATTENUATEROW_SSE2
 #define HAS_ARGBBLENDROW_SSE2
 #define HAS_MIRRORROW_SSE2
 #endif
@@ -186,9 +188,9 @@ extern "C" {
 #define HAS_I422TOUYVYROW_NEON
 #define HAS_I422TOYUY2ROW_NEON
 #define HAS_I444TOARGBROW_NEON
-#define HAS_MERGEUV_NEON
+#define HAS_MERGEUVROW_NEON
 #define HAS_MIRRORROW_NEON
-#define HAS_MirrorUVRow_NEON
+#define HAS_MIRRORUVROW_NEON
 #define HAS_NV12TOARGBROW_NEON
 #define HAS_NV12TORGB565ROW_NEON
 #define HAS_NV21TOARGBROW_NEON
@@ -206,7 +208,7 @@ extern "C" {
 #define HAS_RGBATOUVROW_NEON
 #define HAS_RGBATOYROW_NEON
 #define HAS_SETROW_NEON
-#define HAS_SPLITUV_NEON
+#define HAS_SPLITUVROW_NEON
 #define HAS_UYVYTOARGBROW_NEON
 #define HAS_UYVYTOUV422ROW_NEON
 #define HAS_UYVYTOUVROW_NEON
@@ -216,15 +218,26 @@ extern "C" {
 #define HAS_YUY2TOUV422ROW_NEON
 #define HAS_YUY2TOUVROW_NEON
 #define HAS_YUY2TOYROW_NEON
+#define HAS_ARGBMIRRORROW_NEON
+
+// Effects
+#define HAS_ARGBINTERPOLATEROW_NEON
+#define HAS_ARGBBLENDROW_NEON
+#define HAS_ARGBATTENUATEROW_NEON
+#define HAS_ARGBQUANTIZEROW_NEON
+#define HAS_ARGBGRAYROW_NEON
+#define HAS_ARGBSEPIAROW_NEON
+#define HAS_ARGBSHADEROW_NEON
+#define HAS_ARGBCOLORMATRIXROW_NEON
 #endif
 
 // The following are available on Mips platforms
 #if !defined(YUV_DISABLE_ASM) && defined(__mips__)
 #define HAS_COPYROW_MIPS
 #if defined(__mips_dsp) && (__mips_dsp_rev >= 2)
-#define HAS_SPLITUV_MIPS_DSPR2
+#define HAS_SPLITUVROW_MIPS_DSPR2
 #define HAS_MIRRORROW_MIPS_DSPR2
-#define HAS_MirrorUVRow_MIPS_DSPR2
+#define HAS_MIRRORUVROW_MIPS_DSPR2
 #define HAS_I422TOARGBROW_MIPS_DSPR2
 #define HAS_I422TOBGRAROW_MIPS_DSPR2
 #define HAS_I422TOABGRROW_MIPS_DSPR2
@@ -434,7 +447,7 @@ void BGRAToUVRow_Any_SSSE3(const uint8* src_bgra, int src_stride_bgra,
 void ABGRToUVRow_Any_SSSE3(const uint8* src_abgr, int src_stride_abgr,
                            uint8* dst_u, uint8* dst_v, int width);
 void RGBAToUVRow_Any_SSSE3(const uint8* src_rgba, int src_stride_rgba,
-                       uint8* dst_u, uint8* dst_v, int width);
+                           uint8* dst_u, uint8* dst_v, int width);
 void ARGBToUV444Row_Any_NEON(const uint8* src_argb, uint8* dst_u, uint8* dst_v,
                              int pix);
 void ARGBToUV422Row_Any_NEON(const uint8* src_argb, uint8* dst_u, uint8* dst_v,
@@ -480,6 +493,13 @@ void ARGB1555ToUVRow_C(const uint8* src_argb1555, int src_stride_argb1555,
 void ARGB4444ToUVRow_C(const uint8* src_argb4444, int src_stride_argb4444,
                        uint8* dst_u, uint8* dst_v, int width);
 
+void ARGBToUV444Row_SSSE3(const uint8* src_argb,
+                          uint8* dst_u, uint8* dst_v, int width);
+void ARGBToUV444Row_Unaligned_SSSE3(const uint8* src_argb,
+                                    uint8* dst_u, uint8* dst_v, int width);
+void ARGBToUV444Row_Any_SSSE3(const uint8* src_argb,
+                              uint8* dst_u, uint8* dst_v, int width);
+
 void ARGBToUV422Row_SSSE3(const uint8* src_argb,
                           uint8* dst_u, uint8* dst_v, int width);
 void ARGBToUV422Row_Unaligned_SSSE3(const uint8* src_argb,
@@ -498,60 +518,60 @@ void MirrorRow_SSSE3(const uint8* src, uint8* dst, int width);
 void MirrorRow_SSE2(const uint8* src, uint8* dst, int width);
 void MirrorRow_NEON(const uint8* src, uint8* dst, int width);
 void MirrorRow_MIPS_DSPR2(const uint8* src, uint8* dst, int width);
-void MirrorUVRow_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
-                            int width);
 void MirrorRow_C(const uint8* src, uint8* dst, int width);
 
 void MirrorUVRow_SSSE3(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
                        int width);
 void MirrorUVRow_NEON(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
                       int width);
+void MirrorUVRow_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
+                            int width);
 void MirrorUVRow_C(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
                    int width);
 
 void ARGBMirrorRow_SSSE3(const uint8* src, uint8* dst, int width);
+void ARGBMirrorRow_NEON(const uint8* src, uint8* dst, int width);
 void ARGBMirrorRow_C(const uint8* src, uint8* dst, int width);
 
-void SplitUV_C(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix);
-void SplitUV_SSE2(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix);
-void SplitUV_AVX2(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix);
-void SplitUV_NEON(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix);
-void SplitUV_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
-                        int pix);
-void SplitUV_Unaligned_SSE2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
-                            int pix);
-void SplitUV_Unaligned_AVX2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
-                            int pix);
-void SplitUV_Unaligned_NEON(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
-                            int pix);
-void SplitUV_Unaligned_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u,
-                                  uint8* dst_v, int pix);
-void SplitUV_Any_SSE2(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix);
-void SplitUV_Any_AVX2(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix);
-void SplitUV_Any_NEON(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix);
-void SplitUV_Any_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
-                            int pix);
+void SplitUVRow_C(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix);
+void SplitUVRow_SSE2(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix);
+void SplitUVRow_AVX2(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix);
+void SplitUVRow_NEON(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix);
+void SplitUVRow_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
+                           int pix);
+void SplitUVRow_Unaligned_SSE2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
+                               int pix);
+void SplitUVRow_Unaligned_AVX2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
+                               int pix);
+void SplitUVRow_Unaligned_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u,
+                                     uint8* dst_v, int pix);
+void SplitUVRow_Any_SSE2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
+                         int pix);
+void SplitUVRow_Any_AVX2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
+                         int pix);
+void SplitUVRow_Any_NEON(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
+                         int pix);
+void SplitUVRow_Any_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
+                               int pix);
 
-void MergeUV_C(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
-               int width);
-void MergeUV_SSE2(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
+void MergeUVRow_C(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
                   int width);
-void MergeUV_AVX2(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
-                  int width);
-void MergeUV_NEON(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
-                  int width);
-void MergeUV_Unaligned_SSE2(const uint8* src_u, const uint8* src_v,
-                            uint8* dst_uv, int width);
-void MergeUV_Unaligned_AVX2(const uint8* src_u, const uint8* src_v,
-                            uint8* dst_uv, int width);
-void MergeUV_Unaligned_NEON(const uint8* src_u, const uint8* src_v,
-                            uint8* dst_uv, int width);
-void MergeUV_Any_SSE2(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
-                      int width);
-void MergeUV_Any_AVX2(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
-                      int width);
-void MergeUV_Any_NEON(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
-                      int width);
+void MergeUVRow_SSE2(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
+                     int width);
+void MergeUVRow_AVX2(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
+                     int width);
+void MergeUVRow_NEON(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
+                     int width);
+void MergeUVRow_Unaligned_SSE2(const uint8* src_u, const uint8* src_v,
+                               uint8* dst_uv, int width);
+void MergeUVRow_Unaligned_AVX2(const uint8* src_u, const uint8* src_v,
+                               uint8* dst_uv, int width);
+void MergeUVRow_Any_SSE2(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
+                         int width);
+void MergeUVRow_Any_AVX2(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
+                         int width);
+void MergeUVRow_Any_NEON(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
+                         int width);
 
 void CopyRow_SSE2(const uint8* src, uint8* dst, int count);
 void CopyRow_X86(const uint8* src, uint8* dst, int count);
@@ -559,14 +579,15 @@ void CopyRow_NEON(const uint8* src, uint8* dst, int count);
 void CopyRow_MIPS(const uint8* src, uint8* dst, int count);
 void CopyRow_C(const uint8* src, uint8* dst, int count);
 
-void SetRow8_X86(uint8* dst, uint32 v32, int count);
-void SetRows32_X86(uint8* dst, uint32 v32, int width,
-                   int dst_stride, int height);
-void SetRow8_NEON(uint8* dst, uint32 v32, int count);
-void SetRows32_NEON(uint8* dst, uint32 v32, int width,
-                    int dst_stride, int height);
-void SetRow8_C(uint8* dst, uint32 v32, int count);
-void SetRows32_C(uint8* dst, uint32 v32, int width, int dst_stride, int height);
+void SetRow_X86(uint8* dst, uint32 v32, int count);
+void ARGBSetRows_X86(uint8* dst, uint32 v32, int width,
+                     int dst_stride, int height);
+void SetRow_NEON(uint8* dst, uint32 v32, int count);
+void ARGBSetRows_NEON(uint8* dst, uint32 v32, int width,
+                      int dst_stride, int height);
+void SetRow_C(uint8* dst, uint32 v32, int count);
+void ARGBSetRows_C(uint8* dst, uint32 v32, int width, int dst_stride,
+                   int height);
 
 void BGRAToARGBRow_SSSE3(const uint8* src_bgra, uint8* dst_argb, int pix);
 void ABGRToARGBRow_SSSE3(const uint8* src_abgr, uint8* dst_argb, int pix);
@@ -612,8 +633,6 @@ void ARGB1555ToARGBRow_Any_NEON(const uint8* src_argb1555, uint8* dst_argb,
                                 int pix);
 void ARGB4444ToARGBRow_Any_NEON(const uint8* src_argb4444, uint8* dst_argb,
                                 int pix);
-
-
 
 void ARGBToRGBARow_SSSE3(const uint8* src_argb, uint8* dst_rgb, int pix);
 void ARGBToRGB24Row_SSSE3(const uint8* src_argb, uint8* dst_rgb, int pix);
@@ -931,11 +950,19 @@ void YToARGBRow_SSE2(const uint8* src_y,
 void YToARGBRow_NEON(const uint8* src_y,
                      uint8* dst_argb,
                      int width);
+void YToARGBRow_Any_SSE2(const uint8* src_y,
+                         uint8* dst_argb,
+                         int width);
+void YToARGBRow_Any_NEON(const uint8* src_y,
+                         uint8* dst_argb,
+                         int width);
 
 // ARGB preattenuated alpha blend.
 void ARGBBlendRow_SSSE3(const uint8* src_argb, const uint8* src_argb1,
                         uint8* dst_argb, int width);
 void ARGBBlendRow_SSE2(const uint8* src_argb, const uint8* src_argb1,
+                       uint8* dst_argb, int width);
+void ARGBBlendRow_NEON(const uint8* src_argb, const uint8* src_argb1,
                        uint8* dst_argb, int width);
 void ARGBBlendRow_C(const uint8* src_argb, const uint8* src_argb1,
                     uint8* dst_argb, int width);
@@ -1188,6 +1215,13 @@ void I422ToUYVYRow_Any_NEON(const uint8* src_y,
 void ARGBAttenuateRow_C(const uint8* src_argb, uint8* dst_argb, int width);
 void ARGBAttenuateRow_SSE2(const uint8* src_argb, uint8* dst_argb, int width);
 void ARGBAttenuateRow_SSSE3(const uint8* src_argb, uint8* dst_argb, int width);
+void ARGBAttenuateRow_NEON(const uint8* src_argb, uint8* dst_argb, int width);
+void ARGBAttenuateRow_Any_SSE2(const uint8* src_argb, uint8* dst_argb,
+                               int width);
+void ARGBAttenuateRow_Any_SSSE3(const uint8* src_argb, uint8* dst_argb,
+                                int width);
+void ARGBAttenuateRow_Any_NEON(const uint8* src_argb, uint8* dst_argb,
+                               int width);
 
 // Inverse table for unattenuate, shared by C and SSE2.
 extern uint32 fixed_invtbl8[256];
@@ -1196,13 +1230,17 @@ void ARGBUnattenuateRow_SSE2(const uint8* src_argb, uint8* dst_argb, int width);
 
 void ARGBGrayRow_C(const uint8* src_argb, uint8* dst_argb, int width);
 void ARGBGrayRow_SSSE3(const uint8* src_argb, uint8* dst_argb, int width);
+void ARGBGrayRow_NEON(const uint8* src_argb, uint8* dst_argb, int width);
 
 void ARGBSepiaRow_C(uint8* dst_argb, int width);
 void ARGBSepiaRow_SSSE3(uint8* dst_argb, int width);
+void ARGBSepiaRow_NEON(uint8* dst_argb, int width);
 
 void ARGBColorMatrixRow_C(uint8* dst_argb, const int8* matrix_argb, int width);
 void ARGBColorMatrixRow_SSSE3(uint8* dst_argb, const int8* matrix_argb,
                               int width);
+void ARGBColorMatrixRow_NEON(uint8* dst_argb, const int8* matrix_argb,
+                             int width);
 
 void ARGBColorTableRow_C(uint8* dst_argb, const uint8* table_argb, int width);
 void ARGBColorTableRow_X86(uint8* dst_argb, const uint8* table_argb, int width);
@@ -1211,22 +1249,27 @@ void ARGBQuantizeRow_C(uint8* dst_argb, int scale, int interval_size,
                        int interval_offset, int width);
 void ARGBQuantizeRow_SSE2(uint8* dst_argb, int scale, int interval_size,
                           int interval_offset, int width);
-
-// Used for blur.
-void CumulativeSumToAverage_SSE2(const int32* topleft, const int32* botleft,
-                                 int width, int area, uint8* dst, int count);
-void ComputeCumulativeSumRow_SSE2(const uint8* row, int32* cumsum,
-                                  const int32* previous_cumsum, int width);
-
-void CumulativeSumToAverage_C(const int32* topleft, const int32* botleft,
-                              int width, int area, uint8* dst, int count);
-void ComputeCumulativeSumRow_C(const uint8* row, int32* cumsum,
-                               const int32* previous_cumsum, int width);
+void ARGBQuantizeRow_NEON(uint8* dst_argb, int scale, int interval_size,
+                          int interval_offset, int width);
 
 void ARGBShadeRow_C(const uint8* src_argb, uint8* dst_argb, int width,
                     uint32 value);
 void ARGBShadeRow_SSE2(const uint8* src_argb, uint8* dst_argb, int width,
                        uint32 value);
+void ARGBShadeRow_NEON(const uint8* src_argb, uint8* dst_argb, int width,
+                       uint32 value);
+
+// Used for blur.
+void CumulativeSumToAverageRow_SSE2(const int32* topleft, const int32* botleft,
+                                    int width, int area, uint8* dst, int count);
+void ComputeCumulativeSumRow_SSE2(const uint8* row, int32* cumsum,
+                                  const int32* previous_cumsum, int width);
+
+void CumulativeSumToAverageRow_C(const int32* topleft, const int32* botleft,
+                                 int width, int area, uint8* dst, int count);
+void ComputeCumulativeSumRow_C(const uint8* row, int32* cumsum,
+                               const int32* previous_cumsum, int width);
+
 
 LIBYUV_API
 void ARGBAffineRow_C(const uint8* src_argb, int src_argb_stride,
@@ -1241,6 +1284,10 @@ void ARGBInterpolateRow_C(uint8* dst_argb, const uint8* src_argb,
 void ARGBInterpolateRow_SSSE3(uint8* dst_argb, const uint8* src_argb,
                               ptrdiff_t src_stride_argb, int dst_width,
                               int source_y_fraction);
+void ARGBInterpolateRow_NEON(uint8* dst_argb, const uint8* src_argb,
+                             ptrdiff_t src_stride_argb, int dst_width,
+                             int source_y_fraction);
+void ARGBMultiplyRow_SSE2(const uint8* src_argb, uint8* dst_argb, int width);
 
 #ifdef __cplusplus
 }  // extern "C"
@@ -1248,4 +1295,3 @@ void ARGBInterpolateRow_SSSE3(uint8* dst_argb, const uint8* src_argb,
 #endif
 
 #endif  // INCLUDE_LIBYUV_ROW_H_  NOLINT
-

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2013 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,22 +34,34 @@
 
 namespace WebKit {
 
+const char* WebKeyValueStorageManagerProxy::supplementName()
+{
+    return "WebKeyValueStorageManagerProxy";
+}
+
 PassRefPtr<WebKeyValueStorageManagerProxy> WebKeyValueStorageManagerProxy::create(WebContext* context)
 {
     return adoptRef(new WebKeyValueStorageManagerProxy(context));
 }
 
 WebKeyValueStorageManagerProxy::WebKeyValueStorageManagerProxy(WebContext* context)
-    : m_webContext(context)
+    : WebContextSupplement(context)
 {
-    m_webContext->addMessageReceiver(Messages::WebKeyValueStorageManagerProxy::messageReceiverName(), this);
+    WebContextSupplement::context()->addMessageReceiver(Messages::WebKeyValueStorageManagerProxy::messageReceiverName(), this);
 }
 
 WebKeyValueStorageManagerProxy::~WebKeyValueStorageManagerProxy()
 {
 }
 
-void WebKeyValueStorageManagerProxy::invalidate()
+// WebContextSupplement
+
+void WebKeyValueStorageManagerProxy::contextDestroyed()
+{
+    invalidateCallbackMap(m_arrayCallbacks);
+}
+
+void WebKeyValueStorageManagerProxy::processDidClose(WebProcessProxy*)
 {
     invalidateCallbackMap(m_arrayCallbacks);
 }
@@ -59,9 +71,14 @@ bool WebKeyValueStorageManagerProxy::shouldTerminate(WebProcessProxy*) const
     return m_arrayCallbacks.isEmpty();
 }
 
-void WebKeyValueStorageManagerProxy::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
+void WebKeyValueStorageManagerProxy::refWebContextSupplement()
 {
-    didReceiveWebKeyValueStorageManagerProxyMessage(connection, messageID, decoder);
+    APIObject::ref();
+}
+
+void WebKeyValueStorageManagerProxy::derefWebContextSupplement()
+{
+    APIObject::deref();
 }
 
 void WebKeyValueStorageManagerProxy::getKeyValueStorageOrigins(PassRefPtr<ArrayCallback> prpCallback)
@@ -71,7 +88,7 @@ void WebKeyValueStorageManagerProxy::getKeyValueStorageOrigins(PassRefPtr<ArrayC
     m_arrayCallbacks.set(callbackID, callback.release());
 
     // FIXME (Multi-WebProcess): <rdar://problem/12239765> Should key-value storage be handled in the web process?
-    m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebKeyValueStorageManager::GetKeyValueStorageOrigins(callbackID));
+    context()->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebKeyValueStorageManager::GetKeyValueStorageOrigins(callbackID));
 }
     
 void WebKeyValueStorageManagerProxy::didGetKeyValueStorageOrigins(const Vector<SecurityOriginData>& originDatas, uint64_t callbackID)
@@ -88,13 +105,13 @@ void WebKeyValueStorageManagerProxy::deleteEntriesForOrigin(WebSecurityOrigin* o
     securityOriginData.port = origin->port();
 
     // FIXME (Multi-WebProcess): <rdar://problem/12239765> Should key-value storage be handled in the web process?
-    m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebKeyValueStorageManager::DeleteEntriesForOrigin(securityOriginData));
+    context()->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebKeyValueStorageManager::DeleteEntriesForOrigin(securityOriginData));
 }
 
 void WebKeyValueStorageManagerProxy::deleteAllEntries()
 {
     // FIXME (Multi-WebProcess): <rdar://problem/12239765> Should key-value storage be handled in the web process?
-    m_webContext->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebKeyValueStorageManager::DeleteAllEntries());
+    context()->sendToAllProcessesRelaunchingThemIfNecessary(Messages::WebKeyValueStorageManager::DeleteAllEntries());
 }
 
 } // namespace WebKit

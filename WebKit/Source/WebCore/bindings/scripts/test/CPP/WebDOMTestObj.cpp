@@ -24,14 +24,12 @@
 #include "Dictionary.h"
 #include "Document.h"
 #include "HTMLNames.h"
-#include "IDBKey.h"
 #include "KURL.h"
 #include "Node.h"
 #include "SVGPoint.h"
 #include "SerializedScriptValue.h"
 #include "WebDOMDictionary.h"
 #include "WebDOMDocument.h"
-#include "WebDOMIDBKey.h"
 #include "WebDOMNode.h"
 #include "WebDOMSVGPoint.h"
 #include "WebDOMString.h"
@@ -272,7 +270,7 @@ WebDOMString WebDOMTestObj::reflectedStringAttr() const
     if (!impl())
         return WebDOMString();
 
-    return static_cast<const WTF::String&>(impl()->getAttribute(WebCore::HTMLNames::reflectedstringattrAttr));
+    return static_cast<const WTF::String&>(impl()->fastGetAttribute(WebCore::HTMLNames::reflectedstringattrAttr));
 }
 
 void WebDOMTestObj::setReflectedStringAttr(const WebDOMString& newReflectedStringAttr)
@@ -320,7 +318,7 @@ bool WebDOMTestObj::reflectedBooleanAttr() const
     if (!impl())
         return false;
 
-    return impl()->hasAttribute(WebCore::HTMLNames::reflectedbooleanattrAttr);
+    return impl()->fastHasAttribute(WebCore::HTMLNames::reflectedbooleanattrAttr);
 }
 
 void WebDOMTestObj::setReflectedBooleanAttr(bool newReflectedBooleanAttr)
@@ -352,7 +350,7 @@ WebDOMString WebDOMTestObj::reflectedStringAttr() const
     if (!impl())
         return WebDOMString();
 
-    return static_cast<const WTF::String&>(impl()->getAttribute(WebCore::HTMLNames::customContentStringAttrAttr));
+    return static_cast<const WTF::String&>(impl()->fastGetAttribute(WebCore::HTMLNames::customContentStringAttrAttr));
 }
 
 void WebDOMTestObj::setReflectedStringAttr(const WebDOMString& newReflectedStringAttr)
@@ -384,7 +382,7 @@ bool WebDOMTestObj::reflectedCustomBooleanAttr() const
     if (!impl())
         return false;
 
-    return impl()->hasAttribute(WebCore::HTMLNames::customContentBooleanAttrAttr);
+    return impl()->fastHasAttribute(WebCore::HTMLNames::customContentBooleanAttrAttr);
 }
 
 void WebDOMTestObj::setReflectedCustomBooleanAttr(bool newReflectedCustomBooleanAttr)
@@ -732,14 +730,6 @@ void WebDOMTestObj::serializedValue(const WebDOMString& serializedArg)
         return;
 
     impl()->serializedValue(WebCore::SerializedScriptValue::create(WTF::String(serializedArg)));
-}
-
-void WebDOMTestObj::idbKey(const WebDOMIDBKey& key)
-{
-    if (!impl())
-        return;
-
-    impl()->idbKey(toWebCore(key));
 }
 
 void WebDOMTestObj::optionsObject(const WebDOMDictionary& oo, const WebDOMDictionary& ooo)

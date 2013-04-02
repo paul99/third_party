@@ -33,9 +33,9 @@ namespace WebKit {
 
 class PageClientLegacyImpl : public PageClientBase {
 public:
-    static PassOwnPtr<PageClientBase> create(EwkViewImpl* viewImpl)
+    static PassOwnPtr<PageClientBase> create(EwkView* view)
     {
-        return adoptPtr(new PageClientLegacyImpl(viewImpl));
+        return adoptPtr(new PageClientLegacyImpl(view));
     }
 
     virtual ~PageClientLegacyImpl() { }
@@ -47,15 +47,13 @@ public:
     virtual WebCore::FloatRect convertToUserSpace(const WebCore::FloatRect&);
 
 private:
-    explicit PageClientLegacyImpl(EwkViewImpl*);
+    explicit PageClientLegacyImpl(EwkView*);
 
     virtual void didChangeViewportProperties(const WebCore::ViewportAttributes&);
     virtual void didChangeContentsSize(const WebCore::IntSize&);
-#if USE(TILED_BACKING_STORE)
     virtual void pageDidRequestScroll(const WebCore::IntPoint&);
     virtual void didRenderFrame(const WebCore::IntSize& contentsSize, const WebCore::IntRect& coveredRect);
     virtual void pageTransitionViewportReady();
-#endif
 };
 
 } // namespace WebKit

@@ -16,15 +16,18 @@
 #ifndef WEBRTC_VOICE_ENGINE_VOICE_ENGINE_DEFINES_H
 #define WEBRTC_VOICE_ENGINE_VOICE_ENGINE_DEFINES_H
 
-#include "common_types.h"
-#include "engine_configurations.h"
+#include "webrtc/common_types.h"
+#include "webrtc/engine_configurations.h"
+#include "webrtc/system_wrappers/interface/logging.h"
 
 // ----------------------------------------------------------------------------
 //  Enumerators
 // ----------------------------------------------------------------------------
 
-namespace webrtc
-{
+namespace webrtc {
+
+// TODO(ajm): There's not really a reason for this limitation. Remove it.
+enum { kVoiceEngineMaxNumChannels = 100 };
 
 // VolumeControl
 enum { kMinVolumeLevel = 0 };
@@ -106,7 +109,7 @@ enum { kVoiceEngineMaxIsacMaxPayloadSizeBytesSwb = 600 };
 // Lowest minimum playout delay
 enum { kVoiceEngineMinMinPlayoutDelayMs = 0 };
 // Highest minimum playout delay
-enum { kVoiceEngineMaxMinPlayoutDelayMs = 1000 };
+enum { kVoiceEngineMaxMinPlayoutDelayMs = 10000 };
 
 // Network
 // Min packet-timeout time for received RTP packets
@@ -186,6 +189,11 @@ enum { kVoiceEngineMaxRtpExtensionId = 14 };
 //  Macros
 // ----------------------------------------------------------------------------
 
+#define NOT_SUPPORTED(stat)                  \
+  LOG_F(LS_ERROR) << "not supported";        \
+  stat.SetLastError(VE_FUNC_NOT_SUPPORTED);  \
+  return -1;
+
 #if (defined(_DEBUG) && defined(_WIN32) && (_MSC_VER >= 1400))
   #include <windows.h>
   #include <stdio.h>
@@ -255,26 +263,11 @@ inline int VoEChannelId(const int moduleId)
   #endif
 
 // ----------------------------------------------------------------------------
-//  Enumerators
-// ----------------------------------------------------------------------------
-
-namespace webrtc
-{
-// Max number of supported channels
-enum { kVoiceEngineMaxNumOfChannels = 32 };
-// Max number of channels which can be played out simultaneously
-enum { kVoiceEngineMaxNumOfActiveChannels = 16 };
-} // namespace webrtc
-
-// ----------------------------------------------------------------------------
 //  Defines
 // ----------------------------------------------------------------------------
 
   #include <windows.h>
-  #include <mmsystem.h> // timeGetTime
 
-  #define GET_TIME_IN_MS() ::timeGetTime()
-  #define SLEEP(x) ::Sleep(x)
   // Comparison of two strings without regard to case
   #define STR_CASE_CMP(x,y) ::_stricmp(x,y)
   // Compares characters of two strings without regard to case
@@ -338,47 +331,10 @@ enum { kVoiceEngineMaxNumOfActiveChannels = 16 };
 #define __cdecl
 #define LPSOCKADDR struct sockaddr *
 
-namespace
-{
-    void Sleep(unsigned long x)
-    {
-        timespec t;
-        t.tv_sec = x/1000;
-        t.tv_nsec = (x-(x/1000)*1000)*1000000;
-        nanosleep(&t,NULL);
-    }
-
-    DWORD timeGetTime()
-    {
-        struct timeval tv;
-        struct timezone tz;
-        unsigned long val;
-
-        gettimeofday(&tv, &tz);
-        val= tv.tv_sec*1000+ tv.tv_usec/1000;
-        return(val);
-    }
-}
-
-#define SLEEP(x) ::Sleep(x)
-#define GET_TIME_IN_MS timeGetTime
-
 // Default device for Linux and Android
 #define WEBRTC_VOICE_ENGINE_DEFAULT_DEVICE 0
 
 #ifdef ANDROID
-
-// ----------------------------------------------------------------------------
-//  Enumerators
-// ----------------------------------------------------------------------------
-
-namespace webrtc
-{
-  // Max number of supported channels
-  enum { kVoiceEngineMaxNumOfChannels = 32 };
-  // Max number of channels which can be played out simultaneously
-  enum { kVoiceEngineMaxNumOfActiveChannels = 16 };
-} // namespace webrtc
 
 // ----------------------------------------------------------------------------
 //  Defines
@@ -406,23 +362,9 @@ namespace webrtc
   #define WEBRTC_VOICE_ENGINE_AGC_DEFAULT_MODE \
       GainControl::kAdaptiveDigital
 
-  #define ANDROID_NOT_SUPPORTED(stat)                         \
-      stat.SetLastError(VE_FUNC_NOT_SUPPORTED, kTraceError,   \
-                        "API call not supported");            \
-      return -1;
+  #define ANDROID_NOT_SUPPORTED(stat) NOT_SUPPORTED(stat)
 
 #else // LINUX PC
-// ----------------------------------------------------------------------------
-//  Enumerators
-// ----------------------------------------------------------------------------
-
-namespace webrtc
-{
-  // Max number of supported channels
-  enum { kVoiceEngineMaxNumOfChannels = 32 };
-  // Max number of channels which can be played out simultaneously
-  enum { kVoiceEngineMaxNumOfActiveChannels = 16 };
-} // namespace webrtc
 
 // ----------------------------------------------------------------------------
 //  Defines
@@ -488,48 +430,11 @@ namespace webrtc
 #define LPCSTR const char*
 #define ULONG unsigned long
 
-namespace
-{
-    void Sleep(unsigned long x)
-    {
-        timespec t;
-        t.tv_sec = x/1000;
-        t.tv_nsec = (x-(x/1000)*1000)*1000000;
-        nanosleep(&t,NULL);
-    }
-
-    DWORD WebRtcTimeGetTime()
-    {
-        struct timeval tv;
-        struct timezone tz;
-        unsigned long val;
-
-        gettimeofday(&tv, &tz);
-        val= tv.tv_sec*1000+ tv.tv_usec/1000;
-        return(val);
-    }
-}
-
-#define SLEEP(x) ::Sleep(x)
-#define GET_TIME_IN_MS WebRtcTimeGetTime
-
 // Default device for Mac and iPhone
 #define WEBRTC_VOICE_ENGINE_DEFAULT_DEVICE 0
 
 // iPhone specific
 #if defined(WEBRTC_IOS)
-
-// ----------------------------------------------------------------------------
-//  Enumerators
-// ----------------------------------------------------------------------------
-
-namespace webrtc
-{
-  // Max number of supported channels
-  enum { kVoiceEngineMaxNumOfChannels = 2 };
-  // Max number of channels which can be played out simultaneously
-  enum { kVoiceEngineMaxNumOfActiveChannels = 2 };
-} // namespace webrtc
 
 // ----------------------------------------------------------------------------
 //  Defines
@@ -553,24 +458,13 @@ namespace webrtc
   #define WEBRTC_VOICE_ENGINE_AGC_DEFAULT_MODE \
       GainControl::kAdaptiveDigital
 
-  #define IPHONE_NOT_SUPPORTED(stat) \
-    stat.SetLastError(VE_FUNC_NOT_SUPPORTED, kTraceError, \
-                      "API call not supported"); \
-    return -1;
+  #define IPHONE_NOT_SUPPORTED(stat) NOT_SUPPORTED(stat)
 
 #else // Non-iPhone
 
 // ----------------------------------------------------------------------------
 //  Enumerators
 // ----------------------------------------------------------------------------
-
-namespace webrtc
-{
-  // Max number of supported channels
-  enum { kVoiceEngineMaxNumOfChannels = 32 };
-  // Max number of channels which can be played out simultaneously
-  enum { kVoiceEngineMaxNumOfActiveChannels = 16 };
-} // namespace webrtc
 
 // ----------------------------------------------------------------------------
 //  Defines
@@ -582,7 +476,5 @@ namespace webrtc
 #else
 #define IPHONE_NOT_SUPPORTED(stat)
 #endif  // #ifdef WEBRTC_MAC
-
-
 
 #endif // WEBRTC_VOICE_ENGINE_VOICE_ENGINE_DEFINES_H

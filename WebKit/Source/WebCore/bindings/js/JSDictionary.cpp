@@ -45,6 +45,10 @@
 #include "JSMediaKeyError.h"
 #endif
 
+#if ENABLE(MEDIA_STREAM)
+#include "JSMediaStream.h"
+#endif
+
 using namespace JSC;
 
 namespace WebCore {
@@ -175,7 +179,6 @@ void JSDictionary::convertValue(ExecState*, JSValue value, RefPtr<TrackBase>& re
 }
 #endif
 
-#if ENABLE(MUTATION_OBSERVERS) || ENABLE(WEB_INTENTS)
 void JSDictionary::convertValue(ExecState* exec, JSValue value, HashSet<AtomicString>& result)
 {
     result.clear();
@@ -195,7 +198,6 @@ void JSDictionary::convertValue(ExecState* exec, JSValue value, HashSet<AtomicSt
         result.add(itemValue.toString(exec)->value(exec));
     }
 }
-#endif
 
 void JSDictionary::convertValue(ExecState* exec, JSValue value, ArrayValue& result)
 {
@@ -214,6 +216,13 @@ void JSDictionary::convertValue(JSC::ExecState*, JSC::JSValue value, RefPtr<Uint
 void JSDictionary::convertValue(JSC::ExecState*, JSC::JSValue value, RefPtr<MediaKeyError>& result)
 {
     result = toMediaKeyError(value);
+}
+#endif
+
+#if ENABLE(MEDIA_STREAM)
+void JSDictionary::convertValue(JSC::ExecState*, JSC::JSValue value, RefPtr<MediaStream>& result)
+{
+    result = toMediaStream(value);
 }
 #endif
 

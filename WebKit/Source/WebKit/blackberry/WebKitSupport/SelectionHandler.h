@@ -46,6 +46,7 @@ class String;
 
 namespace WebKit {
 
+class FatFingersResult;
 class WebPagePrivate;
 
 class SelectionHandler {
@@ -76,18 +77,20 @@ public:
     void inputHandlerDidFinishProcessingChange();
 
 private:
-    void notifyCaretPositionChangedIfNeeded();
-    void caretPositionChanged();
+    void notifyCaretPositionChangedIfNeeded(bool userTouchTriggered = true);
+    void caretPositionChanged(bool userTouchTriggered);
     void regionForTextQuads(WTF::Vector<WebCore::FloatQuad>&, BlackBerry::Platform::IntRectRegion&, bool shouldClipToVisibleContent = true) const;
     WebCore::IntRect clippingRectForVisibleContent() const;
     bool updateOrHandleInputSelection(WebCore::VisibleSelection& newSelection, const WebCore::IntPoint& relativeStart
                                       , const WebCore::IntPoint& relativeEnd);
     WebCore::Node* DOMContainerNodeForVisiblePosition(const WebCore::VisiblePosition&) const;
     bool shouldUpdateSelectionOrCaretForPoint(const WebCore::IntPoint&, const WebCore::IntRect&, bool startCaret = true) const;
-    unsigned short extendSelectionToFieldBoundary(bool isStartHandle, const WebCore::IntPoint& selectionPoint, WebCore::VisibleSelection& newSelection);
+    unsigned extendSelectionToFieldBoundary(bool isStartHandle, const WebCore::IntPoint& selectionPoint, WebCore::VisibleSelection& newSelection);
     WebCore::IntPoint clipPointToVisibleContainer(const WebCore::IntPoint&) const;
 
     bool inputNodeOverridesTouch() const;
+
+    bool selectNodeIfFatFingersResultIsLink(FatFingersResult);
 
     WebPagePrivate* m_webPage;
 

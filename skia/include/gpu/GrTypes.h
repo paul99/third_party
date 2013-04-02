@@ -307,33 +307,8 @@ enum GrPixelConfig {
     #error "SK_*32_SHIFT values must correspond to GL_BGRA or GL_RGBA format."
 #endif
 
-// This alias is deprecated and will be removed.
-static const GrPixelConfig kSkia8888_PM_GrPixelConfig = kSkia8888_GrPixelConfig;
-
-// Returns true if the pixel config has 8bit r,g,b,a components in that byte
-// order
-static inline bool GrPixelConfigIsRGBA8888(GrPixelConfig config) {
-    switch (config) {
-        case kRGBA_8888_GrPixelConfig:
-            return true;
-        default:
-            return false;
-    }
-}
-
-// Returns true if the pixel config has 8bit b,g,r,a components in that byte
-// order
-static inline bool GrPixelConfigIsBGRA8888(GrPixelConfig config) {
-    switch (config) {
-        case kBGRA_8888_GrPixelConfig:
-            return true;
-        default:
-            return false;
-    }
-}
-
 // Returns true if the pixel config is 32 bits per pixel
-static inline bool GrPixelConfigIs32Bit(GrPixelConfig config) {
+static inline bool GrPixelConfigIs8888(GrPixelConfig config) {
     switch (config) {
         case kRGBA_8888_GrPixelConfig:
         case kBGRA_8888_GrPixelConfig:
@@ -428,13 +403,14 @@ enum {
 /**
  * Some textures will be stored such that the upper and left edges of the content meet at the
  * the origin (in texture coord space) and for other textures the lower and left edges meet at
- * the origin. Render-targets are always consistent with the convention of the underlying
- * backend API to make it easier to mix native backend rendering with Skia rendering.
+ * the origin. kDefault_GrSurfaceOrigin sets textures to TopLeft, and render targets
+ * to BottomLeft.
  */
 
 enum GrSurfaceOrigin {
-    kBottomLeft_GrSurfaceOrigin,
+    kDefault_GrSurfaceOrigin,         // DEPRECATED; to be removed
     kTopLeft_GrSurfaceOrigin,
+    kBottomLeft_GrSurfaceOrigin,
 };
 
 /**
@@ -443,6 +419,7 @@ enum GrSurfaceOrigin {
 struct GrTextureDesc {
     GrTextureDesc()
     : fFlags(kNone_GrTextureFlags)
+    , fOrigin(kDefault_GrSurfaceOrigin)
     , fWidth(0)
     , fHeight(0)
     , fConfig(kUnknown_GrPixelConfig)
@@ -450,6 +427,7 @@ struct GrTextureDesc {
     }
 
     GrTextureFlags         fFlags;  //!< bitfield of TextureFlags
+    GrSurfaceOrigin        fOrigin; //!< origin of the texture
     int                    fWidth;  //!< Width of the texture
     int                    fHeight; //!< Height of the texture
 
@@ -640,6 +618,7 @@ struct GrBackendRenderTargetDesc {
     int                             fWidth;         //<! width in pixels
     int                             fHeight;        //<! height in pixels
     GrPixelConfig                   fConfig;        //<! color format
+    GrSurfaceOrigin                 fOrigin;        //<! pixel origin
     /**
      * The number of samples per pixel. Gr uses this to influence decisions
      * about applying other forms of anti-aliasing.
@@ -655,24 +634,6 @@ struct GrBackendRenderTargetDesc {
      */
     GrBackendObject                 fRenderTargetHandle;
 };
-
-///////////////////////////////////////////////////////////////////////////////
-// Legacy names that will be kept until WebKit can be updated.
-
-typedef GrBackend GrEngine;
-static const GrBackend kOpenGL_Shaders_GrEngine = kOpenGL_GrBackend;
-
-typedef GrBackendContext GrPlatform3DContext;
-
-typedef GrBackendObject GrPlatform3DObject;
-
-typedef GrBackendTextureFlags GrPlatformTextureFlags;
-static const GrBackendTextureFlags kNone_GrPlatformTextureFlag = kNone_GrBackendTextureFlag;
-static const GrBackendTextureFlags kRenderTarget_GrPlatformTextureFlag = kRenderTarget_GrBackendTextureFlag;
-
-typedef GrBackendTextureDesc GrPlatformTextureDesc;
-
-typedef GrBackendRenderTargetDesc GrPlatformRenderTargetDesc;
 
 ///////////////////////////////////////////////////////////////////////////////
 

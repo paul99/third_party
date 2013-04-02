@@ -27,6 +27,7 @@
 #include "JSGlobalData.h"
 #include "JSStack.h"
 #include "MacroAssemblerCodeRef.h"
+#include "Register.h"
 
 namespace JSC  {
 
@@ -144,7 +145,7 @@ namespace JSC  {
         // #if's, we make a dummy implementation available anyway.
         InlineCallFrame* inlineCallFrame() const
         {
-            ASSERT_NOT_REACHED();
+            RELEASE_ASSERT_NOT_REACHED();
             return 0;
         }
 #endif

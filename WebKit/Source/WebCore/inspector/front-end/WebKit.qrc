@@ -30,8 +30,7 @@
     <file>CookieParser.js</file>
     <file>CookiesTable.js</file>
     <file>CPUProfileView.js</file>
-    <file>CSSCompletions.js</file>
-    <file>CSSKeywordCompletions.js</file>
+    <file>CSSMetadata.js</file>
     <file>CSSNamedFlowCollectionsView.js</file>
     <file>CSSNamedFlowView.js</file>
     <file>CSSSelectorProfileView.js</file>
@@ -49,6 +48,7 @@
     <file>DataGrid.js</file>
     <file>DebuggerModel.js</file>
     <file>DebuggerScriptMapping.js</file>
+    <file>DefaultScriptMapping.js</file>
     <file>DefaultTextEditor.js</file>
     <file>Dialog.js</file>
     <file>DirectoryContentView.js</file>
@@ -74,8 +74,11 @@
     <file>ExtensionView.js</file>
     <file>FileContentView.js</file>
     <file>FileManager.js</file>
+    <file>FileMapping.js</file>
+    <file>FileSystemMapping.js</file>
     <file>FileSystemModel.js</file>
     <file>FileSystemView.js</file>
+    <file>FileSystemWorkspaceProvider.js</file>
     <file>FileUtils.js</file>
     <file>FilteredItemSelectionDialog.js</file>
     <file>FontView.js</file>
@@ -99,14 +102,18 @@
     <file>InspectorFrontendAPI.js</file>
     <file>InspectorFrontendHostStub.js</file>
     <file>InspectorView.js</file>
+    <file>JSHeapSnapshot.js</file>
+    <file>IsolatedFileSystemModel.js</file>
     <file>JavaScriptFormatter.js</file>
     <file>JavaScriptSourceFrame.js</file>
     <file>jsdifflib.js</file>
     <file>KeyboardShortcut.js</file>
     <file>Linkifier.js</file>
+    <file>LiveEditSupport.js</file>
     <file>MemoryStatistics.js</file>
     <file>MetricsSidebarPane.js</file>
     <file>NativeBreakpointsSidebarPane.js</file>
+    <file>NativeHeapSnapshot.js</file>
     <file>NativeMemorySnapshotView.js</file>
     <file>NavigatorOverlayController.js</file>
     <file>NavigatorView.js</file>
@@ -117,7 +124,6 @@
     <file>NetworkPanelDescriptor.js</file>
     <file>NetworkRequest.js</file>
     <file>NetworkUISourceCodeProvider.js</file>
-    <file>NetworkWorkspaceProvider.js</file>
     <file>Object.js</file>
     <file>ObjectPopoverHelper.js</file>
     <file>ObjectPropertiesSection.js</file>
@@ -174,6 +180,7 @@
     <file>SidebarPane.js</file>
     <file>SidebarTreeElement.js</file>
     <file>SidebarView.js</file>
+    <file>SimpleWorkspaceProvider.js</file>
     <file>SnippetJavaScriptSourceFrame.js</file>
     <file>SnippetStorage.js</file>
     <file>SoftContextMenu.js</file>
@@ -181,6 +188,7 @@
     <file>SourceFrame.js</file>
     <file>SourceHTMLTokenizer.js</file>
     <file>SourceJavaScriptTokenizer.js</file>
+    <file>SourceMap.js</file>
     <file>SourceMapping.js</file>
     <file>SourceTokenizer.js</file>
     <file>Spectrum.js</file>
@@ -215,6 +223,7 @@
     <file>UserMetrics.js</file>
     <file>utilities.js</file>
     <file>View.js</file>
+    <file>ViewportControl.js</file>
     <file>WatchExpressionsSidebarPane.js</file>
     <file>WorkerManager.js</file>
     <file>WorkersSidebarPane.js</file>

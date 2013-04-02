@@ -2621,8 +2621,8 @@ void ARGBMirrorRow_SSSE3(const uint8* src, uint8* dst, int width) {
 }
 #endif  // HAS_ARGBMIRRORROW_SSSE3
 
-#ifdef HAS_SPLITUV_SSE2
-void SplitUV_SSE2(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix) {
+#ifdef HAS_SPLITUVROW_SSE2
+void SplitUVRow_SSE2(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix) {
   asm volatile (
     "pcmpeqb    %%xmm5,%%xmm5                    \n"
     "psrlw      $0x8,%%xmm5                      \n"
@@ -2657,8 +2657,8 @@ void SplitUV_SSE2(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix) {
   );
 }
 
-void SplitUV_Unaligned_SSE2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
-                            int pix) {
+void SplitUVRow_Unaligned_SSE2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
+                               int pix) {
   asm volatile (
     "pcmpeqb    %%xmm5,%%xmm5                    \n"
     "psrlw      $0x8,%%xmm5                      \n"
@@ -2692,11 +2692,11 @@ void SplitUV_Unaligned_SSE2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
 #endif
   );
 }
-#endif  // HAS_SPLITUV_SSE2
+#endif  // HAS_SPLITUVROW_SSE2
 
-#ifdef HAS_MERGEUV_SSE2
-void MergeUV_SSE2(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
-                  int width) {
+#ifdef HAS_MERGEUVROW_SSE2
+void MergeUVRow_SSE2(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
+                     int width) {
   asm volatile (
     "sub       %0,%1                             \n"
     ".p2align   4                                \n"
@@ -2724,8 +2724,8 @@ void MergeUV_SSE2(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
   );
 }
 
-void MergeUV_Unaligned_SSE2(const uint8* src_u, const uint8* src_v,
-                            uint8* dst_uv, int width) {
+void MergeUVRow_Unaligned_SSE2(const uint8* src_u, const uint8* src_v,
+                               uint8* dst_uv, int width) {
   asm volatile (
     "sub       %0,%1                             \n"
     ".p2align   4                                \n"
@@ -2752,7 +2752,7 @@ void MergeUV_Unaligned_SSE2(const uint8* src_u, const uint8* src_v,
 #endif
   );
 }
-#endif  // HAS_MERGEUV_SSE2
+#endif  // HAS_MERGEUVROW_SSE2
 
 #ifdef HAS_COPYROW_SSE2
 void CopyRow_SSE2(const uint8* src, uint8* dst, int count) {
@@ -2795,7 +2795,7 @@ void CopyRow_X86(const uint8* src, uint8* dst, int width) {
 #endif  // HAS_COPYROW_X86
 
 #ifdef HAS_SETROW_X86
-void SetRow8_X86(uint8* dst, uint32 v32, int width) {
+void SetRow_X86(uint8* dst, uint32 v32, int width) {
   size_t width_tmp = static_cast<size_t>(width);
   asm volatile (
     "shr       $0x2,%1                         \n"
@@ -2806,7 +2806,7 @@ void SetRow8_X86(uint8* dst, uint32 v32, int width) {
     : "memory", "cc");
 }
 
-void SetRows32_X86(uint8* dst, uint32 v32, int width,
+void ARGBSetRows_X86(uint8* dst, uint32 v32, int width,
                    int dst_stride, int height) {
   for (int y = 0; y < height; ++y) {
     size_t width_tmp = static_cast<size_t>(width);
@@ -3519,7 +3519,7 @@ void ARGBBlendRow_SSSE3(const uint8* src_argb0, const uint8* src_argb1,
 }
 #endif  // HAS_ARGBBLENDROW_SSSE3
 
-#ifdef HAS_ARGBATTENUATE_SSE2
+#ifdef HAS_ARGBATTENUATEROW_SSE2
 // Attenuate 4 pixels at a time.
 // aligned to 16 bytes
 void ARGBAttenuateRow_SSE2(const uint8* src_argb, uint8* dst_argb, int width) {
@@ -3564,7 +3564,7 @@ void ARGBAttenuateRow_SSE2(const uint8* src_argb, uint8* dst_argb, int width) {
 #endif
   );
 }
-#endif  // HAS_ARGBATTENUATE_SSE2
+#endif  // HAS_ARGBATTENUATEROW_SSE2
 
 #ifdef HAS_ARGBATTENUATEROW_SSSE3
 // Shuffle table duplicating alpha
@@ -3921,6 +3921,45 @@ void ARGBQuantizeRow_SSE2(uint8* dst_argb, int scale, int interval_size,
 }
 #endif  // HAS_ARGBQUANTIZEROW_SSE2
 
+#ifdef HAS_ARGBSHADEROW_SSE2
+// Shade 4 pixels at a time by specified value.
+// Aligned to 16 bytes.
+void ARGBShadeRow_SSE2(const uint8* src_argb, uint8* dst_argb, int width,
+                       uint32 value) {
+  asm volatile (
+    "movd      %3,%%xmm2                       \n"
+    "sub       %0,%1                           \n"
+    "punpcklbw %%xmm2,%%xmm2                   \n"
+    "punpcklqdq %%xmm2,%%xmm2                  \n"
+
+    // 4 pixel loop.
+    ".p2align  2                               \n"
+  "1:                                          \n"
+    "movdqa    (%0),%%xmm0                     \n"
+    "movdqa    %%xmm0,%%xmm1                   \n"
+    "punpcklbw %%xmm0,%%xmm0                   \n"
+    "punpckhbw %%xmm1,%%xmm1                   \n"
+    "pmulhuw   %%xmm2,%%xmm0                   \n"
+    "pmulhuw   %%xmm2,%%xmm1                   \n"
+    "psrlw     $0x8,%%xmm0                     \n"
+    "psrlw     $0x8,%%xmm1                     \n"
+    "packuswb  %%xmm1,%%xmm0                   \n"
+    "sub       $0x4,%2                         \n"
+    "movdqa    %%xmm0,(%0,%1,1)                \n"
+    "lea       0x10(%0),%0                     \n"
+    "jg        1b                              \n"
+  : "+r"(src_argb),       // %0
+    "+r"(dst_argb),       // %1
+    "+r"(width)           // %2
+  : "r"(value)            // %3
+  : "memory", "cc"
+#if defined(__SSE2__)
+    , "xmm0", "xmm1", "xmm2"
+#endif
+  );
+}
+#endif  // HAS_ARGBSHADEROW_SSE2
+
 #ifdef HAS_COMPUTECUMULATIVESUMROW_SSE2
 // Creates a table of cumulative sums where each value is a sum of all values
 // above and to the left of the value, inclusive of the value.
@@ -4002,9 +4041,10 @@ void ComputeCumulativeSumRow_SSE2(const uint8* row, int32* cumsum,
 }
 #endif  // HAS_COMPUTECUMULATIVESUMROW_SSE2
 
-#ifdef HAS_CUMULATIVESUMTOAVERAGE_SSE2
-void CumulativeSumToAverage_SSE2(const int32* topleft, const int32* botleft,
-                                 int width, int area, uint8* dst, int count) {
+#ifdef HAS_CUMULATIVESUMTOAVERAGEROW_SSE2
+void CumulativeSumToAverageRow_SSE2(const int32* topleft, const int32* botleft,
+                                    int width, int area, uint8* dst,
+                                    int count) {
   asm volatile (
     "movd      %5,%%xmm4                       \n"
     "cvtdq2ps  %%xmm4,%%xmm4                   \n"
@@ -4089,49 +4129,10 @@ void CumulativeSumToAverage_SSE2(const int32* topleft, const int32* botleft,
 #endif
   );
 }
-#endif  // HAS_CUMULATIVESUMTOAVERAGE_SSE2
-#ifdef HAS_ARGBSHADE_SSE2
-// Shade 4 pixels at a time by specified value.
-// Aligned to 16 bytes.
-void ARGBShadeRow_SSE2(const uint8* src_argb, uint8* dst_argb, int width,
-                       uint32 value) {
-  asm volatile (
-    "movd      %3,%%xmm2                       \n"
-    "sub       %0,%1                           \n"
-    "punpcklbw %%xmm2,%%xmm2                   \n"
-    "punpcklqdq %%xmm2,%%xmm2                  \n"
-
-    // 4 pixel loop.
-    ".p2align  2                               \n"
-  "1:                                          \n"
-    "movdqa    (%0),%%xmm0                     \n"
-    "movdqa    %%xmm0,%%xmm1                   \n"
-    "punpcklbw %%xmm0,%%xmm0                   \n"
-    "punpckhbw %%xmm1,%%xmm1                   \n"
-    "pmulhuw   %%xmm2,%%xmm0                   \n"
-    "pmulhuw   %%xmm2,%%xmm1                   \n"
-    "psrlw     $0x8,%%xmm0                     \n"
-    "psrlw     $0x8,%%xmm1                     \n"
-    "packuswb  %%xmm1,%%xmm0                   \n"
-    "sub       $0x4,%2                         \n"
-    "movdqa    %%xmm0,(%0,%1,1)                \n"
-    "lea       0x10(%0),%0                     \n"
-    "jg        1b                              \n"
-  : "+r"(src_argb),       // %0
-    "+r"(dst_argb),       // %1
-    "+r"(width)           // %2
-  : "r"(value)            // %3
-  : "memory", "cc"
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2"
-#endif
-  );
-}
-#endif  // HAS_ARGBSHADE_SSE2
+#endif  // HAS_CUMULATIVESUMTOAVERAGEROW_SSE2
 
 #ifdef HAS_ARGBAFFINEROW_SSE2
 // TODO(fbarchard): Find 64 bit way to avoid masking.
-// TODO(fbarchard): Investigate why 4 pixels is slower than 2 on Core2.
 // Copy ARGB pixels from source image with slope to a row of destination.
 // Caveat - in 64 bit, movd is used with 64 bit gpr due to Mac gcc producing
 // an error if movq is used. movd  %%xmm0,%1
@@ -4240,17 +4241,23 @@ void ARGBAffineRow_SSE2(const uint8* src_argb, int src_argb_stride,
 }
 #endif  // HAS_ARGBAFFINEROW_SSE2
 
-// Bilinear row filtering combines 4x2 -> 4x1. SSSE3 version
-void ARGBInterpolateRow_SSSE3(uint8* dst_ptr, const uint8* src_ptr,
+// Bilinear image filtering.
+// Same as ScaleARGBFilterRows_SSSE3 but without last pixel duplicated.
+void ARGBInterpolateRow_SSSE3(uint8* dst_argb, const uint8* src_argb,
                               ptrdiff_t src_stride, int dst_width,
                               int source_y_fraction) {
   asm volatile (
     "sub       %1,%0                           \n"
     "shr       %3                              \n"
     "cmp       $0x0,%3                         \n"
-    "je        2f                              \n"
+    "je        100f                            \n"
+    "cmp       $0x20,%3                        \n"
+    "je        75f                             \n"
     "cmp       $0x40,%3                        \n"
-    "je        3f                              \n"
+    "je        50f                             \n"
+    "cmp       $0x60,%3                        \n"
+    "je        25f                             \n"
+
     "movd      %3,%%xmm0                       \n"
     "neg       %3                              \n"
     "add       $0x80,%3                        \n"
@@ -4258,6 +4265,8 @@ void ARGBInterpolateRow_SSSE3(uint8* dst_ptr, const uint8* src_ptr,
     "punpcklbw %%xmm0,%%xmm5                   \n"
     "punpcklwd %%xmm5,%%xmm5                   \n"
     "pshufd    $0x0,%%xmm5,%%xmm5              \n"
+
+    // General purpose row blend.
     ".p2align  4                               \n"
   "1:                                          \n"
     "movdqa    (%1),%%xmm0                     \n"
@@ -4274,28 +4283,60 @@ void ARGBInterpolateRow_SSSE3(uint8* dst_ptr, const uint8* src_ptr,
     "movdqa    %%xmm0,(%1,%0,1)                \n"
     "lea       0x10(%1),%1                     \n"
     "jg        1b                              \n"
-    "jmp       4f                              \n"
+    "jmp       99f                             \n"
+
+    // Blend 25 / 75.
     ".p2align  4                               \n"
-  "2:                                          \n"
+  "25:                                         \n"
+    "movdqa    (%1),%%xmm0                     \n"
+    "movdqa    (%1,%4,1),%%xmm1                \n"
+    "pavgb     %%xmm1,%%xmm0                   \n"
+    "pavgb     %%xmm1,%%xmm0                   \n"
+    "sub       $0x4,%2                         \n"
+    "movdqa    %%xmm0,(%1,%0,1)                \n"
+    "lea       0x10(%1),%1                     \n"
+    "jg        25b                             \n"
+    "jmp       99f                             \n"
+
+    // Blend 50 / 50.
+    ".p2align  4                               \n"
+  "50:                                         \n"
+    "movdqa    (%1),%%xmm0                     \n"
+    "movdqa    (%1,%4,1),%%xmm1                \n"
+    "pavgb     %%xmm1,%%xmm0                   \n"
+    "sub       $0x4,%2                         \n"
+    "movdqa    %%xmm0,(%1,%0,1)                \n"
+    "lea       0x10(%1),%1                     \n"
+    "jg        50b                             \n"
+    "jmp       99f                             \n"
+
+    // Blend 75 / 25.
+    ".p2align  4                               \n"
+  "75:                                         \n"
+    "movdqa    (%1),%%xmm1                     \n"
+    "movdqa    (%1,%4,1),%%xmm0                \n"
+    "pavgb     %%xmm1,%%xmm0                   \n"
+    "pavgb     %%xmm1,%%xmm0                   \n"
+    "sub       $0x4,%2                         \n"
+    "movdqa    %%xmm0,(%1,%0,1)                \n"
+    "lea       0x10(%1),%1                     \n"
+    "jg        75b                             \n"
+    "jmp       99f                             \n"
+
+    // Blend 100 / 0 - Copy row unchanged.
+    ".p2align  4                               \n"
+  "100:                                        \n"
     "movdqa    (%1),%%xmm0                     \n"
     "sub       $0x4,%2                         \n"
     "movdqa    %%xmm0,(%1,%0,1)                \n"
     "lea       0x10(%1),%1                     \n"
-    "jg        2b                              \n"
-    "jmp       4f                              \n"
-    ".p2align  4                               \n"
-  "3:                                          \n"
-    "movdqa    (%1),%%xmm0                     \n"
-    "pavgb     (%1,%4,1),%%xmm0                \n"
-    "sub       $0x4,%2                         \n"
-    "movdqa    %%xmm0,(%1,%0,1)                \n"
-    "lea       0x10(%1),%1                     \n"
-    "jg        3b                              \n"
-  "4:                                          \n"
-    ".p2align  4                               \n"
-  : "+r"(dst_ptr),     // %0
-    "+r"(src_ptr),     // %1
-    "+r"(dst_width),   // %2
+    "jg        100b                            \n"
+
+    // Extrude last pixel.
+  "99:                                         \n"
+  : "+r"(dst_argb),    // %0
+    "+r"(src_argb),    // %1
+    "+r"(dst_width),  // %2
     "+r"(source_y_fraction)  // %3
   : "r"(static_cast<intptr_t>(src_stride))  // %4
   : "memory", "cc"

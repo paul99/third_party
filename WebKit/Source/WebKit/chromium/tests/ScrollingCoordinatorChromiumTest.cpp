@@ -28,6 +28,7 @@
 
 #include "CompositorFakeWebGraphicsContext3D.h"
 #include "FrameTestHelpers.h"
+#include "GraphicsLayerChromium.h"
 #include "RenderLayerBacking.h"
 #include "RenderLayerCompositor.h"
 #include "RenderView.h"
@@ -39,23 +40,36 @@
 #include "WebViewClient.h"
 #include "WebViewImpl.h"
 #include <gtest/gtest.h>
+#include <public/Platform.h>
 #include <public/WebCompositorSupport.h>
 #include <public/WebLayer.h>
-#include <webkit/support/webkit_support.h>
-
-#include "GraphicsLayerChromium.h"
+#include <public/WebUnitTestSupport.h>
 
 using namespace WebCore;
 using namespace WebKit;
 
 namespace {
 
-class MockWebViewClient : public WebViewClient {
+class FakeWebViewClient : public WebViewClient {
 public:
     virtual WebCompositorOutputSurface* createOutputSurface() OVERRIDE
     {
         return Platform::current()->compositorSupport()->createOutputSurfaceFor3D(CompositorFakeWebGraphicsContext3D::create(WebGraphicsContext3D::Attributes()).leakPtr());
     }
+
+    virtual void initializeLayerTreeView(WebLayerTreeViewClient* client, const WebLayer& rootLayer, const WebLayerTreeView::Settings& settings)
+    {
+        m_layerTreeView = adoptPtr(Platform::current()->compositorSupport()->createLayerTreeView(client, rootLayer, settings));
+        ASSERT(m_layerTreeView);
+    }
+
+    virtual WebLayerTreeView* layerTreeView()
+    {
+        return m_layerTreeView.get();
+    }
+
+private:
+    OwnPtr<WebLayerTreeView> m_layerTreeView;
 };
 
 class MockWebFrameClient : public WebFrameClient {
@@ -65,7 +79,6 @@ class ScrollingCoordinatorChromiumTest : public testing::Test {
 public:
     ScrollingCoordinatorChromiumTest()
         : m_baseURL("http://www.test.com/")
-        , m_webCompositorInitializer(0)
     {
         Platform::current()->compositorSupport()->initialize(0);
 
@@ -84,7 +97,7 @@ public:
 
     virtual ~ScrollingCoordinatorChromiumTest()
     {
-        webkit_support::UnregisterAllMockedURLs();
+        Platform::current()->unitTestSupport()->unregisterAllMockedURLs();
         m_webViewImpl->close();
 
         Platform::current()->compositorSupport()->shutdown();
@@ -93,7 +106,7 @@ public:
     void navigateTo(const std::string& url)
     {
         FrameTestHelpers::loadFrame(m_webViewImpl->mainFrame(), url);
-        webkit_support::ServeAsynchronousMockedRequests();
+        Platform::current()->unitTestSupport()->serveAsynchronousMockedRequests();
     }
 
     void registerMockedHttpURLLoad(const std::string& fileName)
@@ -114,8 +127,7 @@ public:
 protected:
     std::string m_baseURL;
     MockWebFrameClient m_mockWebFrameClient;
-    MockWebViewClient m_mockWebViewClient;
-    WebKitTests::WebCompositorInitializer m_webCompositorInitializer;
+    FakeWebViewClient m_mockWebViewClient;
     WebViewImpl* m_webViewImpl;
 };
 

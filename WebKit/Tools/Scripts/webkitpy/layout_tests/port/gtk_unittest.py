@@ -26,22 +26,36 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import unittest
+import unittest2 as unittest
 import sys
 import os
 
+from webkitpy.common.system.executive_mock import MockExecutive
+from webkitpy.common.system.filesystem_mock import MockFileSystem
 from webkitpy.common.system.outputcapture import OutputCapture
 from webkitpy.layout_tests.port.gtk import GtkPort
+from webkitpy.layout_tests.port.pulseaudio_sanitizer_mock import PulseAudioSanitizerMock
 from webkitpy.layout_tests.port import port_testcase
-from webkitpy.common.system.executive_mock import MockExecutive
 from webkitpy.thirdparty.mock import Mock
-from webkitpy.common.system.filesystem_mock import MockFileSystem
 from webkitpy.tool.mocktool import MockOptions
 
 
 class GtkPortTest(port_testcase.PortTestCase):
     port_name = 'gtk'
     port_maker = GtkPort
+
+    # Additionally mocks out the PulseAudioSanitizer methods.
+    def make_port(self, host=None, port_name=None, options=None, os_name=None, os_version=None, **kwargs):
+        port = super(GtkPortTest, self).make_port(host, port_name, options, os_name, os_version, **kwargs)
+        port._pulseaudio_sanitizer = PulseAudioSanitizerMock()
+        return port
+
+    def test_expectations_files(self):
+        port = self.make_port()
+        self.assertEqual(port.expectations_files(), ['/mock-checkout/LayoutTests/platform/gtk/TestExpectations', '/mock-checkout/LayoutTests/platform/gtk-wk1/TestExpectations'])
+
+        port = self.make_port(options=MockOptions(webkit_test_runner=True))
+        self.assertEqual(port.expectations_files(), ['/mock-checkout/LayoutTests/platform/gtk/TestExpectations', '/mock-checkout/LayoutTests/platform/wk2/TestExpectations', '/mock-checkout/LayoutTests/platform/gtk-wk2/TestExpectations'])
 
     def test_show_results_html_file(self):
         port = self.make_port()
@@ -52,14 +66,6 @@ class GtkPortTest(port_testcase.PortTestCase):
     def test_default_timeout_ms(self):
         self.assertEqual(self.make_port(options=MockOptions(configuration='Release')).default_timeout_ms(), 6000)
         self.assertEqual(self.make_port(options=MockOptions(configuration='Debug')).default_timeout_ms(), 12000)
-        self.assertEqual(self.make_port(options=MockOptions(webkit_test_runner=True, configuration='Debug')).default_timeout_ms(), 80000)
-        self.assertEqual(self.make_port(options=MockOptions(webkit_test_runner=True, configuration='Release')).default_timeout_ms(), 80000)
-
-    def assertLinesEqual(self, a, b):
-        if hasattr(self, 'assertMultiLineEqual'):
-            self.assertMultiLineEqual(a, b)
-        else:
-            self.assertEqual(a.splitlines(), b.splitlines())
 
     def test_get_crash_log(self):
         core_directory = os.environ.get('WEBKIT_CORE_DUMPS_DIRECTORY', '/path/to/coredumps')
@@ -83,8 +89,8 @@ STDERR: <empty>""" % locals()
         port._get_gdb_output = mock_empty_crash_log
         stderr, log = port._get_crash_log("DumpRenderTree", 28529, "", "", newer_than=None)
         self.assertEqual(stderr, "")
-        self.assertLinesEqual(log, mock_empty_crash_log)
+        self.assertMultiLineEqual(log, mock_empty_crash_log)
 
         stderr, log = port._get_crash_log("DumpRenderTree", 28529, "", "", newer_than=0.0)
         self.assertEqual(stderr, "")
-        self.assertLinesEqual(log, mock_empty_crash_log)
+        self.assertMultiLineEqual(log, mock_empty_crash_log)

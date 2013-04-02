@@ -8,7 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "rtp_player.h"
+#include "webrtc/modules/video_coding/main/test/rtp_player.h"
 
 #include <cstdlib>
 #ifdef WIN32
@@ -18,10 +18,11 @@
 #include <arpa/inet.h>
 #endif
 
-#include "../source/internal_defines.h"
 #include "gtest/gtest.h"
-#include "modules/video_coding/main/source/tick_time_base.h"
-#include "rtp_rtcp.h"
+#include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp.h"
+#include "webrtc/modules/video_coding/main/source/internal_defines.h"
+#include "webrtc/modules/video_coding/main/test/test_util.h"
+#include "webrtc/system_wrappers/interface/clock.h"
 
 using namespace webrtc;
 
@@ -137,7 +138,7 @@ void LostPackets::Print() const {
 
 RTPPlayer::RTPPlayer(const char* filename,
                      RtpData* callback,
-                     TickTimeBase* clock)
+                     Clock* clock)
 :
 _clock(clock),
 _rtpModule(NULL),
@@ -191,7 +192,8 @@ WebRtc_Word32 RTPPlayer::Initialize(const PayloadTypeList* payloadList)
         _randVec[i] = rand();
     }
     _randVecPos = 0;
-    WebRtc_Word32 ret = _rtpModule->SetNACKStatus(kNackOff);
+    WebRtc_Word32 ret = _rtpModule->SetNACKStatus(kNackOff,
+                                                  kMaxPacketAgeToNack);
     if (ret < 0)
     {
         return -1;
@@ -273,7 +275,8 @@ WebRtc_Word32 RTPPlayer::ReadHeader()
 
 WebRtc_UWord32 RTPPlayer::TimeUntilNextPacket() const
 {
-    WebRtc_Word64 timeLeft = (_nextRtpTime - _firstPacketRtpTime) - (_clock->MillisecondTimestamp() - _firstPacketTimeMs);
+    WebRtc_Word64 timeLeft = (_nextRtpTime - _firstPacketRtpTime) -
+        (_clock->TimeInMilliseconds() - _firstPacketTimeMs);
     if (timeLeft < 0)
     {
         return 0;
@@ -293,7 +296,7 @@ WebRtc_Word32 RTPPlayer::NextPacket(const WebRtc_Word64 timeNow)
       delete resend_packet;
       _resendPacketCount++;
       if (ret > 0) {
-        _lostPackets.SetPacketResent(seqNo, _clock->MillisecondTimestamp());
+        _lostPackets.SetPacketResent(seqNo, _clock->TimeInMilliseconds());
       } else if (ret < 0) {
         return ret;
       }
@@ -307,7 +310,7 @@ WebRtc_Word32 RTPPlayer::NextPacket(const WebRtc_Word64 timeNow)
         if (_firstPacket)
         {
             _firstPacketRtpTime = static_cast<WebRtc_Word64>(_nextRtpTime);
-            _firstPacketTimeMs = _clock->MillisecondTimestamp();
+            _firstPacketTimeMs = _clock->TimeInMilliseconds();
         }
         if (_reordering && _reorderBuffer == NULL)
         {
@@ -428,8 +431,8 @@ WebRtc_Word32 RTPPlayer::ResendPackets(const WebRtc_UWord16* sequenceNumbers, We
     for (int i=0; i < length; i++)
     {
         _lostPackets.SetResendTime(sequenceNumbers[i],
-                                   _clock->MillisecondTimestamp() + _rttMs,
-                                   _clock->MillisecondTimestamp());
+                                   _clock->TimeInMilliseconds() + _rttMs,
+                                   _clock->TimeInMilliseconds());
     }
     return 0;
 }

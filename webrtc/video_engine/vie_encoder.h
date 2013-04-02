@@ -70,7 +70,8 @@ class ViEEncoder
   WebRtc_UWord8 NumberOfCodecs();
   WebRtc_Word32 GetCodec(WebRtc_UWord8 list_index, VideoCodec* video_codec);
   WebRtc_Word32 RegisterExternalEncoder(VideoEncoder* encoder,
-                                        WebRtc_UWord8 pl_type);
+                                        WebRtc_UWord8 pl_type,
+                                        bool internal_source);
   WebRtc_Word32 DeRegisterExternalEncoder(WebRtc_UWord8 pl_type);
   WebRtc_Word32 SetEncoder(const VideoCodec& video_codec);
   WebRtc_Word32 GetEncoder(VideoCodec* video_codec);
@@ -111,6 +112,9 @@ class ViEEncoder
   int CodecTargetBitrate(WebRtc_UWord32* bitrate) const;
   // Loss protection.
   WebRtc_Word32 UpdateProtectionMethod();
+
+  // Streaming mode.
+  void EnableSenderStreamingMode(int target_delay_ms);
 
   // Implements VCMPacketizationCallback.
   virtual WebRtc_Word32 SendData(

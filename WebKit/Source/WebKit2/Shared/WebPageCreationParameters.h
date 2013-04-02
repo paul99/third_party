@@ -46,7 +46,7 @@ namespace WebKit {
 
 struct WebPageCreationParameters {
     void encode(CoreIPC::ArgumentEncoder&) const;
-    static bool decode(CoreIPC::ArgumentDecoder*, WebPageCreationParameters&);
+    static bool decode(CoreIPC::ArgumentDecoder&, WebPageCreationParameters&);
 
     WebCore::IntSize viewSize;
 
@@ -91,10 +91,6 @@ struct WebPageCreationParameters {
     bool isSmartInsertDeleteEnabled;
     LayerHostingMode layerHostingMode;
     ColorSpaceData colorSpace;
-#endif
-
-#if PLATFORM(WIN)
-    HWND nativeWindow;
 #endif
 };
 

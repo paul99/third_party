@@ -46,14 +46,6 @@ _log = logging.getLogger(__name__)
 
 class ScriptError(Exception):
 
-    # This is a custom List.__str__ implementation to allow size limiting.
-    def _string_from_args(self, args, limit=100):
-        args_string = unicode(args)
-        # We could make this much fancier, but for now this is OK.
-        if len(args_string) > limit:
-            return args_string[:limit - 3] + "..."
-        return args_string
-
     def __init__(self,
                  message=None,
                  script_args=None,
@@ -61,7 +53,7 @@ class ScriptError(Exception):
                  output=None,
                  cwd=None):
         if not message:
-            message = 'Failed to run "%s"' % self._string_from_args(script_args)
+            message = 'Failed to run "%s"' % script_args
             if exit_code:
                 message += " exit_code: %d" % exit_code
             if cwd:
@@ -380,9 +372,10 @@ class Executive(object):
             input = input.encode(self._child_process_encoding())
         return (self.PIPE, input)
 
-    def _command_for_printing(self, args):
+    def command_for_printing(self, args):
         """Returns a print-ready string representing command args.
         The string should be copy/paste ready for execution in a shell."""
+        args = self._stringify_args(args)
         escaped_args = []
         for arg in args:
             if isinstance(arg, unicode):
@@ -405,7 +398,6 @@ class Executive(object):
         """Popen wrapper for convenience and to work around python bugs."""
         assert(isinstance(args, list) or isinstance(args, tuple))
         start_time = time.time()
-        args = self._stringify_args(args)
 
         stdin, string_to_communicate = self._compute_stdin(input)
         stderr = self.STDOUT if return_stderr else None
@@ -427,7 +419,7 @@ class Executive(object):
         # http://bugs.python.org/issue1731717
         exit_code = process.wait()
 
-        _log.debug('"%s" took %.2fs' % (self._command_for_printing(args), time.time() - start_time))
+        _log.debug('"%s" took %.2fs' % (self.command_for_printing(args), time.time() - start_time))
 
         if return_exit_code:
             return exit_code

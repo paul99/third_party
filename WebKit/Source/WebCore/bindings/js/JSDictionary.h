@@ -30,6 +30,7 @@
 #include <heap/Strong.h>
 #include <heap/StrongInlines.h>
 #include <interpreter/CallFrame.h>
+#include <runtime/Operations.h>
 #include <wtf/Forward.h>
 
 namespace WebCore {
@@ -39,6 +40,7 @@ class Dictionary;
 class DOMWindow;
 class EventTarget;
 class MediaKeyError;
+class MediaStream;
 class Node;
 class ScriptValue;
 class SerializedScriptValue;
@@ -108,13 +110,14 @@ private:
 #if ENABLE(VIDEO_TRACK)
     static void convertValue(JSC::ExecState*, JSC::JSValue, RefPtr<TrackBase>& result);
 #endif
-#if ENABLE(MUTATION_OBSERVERS) || ENABLE(WEB_INTENTS)
     static void convertValue(JSC::ExecState*, JSC::JSValue, HashSet<AtomicString>& result);
-#endif
     static void convertValue(JSC::ExecState*, JSC::JSValue, ArrayValue& result);
     static void convertValue(JSC::ExecState*, JSC::JSValue, RefPtr<Uint8Array>& result);
 #if ENABLE(ENCRYPTED_MEDIA)
     static void convertValue(JSC::ExecState*, JSC::JSValue, RefPtr<MediaKeyError>& result);
+#endif
+#if ENABLE(MEDIA_STREAM)
+    static void convertValue(JSC::ExecState*, JSC::JSValue, RefPtr<MediaStream>& result);
 #endif
 
     JSC::ExecState* m_exec;

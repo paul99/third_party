@@ -34,7 +34,9 @@
 ; as this feature might be useful for others as well.  Send patches or ideas
 ; to x264-devel@videolan.org .
 
-%define program_name ff
+%ifndef program_name
+    %define program_name x264
+%endif
 
 %define WIN64  0
 %define UNIX64 0
@@ -739,7 +741,7 @@ SECTION .note.GNU-stack noalloc noexec nowrite progbits
         %elifidn %1, sse3
             %define movu lddqu
         %endif
-        %if notcpuflag(mmx2)
+        %if notcpuflag(sse2)
             CPUNOP basicnop
         %endif
     %else

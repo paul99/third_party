@@ -110,6 +110,12 @@ using namespace std;
 +(void)setAllowsAnyHTTPSCertificate:(BOOL)allow forHost:(NSString *)host;
 @end
 
+#if USE(APPKIT)
+@interface NSSound (Details)
++ (void)_setAlertType:(NSUInteger)alertType;
+@end
+#endif
+
 static void runTest(const string& testPathOrURL);
 
 // Deciding when it's OK to dump out the state is a bit tricky.  All these must be true:
@@ -145,7 +151,7 @@ PolicyDelegate *policyDelegate;
 StorageTrackerDelegate *storageDelegate;
 
 static int dumpPixelsForAllTests = NO;
-static bool dumpPixelsForCurrentTest;
+static bool dumpPixelsForCurrentTest = false;
 static int threaded;
 static int dumpTree = YES;
 static int useTimeoutWatchdog = YES;
@@ -544,6 +550,7 @@ WebView *createWebViewAndOffscreenWindow()
     DumpRenderTreeWindow *window = [[DumpRenderTreeWindow alloc] initWithContentRect:windowRect styleMask:NSBorderlessWindowMask backing:NSBackingStoreBuffered defer:YES];
 
     [window setColorSpace:[[NSScreen mainScreen] colorSpace]];
+    [window setCollectionBehavior:NSWindowCollectionBehaviorStationary];
     [[window contentView] addSubview:webView];
     [window orderBack:nil];
     [window setAutodisplay:NO];
@@ -586,6 +593,10 @@ static void resetDefaultsToConsistentValues()
     [defaults setBool:YES forKey:WebKitEnableFullDocumentTeardownPreferenceKey];
     [defaults setBool:YES forKey:WebKitFullScreenEnabledPreferenceKey];
     [defaults setBool:YES forKey:@"UseWebKitWebInspector"];
+
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
+    [defaults setObject:[NSDictionary dictionaryWithObjectsAndKeys:@"notational", @"notationl", nil] forKey:@"NSTestCorrectionDictionary"];
+#endif
 
     // Scrollbars are drawn either using AppKit (which uses NSUserDefaults) or using HIToolbox (which uses CFPreferences / kCFPreferencesAnyApplication / kCFPreferencesCurrentUser / kCFPreferencesAnyHost)
     [defaults setObject:@"DoubleMax" forKey:@"AppleScrollBarVariant"];
@@ -675,6 +686,7 @@ static void resetDefaultsToConsistentValues()
     [preferences setUsePreHTML5ParserQuirks:NO];
     [preferences setAsynchronousSpellCheckingEnabled:NO];
     [preferences setMockScrollbarsEnabled:YES];
+    [preferences setSeamlessIFramesEnabled:YES];
 
 #if ENABLE(WEB_AUDIO)
     [preferences setWebAudioEnabled:YES];
@@ -734,28 +746,6 @@ static void testThreadIdentifierMap()
     // Now create another thread using WTF. On OSX, it will have the same pthread handle
     // but should get a different ThreadIdentifier.
     createThread(runThread, 0, "DumpRenderTree: test");
-}
-
-static void crashHandler(int sig)
-{
-    char *signalName = strsignal(sig);
-    write(STDERR_FILENO, signalName, strlen(signalName));
-    write(STDERR_FILENO, "\n", 1);
-    exit(128 + sig);
-}
-
-static void installSignalHandlers()
-{
-    signal(SIGILL, crashHandler);    /* 4:   illegal instruction (not reset when caught) */
-    signal(SIGTRAP, crashHandler);   /* 5:   trace trap (not reset when caught) */
-    signal(SIGEMT, crashHandler);    /* 7:   EMT instruction */
-    signal(SIGFPE, crashHandler);    /* 8:   floating point exception */
-    signal(SIGBUS, crashHandler);    /* 10:  bus error */
-    signal(SIGSEGV, crashHandler);   /* 11:  segmentation violation */
-    signal(SIGSYS, crashHandler);    /* 12:  bad argument to system call */
-    signal(SIGPIPE, crashHandler);   /* 13:  write on a pipe with no reader */
-    signal(SIGXCPU, crashHandler);   /* 24:  exceeded CPU time limit */
-    signal(SIGXFSZ, crashHandler);   /* 25:  exceeded file size limit */
 }
 
 static void allocateGlobalControllers()
@@ -855,6 +845,12 @@ static void prepareConsistentTestingEnvironment()
     allocateGlobalControllers();
     
     makeLargeMallocFailSilently();
+
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1090
+    static id assertion = [[[NSProcessInfo processInfo] beginSuspensionOfSystemBehaviors:NSSystemBehaviorCommonBehaviors
+        reason:@"DumpRenderTree should not be subject to process suppression"] retain];
+    ASSERT_UNUSED(assertion, assertion);
+#endif
 }
 
 void dumpRenderTree(int argc, const char *argv[])
@@ -862,11 +858,13 @@ void dumpRenderTree(int argc, const char *argv[])
     initializeGlobalsFromCommandLineOptions(argc, argv);
     prepareConsistentTestingEnvironment();
     addTestPluginsToPluginSearchPath(argv[0]);
-    if (dumpPixelsForCurrentTest)
-        installSignalHandlers();
 
     if (forceComplexText)
         [WebView _setAlwaysUsesComplexTextCodePath:YES];
+
+#if USE(APPKIT)
+    [NSSound _setAlertType:0];
+#endif
 
     WebView *webView = createWebViewAndOffscreenWindow();
     mainFrame = [webView mainFrame];
@@ -887,7 +885,7 @@ void dumpRenderTree(int argc, const char *argv[])
         printSeparators = YES;
         runTestingServerLoop();
     } else {
-        printSeparators = (optind < argc - 1 || (dumpPixelsForCurrentTest && dumpTree));
+        printSeparators = optind < argc - 1;
         for (int i = optind; i != argc; ++i)
             runTest(argv[i]);
     }

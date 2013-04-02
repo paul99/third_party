@@ -129,6 +129,7 @@ public:
     bool requiresCopyFromBackToFrontBuffer() const;
     unsigned frontColorBuffer() const;
     void paintCompositedResultsToCanvas(ImageBuffer*);
+    void clearPlatformLayer();
 #endif
 
     GraphicsContext3D* graphicsContext3D() const { return m_context.get(); }
@@ -138,6 +139,8 @@ private:
                   bool packedDepthStencilExtensionSupported, PreserveDrawingBuffer, AlphaRequirement);
 
     void initialize(const IntSize&);
+
+    bool checkBufferIntegrity();
 
     PreserveDrawingBuffer m_preserveDrawingBuffer;
     AlphaRequirement m_alpha;

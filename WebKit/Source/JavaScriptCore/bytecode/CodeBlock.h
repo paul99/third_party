@@ -51,6 +51,7 @@
 #include "ExecutionCounter.h"
 #include "ExpressionRangeInfo.h"
 #include "HandlerInfo.h"
+#include "ObjectAllocationProfile.h"
 #include "Options.h"
 #include "Instruction.h"
 #include "JITCode.h"
@@ -278,7 +279,7 @@ namespace JSC {
             Vector<CallReturnOffsetToBytecodeOffset>& callIndices = m_rareData->m_callReturnIndexVector;
             if (!callIndices.size())
                 return 1;
-            ASSERT(index < m_rareData->m_callReturnIndexVector.size());
+            RELEASE_ASSERT(index < m_rareData->m_callReturnIndexVector.size());
             return m_rareData->m_callReturnIndexVector[index].bytecodeOffset;
         }
 
@@ -457,7 +458,7 @@ namespace JSC {
 
         unsigned bytecodeOffset(Instruction* returnAddress)
         {
-            ASSERT(returnAddress >= instructions().begin() && returnAddress < instructions().end());
+            RELEASE_ASSERT(returnAddress >= instructions().begin() && returnAddress < instructions().end());
             return static_cast<Instruction*>(returnAddress) - instructions().begin();
         }
 
@@ -594,11 +595,11 @@ namespace JSC {
         
         bool isCaptured(int operand, InlineCallFrame* inlineCallFrame = 0) const
         {
-            if (inlineCallFrame && !operandIsArgument(operand))
-                return inlineCallFrame->capturedVars.get(operand);
-
             if (operandIsArgument(operand))
-                return usesArguments();
+                return operandToArgument(operand) && usesArguments();
+
+            if (inlineCallFrame)
+                return inlineCallFrame->capturedVars.get(operand);
 
             // The activation object isn't in the captured region, but it's "captured"
             // in the sense that stores to its location can be observed indirectly.
@@ -717,7 +718,7 @@ namespace JSC {
             if (!numberOfRareCaseProfiles())
                 return false;
             unsigned value = rareCaseProfileForBytecodeOffset(bytecodeOffset)->m_counter;
-            return value >= Options::likelyToTakeSlowCaseMinimumCount() && static_cast<double>(value) / m_executionEntryCount >= Options::likelyToTakeSlowCaseThreshold();
+            return value >= Options::likelyToTakeSlowCaseMinimumCount();
         }
         
         bool couldTakeSlowCase(int bytecodeOffset)
@@ -725,7 +726,7 @@ namespace JSC {
             if (!numberOfRareCaseProfiles())
                 return false;
             unsigned value = rareCaseProfileForBytecodeOffset(bytecodeOffset)->m_counter;
-            return value >= Options::couldTakeSlowCaseMinimumCount() && static_cast<double>(value) / m_executionEntryCount >= Options::couldTakeSlowCaseThreshold();
+            return value >= Options::couldTakeSlowCaseMinimumCount();
         }
         
         RareCaseProfile* addSpecialFastCaseProfile(int bytecodeOffset)
@@ -747,7 +748,7 @@ namespace JSC {
             if (!numberOfRareCaseProfiles())
                 return false;
             unsigned specialFastCaseCount = specialFastCaseProfileForBytecodeOffset(bytecodeOffset)->m_counter;
-            return specialFastCaseCount >= Options::likelyToTakeSlowCaseMinimumCount() && static_cast<double>(specialFastCaseCount) / m_executionEntryCount >= Options::likelyToTakeSlowCaseThreshold();
+            return specialFastCaseCount >= Options::likelyToTakeSlowCaseMinimumCount();
         }
         
         bool couldTakeSpecialFastCase(int bytecodeOffset)
@@ -755,7 +756,7 @@ namespace JSC {
             if (!numberOfRareCaseProfiles())
                 return false;
             unsigned specialFastCaseCount = specialFastCaseProfileForBytecodeOffset(bytecodeOffset)->m_counter;
-            return specialFastCaseCount >= Options::couldTakeSlowCaseMinimumCount() && static_cast<double>(specialFastCaseCount) / m_executionEntryCount >= Options::couldTakeSlowCaseThreshold();
+            return specialFastCaseCount >= Options::couldTakeSlowCaseMinimumCount();
         }
         
         bool likelyToTakeDeepestSlowCase(int bytecodeOffset)
@@ -765,7 +766,7 @@ namespace JSC {
             unsigned slowCaseCount = rareCaseProfileForBytecodeOffset(bytecodeOffset)->m_counter;
             unsigned specialFastCaseCount = specialFastCaseProfileForBytecodeOffset(bytecodeOffset)->m_counter;
             unsigned value = slowCaseCount - specialFastCaseCount;
-            return value >= Options::likelyToTakeSlowCaseMinimumCount() && static_cast<double>(value) / m_executionEntryCount >= Options::likelyToTakeSlowCaseThreshold();
+            return value >= Options::likelyToTakeSlowCaseMinimumCount();
         }
         
         bool likelyToTakeAnySlowCase(int bytecodeOffset)
@@ -775,11 +776,9 @@ namespace JSC {
             unsigned slowCaseCount = rareCaseProfileForBytecodeOffset(bytecodeOffset)->m_counter;
             unsigned specialFastCaseCount = specialFastCaseProfileForBytecodeOffset(bytecodeOffset)->m_counter;
             unsigned value = slowCaseCount + specialFastCaseCount;
-            return value >= Options::likelyToTakeSlowCaseMinimumCount() && static_cast<double>(value) / m_executionEntryCount >= Options::likelyToTakeSlowCaseThreshold();
+            return value >= Options::likelyToTakeSlowCaseMinimumCount();
         }
         
-        unsigned executionEntryCount() const { return m_executionEntryCount; }
-
         unsigned numberOfArrayProfiles() const { return m_arrayProfiles.size(); }
         const ArrayProfileVector& arrayProfiles() { return m_arrayProfiles; }
         ArrayProfile* addArrayProfile(unsigned bytecodeOffset)
@@ -789,13 +788,6 @@ namespace JSC {
         }
         ArrayProfile* getArrayProfile(unsigned bytecodeOffset);
         ArrayProfile* getOrAddArrayProfile(unsigned bytecodeOffset);
-        
-        unsigned numberOfArrayAllocationProfiles() const { return m_arrayAllocationProfiles.size(); }
-        ArrayAllocationProfile* addArrayAllocationProfile()
-        {
-            m_arrayAllocationProfiles.append(ArrayAllocationProfile());
-            return &m_arrayAllocationProfiles.last();
-        }
 #endif
 
         // Exception handling support
@@ -816,7 +808,7 @@ namespace JSC {
             }
 
         }
-        HandlerInfo& exceptionHandler(int index) { ASSERT(m_rareData); return m_rareData->m_exceptionHandlers[index]; }
+        HandlerInfo& exceptionHandler(int index) { RELEASE_ASSERT(m_rareData); return m_rareData->m_exceptionHandlers[index]; }
 
         bool hasExpressionInfo() { return m_unlinkedCode->hasExpressionInfo(); }
 
@@ -851,7 +843,7 @@ namespace JSC {
         
         CodeOrigin codeOrigin(unsigned index)
         {
-            ASSERT(m_rareData);
+            RELEASE_ASSERT(m_rareData);
             return m_rareData->m_codeOrigins[index].codeOrigin;
         }
         
@@ -936,27 +928,21 @@ namespace JSC {
 
         JSGlobalObject* globalObject() { return m_globalObject.get(); }
         
-        JSGlobalObject* globalObjectFor(CodeOrigin codeOrigin)
-        {
-            if (!codeOrigin.inlineCallFrame)
-                return globalObject();
-            // FIXME: if we ever inline based on executable not function, this code will need to change.
-            return codeOrigin.inlineCallFrame->callee->scope()->globalObject();
-        }
+        JSGlobalObject* globalObjectFor(CodeOrigin);
 
         // Jump Tables
 
         size_t numberOfImmediateSwitchJumpTables() const { return m_rareData ? m_rareData->m_immediateSwitchJumpTables.size() : 0; }
         SimpleJumpTable& addImmediateSwitchJumpTable() { createRareDataIfNecessary(); m_rareData->m_immediateSwitchJumpTables.append(SimpleJumpTable()); return m_rareData->m_immediateSwitchJumpTables.last(); }
-        SimpleJumpTable& immediateSwitchJumpTable(int tableIndex) { ASSERT(m_rareData); return m_rareData->m_immediateSwitchJumpTables[tableIndex]; }
+        SimpleJumpTable& immediateSwitchJumpTable(int tableIndex) { RELEASE_ASSERT(m_rareData); return m_rareData->m_immediateSwitchJumpTables[tableIndex]; }
 
         size_t numberOfCharacterSwitchJumpTables() const { return m_rareData ? m_rareData->m_characterSwitchJumpTables.size() : 0; }
         SimpleJumpTable& addCharacterSwitchJumpTable() { createRareDataIfNecessary(); m_rareData->m_characterSwitchJumpTables.append(SimpleJumpTable()); return m_rareData->m_characterSwitchJumpTables.last(); }
-        SimpleJumpTable& characterSwitchJumpTable(int tableIndex) { ASSERT(m_rareData); return m_rareData->m_characterSwitchJumpTables[tableIndex]; }
+        SimpleJumpTable& characterSwitchJumpTable(int tableIndex) { RELEASE_ASSERT(m_rareData); return m_rareData->m_characterSwitchJumpTables[tableIndex]; }
 
         size_t numberOfStringSwitchJumpTables() const { return m_rareData ? m_rareData->m_stringSwitchJumpTables.size() : 0; }
         StringJumpTable& addStringSwitchJumpTable() { createRareDataIfNecessary(); m_rareData->m_stringSwitchJumpTables.append(StringJumpTable()); return m_rareData->m_stringSwitchJumpTables.last(); }
-        StringJumpTable& stringSwitchJumpTable(int tableIndex) { ASSERT(m_rareData); return m_rareData->m_stringSwitchJumpTables[tableIndex]; }
+        StringJumpTable& stringSwitchJumpTable(int tableIndex) { RELEASE_ASSERT(m_rareData); return m_rareData->m_stringSwitchJumpTables[tableIndex]; }
 
 
         SharedSymbolTable* symbolTable() const { return m_unlinkedCode->symbolTable(); }
@@ -1028,6 +1014,8 @@ namespace JSC {
         // to avoid thrashing.
         unsigned reoptimizationRetryCounter() const;
         void countReoptimization();
+
+        int32_t codeTypeThresholdMultiplier() const;
         
         int32_t counterValueForOptimizeAfterWarmUp();
         int32_t counterValueForOptimizeAfterLongWarmUp();
@@ -1164,7 +1152,7 @@ namespace JSC {
 
         void setIdentifiers(const Vector<Identifier>& identifiers)
         {
-            ASSERT(m_identifiers.isEmpty());
+            RELEASE_ASSERT(m_identifiers.isEmpty());
             m_identifiers.appendVector(identifiers);
         }
 
@@ -1319,8 +1307,8 @@ namespace JSC {
         SegmentedVector<RareCaseProfile, 8> m_specialFastCaseProfiles;
         SegmentedVector<ArrayAllocationProfile, 8> m_arrayAllocationProfiles;
         ArrayProfileVector m_arrayProfiles;
-        unsigned m_executionEntryCount;
 #endif
+        SegmentedVector<ObjectAllocationProfile, 8> m_objectAllocationProfiles;
 
         // Constant Pool
         Vector<Identifier> m_identifiers;
@@ -1466,9 +1454,9 @@ namespace JSC {
 
     inline CodeBlock* baselineCodeBlockForInlineCallFrame(InlineCallFrame* inlineCallFrame)
     {
-        ASSERT(inlineCallFrame);
+        RELEASE_ASSERT(inlineCallFrame);
         ExecutableBase* executable = inlineCallFrame->executable.get();
-        ASSERT(executable->structure()->classInfo() == &FunctionExecutable::s_info);
+        RELEASE_ASSERT(executable->structure()->classInfo() == &FunctionExecutable::s_info);
         return static_cast<FunctionExecutable*>(executable)->baselineCodeBlockFor(inlineCallFrame->isCall ? CodeForCall : CodeForConstruct);
     }
     
@@ -1502,7 +1490,7 @@ namespace JSC {
 
     inline Register& ExecState::uncheckedR(int index)
     {
-        ASSERT(index < FirstConstantRegisterIndex);
+        RELEASE_ASSERT(index < FirstConstantRegisterIndex);
         return this[index];
     }
 

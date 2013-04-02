@@ -176,6 +176,15 @@ struct VoiceStatsMessageData : public talk_base::MessageData {
   VoiceMediaInfo* stats;
 };
 
+struct VideoStatsMessageData : public talk_base::MessageData {
+  explicit VideoStatsMessageData(VideoMediaInfo* stats)
+      : result(false),
+        stats(stats) {
+  }
+  bool result;
+  VideoMediaInfo* stats;
+};
+
 struct PacketMessageData : public talk_base::MessageData {
   talk_base::Buffer packet;
 };
@@ -290,8 +299,12 @@ struct AudioOptionsMessageData : public talk_base::MessageData {
 };
 
 struct VideoOptionsMessageData : public talk_base::MessageData {
-  explicit VideoOptionsMessageData(int options) : options(options) {}
-  int options;
+  explicit VideoOptionsMessageData(const VideoOptions& options)
+      : options(options),
+        result(false) {
+  }
+  VideoOptions options;
+  bool result;
 };
 
 struct SetCapturerMessageData : public talk_base::MessageData {
@@ -1924,6 +1937,12 @@ void VideoChannel::ChangeState() {
   LOG(LS_INFO) << "Changing video state, recv=" << recv << " send=" << send;
 }
 
+bool VideoChannel::GetStats(VideoMediaInfo* stats) {
+  VideoStatsMessageData data(stats);
+  Send(MSG_GETSTATS, &data);
+  return data.result;
+}
+
 void VideoChannel::StartMediaMonitor(int cms) {
   media_monitor_.reset(new VideoMediaMonitor(media_channel(), worker_thread(),
       talk_base::Thread::Current()));
@@ -1989,12 +2008,9 @@ bool VideoChannel::SetRemoteContent_w(const MediaContentDescription* content,
 
   if (action != CA_UPDATE) {
     // Tweak our video processing settings, if needed.
-    int video_options = media_channel()->GetOptions();
-    if (video->conference_mode()) {
-      video_options |= OPT_CONFERENCE;
-    } else {
-      video_options &= (~OPT_CONFERENCE);
-    }
+    VideoOptions video_options;
+    media_channel()->GetOptions(&video_options);
+    video_options.conference_mode.Set(video->conference_mode());
     if (!media_channel()->SetOptions(video_options)) {
       // Log an error on failure, but don't abort the call.
       LOG(LS_ERROR) << "Failed to set video channel options";
@@ -2105,19 +2121,24 @@ void VideoChannel::SetScreenCaptureFactory_w(
   }
 }
 
+bool VideoChannel::GetStats_w(VideoMediaInfo* stats) {
+  return media_channel()->GetStats(stats);
+}
+
 void VideoChannel::OnScreencastWindowEvent_s(uint32 ssrc,
                                              talk_base::WindowEvent we) {
   ASSERT(signaling_thread() == talk_base::Thread::Current());
   SignalScreencastWindowEvent(ssrc, we);
 }
 
-void VideoChannel::SetChannelOptions(int options) {
+bool VideoChannel::SetChannelOptions(const VideoOptions &options) {
   VideoOptionsMessageData data(options);
   Send(MSG_SETCHANNELOPTIONS, &data);
+  return data.result;
 }
 
-void VideoChannel::SetChannelOptions_w(int options) {
-  media_channel()->SetOptions(options);
+bool VideoChannel::SetChannelOptions_w(const VideoOptions &options) {
+  return media_channel()->SetOptions(options);
 }
 
 void VideoChannel::OnMessage(talk_base::Message *pmsg) {
@@ -2174,9 +2195,9 @@ void VideoChannel::OnMessage(talk_base::Message *pmsg) {
       break;
     }
     case MSG_SETCHANNELOPTIONS: {
-      const VideoOptionsMessageData* data =
+      VideoOptionsMessageData* data =
          static_cast<VideoOptionsMessageData*>(pmsg->pdata);
-      SetChannelOptions_w(data->options);
+      data->result = SetChannelOptions_w(data->options);
       break;
     }
     case MSG_CHANNEL_ERROR: {
@@ -2196,6 +2217,12 @@ void VideoChannel::OnMessage(talk_base::Message *pmsg) {
       SetScreenCaptureFactoryMessageData* data =
           static_cast<SetScreenCaptureFactoryMessageData*>(pmsg->pdata);
       SetScreenCaptureFactory_w(data->screencapture_factory);
+    }
+    case MSG_GETSTATS: {
+      VideoStatsMessageData* data =
+          static_cast<VideoStatsMessageData*>(pmsg->pdata);
+      data->result = GetStats_w(data->stats);
+      break;
     }
     default:
       BaseChannel::OnMessage(pmsg);

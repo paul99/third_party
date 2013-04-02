@@ -916,3 +916,54 @@ TEST_F(EWK2UnitTestBase, ewk_view_contents_size_changed)
 
     evas_object_smart_callback_del(webView(), "contents,size,changed", onContentsSizeChanged);
 }
+
+static bool obtainedPageContents = false;
+
+static void PageContentsCallback(Ewk_Page_Contents_Type type, const char* data)
+{
+    // Check the type
+    ASSERT_EQ(EWK_PAGE_CONTENTS_TYPE_MHTML, type);
+
+    // The variable data should have below text block.
+    const String expectedMHTML = "\r\n\r\n<=00h=00t=00m=00l=00>=00<=00h=00e=00a=00d=00>=00<=00m=00e=00t=00a=00 =00c=\r\n"
+        "=00h=00a=00r=00s=00e=00t=00=3D=00\"=00U=00T=00F=00-=001=006=00L=00E=00\"=00>=\r\n"
+        "=00<=00/=00h=00e=00a=00d=00>=00<=00b=00o=00d=00y=00>=00<=00p=00>=00S=00i=00=\r\n"
+        "m=00p=00l=00e=00 =00H=00T=00M=00L=00<=00/=00p=00>=00<=00/=00b=00o=00d=00y=\r\n"
+        "=00>=00<=00/=00h=00t=00m=00l=00>=00\r\n";
+
+    ASSERT_TRUE(String(data).contains(expectedMHTML));
+
+    obtainedPageContents = true;
+}
+
+TEST_F(EWK2UnitTestBase, ewk_view_page_contents_get)
+{
+    const char content[] = "<p>Simple HTML</p>";
+    ewk_view_html_string_load(webView(), content, 0, 0);
+    waitUntilLoadFinished();
+
+    ASSERT_TRUE(ewk_view_page_contents_get(webView(), EWK_PAGE_CONTENTS_TYPE_MHTML, PageContentsCallback));
+    while (!obtainedPageContents)
+        ecore_main_loop_iterate();
+}
+
+TEST_F(EWK2UnitTestBase, ewk_view_source_mode)
+{
+    const char indexHTML[] = "<html><body>Test Web View Mode<script>document.title=window.document.body.innerText;</script></body></html>";
+    const char contents[] = "Test Web View Mode";
+
+    // Default source mode is false.
+    EXPECT_FALSE(ewk_view_source_mode_get(webView()));
+
+    // Load web contents of the web page.
+    ewk_view_html_string_load(webView(), indexHTML, 0, 0);
+    EXPECT_TRUE(waitUntilTitleChangedTo(contents));
+
+    EXPECT_TRUE(ewk_view_source_mode_set(webView(), true));
+    EXPECT_TRUE(ewk_view_source_mode_get(webView()));
+
+    // TODO: Add a test case when the source mode is true.
+    //       But it needs a way to retrieve the body contents to compare the loaded contents
+    //       such as excuting the JavaScript, 'window.document.body.innerText'.
+    //       https://bugs.webkit.org/show_bug.cgi?id=101904.
+}

@@ -10,7 +10,7 @@
   'targets': [
     {
       'target_name': 'signal_processing',
-      'type': '<(library)',
+      'type': 'static_library',
       'include_dirs': [
         'include',
       ],
@@ -85,6 +85,8 @@
           ],
         }],
       ],
+      # Ignore warning on shift operator promotion.
+      'msvs_disabled_warnings': [ 4334, ],
     }, # spl
   ], # targets
   'conditions': [
@@ -109,7 +111,7 @@
       'targets': [
         {
           'target_name': 'signal_processing_neon',
-          'type': '<(library)',
+          'type': 'static_library',
           'includes': ['../../build/arm_neon.gypi',],
           'sources': [
             'cross_correlation_neon.S',

@@ -517,7 +517,7 @@ public:
     
     void absDouble(FPRegisterID, FPRegisterID)
     {
-        ASSERT_NOT_REACHED();
+        RELEASE_ASSERT_NOT_REACHED();
     }
 
     ConvertibleLoadLabel convertibleLoadPtr(Address address, RegisterID dest)
@@ -1322,7 +1322,8 @@ public:
 
     void jump(RegisterID target)
     {
-        m_assembler.jr(target);
+        move(target, MIPSRegisters::t9);
+        m_assembler.jr(MIPSRegisters::t9);
         m_assembler.nop();
     }
 
@@ -2251,12 +2252,12 @@ public:
 
     static void replaceWithJump(CodeLocationLabel instructionStart, CodeLocationLabel destination)
     {
-        ASSERT_NOT_REACHED();
+        RELEASE_ASSERT_NOT_REACHED();
     }
     
     static ptrdiff_t maxJumpReplacementSize()
     {
-        ASSERT_NOT_REACHED();
+        RELEASE_ASSERT_NOT_REACHED();
         return 0;
     }
 

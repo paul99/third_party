@@ -40,6 +40,7 @@
 #include "LocalizedStrings.h"
 #include "Logging.h"
 #include "MIMETypeRegistry.h"
+#include "NetworkingContext.h"
 #include "NotImplemented.h"
 #include "Page.h"
 #include "ResourceError.h"
@@ -116,7 +117,12 @@ public:
     ~WebCoreSynchronousLoader()
     {
         adjustMaxConnections(-1);
-        g_main_context_pop_thread_default(g_main_context_get_thread_default());
+
+        GMainContext* context = g_main_context_get_thread_default();
+        while (g_main_context_pending(context))
+            g_main_context_iteration(context, FALSE);
+
+        g_main_context_pop_thread_default(context);
         loadingSynchronousRequest = false;
     }
 
@@ -221,7 +227,8 @@ private:
     HashSet<String> m_certificates;
 };
 
-static void cleanupSoupRequestOperation(ResourceHandle*, bool isDestroying);
+static bool createSoupRequestAndMessageForHandle(ResourceHandle*, const ResourceRequest&, bool isHTTPFamilyRequest);
+static void cleanupSoupRequestOperation(ResourceHandle*, bool isDestroying = false);
 static void sendRequestCallback(GObject*, GAsyncResult*, gpointer);
 static void readCallback(GObject*, GAsyncResult*, gpointer);
 static void closeCallback(GObject*, GAsyncResult*, gpointer);
@@ -251,7 +258,9 @@ ResourceHandleInternal::~ResourceHandleInternal()
 
 static SoupSession* sessionFromContext(NetworkingContext* context)
 {
-    return (context && context->isValid()) ? context->soupSession() : ResourceHandle::defaultSession();
+    if (!context || !context->isValid())
+        return ResourceHandle::defaultSession();
+    return context->storageSession().soupSession();
 }
 
 ResourceHandle::~ResourceHandle()
@@ -297,6 +306,14 @@ SoupSession* ResourceHandleInternal::soupSession()
     return session;
 }
 
+bool ResourceHandle::cancelledOrClientless()
+{
+    if (!client())
+        return true;
+
+    return getInternal()->m_cancelled;
+}
+
 static bool isAuthenticationFailureStatusCode(int httpStatusCode)
 {
     return httpStatusCode == SOUP_STATUS_PROXY_AUTHENTICATION_REQUIRED || httpStatusCode == SOUP_STATUS_UNAUTHORIZED;
@@ -305,11 +322,10 @@ static bool isAuthenticationFailureStatusCode(int httpStatusCode)
 static void gotHeadersCallback(SoupMessage* message, gpointer data)
 {
     ResourceHandle* handle = static_cast<ResourceHandle*>(data);
-    if (!handle)
+    if (!handle || handle->cancelledOrClientless())
         return;
+
     ResourceHandleInternal* d = handle->getInternal();
-    if (d->m_cancelled)
-        return;
 
 #if ENABLE(WEB_TIMING)
     if (d->m_response.resourceLoadTiming())
@@ -329,8 +345,7 @@ static void gotHeadersCallback(SoupMessage* message, gpointer data)
 #endif
 
     // The original response will be needed later to feed to willSendRequest in
-    // restartedCallback() in case we are redirected. For this reason, so we store it
-    // here.
+    // doRedirect() in case we are redirected. For this reason, we store it here.
     ResourceResponse response;
     response.updateFromSoupMessage(message);
     d->m_response = response;
@@ -373,70 +388,157 @@ static void applyAuthenticationToRequest(ResourceHandle* handle, ResourceRequest
 }
 
 // Called each time the message is going to be sent again except the first time.
-// It's used mostly to let webkit know about redirects.
-static void restartedCallback(SoupMessage* message, gpointer data)
+// This happens when libsoup handles HTTP authentication.
+static void restartedCallback(SoupMessage*, gpointer data)
 {
     ResourceHandle* handle = static_cast<ResourceHandle*>(data);
-    if (!handle)
-        return;
-    ResourceHandleInternal* d = handle->getInternal();
-    if (d->m_cancelled)
+    if (!handle || handle->cancelledOrClientless())
         return;
 
-    ResourceResponse& redirectResponse = d->m_response;
+    ResourceHandleInternal* d = handle->getInternal();
+
 #if ENABLE(WEB_TIMING)
+    ResourceResponse& redirectResponse = d->m_response;
     redirectResponse.setResourceLoadTiming(ResourceLoadTiming::create());
     redirectResponse.resourceLoadTiming()->requestTime = monotonicallyIncreasingTime();
 #endif
+}
 
-    // WebCore only expects us to call willSendRequest when we are redirecting. soup
-    // fires this signal also when it's handling authentication challenges, so in that
-    // case we should not willSendRequest.
-    if (isAuthenticationFailureStatusCode(redirectResponse.httpStatusCode()))
-        return;
+static bool shouldRedirect(ResourceHandle* handle)
+{
+    ResourceHandleInternal* d = handle->getInternal();
+    SoupMessage* message = d->m_soupMessage.get();
 
-    ResourceRequest request = handle->firstRequest();
-    request.setURL(KURL(handle->firstRequest().url(), soupURIToKURL(soup_message_get_uri(message))));
-    request.setHTTPMethod(message->method);
+    // Some 3xx status codes aren't actually redirects.
+    if (message->status_code == 300 || message->status_code == 304 || message->status_code == 305 || message->status_code == 306)
+        return false;
 
-    // Should not set Referer after a redirect from a secure resource to non-secure one.
-    if (!request.url().protocolIs("https") && protocolIs(request.httpReferrer(), "https")) {
-        request.clearHTTPReferrer();
-        soup_message_headers_remove(message->request_headers, "Referer");
+    if (!soup_message_headers_get_one(message->response_headers, "Location"))
+        return false;
+
+    return true;
+}
+
+static bool shouldRedirectAsGET(SoupMessage* message, KURL& newURL, bool crossOrigin)
+{
+    if (message->method == SOUP_METHOD_GET)
+        return false;
+
+    if (!newURL.protocolIsInHTTPFamily())
+        return true;
+
+    switch (message->status_code) {
+    case SOUP_STATUS_SEE_OTHER:
+        return true;
+    case SOUP_STATUS_FOUND:
+    case SOUP_STATUS_MOVED_PERMANENTLY:
+        if (message->method == SOUP_METHOD_POST)
+            return true;
+        break;
     }
 
-    const KURL& url = request.url();
-    d->m_user = url.user();
-    d->m_pass = url.pass();
+    if (crossOrigin && message->method == SOUP_METHOD_DELETE)
+        return true;
+
+    return false;
+}
+
+static void doRedirect(ResourceHandle* handle)
+{
+    ResourceHandleInternal* d = handle->getInternal();
+    static const int maxRedirects = 20;
+
+    if (d->m_redirectCount++ > maxRedirects) {
+        d->client()->didFail(handle, ResourceError::transportError(d->m_soupRequest.get(), SOUP_STATUS_TOO_MANY_REDIRECTS, "Too many redirects"));
+        cleanupSoupRequestOperation(handle);
+        return;
+    }
+
+    ResourceRequest request = handle->firstRequest();
+    SoupMessage* message = d->m_soupMessage.get();
+    const char* location = soup_message_headers_get_one(message->response_headers, "Location");
+    KURL newURL = KURL(soupURIToKURL(soup_message_get_uri(message)), location);
+    bool crossOrigin = !protocolHostAndPortAreEqual(request.url(), newURL);
+    request.setURL(newURL);
+
+    if (shouldRedirectAsGET(message, newURL, crossOrigin)) {
+        request.setHTTPMethod("GET");
+        request.setHTTPBody(0);
+        request.clearHTTPContentType();
+    }
+
+    // Should not set Referer after a redirect from a secure resource to non-secure one.
+    if (!newURL.protocolIs("https") && protocolIs(request.httpReferrer(), "https") && handle->context()->shouldClearReferrerOnHTTPSToHTTPRedirect())
+        request.clearHTTPReferrer();
+
+    d->m_user = newURL.user();
+    d->m_pass = newURL.pass();
     request.removeCredentials();
 
-    if (!protocolHostAndPortAreEqual(request.url(), redirectResponse.url())) {
+    if (crossOrigin) {
         // If the network layer carries over authentication headers from the original request
         // in a cross-origin redirect, we want to clear those headers here. 
         request.clearHTTPAuthorization();
-        soup_message_headers_remove(message->request_headers, "Authorization");
 
         // TODO: We are losing any username and password specified in the redirect URL, as this is the 
         // same behavior as the CFNet port. We should investigate if this is really what we want.
     } else
         applyAuthenticationToRequest(handle, request, true);
 
-    // Per-request authentication is handled via the URI-embedded username/password.
-    GOwnPtr<SoupURI> newSoupURI(request.soupURI());
-    soup_message_set_uri(message, newSoupURI.get());
-
-    if (d->client())
-        d->client()->willSendRequest(handle, request, redirectResponse);
-
-    if (d->m_cancelled)
+    cleanupSoupRequestOperation(handle);
+    if (!createSoupRequestAndMessageForHandle(handle, request, true)) {
+        d->client()->cannotShowURL(handle);
         return;
-
-    // Update the first party in case the base URL changed with the redirect
-    String firstPartyString = request.firstPartyForCookies().string();
-    if (!firstPartyString.isEmpty()) {
-        GOwnPtr<SoupURI> firstParty(soup_uri_new(firstPartyString.utf8().data()));
-        soup_message_set_first_party(d->m_soupMessage.get(), firstParty.get());
     }
+
+    // If we sent credentials with this request's URL, we don't want the response to carry them to
+    // the WebKit layer. They were only placed in the URL for the benefit of libsoup.
+    request.removeCredentials();
+
+    d->client()->willSendRequest(handle, request, d->m_response);
+    handle->sendPendingRequest();
+}
+
+static void redirectCloseCallback(GObject*, GAsyncResult* result, gpointer data)
+{
+    RefPtr<ResourceHandle> handle = static_cast<ResourceHandle*>(data);
+
+    if (handle->cancelledOrClientless()) {
+        cleanupSoupRequestOperation(handle.get());
+        return;
+    }
+
+    ResourceHandleInternal* d = handle->getInternal();
+    g_input_stream_close_finish(d->m_inputStream.get(), result, 0);
+    doRedirect(handle.get());
+}
+
+static void redirectSkipCallback(GObject*, GAsyncResult* asyncResult, gpointer data)
+{
+    RefPtr<ResourceHandle> handle = static_cast<ResourceHandle*>(data);
+
+    if (handle->cancelledOrClientless()) {
+        cleanupSoupRequestOperation(handle.get());
+        return;
+    }
+
+    GOwnPtr<GError> error;
+    ResourceHandleInternal* d = handle->getInternal();
+    gssize bytesSkipped = g_input_stream_read_finish(d->m_inputStream.get(), asyncResult, &error.outPtr());
+    if (error) {
+        handle->client()->didFail(handle.get(), ResourceError::genericIOError(error.get(), d->m_soupRequest.get()));
+        cleanupSoupRequestOperation(handle.get());
+        return;
+    }
+
+    if (bytesSkipped > 0) {
+        d->m_buffer = handle->client()->getBuffer(READ_BUFFER_SIZE, &d->m_bufferSize);
+        g_input_stream_read_async(d->m_inputStream.get(), d->m_buffer, d->m_bufferSize, G_PRIORITY_DEFAULT,
+            d->m_cancellable.get(), redirectSkipCallback, handle.get());
+        return;
+    }
+
+    g_input_stream_close_async(d->m_inputStream.get(), G_PRIORITY_DEFAULT, 0, redirectCloseCallback, handle.get());
 }
 
 static void wroteBodyDataCallback(SoupMessage*, SoupBuffer* buffer, gpointer data)
@@ -446,19 +548,16 @@ static void wroteBodyDataCallback(SoupMessage*, SoupBuffer* buffer, gpointer dat
         return;
 
     ASSERT(buffer);
-    ResourceHandleInternal* internal = handle->getInternal();
-    internal->m_bodyDataSent += buffer->length;
+    ResourceHandleInternal* d = handle->getInternal();
+    d->m_bodyDataSent += buffer->length;
 
-    if (internal->m_cancelled)
-        return;
-    ResourceHandleClient* client = handle->client();
-    if (!client)
+    if (handle->cancelledOrClientless())
         return;
 
-    client->didSendData(handle.get(), internal->m_bodyDataSent, internal->m_bodySize);
+    handle->client()->didSendData(handle.get(), d->m_bodyDataSent, d->m_bodySize);
 }
 
-static void cleanupSoupRequestOperation(ResourceHandle* handle, bool isDestroying = false)
+static void cleanupSoupRequestOperation(ResourceHandle* handle, bool isDestroying)
 {
     ResourceHandleInternal* d = handle->getInternal();
 
@@ -475,8 +574,8 @@ static void cleanupSoupRequestOperation(ResourceHandle* handle, bool isDestroyin
     }
 
     if (d->m_buffer) {
-        g_slice_free1(READ_BUFFER_SIZE, d->m_buffer);
         d->m_buffer = 0;
+        d->m_bufferSize = 0;
     }
 
     if (d->m_timeoutSource) {
@@ -513,26 +612,25 @@ static void nextMultipartResponsePartCallback(GObject* /*source*/, GAsyncResult*
 {
     RefPtr<ResourceHandle> handle = static_cast<ResourceHandle*>(data);
 
-    ResourceHandleInternal* d = handle->getInternal();
-    ResourceHandleClient* client = handle->client();
-
-    if (d->m_cancelled || !client) {
+    if (handle->cancelledOrClientless()) {
         cleanupSoupRequestOperation(handle.get());
         return;
     }
 
+    ResourceHandleInternal* d = handle->getInternal();
     ASSERT(!d->m_inputStream);
 
     GOwnPtr<GError> error;
     d->m_inputStream = adoptGRef(soup_multipart_input_stream_next_part_finish(d->m_multipartInputStream.get(), result, &error.outPtr()));
+
     if (error) {
-        client->didFail(handle.get(), ResourceError::httpError(d->m_soupMessage.get(), error.get(), d->m_soupRequest.get()));
+        handle->client()->didFail(handle.get(), ResourceError::httpError(d->m_soupMessage.get(), error.get(), d->m_soupRequest.get()));
         cleanupSoupRequestOperation(handle.get());
         return;
     }
 
     if (!d->m_inputStream) {
-        client->didFinishLoading(handle.get(), 0);
+        handle->client()->didFinishLoading(handle.get(), 0);
         cleanupSoupRequestOperation(handle.get());
         return;
     }
@@ -541,14 +639,15 @@ static void nextMultipartResponsePartCallback(GObject* /*source*/, GAsyncResult*
     d->m_response.setURL(handle->firstRequest().url());
     d->m_response.updateFromSoupMessageHeaders(soup_multipart_input_stream_get_headers(d->m_multipartInputStream.get()));
 
-    client->didReceiveResponse(handle.get(), d->m_response);
+    handle->client()->didReceiveResponse(handle.get(), d->m_response);
 
-    if (d->m_cancelled || !client) {
+    if (handle->cancelledOrClientless()) {
         cleanupSoupRequestOperation(handle.get());
         return;
     }
 
-    g_input_stream_read_async(d->m_inputStream.get(), d->m_buffer, READ_BUFFER_SIZE,
+    d->m_buffer = handle->client()->getBuffer(READ_BUFFER_SIZE, &d->m_bufferSize);
+    g_input_stream_read_async(d->m_inputStream.get(), d->m_buffer, d->m_bufferSize,
         G_PRIORITY_DEFAULT, d->m_cancellable.get(), readCallback, handle.get());
 }
 
@@ -556,14 +655,14 @@ static void sendRequestCallback(GObject*, GAsyncResult* result, gpointer data)
 {
     RefPtr<ResourceHandle> handle = static_cast<ResourceHandle*>(data);
 
-    ResourceHandleInternal* d = handle->getInternal();
-    ResourceHandleClient* client = handle->client();
-    SoupMessage* soupMessage = d->m_soupMessage.get();
-
-    if (d->m_cancelled || !client) {
+    if (handle->cancelledOrClientless()) {
         cleanupSoupRequestOperation(handle.get());
         return;
     }
+
+    ResourceHandleInternal* d = handle->getInternal();
+    SoupMessage* soupMessage = d->m_soupMessage.get();
+
 
     if (d->m_defersLoading) {
         d->m_deferredResult = result;
@@ -573,14 +672,25 @@ static void sendRequestCallback(GObject*, GAsyncResult* result, gpointer data)
     GOwnPtr<GError> error;
     GRefPtr<GInputStream> inputStream = adoptGRef(soup_request_send_finish(d->m_soupRequest.get(), result, &error.outPtr()));
     if (error) {
-        client->didFail(handle.get(), ResourceError::httpError(soupMessage, error.get(), d->m_soupRequest.get()));
+        handle->client()->didFail(handle.get(), ResourceError::httpError(soupMessage, error.get(), d->m_soupRequest.get()));
         cleanupSoupRequestOperation(handle.get());
         return;
     }
 
-    d->m_buffer = static_cast<char*>(g_slice_alloc(READ_BUFFER_SIZE));
+    ASSERT(!d->m_buffer);
 
     if (soupMessage) {
+        if (SOUP_STATUS_IS_REDIRECTION(soupMessage->status_code) && shouldRedirect(handle.get())) {
+            d->m_inputStream = inputStream;
+            // We use read_async() rather than skip_async() to work around
+            // https://bugzilla.gnome.org/show_bug.cgi?id=691489 until we can
+            // depend on glib > 2.35.4
+            d->m_buffer = handle->client()->getBuffer(READ_BUFFER_SIZE, &d->m_bufferSize);
+            g_input_stream_read_async(d->m_inputStream.get(), d->m_buffer, d->m_bufferSize, G_PRIORITY_DEFAULT,
+                d->m_cancellable.get(), redirectSkipCallback, handle.get());
+            return;
+        }
+
         if (handle->shouldContentSniff() && soupMessage->status_code != SOUP_STATUS_NOT_MODIFIED) {
             const char* sniffedType = soup_request_get_content_type(d->m_soupRequest.get());
             d->m_response.setSniffedContentType(sniffedType);
@@ -600,9 +710,9 @@ static void sendRequestCallback(GObject*, GAsyncResult* result, gpointer data)
         d->m_response.setExpectedContentLength(soup_request_get_content_length(d->m_soupRequest.get()));
     }
 
-    client->didReceiveResponse(handle.get(), d->m_response);
+    handle->client()->didReceiveResponse(handle.get(), d->m_response);
 
-    if (d->m_cancelled) {
+    if (handle->cancelledOrClientless()) {
         cleanupSoupRequestOperation(handle.get());
         return;
     }
@@ -615,7 +725,9 @@ static void sendRequestCallback(GObject*, GAsyncResult* result, gpointer data)
     }
 
     d->m_inputStream = inputStream;
-    g_input_stream_read_async(d->m_inputStream.get(), d->m_buffer, READ_BUFFER_SIZE,
+
+    d->m_buffer = handle->client()->getBuffer(READ_BUFFER_SIZE, &d->m_bufferSize);
+    g_input_stream_read_async(d->m_inputStream.get(), d->m_buffer, d->m_bufferSize,
                               G_PRIORITY_DEFAULT, d->m_cancellable.get(), readCallback, handle.get());
 }
 
@@ -764,10 +876,11 @@ static void networkEventCallback(SoupMessage*, GSocketClientEvent event, GIOStre
     ResourceHandle* handle = static_cast<ResourceHandle*>(data);
     if (!handle)
         return;
-    ResourceHandleInternal* d = handle->getInternal();
-    if (d->m_cancelled)
+
+    if (handle->cancelledOrClientless())
         return;
 
+    ResourceHandleInternal* d = handle->getInternal();
     int deltaTime = milisecondsSinceRequest(d->m_response.resourceLoadTiming()->requestTime);
     switch (event) {
     case G_SOCKET_CLIENT_RESOLVING:
@@ -843,12 +956,6 @@ static bool createSoupMessageForHandleAndRequest(ResourceHandle* handle, const R
     if (!handle->shouldContentSniff())
         soup_message_disable_feature(soupMessage, SOUP_TYPE_CONTENT_SNIFFER);
 
-    String firstPartyString = request.firstPartyForCookies().string();
-    if (!firstPartyString.isEmpty()) {
-        GOwnPtr<SoupURI> firstParty(soup_uri_new(firstPartyString.utf8().data()));
-        soup_message_set_first_party(soupMessage, firstParty.get());
-    }
-
     FormData* httpBody = request.httpBody();
     CString contentType = request.httpContentType().utf8().data();
     if (httpBody && !httpBody->isEmpty() && !addFormElementsToSoupMessage(soupMessage, contentType.data(), httpBody, d->m_bodySize)) {
@@ -874,6 +981,8 @@ static bool createSoupMessageForHandleAndRequest(ResourceHandle* handle, const R
     g_signal_connect(d->m_soupMessage.get(), "restarted", G_CALLBACK(restartedCallback), handle);
     g_signal_connect(d->m_soupMessage.get(), "wrote-body-data", G_CALLBACK(wroteBodyDataCallback), handle);
 
+    soup_message_set_flags(d->m_soupMessage.get(), static_cast<SoupMessageFlags>(soup_message_get_flags(d->m_soupMessage.get()) | SOUP_MESSAGE_NO_REDIRECT));
+
 #if ENABLE(WEB_TIMING)
     d->m_response.setResourceLoadTiming(ResourceLoadTiming::create());
     g_signal_connect(d->m_soupMessage.get(), "network-event", G_CALLBACK(networkEventCallback), handle);
@@ -883,15 +992,17 @@ static bool createSoupMessageForHandleAndRequest(ResourceHandle* handle, const R
     return true;
 }
 
-static bool createSoupRequestAndMessageForHandle(ResourceHandle* handle, bool isHTTPFamilyRequest)
+static bool createSoupRequestAndMessageForHandle(ResourceHandle* handle, const ResourceRequest& request, bool isHTTPFamilyRequest)
 {
     ResourceHandleInternal* d = handle->getInternal();
     SoupRequester* requester = SOUP_REQUESTER(soup_session_get_feature(d->soupSession(), SOUP_TYPE_REQUESTER));
 
     GOwnPtr<GError> error;
-    ResourceRequest& request = handle->firstRequest();
 
     GOwnPtr<SoupURI> soupURI(request.soupURI());
+    if (!soupURI)
+        return false;
+
     d->m_soupRequest = adoptGRef(soup_requester_request_uri(requester, soupURI.get(), &error.outPtr()));
     if (error) {
         d->m_soupRequest.clear();
@@ -907,7 +1018,7 @@ static bool createSoupRequestAndMessageForHandle(ResourceHandle* handle, bool is
     return true;
 }
 
-bool ResourceHandle::start(NetworkingContext* context)
+bool ResourceHandle::start()
 {
     ASSERT(!d->m_soupMessage);
 
@@ -916,11 +1027,8 @@ bool ResourceHandle::start(NetworkingContext* context)
     // If the frame is not null but the page is null this must be an attempted
     // load from an unload handler, so let's just block it.
     // If both the frame and the page are not null the context is valid.
-    if (context && !context->isValid())
+    if (d->m_context && !d->m_context->isValid())
         return false;
-
-    // Used to set the keep track of custom SoupSessions for ports that support it (EFL).
-    d->m_context = context;
 
     // Only allow the POST and GET methods for non-HTTP requests.
     const ResourceRequest& request = firstRequest();
@@ -932,12 +1040,12 @@ bool ResourceHandle::start(NetworkingContext* context)
 
     applyAuthenticationToRequest(this, firstRequest(), false);
 
-    if (!createSoupRequestAndMessageForHandle(this, isHTTPFamilyRequest)) {
+    if (!createSoupRequestAndMessageForHandle(this, request, isHTTPFamilyRequest)) {
         this->scheduleFailure(InvalidURLFailure); // Error must not be reported immediately
         return true;
     }
 
-    setSoupRequestInitiatingPageIDFromNetworkingContext(d->m_soupRequest.get(), context);
+    setSoupRequestInitiatingPageIDFromNetworkingContext(d->m_soupRequest.get(), d->m_context.get());
 
     // Send the request only if it's not been explicitly deferred.
     if (!d->m_defersLoading)
@@ -1140,7 +1248,7 @@ static bool waitingToSendRequest(ResourceHandle* handle)
 
 void ResourceHandle::platformSetDefersLoading(bool defersLoading)
 {
-    if (d->m_cancelled)
+    if (cancelledOrClientless())
         return;
 
     // Except when canceling a possible timeout timer, we only need to take action here to UN-defer loading.
@@ -1169,14 +1277,6 @@ void ResourceHandle::platformSetDefersLoading(bool defersLoading)
 
 bool ResourceHandle::loadsBlocked()
 {
-    return false;
-}
-
-bool ResourceHandle::willLoadFromCache(ResourceRequest&, Frame*)
-{
-    // Not having this function means that we'll ask the user about re-posting a form
-    // even when we go back to a page that's still in the cache.
-    notImplemented();
     return false;
 }
 
@@ -1212,9 +1312,8 @@ static void closeCallback(GObject*, GAsyncResult* res, gpointer data)
 
     g_input_stream_close_finish(d->m_inputStream.get(), res, 0);
 
-    ResourceHandleClient* client = handle->client();
-    if (client && loadingSynchronousRequest)
-        client->didFinishLoading(handle.get(), 0);
+    if (handle->client() && loadingSynchronousRequest)
+        handle->client()->didFinishLoading(handle.get(), 0);
 
     cleanupSoupRequestOperation(handle.get());
 }
@@ -1223,14 +1322,12 @@ static void readCallback(GObject*, GAsyncResult* asyncResult, gpointer data)
 {
     RefPtr<ResourceHandle> handle = static_cast<ResourceHandle*>(data);
 
-    ResourceHandleInternal* d = handle->getInternal();
-    ResourceHandleClient* client = handle->client();
-
-    if (d->m_cancelled || !client) {
+    if (handle->cancelledOrClientless()) {
         cleanupSoupRequestOperation(handle.get());
         return;
     }
 
+    ResourceHandleInternal* d = handle->getInternal();
     if (d->m_defersLoading) {
         d->m_deferredResult = asyncResult;
         return;
@@ -1238,8 +1335,9 @@ static void readCallback(GObject*, GAsyncResult* asyncResult, gpointer data)
 
     GOwnPtr<GError> error;
     gssize bytesRead = g_input_stream_read_finish(d->m_inputStream.get(), asyncResult, &error.outPtr());
+
     if (error) {
-        client->didFail(handle.get(), ResourceError::genericIOError(error.get(), d->m_soupRequest.get()));
+        handle->client()->didFail(handle.get(), ResourceError::genericIOError(error.get(), d->m_soupRequest.get()));
         cleanupSoupRequestOperation(handle.get());
         return;
     }
@@ -1257,8 +1355,8 @@ static void readCallback(GObject*, GAsyncResult* asyncResult, gpointer data)
         // stream to close because the input stream is closed asynchronously. If this
         // is a synchronous request, we wait until the closeCallback, because we don't
         // want to halt the internal main loop before the input stream closes.
-        if (client && !loadingSynchronousRequest) {
-            client->didFinishLoading(handle.get(), 0);
+        if (handle->client() && !loadingSynchronousRequest) {
+            handle->client()->didFinishLoading(handle.get(), 0);
             handle->setClient(0); // Unset the client so that we do not try to access th
                                   // client in the closeCallback.
         }
@@ -1269,15 +1367,16 @@ static void readCallback(GObject*, GAsyncResult* asyncResult, gpointer data)
     // It's mandatory to have sent a response before sending data
     ASSERT(!d->m_response.isNull());
 
-    client->didReceiveData(handle.get(), d->m_buffer, bytesRead, bytesRead);
+    handle->client()->didReceiveData(handle.get(), d->m_buffer, bytesRead, bytesRead);
 
     // didReceiveData may cancel the load, which may release the last reference.
-    if (d->m_cancelled || !client) {
+    if (handle->cancelledOrClientless()) {
         cleanupSoupRequestOperation(handle.get());
         return;
     }
 
-    g_input_stream_read_async(d->m_inputStream.get(), d->m_buffer, READ_BUFFER_SIZE, G_PRIORITY_DEFAULT,
+    d->m_buffer = handle->client()->getBuffer(READ_BUFFER_SIZE, &d->m_bufferSize);
+    g_input_stream_read_async(d->m_inputStream.get(), d->m_buffer, d->m_bufferSize, G_PRIORITY_DEFAULT,
                               d->m_cancellable.get(), readCallback, handle.get());
 }
 

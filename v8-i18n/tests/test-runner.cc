@@ -68,7 +68,7 @@ int main(int argc, char* argv[]) {
     }
 
     context->Exit();
-    context.Dispose();
+    context.Dispose(context->GetIsolate());
   }
 
   v8::V8::Dispose();

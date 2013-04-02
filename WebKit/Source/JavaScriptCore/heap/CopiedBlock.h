@@ -29,8 +29,7 @@
 #include "BlockAllocator.h"
 #include "CopyWorkList.h"
 #include "HeapBlock.h"
-#include "JSValue.h"
-#include "JSValueInlines.h"
+#include "JSCJSValue.h"
 #include "Options.h"
 #include <wtf/Atomics.h>
 #include <wtf/OwnPtr.h>
@@ -49,6 +48,8 @@ public:
 
     void pin();
     bool isPinned();
+
+    bool isOversize();
 
     unsigned liveBytes();
     void reportLiveBytes(JSCell*, unsigned);
@@ -166,6 +167,11 @@ inline void CopiedBlock::pin()
 inline bool CopiedBlock::isPinned()
 {
     return m_isPinned;
+}
+
+inline bool CopiedBlock::isOversize()
+{
+    return region()->isCustomSize();
 }
 
 inline unsigned CopiedBlock::liveBytes()

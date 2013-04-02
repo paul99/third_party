@@ -26,7 +26,7 @@ InvalidationClient* CreateInvalidationClient(
     InvalidationListener* listener) {
   // Make a default config and construct an instance to return.
   ClientConfigP client_config;
-  InvalidationClientImpl::InitConfig(&client_config);
+  InvalidationClientCore::InitConfig(&client_config);
   Random* random = new Random(InvalidationClientUtil::GetCurrentTimeMs(
               resources->internal_scheduler()));
   return new InvalidationClientImpl(
@@ -42,7 +42,7 @@ InvalidationClient* CreateInvalidationClientForTest(
     InvalidationListener* listener) {
   // Make a config with test params and construct an instance to return.
   ClientConfigP client_config;
-  InvalidationClientImpl::InitConfigForTest(&client_config);
+  InvalidationClientCore::InitConfigForTest(&client_config);
   Random* random = new Random(InvalidationClientUtil::GetCurrentTimeMs(
               resources->internal_scheduler()));
   return new InvalidationClientImpl(

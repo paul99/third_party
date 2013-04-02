@@ -48,8 +48,6 @@ static v8::Handle<v8::Value> cacheState(v8::Handle<v8::Object> popStateEvent, v8
 
 v8::Handle<v8::Value> V8PopStateEvent::stateAccessorGetter(v8::Local<v8::String> name, const v8::AccessorInfo& info)
 {
-    INC_STATS("DOM.PopStateEvent.state");
-
     v8::Handle<v8::Value> result = info.Holder()->GetHiddenValue(V8HiddenPropertyName::state());
 
     if (!result.IsEmpty())
@@ -69,10 +67,10 @@ v8::Handle<v8::Value> V8PopStateEvent::stateAccessorGetter(v8::Local<v8::String>
     // The current history state object might've changed in the meantime, so we need to take care
     // of using the correct one, and always share the same deserialization with history.state.
 
-    bool isSameState = history->isSameAsCurrentState(event->serializedState());
+    bool isSameState = history->isSameAsCurrentState(event->serializedState().get());
 
     if (isSameState) {
-        v8::Handle<v8::Object> v8History = toV8(history, info.Holder(), info.GetIsolate()).As<v8::Object>();
+        v8::Handle<v8::Object> v8History = toV8Fast(history, info, event).As<v8::Object>();
         if (!history->stateChanged()) {
             result = v8History->GetHiddenValue(V8HiddenPropertyName::state());
             if (!result.IsEmpty())

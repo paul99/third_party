@@ -38,6 +38,9 @@ WHICH GENERATES THE GLSL ES PARSER (glslang_tab.cpp AND glslang_tab.h).
 #include "compiler/ParseHelper.h"
 #include "GLSLANG/ShaderLang.h"
 
+#define YYENABLE_NLS 0
+#define YYLTYPE_IS_TRIVIAL 1
+
 #define YYLEX_PARAM context->scanner
 %}
 
@@ -988,7 +991,10 @@ declaration
         $$ = $1.intermAggregate;
     }
     | PRECISION precision_qualifier type_specifier_no_prec SEMICOLON {
-        context->symbolTable.setDefaultPrecision( $3.type, $2 );
+        if (!context->symbolTable.setDefaultPrecision( $3, $2 )) {
+            context->error($1.line, "illegal type argument for default precision qualifier", getBasicString($3.type));
+            context->recover();
+        }
         $$ = 0;
     }
     ;

@@ -16,8 +16,8 @@
 
 package com.google.ipc.invalidation.examples.android2;
 
-import com.google.android.gcm.GCMRegistrar;
 import com.google.ipc.invalidation.external.client.contrib.AndroidListener;
+import com.google.ipc.invalidation.external.client.contrib.MultiplexingGcmListener;
 import com.google.ipc.invalidation.external.client.types.ObjectId;
 
 import android.app.Activity;
@@ -84,7 +84,7 @@ public final class MainActivity extends Activity {
     Log.i(TAG, "Creating main activity");
     super.onCreate(savedInstanceState);
 
-    initializeGcm();
+    MultiplexingGcmListener.initializeGcm(this);
 
     // Create and start a notification client. When the client is available, or if there is an
     // existing client, AndroidListener.reissueRegistrations() is called.
@@ -100,20 +100,6 @@ public final class MainActivity extends Activity {
     // static state.
     State.currentActivity = this;
     refreshData();
-  }
-
-  /** Registers for Google Cloud Messaging (GCM) if there is no existing registration. */
-  private void initializeGcm() {
-    Context context = getApplicationContext();
-    GCMRegistrar.checkDevice(context);
-    GCMRegistrar.checkManifest(context);
-    String regId = GCMRegistrar.getRegistrationId(context);
-    if (regId.equals("")) {
-      Log.i(TAG, "Not registered with GCM; registering");
-      GCMRegistrar.register(context, SENDER_ID);
-    } else {
-      Log.i(TAG, "Already registered with GCM " + regId);
-    }
   }
 
   /** Updates UI with current registration status and object versions. */

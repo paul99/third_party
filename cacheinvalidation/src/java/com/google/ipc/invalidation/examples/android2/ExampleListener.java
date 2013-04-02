@@ -69,22 +69,25 @@ public final class ExampleListener extends AndroidListener {
   /** Object source for objects the client is tracking. */
   private static final int DEMO_SOURCE = 4;
 
+  /** Prefix for object names. */
+  private static final String OBJECT_ID_PREFIX = "Obj";
+
   /** The tag used for logging in the listener. */
   private static final String TAG = "TEA2:ExampleListener";
 
   /** Number of objects we're interested in tracking. */
-  private static final int NUM_INTERESTING_OBJECTS = 4;
+  
+  static final int NUM_INTERESTING_OBJECTS = 4;
 
   /** Ids for objects we want to track. */
   private final Set<ObjectId> interestingObjects;
 
   public ExampleListener() {
     super();
-    // We're interested in objects with ids Obj0, Obj1, ...
+    // We're interested in objects with ids Obj1, Obj2, ...
     interestingObjects = new HashSet<ObjectId>();
     for (int i = 1; i <= NUM_INTERESTING_OBJECTS; i++) {
-      interestingObjects.add(ObjectId.newInstance(DEMO_SOURCE,
-          ("Obj" + Integer.toString(i)).getBytes()));
+      interestingObjects.add(getObjectId(i));
     }
   }
 
@@ -100,9 +103,14 @@ public final class ExampleListener extends AndroidListener {
   }
 
   @Override
-  public void reissueRegistrations(byte[] clientID) {
+  public void ready(byte[] clientId) {
+    Log.i(TAG, "ready()");
+  }
+
+  @Override
+  public void reissueRegistrations(byte[] clientId) {
     Log.i(TAG, "reissueRegistrations()");
-    register(clientID, interestingObjects);
+    register(clientId, interestingObjects);
   }
 
   @Override
@@ -246,8 +254,10 @@ public final class ExampleListener extends AndroidListener {
       List<ObjectId> objectIds = new ArrayList<ObjectId>();
       objectIds.add(objectId);
       if (interestingObjects.contains(objectId)) {
+        Log.i(TAG, "Retrying registration of " + objectId);
         register(clientId, objectIds);
       } else {
+        Log.i(TAG, "Retrying unregistration of " + objectId);
         unregister(clientId, objectIds);
       }
     }
@@ -257,6 +267,20 @@ public final class ExampleListener extends AndroidListener {
   public void informRegistrationStatus(byte[] clientId, ObjectId objectId,
       RegistrationState regState) {
     Log.i(TAG, "informRegistrationStatus");
+
+    List<ObjectId> objectIds = new ArrayList<ObjectId>();
+    objectIds.add(objectId);
+    if (regState == RegistrationState.REGISTERED) {
+      if (!interestingObjects.contains(objectId)) {
+        Log.i(TAG, "Unregistering for object we're no longer interested in");
+        unregister(clientId, objectIds);
+      }
+    } else {
+      if (interestingObjects.contains(objectId)) {
+        Log.i(TAG, "Registering for an object");
+        register(clientId, objectIds);
+      }
+    }
   }
 
   private SharedPreferences getSharedPreferences() {
@@ -275,5 +299,10 @@ public final class ExampleListener extends AndroidListener {
     // value.
 
     return -1;
+  }
+
+  /** Gets object ID given index. */
+  private static ObjectId getObjectId(int i) {
+    return ObjectId.newInstance(DEMO_SOURCE, (OBJECT_ID_PREFIX + i).getBytes());
   }
 }

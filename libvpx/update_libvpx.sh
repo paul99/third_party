@@ -30,6 +30,9 @@ if [ -n "$1" ]; then
   GIT_BRANCH="$1"
 fi
 
+prev_hash="$(egrep "Commit: [a-Z0-9]" README.chromium | awk '{ print $2 }')"
+echo "prev_hash:$prev_hash"
+
 rm -rf $(svn ls $LIBVPX_SRC_DIR)
 svn update $LIBVPX_SRC_DIR
 
@@ -57,14 +60,22 @@ git checkout -b tot origin/$GIT_BRANCH
 
 # Output the current commit hash.
 hash=$(git log -1 --format="%H")
-echo "Currnet commit hash:$hash"
+echo "Current HEAD: $hash"
+
+# Output log for upstream from current hash.
+found_prev_hash="$(git log | grep $prev_hash)"
+if [ -n "$prev_hash" ]; then
+  echo "git log from upstream:"
+  pretty_git_log="$(git log --pretty="%h %s" $prev_hash..HEAD)"
+  echo "$pretty_git_log"
+fi
 
 # Git is useless now, remove the local git repo.
 rm -rf .git
 
 # Update SVN with the added and deleted files.
-echo "$add" | xargs -i svn add --parents {}
-echo "$delete" | xargs -i svn rm {}
+echo "$add" | xargs -I {} svn add --parents {}
+echo "$delete" | xargs -I {} svn rm {}
 
 # Find empty directories and remove them from SVN.
 find . -type d -empty -not -iwholename '*.svn*' -exec svn rm {} \;

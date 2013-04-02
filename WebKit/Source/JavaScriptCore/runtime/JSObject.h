@@ -124,14 +124,6 @@ public:
     void setPrototype(JSGlobalData&, JSValue prototype);
     bool setPrototypeWithCycleCheck(JSGlobalData&, JSValue prototype);
         
-    Structure* inheritorID(JSGlobalData&);
-    void notifyUsedAsPrototype(JSGlobalData&);
-        
-    bool mayBeUsedAsPrototype(JSGlobalData& globalData)
-    {
-        return isValidOffset(structure()->get(globalData, globalData.m_inheritorIDKey));
-    }
-        
     bool mayInterceptIndexedAccesses()
     {
         return structure()->mayInterceptIndexedAccesses();
@@ -217,7 +209,7 @@ public:
         case ALL_ARRAY_STORAGE_INDEXING_TYPES:
             return i < m_butterfly->arrayStorage()->vectorLength() && m_butterfly->arrayStorage()->m_vector[i];
         default:
-            ASSERT_NOT_REACHED();
+            RELEASE_ASSERT_NOT_REACHED();
             return false;
         }
     }
@@ -233,7 +225,7 @@ public:
         case ALL_ARRAY_STORAGE_INDEXING_TYPES:
             return m_butterfly->arrayStorage()->m_vector[i].get();
         default:
-            ASSERT_NOT_REACHED();
+            RELEASE_ASSERT_NOT_REACHED();
             return JSValue();
         }
     }
@@ -262,7 +254,7 @@ public:
                 return m_butterfly->arrayStorage()->m_vector[i].get();
             break;
         default:
-            ASSERT_NOT_REACHED();
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
         return JSValue();
@@ -302,7 +294,7 @@ public:
             return i < m_butterfly->arrayStorage()->vectorLength()
                 && !!m_butterfly->arrayStorage()->m_vector[i];
         default:
-            ASSERT_NOT_REACHED();
+            RELEASE_ASSERT_NOT_REACHED();
             return false;
         }
     }
@@ -319,7 +311,7 @@ public:
         case ALL_ARRAY_STORAGE_INDEXING_TYPES:
             return i < m_butterfly->vectorLength();
         default:
-            ASSERT_NOT_REACHED();
+            RELEASE_ASSERT_NOT_REACHED();
             return false;
         }
     }
@@ -371,7 +363,7 @@ public:
             break;
         }
         default:
-            ASSERT_NOT_REACHED();
+            RELEASE_ASSERT_NOT_REACHED();
         }
     }
         
@@ -420,7 +412,7 @@ public:
             break;
         }
         default:
-            ASSERT_NOT_REACHED();
+            RELEASE_ASSERT_NOT_REACHED();
         }
     }
         
@@ -436,7 +428,7 @@ public:
         case ALL_ARRAY_STORAGE_INDEXING_TYPES:
             return m_butterfly->arrayStorage()->m_sparseMap;
         default:
-            ASSERT_NOT_REACHED();
+            RELEASE_ASSERT_NOT_REACHED();
             return false;
         }
     }
@@ -453,7 +445,7 @@ public:
         case ALL_ARRAY_STORAGE_INDEXING_TYPES:
             return m_butterfly->arrayStorage()->inSparseMode();
         default:
-            ASSERT_NOT_REACHED();
+            RELEASE_ASSERT_NOT_REACHED();
             return false;
         }
     }
@@ -504,22 +496,15 @@ public:
     JSValue getDirect(JSGlobalData& globalData, PropertyName propertyName) const
     {
         PropertyOffset offset = structure()->get(globalData, propertyName);
-        checkOffset(offset, structure()->typeInfo().type());
-        return offset != invalidOffset ? getDirectOffset(offset) : JSValue();
+        checkOffset(offset, structure()->inlineCapacity());
+        return offset != invalidOffset ? getDirect(offset) : JSValue();
     }
 
-    WriteBarrierBase<Unknown>* getDirectLocation(JSGlobalData& globalData, PropertyName propertyName)
+    PropertyOffset getDirectOffset(JSGlobalData& globalData, PropertyName propertyName)
     {
         PropertyOffset offset = structure()->get(globalData, propertyName);
-        checkOffset(offset, structure()->typeInfo().type());
-        return isValidOffset(offset) ? locationForOffset(offset) : 0;
-    }
-
-    WriteBarrierBase<Unknown>* getDirectLocation(JSGlobalData& globalData, PropertyName propertyName, unsigned& attributes)
-    {
-        JSCell* specificFunction;
-        PropertyOffset offset = structure()->get(globalData, propertyName, attributes, specificFunction);
-        return isValidOffset(offset) ? locationForOffset(offset) : 0;
+        checkOffset(offset, structure()->inlineCapacity());
+        return offset;
     }
 
     bool hasInlineStorage() const { return structure()->hasInlineStorage(); }
@@ -562,18 +547,6 @@ public:
         return &outOfLineStorage()[offsetInOutOfLineStorage(offset)];
     }
 
-    PropertyOffset offsetForLocation(WriteBarrierBase<Unknown>* location) const
-    {
-        PropertyOffset result;
-        size_t offsetInInlineStorage = location - inlineStorageUnsafe();
-        if (offsetInInlineStorage < static_cast<size_t>(firstOutOfLineOffset))
-            result = offsetInInlineStorage;
-        else
-            result = outOfLineStorage() - location + (firstOutOfLineOffset - 1);
-        validateOffset(result, structure()->typeInfo().type());
-        return result;
-    }
-
     void transitionTo(JSGlobalData&, Structure*);
 
     bool removeDirect(JSGlobalData&, PropertyName); // Return true if anything is removed.
@@ -588,9 +561,9 @@ public:
     bool putOwnDataProperty(JSGlobalData&, PropertyName, JSValue, PutPropertySlot&);
 
     // Fast access to known property offsets.
-    JSValue getDirectOffset(PropertyOffset offset) const { return locationForOffset(offset)->get(); }
-    void putDirectOffset(JSGlobalData& globalData, PropertyOffset offset, JSValue value) { locationForOffset(offset)->set(globalData, this, value); }
-    void putUndefinedAtDirectOffset(PropertyOffset offset) { locationForOffset(offset)->setUndefined(); }
+    JSValue getDirect(PropertyOffset offset) const { return locationForOffset(offset)->get(); }
+    void putDirect(JSGlobalData& globalData, PropertyOffset offset, JSValue value) { locationForOffset(offset)->set(globalData, this, value); }
+    void putDirectUndefined(PropertyOffset offset) { locationForOffset(offset)->setUndefined(); }
 
     JS_EXPORT_PRIVATE static bool defineOwnProperty(JSObject*, ExecState*, PropertyName, PropertyDescriptor&, bool shouldThrow);
 
@@ -649,7 +622,7 @@ public:
     // indexing should be sparse, we're having a bad time, or because
     // we already have a more general form of storage (double,
     // contiguous, array storage).
-    WriteBarrier<Unknown>* ensureInt32(JSGlobalData& globalData)
+    ContiguousJSValues ensureInt32(JSGlobalData& globalData)
     {
         if (LIKELY(hasInt32(structure()->indexingType())))
             return m_butterfly->contiguousInt32();
@@ -661,7 +634,7 @@ public:
     // indexing should be sparse, we're having a bad time, or because
     // we already have a more general form of storage (contiguous,
     // or array storage).
-    double* ensureDouble(JSGlobalData& globalData)
+    ContiguousDoubles ensureDouble(JSGlobalData& globalData)
     {
         if (LIKELY(hasDouble(structure()->indexingType())))
             return m_butterfly->contiguousDouble();
@@ -671,7 +644,7 @@ public:
         
     // Returns 0 if contiguous storage cannot be created - either because
     // indexing should be sparse or because we're having a bad time.
-    WriteBarrier<Unknown>* ensureContiguous(JSGlobalData& globalData)
+    ContiguousJSValues ensureContiguous(JSGlobalData& globalData)
     {
         if (LIKELY(hasContiguous(structure()->indexingType())))
             return m_butterfly->contiguous();
@@ -682,7 +655,7 @@ public:
     // Same as ensureContiguous(), except that if the indexed storage is in
     // double mode, then it does a rage conversion to contiguous: it
     // attempts to convert each double to an int32.
-    WriteBarrier<Unknown>* rageEnsureContiguous(JSGlobalData& globalData)
+    ContiguousJSValues rageEnsureContiguous(JSGlobalData& globalData)
     {
         if (LIKELY(hasContiguous(structure()->indexingType())))
             return m_butterfly->contiguous();
@@ -737,8 +710,6 @@ protected:
     // To create derived types you likely want JSNonFinalObject, below.
     JSObject(JSGlobalData&, Structure*, Butterfly* = 0);
         
-    void resetInheritorID(JSGlobalData&);
-        
     void visitButterfly(SlotVisitor&, Butterfly*, size_t storageSize);
     void copyButterfly(CopyVisitor&, Butterfly*, size_t storageSize);
 
@@ -764,9 +735,9 @@ protected:
     }
         
     Butterfly* createInitialUndecided(JSGlobalData&, unsigned length);
-    WriteBarrier<Unknown>* createInitialInt32(JSGlobalData&, unsigned length);
-    double* createInitialDouble(JSGlobalData&, unsigned length);
-    WriteBarrier<Unknown>* createInitialContiguous(JSGlobalData&, unsigned length);
+    ContiguousJSValues createInitialInt32(JSGlobalData&, unsigned length);
+    ContiguousDoubles createInitialDouble(JSGlobalData&, unsigned length);
+    ContiguousJSValues createInitialContiguous(JSGlobalData&, unsigned length);
         
     void convertUndecidedForValue(JSGlobalData&, JSValue);
     void convertInt32ForValue(JSGlobalData&, JSValue);
@@ -774,21 +745,21 @@ protected:
     ArrayStorage* createArrayStorage(JSGlobalData&, unsigned length, unsigned vectorLength);
     ArrayStorage* createInitialArrayStorage(JSGlobalData&);
         
-    WriteBarrier<Unknown>* convertUndecidedToInt32(JSGlobalData&);
-    double* convertUndecidedToDouble(JSGlobalData&);
-    WriteBarrier<Unknown>* convertUndecidedToContiguous(JSGlobalData&);
+    ContiguousJSValues convertUndecidedToInt32(JSGlobalData&);
+    ContiguousDoubles convertUndecidedToDouble(JSGlobalData&);
+    ContiguousJSValues convertUndecidedToContiguous(JSGlobalData&);
     ArrayStorage* convertUndecidedToArrayStorage(JSGlobalData&, NonPropertyTransition, unsigned neededLength);
     ArrayStorage* convertUndecidedToArrayStorage(JSGlobalData&, NonPropertyTransition);
     ArrayStorage* convertUndecidedToArrayStorage(JSGlobalData&);
         
-    double* convertInt32ToDouble(JSGlobalData&);
-    WriteBarrier<Unknown>* convertInt32ToContiguous(JSGlobalData&);
+    ContiguousDoubles convertInt32ToDouble(JSGlobalData&);
+    ContiguousJSValues convertInt32ToContiguous(JSGlobalData&);
     ArrayStorage* convertInt32ToArrayStorage(JSGlobalData&, NonPropertyTransition, unsigned neededLength);
     ArrayStorage* convertInt32ToArrayStorage(JSGlobalData&, NonPropertyTransition);
     ArrayStorage* convertInt32ToArrayStorage(JSGlobalData&);
     
-    WriteBarrier<Unknown>* convertDoubleToContiguous(JSGlobalData&);
-    WriteBarrier<Unknown>* rageConvertDoubleToContiguous(JSGlobalData&);
+    ContiguousJSValues convertDoubleToContiguous(JSGlobalData&);
+    ContiguousJSValues rageConvertDoubleToContiguous(JSGlobalData&);
     ArrayStorage* convertDoubleToArrayStorage(JSGlobalData&, NonPropertyTransition, unsigned neededLength);
     ArrayStorage* convertDoubleToArrayStorage(JSGlobalData&, NonPropertyTransition);
     ArrayStorage* convertDoubleToArrayStorage(JSGlobalData&);
@@ -839,7 +810,7 @@ protected:
     // as if it contained JSValues. But it won't always contain JSValues.
     // Make sure you cast this to the appropriate type before using.
     template<IndexingType indexingType>
-    WriteBarrier<Unknown>* indexingData()
+    ContiguousJSValues indexingData()
     {
         switch (indexingType) {
         case ALL_INT32_INDEXING_TYPES:
@@ -848,15 +819,15 @@ protected:
             return m_butterfly->contiguous();
                 
         case ALL_ARRAY_STORAGE_INDEXING_TYPES:
-            return m_butterfly->arrayStorage()->m_vector;
-                
+            return m_butterfly->arrayStorage()->vector();
+
         default:
             CRASH();
-            return 0;
+            return ContiguousJSValues();
         }
     }
 
-    WriteBarrier<Unknown>* currentIndexingData()
+    ContiguousJSValues currentIndexingData()
     {
         switch (structure()->indexingType()) {
         case ALL_INT32_INDEXING_TYPES:
@@ -864,16 +835,17 @@ protected:
             return m_butterfly->contiguous();
 
         case ALL_ARRAY_STORAGE_INDEXING_TYPES:
-            return m_butterfly->arrayStorage()->m_vector;
+            return m_butterfly->arrayStorage()->vector();
 
         default:
             CRASH();
-            return 0;
+            return ContiguousJSValues();
         }
     }
         
     JSValue getHolyIndexQuickly(unsigned i)
     {
+        ASSERT(i < m_butterfly->vectorLength());
         switch (structure()->indexingType()) {
         case ALL_INT32_INDEXING_TYPES:
         case ALL_CONTIGUOUS_INDEXING_TYPES:
@@ -953,7 +925,6 @@ private:
     JS_EXPORT_PRIVATE void fillGetterPropertySlot(PropertySlot&, PropertyOffset);
 
     const HashEntry* findPropertyHashEntry(ExecState*, PropertyName) const;
-    Structure* createInheritorID(JSGlobalData&);
         
     void putIndexedDescriptor(ExecState*, SparseArrayEntry*, PropertyDescriptor&, PropertyDescriptor& old);
         
@@ -974,21 +945,20 @@ private:
         
     void ensureLengthSlow(JSGlobalData&, unsigned length);
         
-    WriteBarrier<Unknown>* ensureInt32Slow(JSGlobalData&);
-    double* ensureDoubleSlow(JSGlobalData&);
-    WriteBarrier<Unknown>* ensureContiguousSlow(JSGlobalData&);
-    WriteBarrier<Unknown>* rageEnsureContiguousSlow(JSGlobalData&);
+    ContiguousJSValues ensureInt32Slow(JSGlobalData&);
+    ContiguousDoubles ensureDoubleSlow(JSGlobalData&);
+    ContiguousJSValues ensureContiguousSlow(JSGlobalData&);
+    ContiguousJSValues rageEnsureContiguousSlow(JSGlobalData&);
     ArrayStorage* ensureArrayStorageSlow(JSGlobalData&);
     
     enum DoubleToContiguousMode { EncodeValueAsDouble, RageConvertDoubleToValue };
     template<DoubleToContiguousMode mode>
-    WriteBarrier<Unknown>* genericConvertDoubleToContiguous(JSGlobalData&);
-    WriteBarrier<Unknown>* ensureContiguousSlow(JSGlobalData&, DoubleToContiguousMode);
+    ContiguousJSValues genericConvertDoubleToContiguous(JSGlobalData&);
+    ContiguousJSValues ensureContiguousSlow(JSGlobalData&, DoubleToContiguousMode);
     
 protected:
     Butterfly* m_butterfly;
 };
-
 
 // JSNonFinalObject is a type of JSObject that has some internal storage,
 // but also preserves some space in the collector cell for additional
@@ -1028,10 +998,22 @@ class JSFinalObject : public JSObject {
 public:
     typedef JSObject Base;
 
-    static JSFinalObject* create(ExecState*, Structure*);
-    static Structure* createStructure(JSGlobalData& globalData, JSGlobalObject* globalObject, JSValue prototype)
+    static const unsigned defaultSize = 64;
+    static inline unsigned defaultInlineCapacity()
     {
-        return Structure::create(globalData, globalObject, prototype, TypeInfo(FinalObjectType, StructureFlags), &s_info, NonArray, INLINE_STORAGE_CAPACITY);
+        return (defaultSize - allocationSize(0)) / sizeof(WriteBarrier<Unknown>);
+    }
+
+    static const unsigned maxSize = 512;
+    static inline unsigned maxInlineCapacity()
+    {
+        return (maxSize - allocationSize(0)) / sizeof(WriteBarrier<Unknown>);
+    }
+
+    static JSFinalObject* create(ExecState*, Structure*);
+    static Structure* createStructure(JSGlobalData& globalData, JSGlobalObject* globalObject, JSValue prototype, unsigned inlineCapacity)
+    {
+        return Structure::create(globalData, globalObject, prototype, TypeInfo(FinalObjectType, StructureFlags), &s_info, NonArray, inlineCapacity);
     }
 
     JS_EXPORT_PRIVATE static void visitChildren(JSCell*, SlotVisitor&);
@@ -1125,11 +1107,6 @@ inline void JSObject::setButterflyWithoutChangingStructure(Butterfly* butterfly)
     m_butterfly = butterfly;
 }
 
-inline JSObject* constructEmptyObject(ExecState* exec, Structure* structure)
-{
-    return JSFinalObject::create(exec, structure);
-}
-
 inline CallType getCallData(JSValue value, CallData& callData)
 {
     CallType result = value.isCell() ? value.asCell()->methodTable()->getCallData(value.asCell(), callData) : CallTypeNone;
@@ -1142,11 +1119,6 @@ inline ConstructType getConstructData(JSValue value, ConstructData& constructDat
     ConstructType result = value.isCell() ? value.asCell()->methodTable()->getConstructData(value.asCell(), constructData) : ConstructTypeNone;
     ASSERT(result == ConstructTypeNone || value.isValidCallee());
     return result;
-}
-
-inline Structure* createEmptyObjectStructure(JSGlobalData& globalData, JSGlobalObject* globalObject, JSValue prototype)
-{
-    return JSFinalObject::createStructure(globalData, globalObject, prototype);
 }
 
 inline JSObject* asObject(JSCell* cell)
@@ -1171,32 +1143,11 @@ inline JSValue JSObject::prototype() const
     return structure()->storedPrototype();
 }
 
-inline const MethodTable* JSCell::methodTable() const
-{
-    return &classInfo()->methodTable;
-}
-
-inline bool JSCell::inherits(const ClassInfo* info) const
-{
-    return classInfo()->isSubClassOf(info);
-}
-
-// this method is here to be after the inline declaration of JSCell::inherits
-inline bool JSValue::inherits(const ClassInfo* classInfo) const
-{
-    return isCell() && asCell()->inherits(classInfo);
-}
-
-inline JSObject* JSValue::toThisObject(ExecState* exec) const
-{
-    return isCell() ? asCell()->methodTable()->toThisObject(asCell(), exec) : toThisObjectSlowCase(exec);
-}
-
 ALWAYS_INLINE bool JSObject::inlineGetOwnPropertySlot(ExecState* exec, PropertyName propertyName, PropertySlot& slot)
 {
     PropertyOffset offset = structure()->get(exec->globalData(), propertyName);
     if (LIKELY(isValidOffset(offset))) {
-        JSValue value = getDirectOffset(offset);
+        JSValue value = getDirect(offset);
         if (structure()->hasGetterSetterProperties() && value.isGetterSetter())
             fillGetterPropertySlot(slot, offset);
         else
@@ -1213,29 +1164,6 @@ ALWAYS_INLINE bool JSObject::inlineGetOwnPropertySlot(ExecState* exec, PropertyN
 ALWAYS_INLINE bool JSObject::getOwnPropertySlot(JSCell* cell, ExecState* exec, PropertyName propertyName, PropertySlot& slot)
 {
     return jsCast<JSObject*>(cell)->inlineGetOwnPropertySlot(exec, propertyName, slot);
-}
-
-ALWAYS_INLINE bool JSCell::fastGetOwnPropertySlot(ExecState* exec, PropertyName propertyName, PropertySlot& slot)
-{
-    if (!structure()->typeInfo().overridesGetOwnPropertySlot())
-        return asObject(this)->inlineGetOwnPropertySlot(exec, propertyName, slot);
-    return methodTable()->getOwnPropertySlot(this, exec, propertyName, slot);
-}
-
-// Fast call to get a property where we may not yet have converted the string to an
-// identifier. The first time we perform a property access with a given string, try
-// performing the property map lookup without forming an identifier. We detect this
-// case by checking whether the hash has yet been set for this string.
-ALWAYS_INLINE JSValue JSCell::fastGetOwnProperty(ExecState* exec, const String& name)
-{
-    if (!structure()->typeInfo().overridesGetOwnPropertySlot() && !structure()->hasGetterSetterProperties()) {
-        PropertyOffset offset = name.impl()->hasHash()
-            ? structure()->get(exec->globalData(), Identifier(exec, name))
-            : structure()->get(exec->globalData(), name);
-        if (offset != invalidOffset)
-            return asObject(this)->locationForOffset(offset)->get();
-    }
-    return JSValue();
 }
 
 // It may seem crazy to inline a function this large but it makes a big difference
@@ -1304,7 +1232,7 @@ inline bool JSObject::putDirectInternal(JSGlobalData& globalData, PropertyName p
             if ((mode == PutModePut) && currentAttributes & ReadOnly)
                 return false;
 
-            putDirectOffset(globalData, offset, value);
+            putDirect(globalData, offset, value);
             // At this point, the objects structure only has a specific value set if previously there
             // had been one set, and if the new value being specified is the same (otherwise we would
             // have despecified, above).  So, if currentSpecificFunction is not set, or if the new
@@ -1327,7 +1255,7 @@ inline bool JSObject::putDirectInternal(JSGlobalData& globalData, PropertyName p
 
         validateOffset(offset);
         ASSERT(structure()->isValidOffset(offset));
-        putDirectOffset(globalData, offset, value);
+        putDirect(globalData, offset, value);
         // See comment on setNewProperty call below.
         if (!specificFunction)
             slot.setNewProperty(this, offset);
@@ -1346,7 +1274,7 @@ inline bool JSObject::putDirectInternal(JSGlobalData& globalData, PropertyName p
         validateOffset(offset);
         ASSERT(structure->isValidOffset(offset));
         setButterfly(globalData, newButterfly, structure);
-        putDirectOffset(globalData, offset, value);
+        putDirect(globalData, offset, value);
         // This is a new property; transitions with specific values are not currently cachable,
         // so leave the slot in an uncachable state.
         if (!specificFunction)
@@ -1373,7 +1301,7 @@ inline bool JSObject::putDirectInternal(JSGlobalData& globalData, PropertyName p
         if (currentSpecificFunction) {
             // case (1) Do the put, then return leaving the slot uncachable.
             if (specificFunction == currentSpecificFunction) {
-                putDirectOffset(globalData, offset, value);
+                putDirect(globalData, offset, value);
                 return true;
             }
             // case (2) Despecify, fall through to (3).
@@ -1382,7 +1310,7 @@ inline bool JSObject::putDirectInternal(JSGlobalData& globalData, PropertyName p
 
         // case (3) set the slot, do the put, return.
         slot.setExistingProperty(this, offset);
-        putDirectOffset(globalData, offset, value);
+        putDirect(globalData, offset, value);
         return true;
     }
 
@@ -1395,7 +1323,7 @@ inline bool JSObject::putDirectInternal(JSGlobalData& globalData, PropertyName p
     ASSERT(structure->isValidOffset(offset));
     setStructureAndReallocateStorageIfNecessary(globalData, structure);
 
-    putDirectOffset(globalData, offset, value);
+    putDirect(globalData, offset, value);
     // This is a new property; transitions with specific values are not currently cachable,
     // so leave the slot in an uncachable state.
     if (!specificFunction)
@@ -1455,80 +1383,12 @@ inline void JSObject::putDirectWithoutTransition(JSGlobalData& globalData, Prope
         newButterfly = growOutOfLineStorage(globalData, structure()->outOfLineCapacity(), structure()->suggestedNewOutOfLineStorageCapacity());
     PropertyOffset offset = structure()->addPropertyWithoutTransition(globalData, propertyName, attributes, getCallableObject(value));
     setButterfly(globalData, newButterfly, structure());
-    putDirectOffset(globalData, offset, value);
+    putDirect(globalData, offset, value);
 }
 
 inline JSValue JSObject::toPrimitive(ExecState* exec, PreferredPrimitiveType preferredType) const
 {
     return methodTable()->defaultValue(this, exec, preferredType);
-}
-
-inline JSValue JSValue::get(ExecState* exec, PropertyName propertyName) const
-{
-    PropertySlot slot(asValue());
-    return get(exec, propertyName, slot);
-}
-
-inline JSValue JSValue::get(ExecState* exec, PropertyName propertyName, PropertySlot& slot) const
-{
-    if (UNLIKELY(!isCell())) {
-        JSObject* prototype = synthesizePrototype(exec);
-        if (!prototype->getPropertySlot(exec, propertyName, slot))
-            return jsUndefined();
-        return slot.getValue(exec, propertyName);
-    }
-    JSCell* cell = asCell();
-    while (true) {
-        if (cell->fastGetOwnPropertySlot(exec, propertyName, slot))
-            return slot.getValue(exec, propertyName);
-        JSValue prototype = asObject(cell)->prototype();
-        if (!prototype.isObject())
-            return jsUndefined();
-        cell = asObject(prototype);
-    }
-}
-
-inline JSValue JSValue::get(ExecState* exec, unsigned propertyName) const
-{
-    PropertySlot slot(asValue());
-    return get(exec, propertyName, slot);
-}
-
-inline JSValue JSValue::get(ExecState* exec, unsigned propertyName, PropertySlot& slot) const
-{
-    if (UNLIKELY(!isCell())) {
-        JSObject* prototype = synthesizePrototype(exec);
-        if (!prototype->getPropertySlot(exec, propertyName, slot))
-            return jsUndefined();
-        return slot.getValue(exec, propertyName);
-    }
-    JSCell* cell = const_cast<JSCell*>(asCell());
-    while (true) {
-        if (cell->methodTable()->getOwnPropertySlotByIndex(cell, exec, propertyName, slot))
-            return slot.getValue(exec, propertyName);
-        JSValue prototype = asObject(cell)->prototype();
-        if (!prototype.isObject())
-            return jsUndefined();
-        cell = prototype.asCell();
-    }
-}
-
-inline void JSValue::put(ExecState* exec, PropertyName propertyName, JSValue value, PutPropertySlot& slot)
-{
-    if (UNLIKELY(!isCell())) {
-        putToPrimitive(exec, propertyName, value, slot);
-        return;
-    }
-    asCell()->methodTable()->put(asCell(), exec, propertyName, value, slot);
-}
-
-inline void JSValue::putByIndex(ExecState* exec, unsigned propertyName, JSValue value, bool shouldThrow)
-{
-    if (UNLIKELY(!isCell())) {
-        putToPrimitiveByIndex(exec, propertyName, value, shouldThrow);
-        return;
-    }
-    asCell()->methodTable()->putByIndex(asCell(), exec, propertyName, value, shouldThrow);
 }
 
 ALWAYS_INLINE JSObject* Register::function() const
@@ -1550,7 +1410,7 @@ inline size_t offsetInButterfly(PropertyOffset offset)
     return offsetInOutOfLineStorage(offset) + Butterfly::indexOfPropertyStorage();
 }
 
-// This is a helper for patching code where you want to emit a load or store and
+// Helpers for patching code where you want to emit a load or store and
 // the base is:
 // For inline offsets: a pointer to the out-of-line storage pointer.
 // For out-of-line offsets: the base of the out-of-line storage.
@@ -1559,6 +1419,17 @@ inline size_t offsetRelativeToPatchedStorage(PropertyOffset offset)
     if (isOutOfLineOffset(offset))
         return sizeof(EncodedJSValue) * offsetInButterfly(offset);
     return JSObject::offsetOfInlineStorage() - JSObject::butterflyOffset() + sizeof(EncodedJSValue) * offsetInInlineStorage(offset);
+}
+
+// Returns the maximum offset a load instruction will encode.
+inline size_t maxOffsetRelativeToPatchedStorage(PropertyOffset offset)
+{
+#if USE(JSVALUE32_64)
+    return offsetRelativeToPatchedStorage(offset)
+        + OBJECT_OFFSETOF(EncodedValueDescriptor, asBits.tag);
+#else
+    return offsetRelativeToPatchedStorage(offset);
+#endif
 }
 
 inline int indexRelativeToBase(PropertyOffset offset)

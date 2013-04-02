@@ -48,30 +48,21 @@ class PeerConnectionProxy : public PeerConnectionInterface,
   virtual bool AddStream(MediaStreamInterface* local_stream,
                          const MediaConstraintsInterface* constraints);
   virtual void RemoveStream(MediaStreamInterface* local_stream);
+  virtual talk_base::scoped_refptr<DtmfSenderInterface> CreateDtmfSender(
+      AudioTrackInterface* track);
   virtual bool GetStats(StatsObserver* observer,
                         webrtc::MediaStreamTrackInterface* track);
-  virtual bool CanSendDtmf(const AudioTrackInterface* track);
-  virtual bool SendDtmf(const AudioTrackInterface* send_track,
-                        const std::string& tones, int duration,
-                        const AudioTrackInterface* play_track);
   virtual talk_base::scoped_refptr<DataChannelInterface> CreateDataChannel(
       const std::string& label,
       const DataChannelInit* config);
 
-  virtual ReadyState ready_state();
+  // TODO(perkj): Remove ready_state when callers removed. It is deprecated.
+  virtual ReadyState ready_state() { return signaling_state(); }
+  virtual SignalingState signaling_state();
+  // TODO(bemasc): Remove ice_state when callers are removed. It is deprecated.
   virtual IceState ice_state();
-
-  // TODO: Remove deprecated Jsep functions.
-  virtual SessionDescriptionInterface* CreateOffer(const MediaHints& hints);
-  virtual SessionDescriptionInterface* CreateAnswer(
-      const MediaHints& hints,
-      const SessionDescriptionInterface* offer);
-  virtual bool StartIce(IceOptions options);
-  virtual bool SetLocalDescription(Action action,
-                                   SessionDescriptionInterface* desc);
-  virtual bool SetRemoteDescription(Action action,
-                                    SessionDescriptionInterface* desc);
-  virtual bool ProcessIceMessage(const IceCandidateInterface* ice_candidate);
+  virtual IceConnectionState ice_connection_state();
+  virtual IceGatheringState ice_gathering_state();
 
   virtual const SessionDescriptionInterface* local_description() const;
   virtual const SessionDescriptionInterface* remote_description() const;

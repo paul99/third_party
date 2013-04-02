@@ -23,6 +23,7 @@
 #include "GrSoftwarePathRenderer.h"
 #include "GrStencilBuffer.h"
 #include "GrTextStrike.h"
+#include "SkRTConf.h"
 #include "SkStrokeRec.h"
 #include "SkTLazy.h"
 #include "SkTLS.h"
@@ -31,10 +32,12 @@
 SK_DEFINE_INST_COUNT(GrContext)
 SK_DEFINE_INST_COUNT(GrDrawState)
 
-// It can be useful to set this to kNo_BufferedDraw to test whether a bug is caused by using the
+// It can be useful to set this to false to test whether a bug is caused by using the
 // InOrderDrawBuffer, to compare performance of using/not using InOrderDrawBuffer, or to make
-// debugging easier.
-#define DEFAULT_BUFFERING (GR_DISABLE_DRAW_BUFFERING ? kNo_BufferedDraw : kYes_BufferedDraw)
+// debugging simpler.
+SK_CONF_DECLARE(bool, c_Defer, "gpu.deferContext", true, "Defers rendering in GrContext via GrInOrderDrawBuffer.");
+
+#define BUFFERED_DRAW (c_Defer ? kYes_BufferedDraw : kNo_BufferedDraw)
 
 #define MAX_BLUR_SIGMA 4.0f
 
@@ -310,7 +313,8 @@ GrTexture* GrContext::createResizedTexture(const GrTextureDesc& desc,
         drawState->createTextureEffect(0, clampedTexture, SkMatrix::I(), params);
 
         static const GrVertexLayout layout = GrDrawState::StageTexCoordVertexLayoutBit(0,0);
-        GrDrawTarget::AutoReleaseGeometry arg(fGpu, layout, 4, 0);
+        drawState->setVertexLayout(layout);
+        GrDrawTarget::AutoReleaseGeometry arg(fGpu, 4, 0);
 
         if (arg.succeeded()) {
             GrPoint* verts = (GrPoint*) arg.vertices();
@@ -349,10 +353,6 @@ GrTexture* GrContext::createTexture(const GrTextureParams* params,
                                     void* srcData,
                                     size_t rowBytes) {
     SK_TRACE_EVENT0("GrContext::createTexture");
-
-#if GR_DUMP_TEXTURE_UPLOAD
-    GrPrintf("GrContext::createTexture[%d %d]\n", desc.fWidth, desc.fHeight);
-#endif
 
     GrResourceKey resourceKey = GrTexture::ComputeKey(fGpu, params, desc, cacheID);
 
@@ -555,7 +555,7 @@ void GrContext::setClip(const GrClipData* clipData) {
 void GrContext::clear(const GrIRect* rect,
                       const GrColor color,
                       GrRenderTarget* target) {
-    this->prepareToDraw(NULL, DEFAULT_BUFFERING)->clear(rect, color, target);
+    this->prepareToDraw(NULL, BUFFERED_DRAW)->clear(rect, color, target);
 }
 
 void GrContext::drawPaint(const GrPaint& origPaint) {
@@ -697,7 +697,7 @@ void GrContext::drawRect(const GrPaint& paint,
                          const SkMatrix* matrix) {
     SK_TRACE_EVENT0("GrContext::drawRect");
 
-    GrDrawTarget* target = this->prepareToDraw(&paint, DEFAULT_BUFFERING);
+    GrDrawTarget* target = this->prepareToDraw(&paint, BUFFERED_DRAW);
     GrDrawState::AutoStageDisable atr(fDrawState);
 
     GrRect devRect = rect;
@@ -738,7 +738,8 @@ void GrContext::drawRect(const GrPaint& paint,
         // unitSquareVertexBuffer()
 
         static const int worstCaseVertCount = 10;
-        GrDrawTarget::AutoReleaseGeometry geo(target, 0, worstCaseVertCount, 0);
+        target->drawState()->setVertexLayout(GrDrawState::kDefault_VertexLayout);
+        GrDrawTarget::AutoReleaseGeometry geo(target, worstCaseVertCount, 0);
 
         if (!geo.succeeded()) {
             GrPrintf("Failed to get space for vertices!\n");
@@ -778,8 +779,10 @@ void GrContext::drawRect(const GrPaint& paint,
                 GrPrintf("Failed to create static rect vb.\n");
                 return;
             }
-            target->setVertexSourceToBuffer(0, sqVB);
+
             GrDrawState* drawState = target->drawState();
+            drawState->setVertexLayout(GrDrawState::kDefault_VertexLayout);
+            target->setVertexSourceToBuffer(sqVB);
             SkMatrix m;
             m.setAll(rect.width(),    0,             rect.fLeft,
                         0,            rect.height(), rect.fTop,
@@ -810,7 +813,7 @@ void GrContext::drawRectToRect(const GrPaint& paint,
         return;
     }
 
-    GrDrawTarget* target = this->prepareToDraw(&paint, DEFAULT_BUFFERING);
+    GrDrawTarget* target = this->prepareToDraw(&paint, BUFFERED_DRAW);
 
 #if GR_STATIC_RECT_VB
     GrDrawState::AutoStageDisable atr(fDrawState);
@@ -844,7 +847,8 @@ void GrContext::drawRectToRect(const GrPaint& paint,
         GrPrintf("Failed to create static rect vb.\n");
         return;
     }
-    target->setVertexSourceToBuffer(0, sqVB);
+    drawState->setVertexLayout(GrDrawState::kDefault_VertexLayout);
+    target->setVertexSourceToBuffer(sqVB);
     target->drawNonIndexed(kTriangleFan_GrPrimitiveType, 0, 4);
 #else
     GrDrawState::AutoStageDisable atr(fDrawState);
@@ -870,7 +874,7 @@ void GrContext::drawVertices(const GrPaint& paint,
 
     GrDrawTarget::AutoReleaseGeometry geo;
 
-    GrDrawTarget* target = this->prepareToDraw(&paint, DEFAULT_BUFFERING);
+    GrDrawTarget* target = this->prepareToDraw(&paint, BUFFERED_DRAW);
     GrDrawState::AutoStageDisable atr(fDrawState);
 
     GrVertexLayout layout = 0;
@@ -880,10 +884,11 @@ void GrContext::drawVertices(const GrPaint& paint,
     if (NULL != colors) {
         layout |= GrDrawState::kColor_VertexLayoutBit;
     }
-    int vertexSize = GrDrawState::VertexSize(layout);
+    target->drawState()->setVertexLayout(layout);
 
+    int vertexSize = target->getDrawState().getVertexSize();
     if (sizeof(GrPoint) != vertexSize) {
-        if (!geo.set(target, layout, vertexCount, 0)) {
+        if (!geo.set(target, vertexCount, 0)) {
             GrPrintf("Failed to get space for vertices!\n");
             return;
         }
@@ -908,7 +913,7 @@ void GrContext::drawVertices(const GrPaint& paint,
             curVertex = (void*)((intptr_t)curVertex + vertexSize);
         }
     } else {
-        target->setVertexSourceToArray(layout, positions, vertexCount);
+        target->setVertexSourceToArray(positions, vertexCount);
     }
 
     // we don't currently apply offscreen AA to this path. Need improved
@@ -989,7 +994,7 @@ void GrContext::internalDrawOval(const GrPaint& paint,
     }
 #endif
 
-    GrDrawTarget* target = this->prepareToDraw(&paint, DEFAULT_BUFFERING);
+    GrDrawTarget* target = this->prepareToDraw(&paint, BUFFERED_DRAW);
 
     GrDrawState* drawState = target->drawState();
     GrDrawState::AutoStageDisable atr(fDrawState);
@@ -1006,9 +1011,10 @@ void GrContext::internalDrawOval(const GrPaint& paint,
     }
 
     GrVertexLayout layout = GrDrawState::kEdge_VertexLayoutBit;
-    GrAssert(sizeof(CircleVertex) == GrDrawState::VertexSize(layout));
+    drawState->setVertexLayout(layout);
+    GrAssert(sizeof(CircleVertex) == drawState->getVertexSize());
 
-    GrDrawTarget::AutoReleaseGeometry geo(target, layout, 4, 0);
+    GrDrawTarget::AutoReleaseGeometry geo(target, 4, 0);
     if (!geo.succeeded()) {
         GrPrintf("Failed to get space for vertices!\n");
         return;
@@ -1133,7 +1139,7 @@ void GrContext::internalDrawPath(const GrPaint& paint, const SkPath& path, const
     // cache. This presents a potential hazard for buffered drawing. However,
     // the writePixels that uploads to the scratch will perform a flush so we're
     // OK.
-    GrDrawTarget* target = this->prepareToDraw(&paint, DEFAULT_BUFFERING);
+    GrDrawTarget* target = this->prepareToDraw(&paint, BUFFERED_DRAW);
     GrDrawState::AutoStageDisable atr(fDrawState);
 
     bool prAA = paint.isAntiAlias() && !this->getRenderTarget()->isMultisampled();
@@ -1210,23 +1216,29 @@ void GrContext::flushDrawBuffer() {
     }
 }
 
-void GrContext::writeTexturePixels(GrTexture* texture,
+bool GrContext::writeTexturePixels(GrTexture* texture,
                                    int left, int top, int width, int height,
                                    GrPixelConfig config, const void* buffer, size_t rowBytes,
                                    uint32_t flags) {
     SK_TRACE_EVENT0("GrContext::writeTexturePixels");
     ASSERT_OWNED_RESOURCE(texture);
 
-    // TODO: use scratch texture to perform conversion
-    if (kUnpremul_PixelOpsFlag & flags) {
-        return;
+    if ((kUnpremul_PixelOpsFlag & flags) || !fGpu->canWriteTexturePixels(texture, config)) {
+        if (NULL != texture->asRenderTarget()) {
+            return this->writeRenderTargetPixels(texture->asRenderTarget(),
+                                                 left, top, width, height,
+                                                 config, buffer, rowBytes, flags);
+        } else {
+            return false;
+        }
     }
+
     if (!(kDontFlush_PixelOpsFlag & flags)) {
         this->flush();
     }
 
-    fGpu->writeTexturePixels(texture, left, top, width, height,
-                             config, buffer, rowBytes);
+    return fGpu->writeTexturePixels(texture, left, top, width, height,
+                                    config, buffer, rowBytes);
 }
 
 bool GrContext::readTexturePixels(GrTexture* texture,
@@ -1301,7 +1313,7 @@ SkCanvas::Config8888 swap_config8888_red_and_blue(SkCanvas::Config8888 config888
 
 bool GrContext::readRenderTargetPixels(GrRenderTarget* target,
                                        int left, int top, int width, int height,
-                                       GrPixelConfig config, void* buffer, size_t rowBytes,
+                                       GrPixelConfig dstConfig, void* buffer, size_t rowBytes,
                                        uint32_t flags) {
     SK_TRACE_EVENT0("GrContext::readRenderTargetPixels");
     ASSERT_OWNED_RESOURCE(target);
@@ -1322,27 +1334,25 @@ bool GrContext::readRenderTargetPixels(GrRenderTarget* target,
     // If fGpu->readPixels would incur a y-flip cost then we will read the pixels upside down. We'll
     // either do the flipY by drawing into a scratch with a matrix or on the cpu after the read.
     bool flipY = fGpu->readPixelsWillPayForYFlip(target, left, top,
-                                                 width, height, config,
+                                                 width, height, dstConfig,
                                                  rowBytes);
-    bool swapRAndB = fGpu->preferredReadPixelsConfig(config) == GrPixelConfigSwapRAndB(config);
+    // We ignore the preferred config if it is different than our config unless it is an R/B swap.
+    // In that case we'll perform an R and B swap while drawing to a scratch texture of the swapped
+    // config. Then we will call readPixels on the scratch with the swapped config. The swaps during
+    // the draw cancels out the fact that we call readPixels with a config that is R/B swapped from
+    // dstConfig.
+    GrPixelConfig readConfig = dstConfig;
+    bool swapRAndB = false;
+    if (GrPixelConfigSwapRAndB(dstConfig) == fGpu->preferredReadPixelsConfig(dstConfig)) {
+        readConfig = GrPixelConfigSwapRAndB(readConfig);
+        swapRAndB = true;
+    }
 
     bool unpremul = SkToBool(kUnpremul_PixelOpsFlag & flags);
 
-    // flipY will get set to false when it is handled below using a scratch. However, in that case
-    // we still want to do the read upside down.
-    bool readUpsideDown = flipY;
-
-    if (unpremul && kRGBA_8888_GrPixelConfig != config && kBGRA_8888_GrPixelConfig != config) {
+    if (unpremul && !GrPixelConfigIs8888(dstConfig)) {
         // The unpremul flag is only allowed for these two configs.
         return false;
-    }
-
-    GrPixelConfig readConfig;
-    if (swapRAndB) {
-        readConfig = GrPixelConfigSwapRAndB(config);
-        GrAssert(kUnknown_GrPixelConfig != config);
-    } else {
-        readConfig = config;
     }
 
     // If the src is a texture and we would have to do conversions after read pixels, we instead
@@ -1359,8 +1369,9 @@ bool GrContext::readRenderTargetPixels(GrRenderTarget* target,
         desc.fWidth = width;
         desc.fHeight = height;
         desc.fConfig = readConfig;
+        desc.fOrigin = kTopLeft_GrSurfaceOrigin;
 
-        // When a full readback is faster than a partial we could always make the scratch exactly
+        // When a full read back is faster than a partial we could always make the scratch exactly
         // match the passed rect. However, if we see many different size rectangles we will trash
         // our texture cache and pay the cost of creating and destroying many textures. So, we only
         // request an exact match when the caller is reading an entire RT.
@@ -1377,20 +1388,14 @@ bool GrContext::readRenderTargetPixels(GrRenderTarget* target,
         if (texture) {
             // compute a matrix to perform the draw
             SkMatrix textureMatrix;
-            if (flipY) {
-                textureMatrix.setTranslate(SK_Scalar1 * left,
-                                    SK_Scalar1 * (top + height));
-                textureMatrix.set(SkMatrix::kMScaleY, -SK_Scalar1);
-            } else {
-                textureMatrix.setTranslate(SK_Scalar1 *left, SK_Scalar1 *top);
-            }
+            textureMatrix.setTranslate(SK_Scalar1 *left, SK_Scalar1 *top);
             textureMatrix.postIDiv(src->width(), src->height());
 
             SkAutoTUnref<const GrEffectRef> effect;
             if (unpremul) {
                 effect.reset(this->createPMToUPMEffect(src, swapRAndB, textureMatrix));
                 if (NULL != effect) {
-                    unpremul = false; // we no longer need to do this on CPU after the readback.
+                    unpremul = false; // we no longer need to do this on CPU after the read back.
                 }
             }
             // If we failed to create a PM->UPM effect and have no other conversions to perform then
@@ -1404,7 +1409,6 @@ bool GrContext::readRenderTargetPixels(GrRenderTarget* target,
                                                     textureMatrix));
                 }
                 swapRAndB = false; // we will handle the swap in the draw.
-                flipY = false; // we already incorporated the y flip in the matrix
 
                 GrDrawTarget::AutoStateRestore asr(fGpu, GrDrawTarget::kReset_ASRInit);
                 GrDrawState* drawState = fGpu->drawState();
@@ -1423,63 +1427,27 @@ bool GrContext::readRenderTargetPixels(GrRenderTarget* target,
     }
     if (!fGpu->readPixels(target,
                           left, top, width, height,
-                          readConfig, buffer, rowBytes, readUpsideDown)) {
+                          readConfig, buffer, rowBytes)) {
         return false;
     }
     // Perform any conversions we weren't able to perform using a scratch texture.
-    if (unpremul || swapRAndB || flipY) {
+    if (unpremul || swapRAndB) {
         // These are initialized to suppress a warning
         SkCanvas::Config8888 srcC8888 = SkCanvas::kNative_Premul_Config8888;
         SkCanvas::Config8888 dstC8888 = SkCanvas::kNative_Premul_Config8888;
 
-        bool c8888IsValid = grconfig_to_config8888(config, false, &srcC8888);
-        grconfig_to_config8888(config, unpremul, &dstC8888);
+        SkDEBUGCODE(bool c8888IsValid =) grconfig_to_config8888(dstConfig, false, &srcC8888);
+        grconfig_to_config8888(dstConfig, unpremul, &dstC8888);
 
         if (swapRAndB) {
             GrAssert(c8888IsValid); // we should only do r/b swap on 8888 configs
             srcC8888 = swap_config8888_red_and_blue(srcC8888);
         }
-        if (flipY) {
-            size_t tightRB = width * GrBytesPerPixel(config);
-            if (0 == rowBytes) {
-                rowBytes = tightRB;
-            }
-            SkAutoSTMalloc<256, uint8_t> tempRow(tightRB);
-            intptr_t top = reinterpret_cast<intptr_t>(buffer);
-            intptr_t bot = top + (height - 1) * rowBytes;
-            while (top < bot) {
-                uint32_t* t = reinterpret_cast<uint32_t*>(top);
-                uint32_t* b = reinterpret_cast<uint32_t*>(bot);
-                uint32_t* temp = reinterpret_cast<uint32_t*>(tempRow.get());
-                memcpy(temp, t, tightRB);
-                if (c8888IsValid) {
-                    SkConvertConfig8888Pixels(t, tightRB, dstC8888,
-                                              b, tightRB, srcC8888,
-                                              width, 1);
-                    SkConvertConfig8888Pixels(b, tightRB, dstC8888,
-                                              temp, tightRB, srcC8888,
-                                              width, 1);
-                } else {
-                    memcpy(t, b, tightRB);
-                    memcpy(b, temp, tightRB);
-                }
-                top += rowBytes;
-                bot -= rowBytes;
-            }
-            // The above loop does nothing on the middle row when height is odd.
-            if (top == bot && c8888IsValid && dstC8888 != srcC8888) {
-                uint32_t* mid = reinterpret_cast<uint32_t*>(top);
-                SkConvertConfig8888Pixels(mid, tightRB, dstC8888, mid, tightRB, srcC8888, width, 1);
-            }
-        } else {
-            // if we aren't flipping Y then we have no reason to be here other than doing
-            // conversions for 8888 (r/b swap or upm).
-            GrAssert(c8888IsValid);
-            uint32_t* b32 = reinterpret_cast<uint32_t*>(buffer);
-            SkConvertConfig8888Pixels(b32, rowBytes, dstC8888,
-                                      b32, rowBytes, srcC8888,
-                                      width, height);
-        }
+        GrAssert(c8888IsValid);
+        uint32_t* b32 = reinterpret_cast<uint32_t*>(buffer);
+        SkConvertConfig8888Pixels(b32, rowBytes, dstC8888,
+                                  b32, rowBytes, srcC8888,
+                                  width, height);
     }
     return true;
 }
@@ -1525,9 +1493,9 @@ void GrContext::copyTexture(GrTexture* src, GrRenderTarget* dst, const SkIPoint*
     fGpu->drawSimpleRect(dstR, NULL);
 }
 
-void GrContext::writeRenderTargetPixels(GrRenderTarget* target,
+bool GrContext::writeRenderTargetPixels(GrRenderTarget* target,
                                         int left, int top, int width, int height,
-                                        GrPixelConfig config,
+                                        GrPixelConfig srcConfig,
                                         const void* buffer,
                                         size_t rowBytes,
                                         uint32_t flags) {
@@ -1537,7 +1505,7 @@ void GrContext::writeRenderTargetPixels(GrRenderTarget* target,
     if (NULL == target) {
         target = fDrawState->getRenderTarget();
         if (NULL == target) {
-            return;
+            return false;
         }
     }
 
@@ -1556,31 +1524,33 @@ void GrContext::writeRenderTargetPixels(GrRenderTarget* target,
     // At least some drivers on the Mac get confused when glTexImage2D is called on a texture
     // attached to an FBO. The FBO still sees the old image. TODO: determine what OS versions and/or
     // HW is affected.
-    if (NULL != target->asTexture() && !(kUnpremul_PixelOpsFlag & flags)) {
-        this->writeTexturePixels(target->asTexture(),
-                                 left, top, width, height,
-                                 config, buffer, rowBytes, flags);
-        return;
+    if (NULL != target->asTexture() && !(kUnpremul_PixelOpsFlag & flags) &&
+        fGpu->canWriteTexturePixels(target->asTexture(), srcConfig)) {
+        return this->writeTexturePixels(target->asTexture(),
+                                        left, top, width, height,
+                                        srcConfig, buffer, rowBytes, flags);
     }
 #endif
 
-    bool swapRAndB = (fGpu->preferredReadPixelsConfig(config) == GrPixelConfigSwapRAndB(config));
-
-    GrPixelConfig textureConfig;
-    if (swapRAndB) {
-        textureConfig = GrPixelConfigSwapRAndB(config);
-    } else {
-        textureConfig = config;
+    // We ignore the preferred config unless it is a R/B swap of the src config. In that case
+    // we will upload the original src data to a scratch texture but we will spoof it as the swapped
+    // config. This scratch will then have R and B swapped. We correct for this by swapping again
+    // when drawing the scratch to the dst using a conversion effect.
+    bool swapRAndB = false;
+    GrPixelConfig writeConfig = srcConfig;
+    if (fGpu->preferredWritePixelsConfig(srcConfig) == GrPixelConfigSwapRAndB(srcConfig)) {
+        writeConfig = GrPixelConfigSwapRAndB(srcConfig);
+        swapRAndB = true;
     }
 
     GrTextureDesc desc;
     desc.fWidth = width;
     desc.fHeight = height;
-    desc.fConfig = textureConfig;
+    desc.fConfig = writeConfig;
     GrAutoScratchTexture ast(this, desc);
     GrTexture* texture = ast.texture();
     if (NULL == texture) {
-        return;
+        return false;
     }
 
     SkAutoTUnref<const GrEffectRef> effect;
@@ -1591,17 +1561,18 @@ void GrContext::writeRenderTargetPixels(GrRenderTarget* target,
     SkAutoSTMalloc<128 * 128, uint32_t> tmpPixels(0);
 
     if (kUnpremul_PixelOpsFlag & flags) {
-        if (kRGBA_8888_GrPixelConfig != config && kBGRA_8888_GrPixelConfig != config) {
-            return;
+        if (!GrPixelConfigIs8888(srcConfig)) {
+            return false;
         }
         effect.reset(this->createUPMToPMEffect(texture, swapRAndB, textureMatrix));
+        // handle the unpremul step on the CPU if we couldn't create an effect to do it.
         if (NULL == effect) {
             SkCanvas::Config8888 srcConfig8888, dstConfig8888;
             GR_DEBUGCODE(bool success = )
-            grconfig_to_config8888(config, true, &srcConfig8888);
+            grconfig_to_config8888(srcConfig, true, &srcConfig8888);
             GrAssert(success);
             GR_DEBUGCODE(success = )
-            grconfig_to_config8888(config, false, &dstConfig8888);
+            grconfig_to_config8888(srcConfig, false, &dstConfig8888);
             GrAssert(success);
             const uint32_t* src = reinterpret_cast<const uint32_t*>(buffer);
             tmpPixels.reset(width * height);
@@ -1619,10 +1590,12 @@ void GrContext::writeRenderTargetPixels(GrRenderTarget* target,
                                                       textureMatrix));
     }
 
-    this->writeTexturePixels(texture,
-                             0, 0, width, height,
-                             textureConfig, buffer, rowBytes,
-                             flags & ~kUnpremul_PixelOpsFlag);
+    if (!this->writeTexturePixels(texture,
+                                  0, 0, width, height,
+                                  writeConfig, buffer, rowBytes,
+                                  flags & ~kUnpremul_PixelOpsFlag)) {
+        return false;
+    }
 
     GrDrawTarget::AutoStateRestore  asr(fGpu, GrDrawTarget::kReset_ASRInit);
     GrDrawState* drawState = fGpu->drawState();
@@ -1635,6 +1608,7 @@ void GrContext::writeRenderTargetPixels(GrRenderTarget* target,
     drawState->setRenderTarget(target);
 
     fGpu->drawSimpleRect(GrRect::MakeWH(SkIntToScalar(width), SkIntToScalar(height)), NULL);
+    return true;
 }
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -1798,7 +1772,7 @@ void GrContext::setupDrawBuffer() {
 }
 
 GrDrawTarget* GrContext::getTextTarget(const GrPaint& paint) {
-    return prepareToDraw(&paint, DEFAULT_BUFFERING);
+    return this->prepareToDraw(&paint, BUFFERED_DRAW);
 }
 
 const GrIndexBuffer* GrContext::getQuadIndexBuffer() const {
@@ -1922,7 +1896,7 @@ GrTexture* GrContext::gaussianBlur(GrTexture* srcTexture,
         }
 
         this->setRenderTarget(dstTexture->asRenderTarget());
-        GrDrawTarget* target = this->prepareToDraw(NULL, DEFAULT_BUFFERING);
+        GrDrawTarget* target = this->prepareToDraw(NULL, BUFFERED_DRAW);
         convolve_gaussian(target, srcTexture, srcRect, sigmaX, radiusX,
                           Gr1DKernelEffect::kX_Direction);
         srcTexture = dstTexture;
@@ -1939,7 +1913,7 @@ GrTexture* GrContext::gaussianBlur(GrTexture* srcTexture,
         }
 
         this->setRenderTarget(dstTexture->asRenderTarget());
-        GrDrawTarget* target = this->prepareToDraw(NULL, DEFAULT_BUFFERING);
+        GrDrawTarget* target = this->prepareToDraw(NULL, BUFFERED_DRAW);
         convolve_gaussian(target, srcTexture, srcRect, sigmaY, radiusY,
                           Gr1DKernelEffect::kY_Direction);
         srcTexture = dstTexture;

@@ -28,6 +28,7 @@
 
 #include "CopiedSpaceInlines.h"
 #include "GCActivityCallback.h"
+#include "Operations.h"
 #include "Options.h"
 
 namespace JSC {
@@ -81,7 +82,7 @@ CheckedBoolean CopiedSpace::tryAllocateOversize(size_t bytes, void** outPtr)
 {
     ASSERT(isOversize(bytes));
     
-    CopiedBlock* block = CopiedBlock::create(m_heap->blockAllocator().allocateCustomSize(sizeof(CopiedBlock) + bytes, WTF::pageSize()));
+    CopiedBlock* block = CopiedBlock::create(m_heap->blockAllocator().allocateCustomSize(sizeof(CopiedBlock) + bytes, CopiedBlock::blockSize));
     m_oversizeBlocks.push(block);
     m_blockFilter.add(reinterpret_cast<Bits>(block));
     m_blockSet.add(block);
@@ -104,7 +105,7 @@ CheckedBoolean CopiedSpace::tryReallocate(void** ptr, size_t oldSize, size_t new
     void* oldPtr = *ptr;
     ASSERT(!m_heap->globalData()->isInitializingObject());
     
-    if (isOversize(oldSize) || isOversize(newSize))
+    if (CopiedSpace::blockFor(oldPtr)->isOversize() || isOversize(newSize))
         return tryReallocateOversize(ptr, oldSize, newSize);
     
     if (m_allocator.tryReallocate(oldPtr, oldSize, newSize))
@@ -135,8 +136,8 @@ CheckedBoolean CopiedSpace::tryReallocateOversize(void** ptr, size_t oldSize, si
 
     memcpy(newPtr, oldPtr, oldSize);
 
-    if (isOversize(oldSize)) {
-        CopiedBlock* oldBlock = oversizeBlockFor(oldPtr);
+    CopiedBlock* oldBlock = CopiedSpace::blockFor(oldPtr);
+    if (oldBlock->isOversize()) {
         m_oversizeBlocks.remove(oldBlock);
         m_blockSet.remove(oldBlock);
         m_heap->blockAllocator().deallocateCustomSize(CopiedBlock::destroy(oldBlock));

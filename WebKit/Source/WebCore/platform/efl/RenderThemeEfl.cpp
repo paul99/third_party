@@ -29,6 +29,7 @@
 
 #include "CSSValueKeywords.h"
 #include "CairoUtilitiesEfl.h"
+#include "ExceptionCodePlaceholder.h"
 #include "FontDescription.h"
 #include "GraphicsContext.h"
 #include "HTMLInputElement.h"
@@ -757,6 +758,7 @@ bool RenderThemeEfl::supportsDataListUI(const AtomicString& type) const
     // FIXME: We need to support other types.
     return type == InputTypeNames::range();
 #else
+    UNUSED_PARAM(type);
     return false;
 #endif
 }
@@ -1177,9 +1179,8 @@ bool RenderThemeEfl::paintMediaSliderTrack(RenderObject* object, const PaintInfo
     context->setStrokeStyle(NoStroke);
 
     for (unsigned index = 0; index < timeRanges->length(); ++index) {
-        ExceptionCode ignoredException;
-        float start = timeRanges->start(index, ignoredException);
-        float end = timeRanges->end(index, ignoredException);
+        float start = timeRanges->start(index, IGNORE_EXCEPTION);
+        float end = timeRanges->end(index, IGNORE_EXCEPTION);
         int width = ((end - start) * totalWidth) / mediaDuration;
         IntRect rangeRect;
         if (!index) {

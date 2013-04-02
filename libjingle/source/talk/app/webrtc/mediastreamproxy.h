@@ -52,11 +52,6 @@ class MediaStreamProxy : public LocalMediaStreamInterface,
       talk_base::Thread* signaling_thread,
       LocalMediaStreamInterface* media_stream_impl);
 
-  // Implement LocalStream.
-  virtual bool AddTrack(AudioTrackInterface* track);
-  virtual bool AddTrack(VideoTrackInterface* track);
-
-  // Implement MediaStream.
   virtual std::string label() const;
   virtual AudioTracks* audio_tracks() {
     return audio_tracks_;
@@ -64,8 +59,18 @@ class MediaStreamProxy : public LocalMediaStreamInterface,
   virtual VideoTracks* video_tracks() {
     return video_tracks_;
   }
-  virtual ReadyState ready_state() const;
-  virtual void set_ready_state(ReadyState new_state);
+
+  virtual AudioTrackVector GetAudioTracks();
+  virtual VideoTrackVector GetVideoTracks();
+  virtual talk_base::scoped_refptr<AudioTrackInterface>
+      FindAudioTrack(const std::string& track_id);
+  virtual talk_base::scoped_refptr<VideoTrackInterface>
+      FindVideoTrack(const std::string& track_id);
+
+  virtual bool AddTrack(AudioTrackInterface* track);
+  virtual bool AddTrack(VideoTrackInterface* track);
+  virtual bool RemoveTrack(AudioTrackInterface* track);
+  virtual bool RemoveTrack(VideoTrackInterface* track);
 
   // Implement Notifier
   virtual void RegisterObserver(ObserverInterface* observer);
@@ -85,6 +90,7 @@ class MediaStreamProxy : public LocalMediaStreamInterface,
     void SetImplementation(MediaStreamTrackListInterface<T>* track_list);
     virtual size_t count() const;
     virtual T* at(size_t index);
+    virtual T* Find(const std::string& id);
 
    private:
     void Send(uint32 id, talk_base::MessageData* data) const;

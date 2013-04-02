@@ -49,6 +49,8 @@
 #include "JSDOMBinding.h"
 #include "JSDOMWindow.h"
 #include "JSLock.h"
+#include "NetworkStorageSession.h"
+#include "Operations.h"
 #include "PageClientEfl.h"
 #include "PageGroup.h"
 #include "PlatformMouseEvent.h"
@@ -271,6 +273,7 @@ struct _Ewk_View_Private_Data {
 #if ENABLE(NAVIGATOR_CONTENT_UTILS) || ENABLE(CUSTOM_SCHEME_HANDLER)
     OwnPtr<WebCore::NavigatorContentUtilsClientEfl> navigatorContentUtilsClient;
 #endif
+    OwnPtr<WebCore::NetworkStorageSession> storageSession;
     struct {
         Ewk_Menu menu;
         WebCore::PopupMenuClient* menuClient;
@@ -368,7 +371,6 @@ struct _Ewk_View_Private_Data {
         } center;
         Ecore_Animator* animator;
     } animatedZoom;
-    SoupSession* soupSession;
     const char* cursorGroup;
     Evas_Object* cursorObject;
 #if ENABLE(INSPECTOR)
@@ -820,6 +822,7 @@ static Ewk_View_Private_Data* _ewk_view_priv_new(Ewk_View_Smart_Data* smartData)
     priv->pageSettings->setStandardFontFamily("sans");
     priv->pageSettings->setHyperlinkAuditingEnabled(false);
     WebCore::RuntimeEnabledFeatures::setCSSRegionsEnabled(true);
+    WebCore::RuntimeEnabledFeatures::setSeamlessIFramesEnabled(true);
     priv->pageSettings->setScriptEnabled(true);
     priv->pageSettings->setPluginsEnabled(true);
     priv->pageSettings->setLocalStorageEnabled(true);
@@ -837,6 +840,10 @@ static Ewk_View_Private_Data* _ewk_view_priv_new(Ewk_View_Smart_Data* smartData)
     priv->pageSettings->setInteractiveFormValidationEnabled(true);
 #if USE(ACCELERATED_COMPOSITING)
     priv->pageSettings->setAcceleratedCompositingEnabled(false);
+    char* debugVisualsEnvironment = getenv("WEBKIT_SHOW_COMPOSITING_DEBUG_VISUALS");
+    bool showDebugVisuals = debugVisualsEnvironment && !strcmp(debugVisualsEnvironment, "1");
+    priv->pageSettings->setShowDebugBorders(showDebugVisuals);
+    priv->pageSettings->setShowRepaintCounter(showDebugVisuals);
 #endif
 
     url = priv->pageSettings->userStyleSheetLocation();
@@ -920,7 +927,7 @@ static Ewk_View_Private_Data* _ewk_view_priv_new(Ewk_View_Smart_Data* smartData)
 
     priv->history = ewk_history_new(static_cast<WebCore::BackForwardListImpl*>(priv->page->backForwardList()));
 
-    priv->soupSession = WebCore::ResourceHandle::defaultSession();
+    priv->storageSession = WebCore::NetworkStorageSession::createDefaultSession();
 
     priv->pageClient = adoptPtr(new PageClientEfl(smartData->self));
 
@@ -1708,6 +1715,8 @@ Eina_Bool ewk_view_context_menu_forward_event(Evas_Object* ewkView, const Evas_E
 
     return true;
 #else
+    UNUSED_PARAM(ewkView);
+    UNUSED_PARAM(downEvent);
     return false;
 #endif
 }
@@ -4373,7 +4382,7 @@ SoupSession* ewk_view_soup_session_get(const Evas_Object* ewkView)
 {
     EWK_VIEW_SD_GET_OR_RETURN(ewkView, smartData, 0);
     EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, 0);
-    return priv->soupSession;
+    return priv->storageSession->soupSession();
 }
 
 void ewk_view_soup_session_set(Evas_Object* ewkView, SoupSession* session)
@@ -4385,7 +4394,7 @@ void ewk_view_soup_session_set(Evas_Object* ewkView, SoupSession* session)
             "a SoupSessionSync was provided.");
         return;
     }
-    priv->soupSession = session;
+    priv->storageSession->setSoupSession(session);
 }
 
 Eina_Bool ewk_view_setting_enable_xss_auditor_get(const Evas_Object* ewkView)
@@ -4413,6 +4422,7 @@ Eina_Bool ewk_view_setting_should_display_subtitles_get(const Evas_Object *ewkVi
     EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, false);
     return priv->settings.shouldDisplaySubtitles;
 #else
+    UNUSED_PARAM(ewkView);
     return false;
 #endif
 }
@@ -4424,6 +4434,7 @@ Eina_Bool ewk_view_setting_should_display_captions_get(const Evas_Object *ewkVie
     EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, false);
     return priv->settings.shouldDisplayCaptions;
 #else
+    UNUSED_PARAM(ewkView);
     return false;
 #endif
 }
@@ -4438,6 +4449,9 @@ void ewk_view_setting_should_display_captions_set(Evas_Object *ewkView, Eina_Boo
         priv->pageSettings->setShouldDisplayCaptions(enable);
         priv->settings.shouldDisplayCaptions = enable;
     }
+#else
+    UNUSED_PARAM(ewkView);
+    UNUSED_PARAM(enable);
 #endif
 }
 
@@ -4451,6 +4465,9 @@ void ewk_view_setting_should_display_subtitles_set(Evas_Object *ewkView, Eina_Bo
         priv->pageSettings->setShouldDisplaySubtitles(enable);
         priv->settings.shouldDisplaySubtitles = enable;
     }
+#else
+    UNUSED_PARAM(ewkView);
+    UNUSED_PARAM(enable);
 #endif
 }
 
@@ -4461,6 +4478,7 @@ Eina_Bool ewk_view_setting_should_display_text_descriptions_get(const Evas_Objec
     EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, false);
     return priv->settings.shouldDisplayTextDescriptions;
 #else
+    UNUSED_PARAM(ewkView);
     return false;
 #endif
 }
@@ -4475,6 +4493,9 @@ void ewk_view_setting_should_display_text_descriptions_set(Evas_Object *ewkView,
         priv->pageSettings->setShouldDisplayTextDescriptions(enable);
         priv->settings.shouldDisplayTextDescriptions = enable;
     }
+#else
+    UNUSED_PARAM(ewkView);
+    UNUSED_PARAM(enable);
 #endif
 }
 
@@ -4829,6 +4850,13 @@ PlatformPageClient corePageClient(Evas_Object* ewkView)
     EWK_VIEW_SD_GET_OR_RETURN(ewkView, smartData, 0);
     EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, 0);
     return priv->pageClient.get();
+}
+
+WebCore::NetworkStorageSession* storageSession(const Evas_Object* ewkView)
+{
+    EWK_VIEW_SD_GET_OR_RETURN(ewkView, smartData, 0);
+    EWK_VIEW_PRIV_GET_OR_RETURN(smartData, priv, 0);
+    return priv->storageSession.get();
 }
 
 } // namespace EWKPrivate

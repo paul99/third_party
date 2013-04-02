@@ -16,19 +16,16 @@
       'target_name': 'test_support',
       'type': 'static_library',
       'include_dirs': [
+        # TODO(kjellander): Remove this by making all includes use full paths.
         '.',
       ],
-      'direct_dependent_settings': {
-        'include_dirs': [
-          '.', # Some includes are hierarchical
-        ],
-      },
       'dependencies': [
         '<(DEPTH)/testing/gtest.gyp:gtest',
         '<(DEPTH)/testing/gmock.gyp:gmock',
       ],
       'all_dependent_settings': {
         'include_dirs': [
+          # TODO(kjellander): Remove this by making all includes use full paths.
           '.',
         ],
       },
@@ -42,6 +39,7 @@
         'testsupport/frame_writer.cc',
         'testsupport/frame_writer.h',
         'testsupport/gtest_prod_util.h',
+        'testsupport/gtest_disable.h',
         'testsupport/mock/mock_frame_reader.h',
         'testsupport/mock/mock_frame_writer.h',
         'testsupport/packet_reader.cc',
@@ -95,5 +93,25 @@
         'testsupport/perf_test_unittest.cc',
       ],
     },
+    {
+      'target_name': 'buildbot_tests_scripts',
+      'type': 'none',
+      'copies': [
+        {
+          'destination': '<(PRODUCT_DIR)',
+          'files': [
+            'buildbot_tests.py',
+            '<(DEPTH)/tools/e2e_quality/audio/run_audio_test.py',
+          ],
+        },
+        {
+          'destination': '<(PRODUCT_DIR)/perf',
+          'files': [
+            '<(DEPTH)/tools/perf/__init__.py',
+            '<(DEPTH)/tools/perf/perf_utils.py',
+          ],
+        },
+      ],
+    },  # target buildbot_tests_scripts
   ],
 }

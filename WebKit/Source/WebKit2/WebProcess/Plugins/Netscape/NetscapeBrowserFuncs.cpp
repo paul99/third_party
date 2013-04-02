@@ -39,10 +39,6 @@
 #include <utility>
 #include <wtf/text/StringBuilder.h>
 
-#if PLATFORM(MAC)
-#include "NetscapeSandboxFunctions.h"
-#endif
-
 using namespace WebCore;
 using namespace std;
 
@@ -412,10 +408,7 @@ static const unsigned WKNVSupportsCompositingCoreAnimationPluginsBool = 74656;
 // Whether the browser expects a non-retained Core Animation layer.
 static const unsigned WKNVExpectsNonretainedLayer = 74657;
 
-// Whether plug-in code is allowed to enter (arbitrary) sandbox for the process.
-static const unsigned WKNVAllowedToEnterSandbox = 74658;
-
-// WKNVSandboxFunctions = 74659 is defined in NetscapeSandboxFunctions.h
+// 74658 and 74659 are no longer implemented.
 
 #endif
 
@@ -501,18 +494,6 @@ static NPError NPN_GetValue(NPP npp, NPNVariable variable, void *value)
             break;
         }
 
-        case WKNVAllowedToEnterSandbox:
-            *(NPBool*)value = true;
-            break;
-
-#if PLATFORM(MAC) && ENABLE(PLUGIN_PROCESS)
-        case WKNVSandboxFunctions:
-        {
-            *(WKNSandboxFunctions **)value = netscapeSandboxFunctions();
-            break;
-        }
-#endif
-
 #ifndef NP_NO_QUICKDRAW
         case NPNVsupportsQuickDrawBool:
             // We don't support the QuickDraw drawing model.
@@ -524,15 +505,6 @@ static NPError NPN_GetValue(NPP npp, NPNVariable variable, void *value)
             *(NPBool*)value = true;
             break;
 #endif
-#elif PLATFORM(WIN)
-       case NPNVnetscapeWindow: {
-           RefPtr<NetscapePlugin> plugin = NetscapePlugin::fromNPP(npp);
-           *reinterpret_cast<HWND*>(value) = plugin->containingWindow();
-           break;
-       }
-       case NPNVSupportsWindowless:
-           *(NPBool*)value = true;
-           break;
 #elif PLUGIN_ARCHITECTURE(X11)
        case NPNVxDisplay: {
            if (!npp)

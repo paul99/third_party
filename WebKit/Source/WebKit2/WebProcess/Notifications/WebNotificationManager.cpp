@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012, 2013 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,6 +28,7 @@
 
 #include "WebPage.h"
 #include "WebProcess.h"
+#include "WebProcessCreationParameters.h"
 
 #if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
 #include "WebNotification.h"
@@ -55,6 +56,11 @@ static uint64_t generateNotificationID()
 }
 #endif
 
+const char* WebNotificationManager::supplementName()
+{
+    return "WebNotificationManager";
+}
+
 WebNotificationManager::WebNotificationManager(WebProcess* process)
     : m_process(process)
 {
@@ -67,17 +73,12 @@ WebNotificationManager::~WebNotificationManager()
 {
 }
 
-void WebNotificationManager::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
-{
-    didReceiveWebNotificationManagerMessage(connection, messageID, decoder);
-}
-
-void WebNotificationManager::initialize(const HashMap<String, bool>& permissions)
+void WebNotificationManager::initialize(const WebProcessCreationParameters& parameters)
 {
 #if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
-    m_permissionsMap = permissions;
+    m_permissionsMap = parameters.notificationPermissions;
 #else
-    UNUSED_PARAM(permissions);
+    UNUSED_PARAM(parameters);
 #endif
 }
 

@@ -43,9 +43,17 @@
 #include <runtime/JSArray.h>
 #include <runtime/Lookup.h>
 #include <runtime/ObjectPrototype.h>
+#include <runtime/Operations.h>
 #include <wtf/Forward.h>
 #include <wtf/Noncopyable.h>
+#include <wtf/NullPtr.h>
 #include <wtf/Vector.h>
+
+namespace JSC {
+
+class HashEntry;
+
+}
 
 namespace WebCore {
 
@@ -210,8 +218,8 @@ enum ParameterDefaultPolicy {
         if (node->inDocument())
             return node->document();
 
-        while (node->parentOrHostNode())
-            node = node->parentOrHostNode();
+        while (node->parentOrShadowHostNode())
+            node = node->parentOrShadowHostNode();
         return node;
     }
 
@@ -262,7 +270,6 @@ enum ParameterDefaultPolicy {
     void setDOMException(JSC::ExecState*, ExceptionCode);
 
     JSC::JSValue jsStringWithCache(JSC::ExecState*, const String&);
-    JSC::JSValue jsStringWithCacheSlowCase(JSC::ExecState*, JSStringCache&, StringImpl*);
     JSC::JSValue jsString(JSC::ExecState*, const KURL&); // empty if the URL is null
     inline JSC::JSValue jsStringWithCache(JSC::ExecState* exec, const AtomicString& s)
     { 
@@ -496,10 +503,10 @@ enum ParameterDefaultPolicy {
         }
 
         JSStringCache& stringCache = currentWorld(exec)->m_stringCache;
-        if (JSC::JSString* string = stringCache.get(stringImpl))
-            return string;
-
-        return jsStringWithCacheSlowCase(exec, stringCache, stringImpl);
+        JSStringCache::AddResult addResult = stringCache.add(stringImpl, nullptr);
+        if (addResult.isNewEntry)
+            addResult.iterator->value = JSC::jsString(exec, String(stringImpl));
+        return JSC::JSValue(addResult.iterator->value.get());
     }
 
     inline String propertyNameToString(JSC::PropertyName propertyName)
@@ -510,6 +517,21 @@ enum ParameterDefaultPolicy {
     inline AtomicString propertyNameToAtomicString(JSC::PropertyName propertyName)
     {
         return AtomicString(propertyName.publicName());
+    }
+
+    template <class ThisImp>
+    inline const JSC::HashEntry* getStaticValueSlotEntryWithoutCaching(JSC::ExecState* exec, JSC::PropertyName propertyName)
+    {
+        const JSC::HashEntry* entry = ThisImp::s_info.propHashTable(exec)->entry(exec, propertyName);
+        if (!entry) // not found, forward to parent
+            return getStaticValueSlotEntryWithoutCaching<typename ThisImp::Base>(exec, propertyName);
+        return entry;
+    }
+
+    template <>
+    inline const JSC::HashEntry* getStaticValueSlotEntryWithoutCaching<JSDOMWrapper>(JSC::ExecState*, JSC::PropertyName)
+    {
+        return 0;
     }
 
 } // namespace WebCore

@@ -10,7 +10,7 @@
   'targets': [
     {
       'target_name': 'bitrate_controller',
-      'type': '<(library)',
+      'type': 'static_library',
       'dependencies': [
         '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
       ],
@@ -30,6 +30,8 @@
         'send_side_bandwidth_estimation.cc',
         'send_side_bandwidth_estimation.h',
       ],
+      # TODO(jschuh): Bug 1348: fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
   ], # targets
 

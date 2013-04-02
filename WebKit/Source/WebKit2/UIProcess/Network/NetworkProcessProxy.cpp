@@ -26,6 +26,10 @@
 #include "config.h"
 #include "NetworkProcessProxy.h"
 
+#if ENABLE(NETWORK_PROCESS)
+
+#include "AuthenticationChallengeProxy.h"
+#include "CustomProtocolManagerProxyMessages.h"
 #include "DownloadProxyMessages.h"
 #include "NetworkProcessCreationParameters.h"
 #include "NetworkProcessMessages.h"
@@ -33,7 +37,11 @@
 #include "WebProcessMessages.h"
 #include <WebCore/RunLoop.h>
 
-#if ENABLE(NETWORK_PROCESS)
+#if USE(SECURITY_FRAMEWORK)
+#include "SecItemShimProxy.h"
+#endif
+
+#define MESSAGE_CHECK(assertion) MESSAGE_CHECK_BASE(assertion, connection())
 
 using namespace WebCore;
 
@@ -54,21 +62,14 @@ NetworkProcessProxy::NetworkProcessProxy(WebContext* webContext)
     connect();
 }
 
+NetworkProcessProxy::~NetworkProcessProxy()
+{
+}
+
 void NetworkProcessProxy::getLaunchOptions(ProcessLauncher::LaunchOptions& launchOptions)
 {
     launchOptions.processType = ProcessLauncher::NetworkProcess;
-
-#if PLATFORM(MAC)
-    launchOptions.architecture = ProcessLauncher::LaunchOptions::MatchCurrentArchitecture;
-    launchOptions.executableHeap = false;
-#if HAVE(XPC)
-    launchOptions.useXPC = false;
-#endif
-#endif
-}
-
-NetworkProcessProxy::~NetworkProcessProxy()
-{
+    platformGetLaunchOptions(launchOptions);
 }
 
 void NetworkProcessProxy::getNetworkProcessConnection(PassRefPtr<Messages::WebProcessProxy::GetNetworkProcessConnection::DelayedReply> reply)
@@ -86,7 +87,7 @@ void NetworkProcessProxy::getNetworkProcessConnection(PassRefPtr<Messages::WebPr
 DownloadProxy* NetworkProcessProxy::createDownloadProxy()
 {
     if (!m_downloadProxyMap)
-        m_downloadProxyMap = adoptPtr(new DownloadProxyMap(m_messageReceiverMap));
+        m_downloadProxyMap = adoptPtr(new DownloadProxyMap(this));
 
     return m_downloadProxyMap->createDownloadProxy(m_webContext);
 }
@@ -105,27 +106,23 @@ void NetworkProcessProxy::networkProcessCrashedOrFailedToLaunch()
     }
 
     // Tell the network process manager to forget about this network process proxy. This may cause us to be deleted.
-    m_webContext->removeNetworkProcessProxy(this);
+    m_webContext->networkProcessCrashed(this);
 }
 
-void NetworkProcessProxy::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
+void NetworkProcessProxy::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageDecoder& decoder)
 {
-    if (m_messageReceiverMap.dispatchMessage(connection, messageID, decoder))
+    if (dispatchMessage(connection, decoder))
         return;
 
-#if ENABLE(CUSTOM_PROTOCOLS)
-    if (messageID.is<CoreIPC::MessageClassCustomProtocolManagerProxy>()) {
-        m_customProtocolManagerProxy.didReceiveMessage(connection, messageID, decoder);
+    if (m_webContext->dispatchMessage(connection, decoder))
         return;
-    }
-#endif
 
-    didReceiveNetworkProcessProxyMessage(connection, messageID, decoder);
+    didReceiveNetworkProcessProxyMessage(connection, decoder);
 }
 
-void NetworkProcessProxy::didReceiveSyncMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder, OwnPtr<CoreIPC::MessageEncoder>& replyEncoder)
+void NetworkProcessProxy::didReceiveSyncMessage(CoreIPC::Connection* connection, CoreIPC::MessageDecoder& decoder, OwnPtr<CoreIPC::MessageEncoder>& replyEncoder)
 {
-    if (m_messageReceiverMap.dispatchSyncMessage(connection, messageID, decoder, replyEncoder))
+    if (dispatchSyncMessage(connection, decoder, replyEncoder))
         return;
 
     ASSERT_NOT_REACHED();
@@ -158,9 +155,22 @@ void NetworkProcessProxy::didCreateNetworkConnectionToWebProcess(const CoreIPC::
 #endif
 }
 
+void NetworkProcessProxy::didReceiveAuthenticationChallenge(uint64_t pageID, uint64_t frameID, const WebCore::AuthenticationChallenge& coreChallenge, uint64_t challengeID)
+{
+    WebPageProxy* page = WebProcessProxy::webPage(pageID);
+    MESSAGE_CHECK(page);
+
+    RefPtr<AuthenticationChallengeProxy> authenticationChallenge = AuthenticationChallengeProxy::create(coreChallenge, challengeID, connection());
+    page->didReceiveAuthenticationChallengeProxy(frameID, authenticationChallenge.release());
+}
+
 void NetworkProcessProxy::didFinishLaunching(ProcessLauncher* launcher, CoreIPC::Connection::Identifier connectionIdentifier)
 {
     ChildProcessProxy::didFinishLaunching(launcher, connectionIdentifier);
+
+#if USE(SECURITY_FRAMEWORK)
+    connection()->addQueueClient(&SecItemShimProxy::shared());
+#endif
 
     if (CoreIPC::Connection::identifierIsNull(connectionIdentifier)) {
         // FIXME: Do better cleanup here.
@@ -173,8 +183,8 @@ void NetworkProcessProxy::didFinishLaunching(ProcessLauncher* launcher, CoreIPC:
     m_numPendingConnectionRequests = 0;
 
 #if PLATFORM(MAC)
-    if (WebContext::applicationIsOccluded())
-        connection()->send(Messages::NetworkProcess::SetApplicationIsOccluded(true), 0);
+    if (m_webContext->canEnableProcessSuppressionForNetworkProcess())
+        setProcessSuppressionEnabled(true);
 #endif
 }
 

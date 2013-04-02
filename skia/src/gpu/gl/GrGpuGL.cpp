@@ -345,19 +345,44 @@ void GrGpuGL::fillInConfigRenderableTable() {
     }
 }
 
-GrPixelConfig GrGpuGL::preferredReadPixelsConfig(GrPixelConfig config) const {
-    if (GR_GL_RGBA_8888_PIXEL_OPS_SLOW && GrPixelConfigIsRGBA8888(config)) {
-        return GrPixelConfigSwapRAndB(config);
+namespace {
+GrPixelConfig preferred_pixel_ops_config(GrPixelConfig config) {
+    if (GR_GL_RGBA_8888_PIXEL_OPS_SLOW && kRGBA_8888_GrPixelConfig == config) {
+        return kBGRA_8888_GrPixelConfig;
     } else {
         return config;
     }
 }
+}
+
+GrPixelConfig GrGpuGL::preferredReadPixelsConfig(GrPixelConfig config) const {
+    return preferred_pixel_ops_config(config);
+}
 
 GrPixelConfig GrGpuGL::preferredWritePixelsConfig(GrPixelConfig config) const {
-    if (GR_GL_RGBA_8888_PIXEL_OPS_SLOW && GrPixelConfigIsRGBA8888(config)) {
-        return GrPixelConfigSwapRAndB(config);
+    return preferred_pixel_ops_config(config);
+}
+
+bool GrGpuGL::canWriteTexturePixels(const GrTexture* texture, GrPixelConfig srcConfig) const {
+    if (kIndex_8_GrPixelConfig == srcConfig || kIndex_8_GrPixelConfig == texture->config()) {
+        return false;
+    }
+    if (srcConfig != texture->config() && kES2_GrGLBinding == this->glBinding()) {
+        // In general ES2 requires the internal format of the texture and the format of the src
+        // pixels to match. However, It may or may not be possible to upload BGRA data to a RGBA
+        // texture. It depends upon which extension added BGRA. The Apple extension allows it
+        // (BGRA's internal format is RGBA) while the EXT extension does not (BGRA is its own
+        // internal format).
+        if (this->glCaps().bgraFormatSupport() &&
+            !this->glCaps().bgraIsInternalFormat() &&
+            kBGRA_8888_GrPixelConfig == srcConfig &&
+            kRGBA_8888_GrPixelConfig == texture->config()) {
+            return true;
+        } else {
+            return false;
+        }
     } else {
-        return config;
+        return true;
     }
 }
 
@@ -476,18 +501,27 @@ void GrGpuGL::onResetContext() {
     fHWConstAttribCoverage = GrColor_ILLEGAL;
 }
 
+namespace {
+
+GrSurfaceOrigin resolve_origin(GrSurfaceOrigin origin, bool renderTarget) {
+    // By default, GrRenderTargets are GL's normal orientation so that they
+    // can be drawn to by the outside world without the client having
+    // to render upside down.
+    if (kDefault_GrSurfaceOrigin == origin) {
+        return renderTarget ? kBottomLeft_GrSurfaceOrigin : kTopLeft_GrSurfaceOrigin;
+    } else {
+        return origin;
+    }
+}
+
+}
+
 GrTexture* GrGpuGL::onWrapBackendTexture(const GrBackendTextureDesc& desc) {
     if (!this->configToGLFormats(desc.fConfig, false, NULL, NULL, NULL)) {
         return NULL;
     }
 
     if (0 == desc.fTextureHandle) {
-        return NULL;
-    }
-
-    // FIXME:  add support for TopLeft RT's by flipping all draws.
-    if (desc.fFlags & kRenderTarget_GrBackendTextureFlag &&
-        kBottomLeft_GrSurfaceOrigin != desc.fOrigin) {
         return NULL;
     }
 
@@ -505,16 +539,26 @@ GrTexture* GrGpuGL::onWrapBackendTexture(const GrBackendTextureDesc& desc) {
     glTexDesc.fSampleCnt = desc.fSampleCnt;
     glTexDesc.fTextureID = static_cast<GrGLuint>(desc.fTextureHandle);
     glTexDesc.fIsWrapped = true;
-    glTexDesc.fOrigin = desc.fOrigin;
+    bool renderTarget = 0 != (desc.fFlags & kRenderTarget_GrBackendTextureFlag);
+    // FIXME:  this should be calling resolve_origin(), but Chrome code is currently
+    // assuming the old behaviour, which is that backend textures are always
+    // BottomLeft, even for non-RT's.  Once Chrome is fixed, change this to:
+    // glTexDesc.fOrigin = resolve_origin(desc.fOrigin, renderTarget);
+    if (kDefault_GrSurfaceOrigin == desc.fOrigin) {
+        glTexDesc.fOrigin = kBottomLeft_GrSurfaceOrigin;
+    } else {
+        glTexDesc.fOrigin = desc.fOrigin;
+    }
 
     GrGLTexture* texture = NULL;
-    if (desc.fFlags & kRenderTarget_GrBackendTextureFlag) {
+    if (renderTarget) {
         GrGLRenderTarget::Desc glRTDesc;
         glRTDesc.fRTFBOID = 0;
         glRTDesc.fTexFBOID = 0;
         glRTDesc.fMSColorRenderbufferID = 0;
         glRTDesc.fConfig = desc.fConfig;
         glRTDesc.fSampleCnt = desc.fSampleCnt;
+        glRTDesc.fOrigin = glTexDesc.fOrigin;
         if (!this->createRenderTargetObjects(glTexDesc.fWidth,
                                              glTexDesc.fHeight,
                                              glTexDesc.fTextureID,
@@ -541,6 +585,12 @@ GrRenderTarget* GrGpuGL::onWrapBackendRenderTarget(const GrBackendRenderTargetDe
     glDesc.fTexFBOID = GrGLRenderTarget::kUnresolvableFBOID;
     glDesc.fSampleCnt = desc.fSampleCnt;
     glDesc.fIsWrapped = true;
+    glDesc.fOrigin = desc.fOrigin;
+    if (glDesc.fRTFBOID == 0) {
+        GrAssert(desc.fOrigin == kBottomLeft_GrSurfaceOrigin);
+    }
+
+    glDesc.fOrigin = resolve_origin(desc.fOrigin, true);
     GrGLIRect viewport;
     viewport.fLeft   = 0;
     viewport.fBottom = 0;
@@ -572,12 +622,12 @@ GrRenderTarget* GrGpuGL::onWrapBackendRenderTarget(const GrBackendRenderTargetDe
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void GrGpuGL::onWriteTexturePixels(GrTexture* texture,
+bool GrGpuGL::onWriteTexturePixels(GrTexture* texture,
                                    int left, int top, int width, int height,
                                    GrPixelConfig config, const void* buffer,
                                    size_t rowBytes) {
     if (NULL == buffer) {
-        return;
+        return false;
     }
     GrGLTexture* glTex = static_cast<GrGLTexture*>(texture);
 
@@ -592,9 +642,9 @@ void GrGpuGL::onWriteTexturePixels(GrTexture* texture,
     desc.fTextureID = glTex->textureID();
     desc.fOrigin = glTex->origin();
 
-    this->uploadTexData(desc, false,
-                        left, top, width, height,
-                        config, buffer, rowBytes);
+    return this->uploadTexData(desc, false,
+                               left, top, width, height,
+                               config, buffer, rowBytes);
 }
 
 namespace {
@@ -960,10 +1010,8 @@ GrTexture* GrGpuGL::onCreateTexture(const GrTextureDesc& desc,
 
     const Caps& caps = this->getCaps();
 
-    // We keep GrRenderTargets in GL's normal orientation so that they
-    // can be drawn to by the outside world without the client having
-    // to render upside down.
-    glTexDesc.fOrigin = renderTarget ? kBottomLeft_GrSurfaceOrigin : kTopLeft_GrSurfaceOrigin;
+    glTexDesc.fOrigin = resolve_origin(desc.fOrigin, renderTarget);
+    glRTDesc.fOrigin = glTexDesc.fOrigin;
 
     glRTDesc.fSampleCnt = desc.fSampleCnt;
     if (GrGLCaps::kNone_MSFBOType == this->glCaps().msFBOType() &&
@@ -1278,7 +1326,8 @@ void GrGpuGL::flushScissor() {
                               fScissorState.fRect.fLeft,
                               fScissorState.fRect.fTop,
                               fScissorState.fRect.width(),
-                              fScissorState.fRect.height());
+                              fScissorState.fRect.height(),
+                              rt->origin());
         // if the scissor fully contains the viewport then we fall through and
         // disable the scissor test.
         if (!scissor.contains(vp)) {
@@ -1404,6 +1453,11 @@ bool GrGpuGL::readPixelsWillPayForYFlip(GrRenderTarget* renderTarget,
                                         int width, int height,
                                         GrPixelConfig config,
                                         size_t rowBytes) const {
+    // If this rendertarget is aready TopLeft, we don't need to flip.
+    if (kTopLeft_GrSurfaceOrigin == renderTarget->origin()) {
+        return false;
+    }
+
     // if GL can do the flip then we'll never pay for it.
     if (this->glCaps().packFlipYSupport()) {
         return false;
@@ -1430,10 +1484,10 @@ bool GrGpuGL::onReadPixels(GrRenderTarget* target,
                            int width, int height,
                            GrPixelConfig config,
                            void* buffer,
-                           size_t rowBytes,
-                           bool invertY) {
+                           size_t rowBytes) {
     GrGLenum format;
     GrGLenum type;
+    bool flipY = kBottomLeft_GrSurfaceOrigin == target->origin();
     if (!this->configToGLFormats(config, false, NULL, &format, &type)) {
         return false;
     }
@@ -1469,7 +1523,7 @@ bool GrGpuGL::onReadPixels(GrRenderTarget* target,
 
     // the read rect is viewport-relative
     GrGLIRect readRect;
-    readRect.setRelativeTo(glvp, left, top, width, height);
+    readRect.setRelativeTo(glvp, left, top, width, height, target->origin());
 
     size_t tightRowBytes = bpp * width;
     if (0 == rowBytes) {
@@ -1491,7 +1545,7 @@ bool GrGpuGL::onReadPixels(GrRenderTarget* target,
             readDst = scratch.get();
         }
     }
-    if (!invertY && this->glCaps().packFlipYSupport()) {
+    if (flipY && this->glCaps().packFlipYSupport()) {
         GL_CALL(PixelStorei(GR_GL_PACK_REVERSE_ROW_ORDER, 1));
     }
     GL_CALL(ReadPixels(readRect.fLeft, readRect.fBottom,
@@ -1501,9 +1555,9 @@ bool GrGpuGL::onReadPixels(GrRenderTarget* target,
         GrAssert(this->glCaps().packRowLengthSupport());
         GL_CALL(PixelStorei(GR_GL_PACK_ROW_LENGTH, 0));
     }
-    if (!invertY && this->glCaps().packFlipYSupport()) {
+    if (flipY && this->glCaps().packFlipYSupport()) {
         GL_CALL(PixelStorei(GR_GL_PACK_REVERSE_ROW_ORDER, 0));
-        invertY = true;
+        flipY = false;
     }
 
     // now reverse the order of the rows, since GL's are bottom-to-top, but our
@@ -1511,7 +1565,7 @@ bool GrGpuGL::onReadPixels(GrRenderTarget* target,
     // that the above readPixels did not overwrite the padding.
     if (readDst == buffer) {
         GrAssert(rowBytes == readDstRowBytes);
-        if (!invertY) {
+        if (flipY) {
             scratch.reset(tightRowBytes);
             void* tmpRow = scratch.get();
             // flip y in-place by rows
@@ -1532,13 +1586,13 @@ bool GrGpuGL::onReadPixels(GrRenderTarget* target,
         // const int halfY = height >> 1;
         const char* src = reinterpret_cast<const char*>(readDst);
         char* dst = reinterpret_cast<char*>(buffer);
-        if (!invertY) {
+        if (flipY) {
             dst += (height-1) * rowBytes;
         }
         for (int y = 0; y < height; y++) {
             memcpy(dst, src, tightRowBytes);
             src += readDstRowBytes;
-            if (invertY) {
+            if (!flipY) {
                 dst += rowBytes;
             } else {
                 dst -= rowBytes;
@@ -1735,7 +1789,7 @@ void GrGpuGL::onResolveRenderTarget(GrRenderTarget* target) {
         const GrIRect dirtyRect = rt->getResolveRect();
         GrGLIRect r;
         r.setRelativeTo(vp, dirtyRect.fLeft, dirtyRect.fTop,
-                        dirtyRect.width(), dirtyRect.height());
+                        dirtyRect.width(), dirtyRect.height(), target->origin());
 
         GrAutoTRestore<ScissorState> asr;
         if (GrGLCaps::kAppleES_MSFBOType == this->glCaps().msFBOType()) {

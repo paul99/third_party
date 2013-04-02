@@ -48,7 +48,9 @@
 #include "JSRetainPtr.h"
 #include "JSString.h"
 #include "JSValueRef.h"
+#include "ObjectConstructor.h"
 #include "ObjectPrototype.h"
+#include "Operations.h"
 #include "PropertyNameArray.h"
 #include "RegExpConstructor.h"
 

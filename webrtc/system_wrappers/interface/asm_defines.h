@@ -11,6 +11,10 @@
 #ifndef WEBRTC_SYSTEM_WRAPPERS_INTERFACE_ASM_DEFINES_H_
 #define WEBRTC_SYSTEM_WRAPPERS_INTERFACE_ASM_DEFINES_H_
 
+#if defined(__linux__) && defined(__ELF__)
+.section .note.GNU-stack,"",%progbits
+#endif
+
 // Define the macros used in ARM assembly code, so that for Mac or iOS builds
 // we add leading underscores for the function names.
 #ifdef __APPLE__
@@ -20,6 +24,12 @@
 .macro DEFINE_FUNCTION name
 _\name:
 .endm
+.macro CALL_FUNCTION name
+bl _\name
+.endm
+.macro GLOBAL_LABEL name
+.global _\name
+.endm
 #else
 .macro GLOBAL_FUNCTION name
 .global \name
@@ -27,6 +37,14 @@ _\name:
 .macro DEFINE_FUNCTION name
 \name:
 .endm
+.macro CALL_FUNCTION name
+bl \name
+.endm
+.macro GLOBAL_LABEL name
+.global \name
+.endm
 #endif
+
+.text
 
 #endif  // WEBRTC_SYSTEM_WRAPPERS_INTERFACE_COMPILE_ASSERT_H_

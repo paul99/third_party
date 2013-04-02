@@ -32,25 +32,21 @@ namespace {
 enum {
   MSG_ADDSTREAM = 1,
   MSG_REMOVESTREAM,
+  MSG_CREATEDTMFSENDER,
   MSG_RETURNLOCALMEDIASTREAMS,
   MSG_RETURNREMOTEMEDIASTREAMS,
-  MSG_READYSTATE,
+  MSG_SIGNALINGSTATE,
   MSG_ICESTATE,
-  MSG_CANSENDDTMF,
-  MSG_SEND_DTMF,
+  MSG_ICECONNECTION,
+  MSG_ICEGATHERING,
   MSG_CREATEDATACHANNEL,
   MSG_TERMINATE,
   MSG_CREATEOFFER,
-  MSG_CREATEOFFERJSEP00,
   MSG_CREATEANSWER,
-  MSG_CREATEANSWERJSEP00,
   MSG_SETLOCALDESCRIPTION,
-  MSG_SETLOCALDESCRIPTIONJSEP00,
   MSG_SETREMOTEDESCRIPTION,
-  MSG_SETREMOTEDESCRIPTIONJSEP00,
   MSG_UPDATEICE,
   MSG_ADDICECANDIDATE,
-  MSG_PROCESSICEMESSAGEJSEP00,
   MSG_GETLOCALDESCRIPTION,
   MSG_GETREMOTEDESCRIPTION,
   MSG_GETSTATS,
@@ -68,13 +64,22 @@ struct MediaStreamParams : public talk_base::MessageData {
   bool result;
 };
 
+struct DtmfSenderParams : public talk_base::MessageData {
+  explicit DtmfSenderParams(webrtc::AudioTrackInterface* track)
+      : track(track),
+        dtmf_sender(NULL) {
+  }
+  webrtc::AudioTrackInterface* track;
+  talk_base::scoped_refptr<webrtc::DtmfSenderInterface> dtmf_sender;
+};
+
 struct IceConfigurationParams : public talk_base::MessageData {
   IceConfigurationParams()
       : configuration(NULL),
         constraints(NULL),
         result(false) {
   }
-  const webrtc::JsepInterface::IceServers* configuration;
+  const webrtc::PeerConnectionInterface::IceServers* configuration;
   const webrtc::MediaConstraintsInterface* constraints;
   bool result;
 };
@@ -105,8 +110,6 @@ struct JsepSessionDescriptionParams : public talk_base::MessageData {
       : result(false), desc(NULL), const_desc(NULL) {
   }
   bool result;
-  webrtc::MediaHints hints;
-  webrtc::JsepInterface::Action action;
   webrtc::SessionDescriptionInterface* desc;
   const webrtc::SessionDescriptionInterface* const_desc;
 };
@@ -138,9 +141,9 @@ struct StreamCollectionParams : public talk_base::MessageData {
   talk_base::scoped_refptr<webrtc::StreamCollectionInterface> streams;
 };
 
-struct ReadyStateMessage : public talk_base::MessageData {
-  ReadyStateMessage() : state(webrtc::PeerConnectionInterface::kNew) {}
-  webrtc::PeerConnectionInterface::ReadyState state;
+struct SignalingStateMessage : public talk_base::MessageData {
+  SignalingStateMessage() : state(webrtc::PeerConnectionInterface::kStable) {}
+  webrtc::PeerConnectionInterface::SignalingState state;
 };
 
 struct IceStateMessage : public talk_base::MessageData {
@@ -148,28 +151,16 @@ struct IceStateMessage : public talk_base::MessageData {
   webrtc::PeerConnectionInterface::IceState state;
 };
 
-class SendDtmfMessageData : public talk_base::MessageData {
- public:
-  explicit SendDtmfMessageData(const webrtc::AudioTrackInterface* send_track)
-      : send_track(send_track),
-        duration(0),
-        play_track(NULL),
-        result(false) {}
+struct IceConnectionMessage : public talk_base::MessageData {
+  IceConnectionMessage()
+      : state(webrtc::PeerConnectionInterface::kIceConnectionNew) {}
+  webrtc::PeerConnectionInterface::IceConnectionState state;
+};
 
-  SendDtmfMessageData(const webrtc::AudioTrackInterface* send_track,
-                      std::string tones, int duration,
-                      const webrtc::AudioTrackInterface* play_track)
-      : send_track(send_track),
-        tones(tones),
-        duration(duration),
-        play_track(play_track),
-        result(false) {}
-
-  const webrtc::AudioTrackInterface* send_track;
-  std::string tones;
-  int duration;
-  const webrtc::AudioTrackInterface* play_track;
-  bool result;
+struct IceGatheringMessage : public talk_base::MessageData {
+  IceGatheringMessage()
+      : state(webrtc::PeerConnectionInterface::kIceGatheringNew) {}
+  webrtc::PeerConnectionInterface::IceGatheringState state;
 };
 
 struct CreateDataChannelMessageData : public talk_base::MessageData {
@@ -247,6 +238,16 @@ void PeerConnectionProxy::RemoveStream(MediaStreamInterface* remove_stream) {
   peerconnection_->RemoveStream(remove_stream);
 }
 
+talk_base::scoped_refptr<DtmfSenderInterface>
+    PeerConnectionProxy::CreateDtmfSender(AudioTrackInterface* track) {
+  if (!signaling_thread_->IsCurrent()) {
+    DtmfSenderParams msg(track);
+    signaling_thread_->Send(this, MSG_CREATEDTMFSENDER, &msg);
+    return msg.dtmf_sender;
+  }
+  return peerconnection_->CreateDtmfSender(track);
+}
+
 bool PeerConnectionProxy::GetStats(StatsObserver* observer,
                                    MediaStreamTrackInterface* track) {
   if (!signaling_thread_->IsCurrent()) {
@@ -257,14 +258,15 @@ bool PeerConnectionProxy::GetStats(StatsObserver* observer,
   return peerconnection_->GetStats(observer, track);
 }
 
-PeerConnectionInterface::ReadyState PeerConnectionProxy::ready_state() {
+PeerConnectionInterface::SignalingState PeerConnectionProxy::signaling_state() {
   if (!signaling_thread_->IsCurrent()) {
-    ReadyStateMessage msg;
-    signaling_thread_->Send(this, MSG_READYSTATE, &msg);
+    SignalingStateMessage msg;
+    signaling_thread_->Send(this, MSG_SIGNALINGSTATE, &msg);
     return msg.state;
   }
-  return peerconnection_->ready_state();
+  return peerconnection_->signaling_state();
 }
+
 
 PeerConnectionInterface::IceState PeerConnectionProxy::ice_state() {
   if (!signaling_thread_->IsCurrent()) {
@@ -275,24 +277,24 @@ PeerConnectionInterface::IceState PeerConnectionProxy::ice_state() {
   return peerconnection_->ice_state();
 }
 
-bool PeerConnectionProxy::CanSendDtmf(const AudioTrackInterface* track) {
+PeerConnectionInterface::IceConnectionState
+PeerConnectionProxy::ice_connection_state() {
   if (!signaling_thread_->IsCurrent()) {
-    SendDtmfMessageData msg(track);
-    signaling_thread_->Send(this, MSG_CANSENDDTMF, &msg);
-    return msg.result;
+    IceConnectionMessage msg;
+    signaling_thread_->Send(this, MSG_ICECONNECTION, &msg);
+    return msg.state;
   }
-  return peerconnection_->CanSendDtmf(track);
+  return peerconnection_->ice_connection_state();
 }
 
-bool PeerConnectionProxy::SendDtmf(const AudioTrackInterface* send_track,
-                                   const std::string& tones, int duration,
-                                   const AudioTrackInterface* play_track) {
+PeerConnectionInterface::IceGatheringState
+PeerConnectionProxy::ice_gathering_state() {
   if (!signaling_thread_->IsCurrent()) {
-    SendDtmfMessageData msg(send_track, tones, duration, play_track);
-    signaling_thread_->Send(this, MSG_SEND_DTMF, &msg);
-    return msg.result;
+    IceGatheringMessage msg;
+    signaling_thread_->Send(this, MSG_ICEGATHERING, &msg);
+    return msg.state;
   }
-  return peerconnection_->SendDtmf(send_track, tones, duration, play_track);
+  return peerconnection_->ice_gathering_state();
 }
 
 talk_base::scoped_refptr<DataChannelInterface>
@@ -304,23 +306,6 @@ PeerConnectionProxy::CreateDataChannel(const std::string& label,
     return msg.data_channel;
   }
   return peerconnection_->CreateDataChannel(label, config);
-}
-
-bool PeerConnectionProxy::StartIce(IceOptions options) {
-  // Ice will be started by default and will be removed in Jsep01.
-  // TODO: Remove this method once fully migrated to JSEP01.
-  return true;
-}
-
-SessionDescriptionInterface* PeerConnectionProxy::CreateOffer(
-    const MediaHints& hints) {
-  if (!signaling_thread_->IsCurrent()) {
-    JsepSessionDescriptionParams msg;
-    msg.hints = hints;
-    signaling_thread_->Send(this, MSG_CREATEOFFERJSEP00, &msg);
-    return msg.desc;
-  }
-  return peerconnection_->CreateOffer(hints);
 }
 
 void PeerConnectionProxy::CreateOffer(
@@ -336,19 +321,6 @@ void PeerConnectionProxy::CreateOffer(
   peerconnection_->CreateOffer(observer, constraints);
 }
 
-SessionDescriptionInterface* PeerConnectionProxy::CreateAnswer(
-    const MediaHints& hints,
-    const SessionDescriptionInterface* offer) {
-  if (!signaling_thread_->IsCurrent()) {
-    JsepSessionDescriptionParams msg;
-    msg.hints = hints;
-    msg.const_desc = offer;
-    signaling_thread_->Send(this, MSG_CREATEANSWERJSEP00, &msg);
-    return msg.desc;
-  }
-  return peerconnection_->CreateAnswer(hints, offer);
-}
-
 void PeerConnectionProxy::CreateAnswer(
     CreateSessionDescriptionObserver* observer,
     const MediaConstraintsInterface* constraints) {
@@ -362,19 +334,6 @@ void PeerConnectionProxy::CreateAnswer(
   peerconnection_->CreateAnswer(observer, constraints);
 }
 
-bool PeerConnectionProxy::SetLocalDescription(
-    Action action,
-    SessionDescriptionInterface* desc) {
-  if (!signaling_thread_->IsCurrent()) {
-    JsepSessionDescriptionParams msg;
-    msg.action = action;
-    msg.desc = desc;
-    signaling_thread_->Send(this, MSG_SETLOCALDESCRIPTIONJSEP00, &msg);
-    return msg.result;
-  }
-  return peerconnection_->SetLocalDescription(action, desc);
-}
-
 void PeerConnectionProxy::SetLocalDescription(
     SetSessionDescriptionObserver* observer,
     SessionDescriptionInterface* desc) {
@@ -386,19 +345,6 @@ void PeerConnectionProxy::SetLocalDescription(
     return;
   }
   peerconnection_->SetLocalDescription(observer, desc);
-}
-
-bool PeerConnectionProxy::SetRemoteDescription(
-    Action action,
-    SessionDescriptionInterface* desc) {
-  if (!signaling_thread_->IsCurrent()) {
-    JsepSessionDescriptionParams msg;
-    msg.action = action;
-    msg.desc = desc;
-    signaling_thread_->Send(this, MSG_SETREMOTEDESCRIPTIONJSEP00, &msg);
-    return msg.result;
-  }
-  return peerconnection_->SetRemoteDescription(action, desc);
 }
 
 void PeerConnectionProxy::SetRemoteDescription(
@@ -425,16 +371,6 @@ bool PeerConnectionProxy::UpdateIce(
     return msg.result;
   }
   return peerconnection_->UpdateIce(configuration, constraints);
-}
-
-bool PeerConnectionProxy::ProcessIceMessage(
-    const IceCandidateInterface* ice_candidate) {
-  if (!signaling_thread_->IsCurrent()) {
-    JsepIceCandidateParams msg(ice_candidate);
-    signaling_thread_->Send(this, MSG_PROCESSICEMESSAGEJSEP00, &msg);
-    return msg.result;
-  }
-  return peerconnection_->ProcessIceMessage(ice_candidate);
 }
 
 bool PeerConnectionProxy::AddIceCandidate(
@@ -483,6 +419,12 @@ void PeerConnectionProxy::OnMessage(talk_base::Message* msg) {
       peerconnection_->RemoveStream(param->stream);
       break;
     }
+    case MSG_CREATEDTMFSENDER: {
+      DtmfSenderParams* param(static_cast<DtmfSenderParams*> (data));
+      param->dtmf_sender =
+          peerconnection_->CreateDtmfSender(param->track);
+      break;
+    }
     case MSG_GETSTATS: {
       StatsParams* param(static_cast<StatsParams*> (data));
       param->result = peerconnection_->GetStats(param->observer, param->track);
@@ -498,9 +440,9 @@ void PeerConnectionProxy::OnMessage(talk_base::Message* msg) {
       param->streams = peerconnection_->remote_streams();
       break;
     }
-    case MSG_READYSTATE: {
-      ReadyStateMessage* param(static_cast<ReadyStateMessage*> (data));
-      param->state = peerconnection_->ready_state();
+    case MSG_SIGNALINGSTATE: {
+      SignalingStateMessage* param(static_cast<SignalingStateMessage*> (data));
+      param->state = peerconnection_->signaling_state();
       break;
     }
     case MSG_ICESTATE: {
@@ -508,15 +450,14 @@ void PeerConnectionProxy::OnMessage(talk_base::Message* msg) {
       param->state = peerconnection_->ice_state();
       break;
     }
-    case MSG_CANSENDDTMF: {
-      SendDtmfMessageData* param(static_cast<SendDtmfMessageData*> (data));
-      param->result = peerconnection_->CanSendDtmf(param->send_track);
+    case MSG_ICECONNECTION: {
+      IceConnectionMessage* param(static_cast<IceConnectionMessage*> (data));
+      param->state = peerconnection_->ice_connection_state();
       break;
     }
-    case MSG_SEND_DTMF: {
-      SendDtmfMessageData* param(static_cast<SendDtmfMessageData*> (data));
-      param->result = peerconnection_->SendDtmf(param->send_track,
-          param->tones, param->duration, param->play_track);
+    case MSG_ICEGATHERING: {
+      IceGatheringMessage* param(static_cast<IceGatheringMessage*> (data));
+      param->state = peerconnection_->ice_gathering_state();
       break;
     }
     case MSG_CREATEDATACHANNEL: {
@@ -524,19 +465,6 @@ void PeerConnectionProxy::OnMessage(talk_base::Message* msg) {
           static_cast<CreateDataChannelMessageData*>(data));
       param->data_channel = peerconnection_->CreateDataChannel(param->label,
                                                                param->init);
-      break;
-    }
-    case MSG_CREATEOFFERJSEP00: {
-      JsepSessionDescriptionParams* param(
-          static_cast<JsepSessionDescriptionParams*> (data));
-      param->desc = peerconnection_->CreateOffer(param->hints);
-      break;
-    }
-    case MSG_CREATEANSWERJSEP00: {
-      JsepSessionDescriptionParams* param(
-          static_cast<JsepSessionDescriptionParams*> (data));
-      param->desc = peerconnection_->CreateAnswer(param->hints,
-                                                  param->const_desc);
       break;
     }
     case MSG_CREATEOFFER: {
@@ -558,25 +486,11 @@ void PeerConnectionProxy::OnMessage(talk_base::Message* msg) {
                                            param->desc);
       break;
     }
-    case MSG_SETLOCALDESCRIPTIONJSEP00: {
-      JsepSessionDescriptionParams* param(
-          static_cast<JsepSessionDescriptionParams*> (data));
-      param->result  = peerconnection_->SetLocalDescription(param->action,
-                                                            param->desc);
-      break;
-    }
     case MSG_SETREMOTEDESCRIPTION: {
       SetSessionDescriptionParams* param(
           static_cast<SetSessionDescriptionParams*> (data));
       peerconnection_->SetRemoteDescription(param->observer,
                                             param->desc);
-      break;
-    }
-    case MSG_SETREMOTEDESCRIPTIONJSEP00: {
-      JsepSessionDescriptionParams* param(
-          static_cast<JsepSessionDescriptionParams*> (data));
-      param->result  = peerconnection_->SetRemoteDescription(param->action,
-                                                             param->desc);
       break;
     }
     case MSG_UPDATEICE: {
@@ -590,12 +504,6 @@ void PeerConnectionProxy::OnMessage(talk_base::Message* msg) {
       JsepIceCandidateParams* param(
           static_cast<JsepIceCandidateParams*> (data));
       param->result  = peerconnection_->AddIceCandidate(param->candidate);
-      break;
-    }
-    case MSG_PROCESSICEMESSAGEJSEP00: {
-      JsepIceCandidateParams* param(
-          static_cast<JsepIceCandidateParams*> (data));
-      param->result  = peerconnection_->ProcessIceMessage(param->candidate);
       break;
     }
     case MSG_GETLOCALDESCRIPTION: {

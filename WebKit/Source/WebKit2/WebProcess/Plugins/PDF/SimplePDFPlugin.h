@@ -172,6 +172,13 @@ protected:
     virtual bool handlesPageScaleFactor() OVERRIDE;
 
     virtual bool shouldAllowScripting() OVERRIDE { return false; }
+    virtual bool shouldAllowNavigationFromDrags() { return true; }
+
+    virtual unsigned countFindMatches(const String&, WebCore::FindOptions, unsigned) OVERRIDE { return 0; }
+    virtual bool findString(const String&, WebCore::FindOptions, unsigned) OVERRIDE { return false; }
+
+    virtual bool getResourceData(const unsigned char*& bytes, unsigned& length) const OVERRIDE;
+    virtual bool performDictionaryLookupAtLocation(const WebCore::FloatPoint&) OVERRIDE { return false; }
 
     WebCore::IntSize m_scrollOffset;
 

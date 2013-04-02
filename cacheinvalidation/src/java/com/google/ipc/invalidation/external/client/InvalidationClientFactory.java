@@ -32,17 +32,35 @@ public class InvalidationClientFactory {
    *
    * @param resources {@link SystemResources} to use for logging, scheduling, persistence, and
    *     network connectivity
+   * @param clientConfig application provided configuration for the client.
+   * @param listener callback object for invalidation events
+   */
+  public static InvalidationClient createClient(SystemResources resources,
+      InvalidationClientConfig clientConfig, InvalidationListener listener) {
+    ClientConfigP internalConfig = InvalidationClientCore.createConfig()
+        .setAllowSuppression(clientConfig.allowSuppression)
+        .build();
+    Random random = new Random(resources.getInternalScheduler().getCurrentTimeMs());
+    return new InvalidationClientImpl(resources, random, clientConfig.clientType,
+        clientConfig.clientName, internalConfig, clientConfig.applicationName, listener);
+  }
+  /**
+   * Constructs an invalidation client library instance.
+   * Deprecated, please use {@link #createClient} instead.
+   *
+   * @param resources {@link SystemResources} to use for logging, scheduling, persistence, and
+   *     network connectivity
    * @param clientType client type code as assigned by the notification system's backend
    * @param clientName id/name of the client in the application's own naming scheme
    * @param applicationName name of the application using the library (for debugging/monitoring)
    * @param listener callback object for invalidation events
    */
+  @Deprecated
   public static InvalidationClient create(SystemResources resources, int clientType,
       byte[] clientName, String applicationName, InvalidationListener listener) {
-    ClientConfigP config = InvalidationClientCore.createConfig().build();
-    Random random = new Random(resources.getInternalScheduler().getCurrentTimeMs());
-    return new InvalidationClientImpl(resources, random, clientType, clientName, config,
-        applicationName, listener);
+    final InvalidationClientConfig appConfig = new InvalidationClientConfig(clientType, clientName,
+        applicationName, true /* allowSuppression */);
+    return createClient(resources, appConfig, listener);
   }
 
   private InvalidationClientFactory() {} // Prevents instantiation.

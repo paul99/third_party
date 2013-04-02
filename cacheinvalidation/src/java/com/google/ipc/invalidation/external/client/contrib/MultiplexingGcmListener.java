@@ -18,14 +18,19 @@ package com.google.ipc.invalidation.external.client.contrib;
 
 import com.google.android.gcm.GCMBaseIntentService;
 import com.google.android.gcm.GCMBroadcastReceiver;
+import com.google.android.gcm.GCMRegistrar;
 import com.google.ipc.invalidation.external.client.SystemResources.Logger;
 import com.google.ipc.invalidation.external.client.android.service.AndroidLogger;
 import com.google.ipc.invalidation.ticl.android.c2dm.WakeLockManager;
 
 import android.app.IntentService;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.pm.ServiceInfo;
 
 /**
  * A Google Cloud Messaging listener class that rebroadcasts events as package-scoped
@@ -239,6 +244,12 @@ public class MultiplexingGcmListener extends GCMBaseIntentService {
     }
   }
 
+  /**
+   * Name of the metadata element within the {@code service} element whose value is a
+   * comma-delimited list of GCM sender ids.
+   */
+  private static final String GCM_SENDER_IDS_METADATA_KEY = "sender_ids";
+
   /** Logger. */
   private static final Logger logger = AndroidLogger.forTag("MplexGcmListener");
 
@@ -286,6 +297,11 @@ public class MultiplexingGcmListener extends GCMBaseIntentService {
     logger.warning("GCM error: %s", errorId);
   }
 
+  @Override
+  protected String[] getSenderIds(Context context) {
+    return readSenderIdsFromManifestOrDie(this);
+  }
+
   /**
    * Broadcasts {@code intent} with the action set to {@link Intents#ACTION} and the package name
    * set to the package name of this service.
@@ -294,5 +310,45 @@ public class MultiplexingGcmListener extends GCMBaseIntentService {
     intent.setAction(Intents.ACTION);
     intent.setPackage(getPackageName());
     sendBroadcast(intent);
+  }
+
+  /**
+   * Registers with GCM if not already registered. Also verifies that the device supports GCM
+   * and that the manifest is correctly configured. Returns the existing registration id, if one
+   * exists, or the empty string if one does not.
+   *
+   * @throws UnsupportedOperationException if the device does not have all GCM dependencies
+   * @throws IllegalStateException if the manifest is not correctly configured
+   */
+  public static String initializeGcm(Context context) {
+    GCMRegistrar.checkDevice(context);
+    GCMRegistrar.checkManifest(context);
+    final String regId = GCMRegistrar.getRegistrationId(context);
+    if (regId.equals("")) {
+      GCMRegistrar.register(context, readSenderIdsFromManifestOrDie(context));
+    }
+    return regId;
+  }
+
+  /**
+   * Returns the GCM sender ids from {@link #GCM_SENDER_IDS_METADATA_KEY} or throws a
+   * {@code RuntimeException} if they are not defined.
+   */
+  
+  static String[] readSenderIdsFromManifestOrDie(Context context) {
+    try {
+      ServiceInfo serviceInfo = context.getPackageManager().getServiceInfo(
+          new ComponentName(context, MultiplexingGcmListener.class), PackageManager.GET_META_DATA);
+      if (serviceInfo.metaData == null) {
+        throw new RuntimeException("Service has no metadata");
+      }
+      String senderIds = serviceInfo.metaData.getString(GCM_SENDER_IDS_METADATA_KEY);
+      if (senderIds == null) {
+        throw new RuntimeException("Service does not have the sender-ids metadata");
+      }
+      return senderIds.split(",");
+    } catch (NameNotFoundException exception) {
+      throw new RuntimeException("Could not read service info from manifest", exception);
+    }
   }
 }

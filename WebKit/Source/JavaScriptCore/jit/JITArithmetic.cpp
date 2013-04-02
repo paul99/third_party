@@ -35,6 +35,7 @@
 #include "JSArray.h"
 #include "JSFunction.h"
 #include "Interpreter.h"
+#include "Operations.h"
 #include "ResultType.h"
 #include "SamplingTool.h"
 
@@ -794,7 +795,7 @@ void JIT::emit_op_mod(Instruction* currentInstruction)
 
 void JIT::emitSlow_op_mod(Instruction* currentInstruction, Vector<SlowCaseEntry>::iterator& iter)
 {
-    ASSERT_NOT_REACHED();
+    RELEASE_ASSERT_NOT_REACHED();
 }
 
 #endif // CPU(X86) || CPU(X86_64)

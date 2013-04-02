@@ -1241,7 +1241,7 @@ void JIT::emitSlow_op_init_global_const_check(Instruction* currentInstruction, V
 void JIT::resetPatchGetById(RepatchBuffer& repatchBuffer, StructureStubInfo* stubInfo)
 {
     repatchBuffer.relink(stubInfo->callReturnLocation, cti_op_get_by_id);
-    repatchBuffer.repatch(stubInfo->hotPathBegin.dataLabelPtrAtOffset(stubInfo->patch.baseline.u.get.structureToCompare), reinterpret_cast<void*>(-1));
+    repatchBuffer.repatch(stubInfo->hotPathBegin.dataLabelPtrAtOffset(stubInfo->patch.baseline.u.get.structureToCompare), reinterpret_cast<void*>(unusedPointer));
     repatchBuffer.repatch(stubInfo->hotPathBegin.dataLabelCompactAtOffset(stubInfo->patch.baseline.u.get.displacementLabel), 0);
     repatchBuffer.relink(stubInfo->hotPathBegin.jumpAtOffset(stubInfo->patch.baseline.u.get.structureCheck), stubInfo->callReturnLocation.labelAtOffset(-stubInfo->patch.baseline.u.get.coldPathBegin));
 }
@@ -1252,7 +1252,7 @@ void JIT::resetPatchPutById(RepatchBuffer& repatchBuffer, StructureStubInfo* stu
         repatchBuffer.relink(stubInfo->callReturnLocation, cti_op_put_by_id_direct);
     else
         repatchBuffer.relink(stubInfo->callReturnLocation, cti_op_put_by_id);
-    repatchBuffer.repatch(stubInfo->hotPathBegin.dataLabelPtrAtOffset(stubInfo->patch.baseline.u.put.structureToCompare), reinterpret_cast<void*>(-1));
+    repatchBuffer.repatch(stubInfo->hotPathBegin.dataLabelPtrAtOffset(stubInfo->patch.baseline.u.put.structureToCompare), reinterpret_cast<void*>(unusedPointer));
     repatchBuffer.repatch(stubInfo->hotPathBegin.dataLabel32AtOffset(stubInfo->patch.baseline.u.put.displacementLabel), 0);
 }
 
@@ -1272,26 +1272,6 @@ void JIT::emitWriteBarrier(RegisterID owner, RegisterID value, RegisterID scratc
 #if ENABLE(WRITE_BARRIER_PROFILING)
     emitCount(WriteBarrierCounters::jitCounterFor(useKind));
 #endif
-    
-#if ENABLE(GGC)
-    Jump filterCells;
-    if (mode == ShouldFilterImmediates)
-        filterCells = emitJumpIfNotJSCell(value);
-    move(owner, scratch);
-    andPtr(TrustedImm32(static_cast<int32_t>(MarkedBlock::blockMask)), scratch);
-    move(owner, scratch2);
-    // consume additional 8 bits as we're using an approximate filter
-    rshift32(TrustedImm32(MarkedBlock::atomShift + 8), scratch2);
-    andPtr(TrustedImm32(MarkedBlock::atomMask >> 8), scratch2);
-    Jump filter = branchTest8(Zero, BaseIndex(scratch, scratch2, TimesOne, MarkedBlock::offsetOfMarks()));
-    move(owner, scratch2);
-    rshift32(TrustedImm32(MarkedBlock::cardShift), scratch2);
-    andPtr(TrustedImm32(MarkedBlock::cardMask), scratch2);
-    store8(TrustedImm32(1), BaseIndex(scratch, scratch2, TimesOne, MarkedBlock::offsetOfCards()));
-    filter.link(this);
-    if (mode == ShouldFilterImmediates)
-        filterCells.link(this);
-#endif
 }
 
 void JIT::emitWriteBarrier(JSCell* owner, RegisterID value, RegisterID scratch, WriteBarrierMode mode, WriteBarrierUseKind useKind)
@@ -1304,17 +1284,6 @@ void JIT::emitWriteBarrier(JSCell* owner, RegisterID value, RegisterID scratch, 
     
 #if ENABLE(WRITE_BARRIER_PROFILING)
     emitCount(WriteBarrierCounters::jitCounterFor(useKind));
-#endif
-    
-#if ENABLE(GGC)
-    Jump filterCells;
-    if (mode == ShouldFilterImmediates)
-        filterCells = emitJumpIfNotJSCell(value);
-    uint8_t* cardAddress = Heap::addressOfCardFor(owner);
-    move(TrustedImmPtr(cardAddress), scratch);
-    store8(TrustedImm32(1), Address(scratch));
-    if (mode == ShouldFilterImmediates)
-        filterCells.link(this);
 #endif
 }
 
@@ -1374,7 +1343,7 @@ bool JIT::isDirectPutById(StructureStubInfo* stubInfo)
         return false;
     }
     default:
-        ASSERT_NOT_REACHED();
+        RELEASE_ASSERT_NOT_REACHED();
         return false;
     }
 }

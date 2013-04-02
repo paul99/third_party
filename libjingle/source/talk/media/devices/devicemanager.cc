@@ -35,6 +35,7 @@
 #include "talk/base/windowpicker.h"
 #include "talk/base/windowpickerfactory.h"
 #include "talk/media/base/mediacommon.h"
+#include "talk/media/devices/deviceinfo.h"
 #include "talk/media/devices/filevideocapturer.h"
 
 #if !(defined(IOS) || defined(ANDROID))
@@ -51,13 +52,44 @@
 
 #endif
 
+namespace {
+
+bool StringMatchWithWildcard(
+    const std::pair<const std::basic_string<char>, cricket::VideoFormat> key,
+    const std::string& val) {
+  return talk_base::string_match(val.c_str(), key.first.c_str());
+}
+
+}  // namespace
+
 namespace cricket {
 
 // Initialize to empty string.
 const char DeviceManagerInterface::kDefaultDeviceName[] = "";
 
+
+class DefaultVideoCapturerFactory : public VideoCapturerFactory {
+ public:
+  DefaultVideoCapturerFactory() {}
+  virtual ~DefaultVideoCapturerFactory() {}
+
+  VideoCapturer* Create(const Device& device) {
+#if defined(VIDEO_CAPTURER_NAME)
+    VIDEO_CAPTURER_NAME* return_value = new VIDEO_CAPTURER_NAME;
+    if (!return_value->Init(device)) {
+      delete return_value;
+      return NULL;
+    }
+    return return_value;
+#else
+    return NULL;
+#endif
+  }
+};
+
 DeviceManager::DeviceManager()
     : initialized_(false),
+      device_video_capturer_factory_(new DefaultVideoCapturerFactory),
       window_picker_(talk_base::WindowPickerFactory::CreateWindowPicker()) {
 }
 
@@ -160,6 +192,17 @@ bool DeviceManager::GetVideoCaptureDevice(const std::string& name,
   return false;
 }
 
+void DeviceManager::SetVideoCaptureDeviceMaxFormat(
+    const std::string& uvc_id,
+    const VideoFormat& max_format) {
+  max_formats_[uvc_id] = max_format;
+}
+
+void DeviceManager::ClearVideoCaptureDeviceMaxFormat(
+    const std::string& uvc_id) {
+  max_formats_.erase(uvc_id);
+}
+
 VideoCapturer* DeviceManager::CreateVideoCapturer(const Device& device) const {
 #if defined(IOS) || defined(ANDROID)
   LOG_F(LS_ERROR) << " should never be called!";
@@ -176,16 +219,14 @@ VideoCapturer* DeviceManager::CreateVideoCapturer(const Device& device) const {
     capturer->set_repeat(talk_base::kForever);
     return capturer;
   }
-#if defined(VIDEO_CAPTURER_NAME)
-  VIDEO_CAPTURER_NAME* capturer = new VIDEO_CAPTURER_NAME;
-  if (!capturer->Init(device)) {
-    delete capturer;
+  VideoCapturer* capturer = device_video_capturer_factory_->Create(device);
+  if (!capturer) {
     return NULL;
   }
+  VideoFormat video_format;
+  GetMaxFormat(device, &video_format);
+  capturer->ConstrainSupportedFormats(video_format);
   return capturer;
-#else
-  return NULL;
-#endif
 #endif
 }
 
@@ -284,6 +325,39 @@ bool DeviceManager::GetDefaultVideoCaptureDevice(Device* device) {
     *device = devices[0];
   }
   return ret;
+}
+
+bool DeviceManager::IsInWhitelist(const std::string& key,
+                                  VideoFormat* video_format) const {
+  std::map<std::string, VideoFormat>::const_iterator found =
+      std::search_n(max_formats_.begin(), max_formats_.end(), 1, key,
+                    StringMatchWithWildcard);
+  if (found == max_formats_.end()) {
+    return false;
+  }
+  *video_format = found->second;
+  return true;
+}
+
+bool DeviceManager::IsDeviceWhitelisted(const Device& device,
+                                        VideoFormat* video_format) const {
+  // Match UVC ID if available. Failing that, match device name.
+  std::string uvc_id;
+  if (GetUsbUvcId(device, &uvc_id) && IsInWhitelist(uvc_id, video_format)) {
+      return true;
+  }
+  return IsInWhitelist(device.name, video_format);
+}
+
+void DeviceManager::GetMaxFormat(const Device& device,
+                                 VideoFormat* video_format) const {
+  if (!IsDeviceWhitelisted(device, video_format)) {
+    // Default capabilities to VGA.
+    *video_format = VideoFormat(640,
+                                480,
+                                cricket::VideoFormat::FpsToInterval(30),
+                                FOURCC_I420);
+  }
 }
 
 bool DeviceManager::ShouldDeviceBeIgnored(const std::string& device_name,

@@ -280,10 +280,14 @@ void DrawingAreaProxyImpl::incorporateUpdate(const UpdateInfo& updateInfo)
 
     if (shouldScroll)
         m_webPageProxy->scrollView(updateInfo.scrollRect, updateInfo.scrollOffset);
-
-    for (size_t i = 0; i < updateInfo.updateRects.size(); ++i)
-        m_webPageProxy->setViewNeedsDisplay(updateInfo.updateRects[i]);
-
+    
+    if (shouldScroll && !m_webPageProxy->canScrollView())
+        m_webPageProxy->setViewNeedsDisplay(IntRect(IntPoint(), m_webPageProxy->viewSize()));
+    else {
+        for (size_t i = 0; i < updateInfo.updateRects.size(); ++i)
+            m_webPageProxy->setViewNeedsDisplay(updateInfo.updateRects[i]);
+    }
+    
     if (WebPageProxy::debugPaintFlags() & kWKDebugFlashBackingStoreUpdates)
         m_webPageProxy->flashBackingStoreUpdates(updateInfo.updateRects);
 
@@ -366,18 +370,11 @@ void DrawingAreaProxyImpl::enterAcceleratedCompositingMode(const LayerTreeContex
 }
 
 #if USE(COORDINATED_GRAPHICS)
-void DrawingAreaProxyImpl::didReceiveCoordinatedLayerTreeHostProxyMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
+void DrawingAreaProxyImpl::setVisibleContentsRect(const WebCore::FloatRect& visibleContentsRect, const WebCore::FloatPoint& trajectoryVector)
 {
     if (m_coordinatedLayerTreeHostProxy)
-        m_coordinatedLayerTreeHostProxy->didReceiveCoordinatedLayerTreeHostProxyMessage(connection, messageID, decoder);
+        m_coordinatedLayerTreeHostProxy->setVisibleContentsRect(visibleContentsRect, trajectoryVector);
 }
-
-void DrawingAreaProxyImpl::setVisibleContentsRect(const WebCore::FloatRect& visibleContentsRect, float scale, const WebCore::FloatPoint& trajectoryVector)
-{
-    if (m_coordinatedLayerTreeHostProxy)
-        m_coordinatedLayerTreeHostProxy->setVisibleContentsRect(visibleContentsRect, scale, trajectoryVector);
-}
-
 #endif
 
 void DrawingAreaProxyImpl::exitAcceleratedCompositingMode()

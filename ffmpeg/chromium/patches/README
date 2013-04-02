@@ -1,13 +1,19 @@
-Current Status as of Oct 2, 2012
+Current Status as of Dec 11, 2012
 
 
 Upstream cherry-picks:
-3c2101f Shared library support for MSVC build.
-8993d03 mp3demux: Rewrite xing TOC based seeking
-a9dbb83 mp3dec: propagate error code correctly.
-67c5aee mpegaudiodec: Fix buffer handling on random access
+<upstream in progress> - aligned stack fixes for MSVC++.
+<upstream in progress> - vp3 double-free fixes.
+2c16bf2de07c68513072bf3cc96401d2c6291a3e - vorbisdec: Check bark_map_size.
+
 
 Current patches:
+
+to_upstream/
+10_realloc_mismatch.patch
+  phajdan.jr: Fixes a mismatch between posix_memalign and realloc
+  detected by debugallocation (http://crbug.com/30715). Pointer passed
+  to realloc must come from malloc, calloc or realloc, which was not the case.
 
 ugly/
 01_enable_checked_bitstream.patch
@@ -23,3 +29,8 @@ ugly/
   dalecurtis: In order to preserve ABI compatibility after av_gettime() was
   moved inside the FFmpeg code base, they added a "symbolic link" version which
   our build chain doesn't like.  Remove it until the next major version bump.
+
+08_add_vp9_support.patch
+  tomfinegan: Add support for VP9 in WebM:
+      Tracking issue: http://crbug.com/166094
+      CL: https://codereview.chromium.org/11578025/

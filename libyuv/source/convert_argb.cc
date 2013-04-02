@@ -230,13 +230,19 @@ int I400ToARGB_Reference(const uint8* src_y, int src_stride_y,
                      uint8* rgb_buf,
                      int width) = YToARGBRow_C;
 #if defined(HAS_YTOARGBROW_SSE2)
-  if (TestCpuFlag(kCpuHasSSE2) && IS_ALIGNED(width, 8) &&
+  if (TestCpuFlag(kCpuHasSSE2) && width >= 8 &&
       IS_ALIGNED(dst_argb, 16) && IS_ALIGNED(dst_stride_argb, 16)) {
-    YToARGBRow = YToARGBRow_SSE2;
+    YToARGBRow = YToARGBRow_Any_SSE2;
+    if (IS_ALIGNED(width, 8)) {
+      YToARGBRow = YToARGBRow_SSE2;
+    }
   }
 #elif defined(HAS_YTOARGBROW_NEON)
-  if (TestCpuFlag(kCpuHasNEON) && IS_ALIGNED(width, 8)) {
-    YToARGBRow = YToARGBRow_NEON;
+  if (TestCpuFlag(kCpuHasNEON) && width >= 8) {
+    YToARGBRow = YToARGBRow_Any_NEON;
+    if (IS_ALIGNED(width, 8)) {
+      YToARGBRow = YToARGBRow_NEON;
+    }
   }
 #endif
 
@@ -941,7 +947,7 @@ int MJPGToARGB(const uint8* sample,
     return -1;
   }
 
-  // TODO(fbarchard): Port to C
+  // TODO(fbarchard): Port MJpeg to C.
   MJpegDecoder mjpeg_decoder;
   bool ret = mjpeg_decoder.LoadFrame(sample, sample_size);
   if (ret && (mjpeg_decoder.GetWidth() != w ||
@@ -1027,7 +1033,8 @@ int ConvertToARGB(const uint8* sample, size_t sample_size,
                   int src_width, int src_height,
                   int dst_width, int dst_height,
                   RotationMode rotation,
-                  uint32 format) {
+                  uint32 fourcc) {
+  uint32 format = CanonicalFourCC(fourcc);
   if (dst_argb == NULL || sample == NULL ||
       src_width <= 0 || dst_width <= 0 ||
       src_height == 0 || dst_height == 0) {
@@ -1077,15 +1084,6 @@ int ConvertToARGB(const uint8* sample, size_t sample_size,
                      dst_argb, argb_stride,
                      dst_width, inv_dst_height);
       break;
-//    case FOURCC_V210:
-      // stride is multiple of 48 pixels (128 bytes).
-      // pixels come in groups of 6 = 16 bytes
-//      src = sample + (aligned_src_width + 47) / 48 * 128 * crop_y +
-//            crop_x / 6 * 16;
-//      r = V210ToARGB(src, (aligned_src_width + 47) / 48 * 128,
-//                     dst_argb, argb_stride,
-//                     dst_width, inv_dst_height);
-//      break;
     case FOURCC_24BG:
       src = sample + (src_width * crop_y + crop_x) * 3;
       r = RGB24ToARGB(src, src_width * 3,

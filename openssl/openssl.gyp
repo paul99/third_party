@@ -6,7 +6,7 @@
   'targets': [
     {
       'target_name': 'openssl',
-      'type': '<(library)',
+      'type': 'static_library',
       'defines': [
         'L_ENDIAN',
         'OPENSSL_THREADS',

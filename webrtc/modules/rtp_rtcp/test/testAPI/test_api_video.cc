@@ -28,7 +28,8 @@ class RtpRtcpVideoTest : public ::testing::Test {
       : test_id_(123),
         test_ssrc_(3456),
         test_timestamp_(4567),
-        test_sequence_number_(2345) {
+        test_sequence_number_(2345),
+        fake_clock(123456) {
   }
   ~RtpRtcpVideoTest() {}
 
@@ -46,8 +47,8 @@ class RtpRtcpVideoTest : public ::testing::Test {
 
     EXPECT_EQ(0, video_module_->SetRTCPStatus(kRtcpCompound));
     EXPECT_EQ(0, video_module_->SetSSRC(test_ssrc_));
-    EXPECT_EQ(0, video_module_->SetNACKStatus(kNackRtcp));
-    EXPECT_EQ(0, video_module_->SetStorePacketsStatus(true));
+    EXPECT_EQ(0, video_module_->SetNACKStatus(kNackRtcp, 450));
+    EXPECT_EQ(0, video_module_->SetStorePacketsStatus(true, 600));
     EXPECT_EQ(0, video_module_->SetSendingStatus(true));
 
     transport_->SetSendModule(video_module_);
@@ -124,7 +125,7 @@ class RtpRtcpVideoTest : public ::testing::Test {
   WebRtc_UWord16 test_sequence_number_;
   WebRtc_UWord8  video_frame_[65000];
   int payload_data_length_;
-  FakeRtpRtcpClock fake_clock;
+  SimulatedClock fake_clock;
   enum { kPayloadType = 100 };
 };
 
@@ -157,7 +158,7 @@ TEST_F(RtpRtcpVideoTest, PaddingOnlyFrames) {
       EXPECT_EQ(packet_size - 12, receiver_->rtp_header().header.paddingLength);
     }
     timestamp += 3000;
-    fake_clock.IncrementTime(33);
+    fake_clock.AdvanceTimeMilliseconds(33);
   }
 }
 

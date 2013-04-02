@@ -110,11 +110,23 @@ class PortAllocatorTest : public testing::Test, public sigslot::has_slots<> {
     return true;
   }
 
+  bool CreateSession(int component, const std::string& content_name) {
+    session_.reset(CreateSession("session", content_name, component));
+    if (!session_)
+      return false;
+    return true;
+  }
+
   cricket::PortAllocatorSession* CreateSession(
       const std::string& sid, int component) {
+    return CreateSession(sid, "test content", component);
+  }
+
+  cricket::PortAllocatorSession* CreateSession(
+      const std::string& sid, const std::string& content_name, int component) {
     cricket::PortAllocatorSession* session =
         allocator_->CreateSession(
-            sid, "test content", component, kIceUfrag0, kIcePwd0);
+            sid, content_name, component, kIceUfrag0, kIcePwd0);
     session->SignalPortReady.connect(this,
             &PortAllocatorTest::OnPortReady);
     session->SignalCandidatesReady.connect(this,
@@ -138,8 +150,31 @@ class PortAllocatorTest : public testing::Test, public sigslot::has_slots<> {
     return (addr.port() >= min_port && addr.port() <= max_port);
   }
 
-  void OnCandidatesAllocationDone(cricket::PortAllocatorSession* allocator) {
-    candidate_allocation_done_ = true;
+  void OnCandidatesAllocationDone(cricket::PortAllocatorSession* session) {
+    // We should only get this callback once, except in the mux test where
+    // we have multiple port allocation sessions.
+    if (session == session_.get()) {
+      ASSERT_FALSE(candidate_allocation_done_);
+      candidate_allocation_done_ = true;
+    }
+  }
+
+  // Check if all ports allocated have send-buffer size |expected|. If
+  // |expected| == -1, check if GetOptions returns SOCKET_ERROR.
+  void CheckSendBufferSizesOfAllPorts(int expected) {
+    std::vector<cricket::PortInterface*>::iterator it;
+    for (it = ports_.begin(); it < ports_.end(); ++it) {
+      int send_buffer_size;
+      if (expected == -1) {
+        EXPECT_EQ(SOCKET_ERROR,
+                  (*it)->GetOption(talk_base::Socket::OPT_SNDBUF,
+                                   &send_buffer_size));
+      } else {
+        EXPECT_EQ(0, (*it)->GetOption(talk_base::Socket::OPT_SNDBUF,
+                                      &send_buffer_size));
+        ASSERT_EQ(expected, send_buffer_size);
+      }
+    }
   }
 
  protected:
@@ -245,6 +280,75 @@ TEST_F(PortAllocatorTest, TestGetAllPorts) {
                "relay", "ssltcp", kRelaySslTcpIntAddr);
   EXPECT_EQ(4U, ports_.size());
   EXPECT_TRUE(candidate_allocation_done_);
+  // If we Stop gathering now, we shouldn't get a second "done" callback.
+  session_->StopGetAllPorts();
+}
+
+TEST_F(PortAllocatorTest, TestSetupVideoRtpPortsWithNormalSendBuffers) {
+  AddInterface(kClientAddr);
+  EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP,
+                            cricket::CN_VIDEO));
+  session_->GetInitialPorts();
+  session_->StartGetAllPorts();
+  ASSERT_EQ_WAIT(7U, candidates_.size(), 5000);
+  EXPECT_TRUE(candidate_allocation_done_);
+  // If we Stop gathering now, we shouldn't get a second "done" callback.
+  session_->StopGetAllPorts();
+
+  // All ports should have normal send-buffer sizes (64KB).
+  CheckSendBufferSizesOfAllPorts(64 * 1024);
+}
+
+TEST_F(PortAllocatorTest, TestSetupVideoRtpPortsWithLargeSendBuffers) {
+  AddInterface(kClientAddr);
+  allocator_->set_flags(allocator_->flags() |
+                        cricket::PORTALLOCATOR_USE_LARGE_SOCKET_SEND_BUFFERS);
+  EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP,
+                            cricket::CN_VIDEO));
+  session_->GetInitialPorts();
+  session_->StartGetAllPorts();
+  ASSERT_EQ_WAIT(7U, candidates_.size(), 5000);
+  EXPECT_TRUE(candidate_allocation_done_);
+  // If we Stop gathering now, we shouldn't get a second "done" callback.
+  session_->StopGetAllPorts();
+
+  // All ports should have large send-buffer sizes (128KB).
+  CheckSendBufferSizesOfAllPorts(128 * 1024);
+}
+
+TEST_F(PortAllocatorTest, TestSetupVideoRtcpPortsAndCheckSendBuffers) {
+  AddInterface(kClientAddr);
+  allocator_->set_flags(allocator_->flags() |
+                        cricket::PORTALLOCATOR_USE_LARGE_SOCKET_SEND_BUFFERS);
+  EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTCP,
+                            cricket::CN_DATA));
+  session_->GetInitialPorts();
+  session_->StartGetAllPorts();
+  ASSERT_EQ_WAIT(7U, candidates_.size(), 5000);
+  EXPECT_TRUE(candidate_allocation_done_);
+  // If we Stop gathering now, we shouldn't get a second "done" callback.
+  session_->StopGetAllPorts();
+
+  // No ports should have send-buffer size set.
+  CheckSendBufferSizesOfAllPorts(-1);
+}
+
+
+TEST_F(PortAllocatorTest, TestSetupNonVideoPortsAndCheckSendBuffers) {
+  AddInterface(kClientAddr);
+  allocator_->set_flags(allocator_->flags() |
+                        cricket::PORTALLOCATOR_USE_LARGE_SOCKET_SEND_BUFFERS);
+  EXPECT_TRUE(CreateSession(cricket::ICE_CANDIDATE_COMPONENT_RTP,
+                            cricket::CN_DATA));
+  session_->GetInitialPorts();
+  session_->StartGetAllPorts();
+  ASSERT_EQ_WAIT(7U, candidates_.size(), 5000);
+  EXPECT_TRUE(candidate_allocation_done_);
+  // If we Stop gathering now, we shouldn't get a second "done" callback.
+  session_->StopGetAllPorts();
+
+  // No ports should have send-buffer size set.
+  CheckSendBufferSizesOfAllPorts(-1);
 }
 
 // Tests that we can get callback after StopGetAllPorts.

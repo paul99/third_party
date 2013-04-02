@@ -18,6 +18,7 @@ INCLUDEPATH += \
     $$SOURCE_DIR/Modules/indexeddb \
     $$SOURCE_DIR/Modules/navigatorcontentutils \
     $$SOURCE_DIR/Modules/notifications \
+    $$SOURCE_DIR/Modules/proximity \
     $$SOURCE_DIR/Modules/quota \
     $$SOURCE_DIR/Modules/webaudio \
     $$SOURCE_DIR/Modules/webdatabase \
@@ -49,6 +50,7 @@ INCLUDEPATH += \
     $$SOURCE_DIR/page/animation \
     $$SOURCE_DIR/page/qt \
     $$SOURCE_DIR/page/scrolling \
+    $$SOURCE_DIR/page/scrolling/coordinatedgraphics \
     $$SOURCE_DIR/platform \
     $$SOURCE_DIR/platform/animation \
     $$SOURCE_DIR/platform/audio \
@@ -62,6 +64,7 @@ INCLUDEPATH += \
     $$SOURCE_DIR/platform/graphics/qt \
     $$SOURCE_DIR/platform/graphics/surfaces \
     $$SOURCE_DIR/platform/graphics/texmap \
+    $$SOURCE_DIR/platform/graphics/texmap/coordinated \
     $$SOURCE_DIR/platform/graphics/transforms \
     $$SOURCE_DIR/platform/image-decoders \
     $$SOURCE_DIR/platform/image-decoders/bmp \
@@ -115,6 +118,8 @@ enable?(XSLT) {
     } else {
         QT *= xmlpatterns
     }
+} else:!mac:use?(LIBXML2) {
+    PKGCONFIG += libxml-2.0
 }
 
 use?(ZLIB) {
@@ -164,7 +169,7 @@ enable?(GAMEPAD) {
 }
 
 use?(GSTREAMER) {
-    DEFINES += ENABLE_GLIB_SUPPORT=1
+    DEFINES += WTF_USE_GLIB=1
     PKGCONFIG += glib-2.0 gio-2.0 gstreamer-0.10 gstreamer-app-0.10 gstreamer-base-0.10 gstreamer-interfaces-0.10 gstreamer-pbutils-0.10 gstreamer-plugins-base-0.10 gstreamer-video-0.10
 }
 
@@ -216,7 +221,11 @@ use?(3D_GRAPHICS) {
         win32-g++: {
             # Make sure OpenGL libs are after the webcore lib so MinGW can resolve symbols
             contains(QT_CONFIG, opengles2) {
-                LIBS += $$QMAKE_LIBS_OPENGL_ES2
+                CONFIG(debug, debug|release):contains(QT_CONFIG, angle) {
+                    LIBS += $$QMAKE_LIBS_OPENGL_ES2_DEBUG
+                } else {
+                    LIBS += $$QMAKE_LIBS_OPENGL_ES2
+                }
             } else {
                 LIBS += $$QMAKE_LIBS_OPENGL
             }

@@ -67,6 +67,7 @@ WK_EXPORT void WKBundleSetWebNotificationPermission(WKBundleRef bundle, WKBundle
 WK_EXPORT void WKBundleRemoveAllWebNotificationPermissions(WKBundleRef bundle, WKBundlePageRef page);
 WK_EXPORT uint64_t WKBundleGetWebNotificationID(WKBundleRef bundle, JSContextRef context, JSValueRef notification);
 WK_EXPORT void WKBundleSetMinimumTimerInterval(WKBundleRef bundleRef, WKBundlePageGroupRef pageGroupRef, double interval);
+WK_EXPORT WKDataRef WKBundleCreateWKDataFromUInt8Array(WKBundleRef bundle, JSContextRef context, JSValueRef data);
 
 // UserContent API
 WK_EXPORT void WKBundleAddUserScript(WKBundleRef bundle, WKBundlePageGroupRef pageGroup, WKBundleScriptWorldRef scriptWorld, WKStringRef source, WKURLRef url, WKArrayRef whitelist, WKArrayRef blacklist, WKUserScriptInjectionTime injectionTime, WKUserContentInjectedFrames injectedFrames);
@@ -97,13 +98,10 @@ WK_EXPORT size_t WKBundleGetJavaScriptObjectsCount(WKBundleRef bundle);
 
 WK_EXPORT bool WKBundleIsProcessingUserGesture(WKBundleRef bundle);
 
-WK_EXPORT void WKBundleSetPageVisibilityState(WKBundleRef bundle, WKBundlePageRef page, int state, bool isInitialState);
-
-WK_EXPORT size_t WKBundleGetWorkerThreadCount(WKBundleRef bundle);
-
 WK_EXPORT void WKBundleSetTabKeyCyclesThroughElements(WKBundleRef bundle, WKBundlePageRef page, bool enabled);
 WK_EXPORT void WKBundleSetSerialLoadingEnabled(WKBundleRef bundle, bool enabled);
 WK_EXPORT void WKBundleSetShadowDOMEnabled(WKBundleRef bundle, bool enabled);
+WK_EXPORT void WKBundleSetSeamlessIFramesEnabled(WKBundleRef bundle, bool enabled);
 WK_EXPORT void WKBundleDispatchPendingLoadRequests(WKBundleRef bundle);
 
 #ifdef __cplusplus

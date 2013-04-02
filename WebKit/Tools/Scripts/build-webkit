@@ -108,7 +108,11 @@ my $usage = <<EOF;
 Usage: $programName [options] [options to pass to build system]
   --help                            Show this help message
   --clean                           Cleanup the build directory
-  --debug                           Compile in debug mode
+  --debug                           Compile with Debug configuration
+  --release                         Compile with Release configuration
+  --sdk=<sdk>                       Use a specific Xcode SDK (iOS and Mac only)
+  --device                          Use the current iphoneos.internal SDK (iOS only)
+  --simulator                       Use the current iphonesimulator SDK (iOS only)
   --gyp                             Use GYP-generated project files
   --coverage                        Enable Code Coverage support (Mac only)
 
@@ -134,7 +138,7 @@ Usage: $programName [options] [options to pass to build system]
   --minimal                         No optional features, unless explicitly enabled
 
   --only-webkit                     Build only the WebKit project
-  --no-webkit1                      Omit WebKit1 code from the build (Qt/EFL only)
+  --no-webkit1                      Omit WebKit1 code from the build (Qt/EFL/GTK only)
   --no-webkit2                      Omit WebKit2 code from the build
 
 EOF
@@ -359,7 +363,7 @@ for my $dir (@projects) {
 
     my $project = basename($dir);
     if (isGtk()) {
-        $result = buildGtkProject($project, $clean, $prefixPath, $makeArgs, $noWebKit2, @features);
+        $result = buildGtkProject($project, $clean, $prefixPath, $makeArgs, $noWebKit1, $noWebKit2, @features);
     } elsif (isAppleMacWebKit()) {
         my @local_options = @options;
         push @local_options, XcodeCoverageSupportOptions() if $coverageSupport && $project ne "ANGLE";

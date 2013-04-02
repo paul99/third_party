@@ -11,7 +11,7 @@
   'targets': [
     {
       'target_name': 'system_wrappers',
-      'type': '<(library)',
+      'type': 'static_library',
       'include_dirs': [
         'spreadsortlib',
         '../interface',
@@ -24,6 +24,7 @@
       'sources': [
         '../interface/aligned_malloc.h',
         '../interface/atomic32.h',
+        '../interface/clock.h',
         '../interface/compile_assert.h',
         '../interface/condition_variable_wrapper.h',
         '../interface/cpu_info.h',
@@ -33,6 +34,7 @@
         '../interface/data_log.h',
         '../interface/data_log_c.h',
         '../interface/data_log_impl.h',
+        '../interface/event_tracer.h',
         '../interface/event_wrapper.h',
         '../interface/file_wrapper.h',
         '../interface/fix_interlocked_exchange_pointer_win.h',
@@ -49,10 +51,12 @@
         '../interface/thread_wrapper.h',
         '../interface/tick_util.h',
         '../interface/trace.h',
+        '../interface/trace_event.h',
         'aligned_malloc.cc',
         'atomic32_mac.cc',
         'atomic32_posix.cc',
         'atomic32_win.cc',
+        'clock.cc',
         'condition_variable.cc',
         'condition_variable_posix.cc',
         'condition_variable_posix.h',
@@ -79,6 +83,7 @@
         'event.cc',
         'event_posix.cc',
         'event_posix.h',
+        'event_tracer.cc',
         'event_win.cc',
         'event_win.h',
         'file_impl.cc',
@@ -182,6 +187,11 @@
           ],
         }],
       ],
+      # Disable warnings to enable Win64 build, issue 1323.
+      'msvs_disabled_warnings': [
+        4267,  # size_t to int truncation.
+        4334,  # Ignore warning on shift operator promotion.
+      ],
     },
   ], # targets
   'conditions': [
@@ -193,7 +203,7 @@
             'chromium_code': 0,
           },
           'target_name': 'cpu_features_android',
-          'type': '<(library)',
+          'type': 'static_library',
           'sources': [
             # TODO(leozwang): Ideally we want to audomatically exclude .c files
             # as with .cc files, gyp currently only excludes .cc files.
@@ -201,8 +211,16 @@
           ],
           'conditions': [
             ['build_with_chromium==1', {
-              'dependencies': [
-                '<(android_ndk_root)/android_tools_ndk.gyp:cpu_features',
+              'conditions': [
+                ['android_build_type != 0', {
+                  'libraries': [
+                    'cpufeatures.a'
+                  ],
+                }, {
+                  'dependencies': [
+                    '<(android_ndk_root)/android_tools_ndk.gyp:cpu_features',
+                  ],
+                }],
               ],
             }, {
               'sources': [
@@ -231,6 +249,7 @@
             'cpu_measurement_harness.h',
             'cpu_measurement_harness.cc',
             'critical_section_unittest.cc',
+            'event_tracer_unittest.cc',
             'list_unittest.cc',
             'logging_unittest.cc',
             'map_unittest.cc',
@@ -253,6 +272,10 @@
             ['os_posix==0', {
               'sources!': [ 'thread_posix_unittest.cc', ],
             }],
+          ],
+          # Disable warnings to enable Win64 build, issue 1323.
+          'msvs_disabled_warnings': [
+            4267,  # size_t to int truncation.
           ],
         },
       ], # targets

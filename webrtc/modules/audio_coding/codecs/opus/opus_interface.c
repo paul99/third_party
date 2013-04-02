@@ -19,8 +19,8 @@
 #include "common_audio/signal_processing/include/signal_processing_library.h"
 
 enum {
-  /* We always produce 20ms frames. */
-  kWebRtcOpusMaxEncodeFrameSizeMs = 20,
+  /* Maximum supported frame size in WebRTC is 60 ms. */
+  kWebRtcOpusMaxEncodeFrameSizeMs = 60,
 
   /* The format allows up to 120ms frames. Since we
    * don't control the other side, we must allow
@@ -42,8 +42,11 @@ int16_t WebRtcOpus_EncoderCreate(OpusEncInst** inst, int32_t channels) {
   state = (OpusEncInst*) calloc(1, sizeof(OpusEncInst));
   if (state) {
     int error;
-    state->encoder = opus_encoder_create(48000, channels, OPUS_APPLICATION_VOIP,
-                                         &error);
+    // Default to VoIP application for mono, and AUDIO for stereo.
+    int application = (channels == 1) ?
+        OPUS_APPLICATION_VOIP : OPUS_APPLICATION_AUDIO;
+
+    state->encoder = opus_encoder_create(48000, channels, application, &error);
     if (error == OPUS_OK || state->encoder != NULL ) {
       *inst = state;
       return 0;
@@ -214,7 +217,9 @@ int16_t WebRtcOpus_Decode(OpusDecInst* inst, int16_t* encoded,
     buffer32[7 + i] = buffer16[i];
   }
   /* Resampling 3 samples to 2. Function divides the input in |blocks| number
-   * of 3-sample groups, and output is |blocks| number of 2-sample groups. */
+   * of 3-sample groups, and output is |blocks| number of 2-sample groups.
+   * When this is removed, the compensation in WebRtcOpus_DurationEst should be
+   * removed too. */
   blocks = decoded_samples / 3;
   WebRtcSpl_Resample48khzTo32khz(buffer32, buffer32, blocks);
   output_samples = (int16_t) (blocks * 2);
@@ -279,4 +284,26 @@ int16_t WebRtcOpus_DecodePlc(OpusDecInst* inst, int16_t* decoded,
    * loss concealment, but I don't know how many samples
    * number_of_lost_frames corresponds to. */
   return -1;
+}
+
+int WebRtcOpus_DurationEst(OpusDecInst* inst,
+                           const uint8_t* payload,
+                           int payload_length_bytes)
+{
+  int frames, samples;
+  frames = opus_packet_get_nb_frames(payload, payload_length_bytes);
+  if (frames < 0) {
+    /* Invalid payload data. */
+    return 0;
+  }
+  samples = frames * opus_packet_get_samples_per_frame(payload, 48000);
+  if (samples < 120 || samples > 5760) {
+    /* Invalid payload duration. */
+    return 0;
+  }
+  /* Compensate for the down-sampling from 48 kHz to 32 kHz.
+   * This should be removed when the resampling in WebRtcOpus_Decode is
+   * removed. */
+  samples = samples * 2 / 3;
+  return samples;
 }

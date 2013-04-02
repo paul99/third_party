@@ -30,9 +30,6 @@
 
 #include "config.h"
 
-#include <gtest/gtest.h>
-#include <webkit/support/webkit_support.h>
-
 #include "Color.h"
 #include "Element.h"
 #include "FrameView.h"
@@ -40,8 +37,8 @@
 #include "KeyboardCodes.h"
 #include "PopupContainer.h"
 #include "PopupMenu.h"
-#include "PopupMenuClient.h"
 #include "PopupMenuChromium.h"
+#include "PopupMenuClient.h"
 #include "RuntimeEnabledFeatures.h"
 #include "URLTestHelpers.h"
 #include "WebDocument.h"
@@ -53,14 +50,17 @@
 #include "WebPopupMenuImpl.h"
 #include "WebScreenInfo.h"
 #include "WebSettings.h"
-#include "platform/WebString.h"
-#include "platform/WebURL.h"
-#include "platform/WebURLRequest.h"
-#include "platform/WebURLResponse.h"
 #include "WebView.h"
 #include "WebViewClient.h"
 #include "WebViewImpl.h"
 #include "v8.h"
+#include <gtest/gtest.h>
+#include <public/Platform.h>
+#include <public/WebString.h>
+#include <public/WebURL.h>
+#include <public/WebURLRequest.h>
+#include <public/WebURLResponse.h>
+#include <public/WebUnitTestSupport.h>
 
 using namespace WebCore;
 using namespace WebKit;
@@ -193,7 +193,7 @@ protected:
     {
         m_popupMenu = 0;
         m_webView->close();
-        webkit_support::UnregisterAllMockedURLs();
+        Platform::current()->unitTestSupport()->unregisterAllMockedURLs();
     }
 
     // Returns true if there currently is a select popup in the WebView.
@@ -256,7 +256,7 @@ protected:
 
     void serveRequests()
     {
-        webkit_support::ServeAsynchronousMockedRequests();
+        Platform::current()->unitTestSupport()->serveAsynchronousMockedRequests();
     }
 
     void loadFrame(WebFrame* frame, const std::string& fileName)

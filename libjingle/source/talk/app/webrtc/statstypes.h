@@ -35,22 +35,49 @@
 #include <vector>
 
 #include "talk/base/basictypes.h"
+#include "talk/base/stringencode.h"
 
 namespace webrtc {
 
 // StatsElement contains a time stamped list of name/value pairs.
-struct StatsElement {
-  StatsElement() : timestamp(0) { }
-  double timestamp;  // Time since 1970-01-01T00:00:00Z in milliseconds.
+class StatsElement {
+ public:
   struct Value {
     std::string name;
     std::string value;
   };
+
+  StatsElement() : timestamp(0) { }
+
+  void AddValue(const std::string& name, const std::string& value);
+  void AddValue(const std::string& name, int64 value);
+
+  double timestamp;  // Time since 1970-01-01T00:00:00Z in milliseconds.
   typedef std::vector<Value> Values;
   Values values;
 
   // StatsValue names
   static const char kStatsValueNameAudioOutputLevel[];
+  static const char kStatsValueNameAudioInputLevel[];
+  static const char kStatsValueNameBytesSent[];
+  static const char kStatsValueNamePacketsSent[];
+  static const char kStatsValueNameBytesReceived[];
+  static const char kStatsValueNamePacketsReceived[];
+  static const char kStatsValueNamePacketsLost[];
+
+  // Internal StatsValue names
+  static const char kStatsValueNameFirsReceived[];
+  static const char kStatsValueNameFirsSent[];
+  static const char kStatsValueNameFrameHeightReceived[];
+  static const char kStatsValueNameFrameHeightSent[];
+  static const char kStatsValueNameFrameRateReceived[];
+  static const char kStatsValueNameFrameRateSent[];
+  static const char kStatsValueNameFrameWidthReceived[];
+  static const char kStatsValueNameFrameWidthSent[];
+  static const char kStatsValueNameJitterReceived[];
+  static const char kStatsValueNameNacksReceived[];
+  static const char kStatsValueNameNacksSent[];
+  static const char kStatsValueNameRtt[];
 };
 
 // StatsReport contains local and remote StatsElements that pertain to the same

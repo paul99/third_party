@@ -26,72 +26,13 @@
 #import "config.h"
 #import "WebProcessProxy.h"
 
-#import "SecItemRequestData.h"
-#import "SecItemResponseData.h"
+#import "WebContext.h"
+#import "WebPageGroup.h"
+#import "WebPreferences.h"
 #import "WebProcessMessages.h"
 #import "WKFullKeyboardAccessWatcher.h"
-#import <Security/SecItem.h>
 
 namespace WebKit {
-
-static void handleSecItemRequest(CoreIPC::Connection* connection, uint64_t requestID, const SecItemRequestData& request)
-{
-    SecItemResponseData response;
-
-    switch (request.type()) {
-        case SecItemRequestData::CopyMatching: {
-            CFTypeRef resultObject = 0;
-            OSStatus resultCode = SecItemCopyMatching(request.query(), &resultObject);
-            response = SecItemResponseData(resultCode, adoptCF(resultObject).get());
-            break;
-        }
-
-        case SecItemRequestData::Add: {
-            CFTypeRef resultObject = 0;
-            OSStatus resultCode = SecItemAdd(request.query(), &resultObject);
-            response = SecItemResponseData(resultCode, adoptCF(resultObject).get());
-            break;
-        }
-
-        case SecItemRequestData::Update: {
-            OSStatus resultCode = SecItemUpdate(request.query(), request.attributesToMatch());
-            response = SecItemResponseData(resultCode, 0);
-            break;
-        }
-
-        case SecItemRequestData::Delete: {
-            OSStatus resultCode = SecItemDelete(request.query());
-            response = SecItemResponseData(resultCode, 0);
-            break;
-        }
-
-        default:
-            return;
-    }
-
-    connection->send(Messages::WebProcess::SecItemResponse(requestID, response), 0);
-}
-
-static void dispatchFunctionOnQueue(dispatch_queue_t queue, const Function<void ()>& function)
-{
-#if COMPILER(CLANG)
-    dispatch_async(queue, function);
-#else
-    Function<void ()>* functionPtr = new Function<void ()>(function);
-    dispatch_async(queue, ^{
-        (*functionPtr)();
-        delete functionPtr;
-    });
-#endif
-}
-
-void WebProcessProxy::secItemRequest(CoreIPC::Connection* connection, uint64_t requestID, const SecItemRequestData& request)
-{
-    // Since we don't want the connection work queue to be held up, we do all
-    // keychain interaction work on a global dispatch queue.
-    dispatch_queue_t keychainWorkQueue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
-    dispatchFunctionOnQueue(keychainWorkQueue, bind(handleSecItemRequest, RefPtr<CoreIPC::Connection>(connection), requestID, request));
-}
 
 bool WebProcessProxy::fullKeyboardAccessEnabled()
 {
@@ -121,6 +62,29 @@ void WebProcessProxy::platformGetLaunchOptions(ProcessLauncher::LaunchOptions& l
 #if HAVE(XPC)
     launchOptions.useXPC = shouldUseXPC();
 #endif
+}
+
+bool WebProcessProxy::pageIsProcessSuppressible(WebPageProxy* page)
+{
+    return !page->isViewVisible() && page->pageGroup()->preferences()->pageVisibilityBasedProcessSuppressionEnabled();
+}
+
+bool WebProcessProxy::allPagesAreProcessSuppressible() const
+{
+    return (m_processSuppressiblePages.size() == m_pageMap.size()) && !m_processSuppressiblePages.isEmpty();
+}
+
+void WebProcessProxy::updateProcessSuppressionState()
+{
+    if (!isValid())
+        return;
+
+    bool canEnable = m_context->canEnableProcessSuppressionForWebProcess(this);
+    if (m_processSuppressionEnabled == canEnable)
+        return;
+    m_processSuppressionEnabled = canEnable;
+
+    connection()->send(Messages::WebProcess::SetProcessSuppressionEnabled(m_processSuppressionEnabled), 0);
 }
 
 } // namespace WebKit

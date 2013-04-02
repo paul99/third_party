@@ -11,6 +11,7 @@
 #include "JSGlobalData.h"
 #include "JSObject.h"
 #include "JSString.h"
+#include "Operations.h"
 #include <wtf/StackStats.h>
 
 namespace JSC {
@@ -335,10 +336,7 @@ void SlotVisitor::finalizeUnconditionalFinalizers()
 #if ENABLE(GC_VALIDATION)
 void SlotVisitor::validate(JSCell* cell)
 {
-    if (!cell) {
-        dataLogF("cell is NULL\n");
-        CRASH();
-    }
+    RELEASE_ASSERT(cell);
 
     if (!cell->structure()) {
         dataLogF("cell at %p has a null structure\n" , cell);

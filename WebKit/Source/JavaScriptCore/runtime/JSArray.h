@@ -161,8 +161,8 @@ private:
     template<IndexingType indexingType>
     void sortNumericVector(ExecState*, JSValue compareFunction, CallType, const CallData&);
         
-    template<IndexingType indexingType>
-    void sortCompactedVector(ExecState*, void* begin, unsigned relevantLength);
+    template<IndexingType indexingType, typename StorageType>
+    void sortCompactedVector(ExecState*, ContiguousData<StorageType>, unsigned relevantLength);
         
     template<IndexingType indexingType>
     void sortVector(ExecState*, JSValue compareFunction, CallType, const CallData&);
@@ -245,6 +245,10 @@ inline JSArray* JSArray::tryCreateUninitialized(JSGlobalData& globalData, Struct
         butterfly = Butterfly::fromBase(temp, 0, 0);
         butterfly->setVectorLength(vectorLength);
         butterfly->setPublicLength(initialLength);
+        if (hasDouble(structure->indexingType())) {
+            for (unsigned i = initialLength; i < vectorLength; ++i)
+                butterfly->contiguousDouble()[i] = QNaN;
+        }
     } else {
         void* temp;
         if (!globalData.heap.tryAllocateStorage(Butterfly::totalSize(0, 0, true, ArrayStorage::sizeFor(vectorLength)), &temp))
@@ -287,8 +291,7 @@ inline JSArray* constructArray(ExecState* exec, Structure* arrayStructure, const
     // FIXME: we should probably throw an out of memory error here, but
     // when making this change we should check that all clients of this
     // function will correctly handle an exception being thrown from here.
-    if (!array)
-        CRASH();
+    RELEASE_ASSERT(array);
 
     for (unsigned i = 0; i < length; ++i)
         array->initializeIndex(globalData, i, values.at(i));
@@ -303,8 +306,7 @@ inline JSArray* constructArray(ExecState* exec, Structure* arrayStructure, const
     // FIXME: we should probably throw an out of memory error here, but
     // when making this change we should check that all clients of this
     // function will correctly handle an exception being thrown from here.
-    if (!array)
-        CRASH();
+    RELEASE_ASSERT(array);
 
     for (unsigned i = 0; i < length; ++i)
         array->initializeIndex(globalData, i, values[i]);

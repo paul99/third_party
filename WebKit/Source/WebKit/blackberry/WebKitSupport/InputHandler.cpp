@@ -29,6 +29,7 @@
 #include "Document.h"
 #include "DocumentLoader.h"
 #include "DocumentMarkerController.h"
+#include "EditorClientBlackBerry.h"
 #include "FocusController.h"
 #include "Frame.h"
 #include "FrameView.h"
@@ -55,6 +56,7 @@
 #include "SelectPopupClient.h"
 #include "SelectionHandler.h"
 #include "SpellChecker.h"
+#include "SpellingHandler.h"
 #include "TextCheckerClient.h"
 #include "TextIterator.h"
 #include "VisiblePosition.h"
@@ -64,10 +66,10 @@
 #include "htmlediting.h"
 #include "visible_units.h"
 
+#include <BlackBerryPlatformDeviceInfo.h>
 #include <BlackBerryPlatformIMF.h>
 #include <BlackBerryPlatformKeyboardEvent.h>
 #include <BlackBerryPlatformLog.h>
-#include <BlackBerryPlatformMisc.h>
 #include <BlackBerryPlatformScreen.h>
 #include <BlackBerryPlatformSettings.h>
 #include <sys/keycodes.h>
@@ -76,8 +78,6 @@
 #define ENABLE_INPUT_LOG 0
 #define ENABLE_FOCUS_LOG 0
 #define ENABLE_SPELLING_LOG 0
-
-static const unsigned MaxLearnTextDataSize = 500;
 
 using namespace BlackBerry::Platform;
 using namespace WebCore;
@@ -102,6 +102,8 @@ using namespace WebCore;
 
 namespace BlackBerry {
 namespace WebKit {
+
+static const float zoomAnimationThreshold = 0.5;
 
 class ProcessingChangeGuard {
 public:
@@ -139,14 +141,18 @@ InputHandler::InputHandler(WebPagePrivate* page)
     , m_delayKeyboardVisibilityChange(false)
     , m_request(0)
     , m_processingTransactionId(-1)
-    , m_receivedBackspaceKeyDown(false)
+    , m_shouldNotifyWebView(true)
     , m_expectedKeyUpChar(0)
     , m_didSpellCheckWord(false)
+    , m_spellingHandler(new SpellingHandler(this))
+    , m_spellCheckStatusConfirmed(false)
+    , m_globalSpellCheckStatus(false)
 {
 }
 
 InputHandler::~InputHandler()
 {
+    delete m_spellingHandler;
 }
 
 static BlackBerryInputType convertInputType(const HTMLInputElement* inputElement)
@@ -561,7 +567,9 @@ void InputHandler::learnText()
         return;
 
     WTF::String textInField(elementText());
-    textInField = textInField.substring(std::max(0, static_cast<int>(textInField.length() - MaxLearnTextDataSize)), textInField.length());
+    if (textInField.length() >= MaxLearnTextDataSize)
+        textInField = textInField.substring(std::max(0, static_cast<int>(caretPosition() - MaxLearnTextDataSize)), std::min(textInField.length(), MaxLearnTextDataSize));
+
     textInField = textInField.stripWhiteSpace();
 
     // Build up the 500 character strings in word chunks.
@@ -573,6 +581,12 @@ void InputHandler::learnText()
 
     InputLog(Platform::LogLevelInfo, "InputHandler::learnText '%s'", textInField.latin1().data());
     sendLearnTextDetails(textInField);
+}
+
+void InputHandler::callRequestCheckingFor(PassRefPtr<WebCore::SpellCheckRequest> spellCheckRequest)
+{
+    if (SpellChecker* spellChecker = getSpellChecker())
+        spellChecker->requestCheckingFor(spellCheckRequest);
 }
 
 void InputHandler::requestCheckingOfString(PassRefPtr<WebCore::TextCheckingRequest> textCheckingRequest)
@@ -595,6 +609,9 @@ void InputHandler::requestCheckingOfString(PassRefPtr<WebCore::TextCheckingReque
     }
 
     if (requestLength > MaxSpellCheckingStringLength) {
+        // Batch requests which are generally created by us on focus, should not exceed this limit. Check that this is in fact of Incremental type.
+        ASSERT(textCheckingRequest->processType() == TextCheckingProcessIncremental);
+
         // Cancel this request and send it off in newly created chunks.
         m_request->didCancel();
         if (m_currentFocusElement->document() && m_currentFocusElement->document()->frame() && m_currentFocusElement->document()->frame()->selection()) {
@@ -602,7 +619,7 @@ void InputHandler::requestCheckingOfString(PassRefPtr<WebCore::TextCheckingReque
             // enter to finish composing a word and create a new line.
             VisiblePosition caretPosition = m_currentFocusElement->document()->frame()->selection()->start();
             VisibleSelection visibleSelection = VisibleSelection(previousLinePosition(caretPosition, caretPosition.lineDirectionPointForBlockDirectionNavigation()), caretPosition);
-            spellCheckBlock(visibleSelection, TextCheckingProcessIncremental);
+            m_spellingHandler->spellCheckTextBlock(visibleSelection, TextCheckingProcessIncremental);
         }
         return;
     }
@@ -654,7 +671,7 @@ void InputHandler::spellCheckingRequestProcessed(int32_t transactionId, spannabl
         m_processingTransactionId,
         transactionId == m_processingTransactionId ? "" : "We are out of sync with input service.");
 
-    if (!spannableString || !isActiveTextEdit()) {
+    if (!spannableString || !isActiveTextEdit() || !DOMSupport::elementHasContinuousSpellCheckingEnabled(m_currentFocusElement) || !m_processingTransactionId) {
         SpellingLog(Platform::LogLevelWarn, "InputHandler::spellCheckingRequestProcessed Cancelling request with transactionId %d.", transactionId);
         m_request->didCancel();
         m_processingTransactionId = -1;
@@ -750,7 +767,7 @@ bool InputHandler::shouldRequestSpellCheckingOptionsForPoint(const Platform::Int
 
     SpellingLog(Platform::LogLevelInfo,
         "InputHandler::shouldRequestSpellCheckingOptionsForPoint Found spelling marker at point %s\nMarker start %d end %d",
-        point.toString().c_str(),
+        documentContentPosition.toString().c_str(),
         spellCheckingOptionRequest.startTextPosition,
         spellCheckingOptionRequest.endTextPosition);
 
@@ -799,16 +816,19 @@ void InputHandler::requestSpellingCheckingOptions(imf_sp_text_t& spellCheckingOp
         // Get caret position. Though the spelling markers might no longer exist, if this method is called we can assume the caret was placed on top of a marker earlier.
         VisiblePosition caretPosition = m_currentFocusElement->document()->frame()->selection()->selection().visibleStart();
 
-        // Create a range from the start to end of word.
-        RefPtr<Range> rangeSelection = VisibleSelection(startOfWord(caretPosition), endOfWord(caretPosition)).toNormalizedRange();
-        if (!rangeSelection)
-            return;
+        if (HTMLTextFormControlElement* controlElement = DOMSupport::toTextControlElement(m_currentFocusElement.get())) {
+            spellCheckingOptionRequest.startTextPosition = controlElement->indexForVisiblePosition(startOfWord(caretPosition));
+            spellCheckingOptionRequest.endTextPosition = controlElement->indexForVisiblePosition(endOfWord(caretPosition));
+        } else {
+            unsigned location = 0;
+            unsigned length = 0;
 
-        unsigned location = 0;
-        unsigned length = 0;
-        TextIterator::getLocationAndLengthFromRange(m_currentFocusElement.get(), rangeSelection.get(), location, length);
+            // Create a range from the start to end of word.
+            RefPtr<Range> rangeSelection = VisibleSelection(startOfWord(caretPosition), endOfWord(caretPosition)).toNormalizedRange();
+            if (!rangeSelection)
+                return;
 
-        if (location != notFound && length) {
+            TextIterator::getLocationAndLengthFromRange(m_currentFocusElement.get(), rangeSelection.get(), location, length);
             spellCheckingOptionRequest.startTextPosition = location;
             spellCheckingOptionRequest.endTextPosition = location + length;
         }
@@ -842,10 +862,17 @@ void InputHandler::setElementUnfocused(bool refocusOccuring)
 
         m_webPage->m_client->inputFocusLost();
 
+        // Repaint the element absent of the caret.
+        if (m_currentFocusElement->renderer())
+            m_currentFocusElement->renderer()->repaint();
+
         // If the frame selection isn't focused, focus it.
         if (!m_currentFocusElement->document()->frame()->selection()->isFocused())
             m_currentFocusElement->document()->frame()->selection()->setFocused(true);
     }
+
+    m_spellingHandler->setSpellCheckActive(false);
+    m_processingTransactionId = 0;
 
     // Clear the node details.
     m_currentFocusElement = 0;
@@ -872,6 +899,29 @@ void InputHandler::setInputModeEnabled(bool active)
         m_currentFocusElement->document()->frame()->selection()->setFocused(true);
 }
 
+static void addInputStyleMaskForKeyboardType(int64_t& inputMask, VirtualKeyboardType keyboardType)
+{
+    switch (keyboardType) {
+    case VKBTypeUrl:
+        inputMask |= IMF_URL_TYPE;
+        break;
+    case VKBTypePassword:
+        inputMask |= IMF_PASSWORD_TYPE;
+        break;
+    case VKBTypePin:
+        inputMask |= IMF_PIN_TYPE;
+        break;
+    case VKBTypePhone:
+        inputMask |= IMF_PHONE_TYPE;
+        break;
+    case VKBTypeEmail:
+        inputMask |= IMF_EMAIL_TYPE;
+        break;
+    default:
+        break;
+    }
+}
+
 void InputHandler::setElementFocused(Element* element)
 {
     ASSERT(DOMSupport::isTextBasedContentEditableElement(element));
@@ -893,7 +943,8 @@ void InputHandler::setElementFocused(Element* element)
         frame->selection()->setFocused(isInputModeEnabled());
 
     // Ensure visible when refocusing.
-    m_shouldEnsureFocusTextElementVisibleOnSelectionChanged = isActiveTextEdit();
+    // If device does not have physical keyboard, wait to ensure visible until VKB resizes viewport so that both animations are combined into one.
+    m_shouldEnsureFocusTextElementVisibleOnSelectionChanged = isActiveTextEdit() || DeviceInfo::instance()->hasPhysicalKeyboard();
 
     // Clear the existing focus node details.
     setElementUnfocused(true /*refocusOccuring*/);
@@ -909,6 +960,8 @@ void InputHandler::setElementFocused(Element* element)
     VirtualKeyboardType keyboardType = keyboardTypeAttribute(element);
     if (keyboardType == VKBTypeNotSet)
         keyboardType = convertInputTypeToVKBType(type);
+
+    addInputStyleMaskForKeyboardType(m_currentFocusElementTextEditMask, keyboardType);
 
     VirtualKeyboardEnterKeyType enterKeyType = keyboardEnterKeyTypeAttribute(element);
 
@@ -936,12 +989,12 @@ void InputHandler::setElementFocused(Element* element)
 #endif
 
     // Check if the field should be spellchecked.
-    if (!shouldSpellCheckElement(element))
+    if (!shouldSpellCheckElement(element) || !isActiveTextEdit())
         return;
 
     // Spellcheck the field in its entirety.
     VisibleSelection focusedBlock = DOMSupport::visibleSelectionForInputElement(element);
-    spellCheckBlock(focusedBlock, TextCheckingProcessBatch);
+    m_spellingHandler->spellCheckTextBlock(focusedBlock, TextCheckingProcessBatch);
 
 #ifdef ENABLE_SPELLING_LOG
     SpellingLog(Platform::LogLevelInfo, "InputHandler::setElementFocused Spellchecking the field increased the total time to focus to %f seconds.", timer.elapsed());
@@ -960,7 +1013,13 @@ bool InputHandler::shouldSpellCheckElement(const Element* element) const
     if (spellCheckAttr == DOMSupport::Default && (m_currentFocusElementTextEditMask & NO_AUTO_TEXT))
         return false;
 
-    return true;
+    // Check if the system spell check setting is off
+    return m_spellCheckStatusConfirmed ? m_globalSpellCheckStatus : true;
+}
+
+void InputHandler::stopPendingSpellCheckRequests()
+{
+    m_spellingHandler->setSpellCheckActive(false);
 }
 
 void InputHandler::redrawSpellCheckDialogIfRequired(const bool shouldMoveDialog)
@@ -972,90 +1031,6 @@ void InputHandler::redrawSpellCheckDialogIfRequired(const bool shouldMoveDialog)
         WebCore::IntSize screenOffset(-1, -1);
         requestSpellingCheckingOptions(spellCheckingOptionRequest, screenOffset, shouldMoveDialog);
     }
-}
-
-void InputHandler::spellCheckBlock(VisibleSelection& visibleSelection, TextCheckingProcessType textCheckingProcessType)
-{
-    if (!isActiveTextEdit())
-        return;
-
-    RefPtr<Range> rangeForSpellChecking = visibleSelection.toNormalizedRange();
-    if (!rangeForSpellChecking || !rangeForSpellChecking->text() || !rangeForSpellChecking->text().length())
-        return;
-
-    SpellChecker* spellChecker = getSpellChecker();
-    if (!spellChecker) {
-        SpellingLog(Platform::LogLevelInfo, "InputHandler::spellCheckBlock Failed to spellcheck the current focused element.");
-        return;
-    }
-
-    // If we have a batch request, try to send off the entire block.
-    if (textCheckingProcessType == TextCheckingProcessBatch) {
-        // If total block text is under the limited amount, send the entire chunk.
-        if (rangeForSpellChecking->text().length() < MaxSpellCheckingStringLength) {
-            spellChecker->requestCheckingFor(SpellCheckRequest::create(TextCheckingTypeSpelling, TextCheckingProcessBatch, rangeForSpellChecking, rangeForSpellChecking));
-            return;
-        }
-    }
-
-    // Since we couldn't check the entire block at once, set up starting and ending markers to fire incrementally.
-    VisiblePosition startPos = visibleSelection.visibleStart();
-    VisiblePosition startOfCurrentLine = startOfLine(startPos);
-    VisiblePosition endOfCurrentLine = endOfLine(startOfCurrentLine);
-
-    while (!isEndOfBlock(startOfCurrentLine)) {
-        // Create a selection with the start and end points of the line, and convert to Range to create a SpellCheckRequest.
-        rangeForSpellChecking = VisibleSelection(startOfCurrentLine, endOfCurrentLine).toNormalizedRange();
-
-        if (rangeForSpellChecking->text().length() < MaxSpellCheckingStringLength) {
-            startOfCurrentLine = nextLinePosition(startOfCurrentLine, startOfCurrentLine.lineDirectionPointForBlockDirectionNavigation());
-            endOfCurrentLine = endOfLine(startOfCurrentLine);
-        } else {
-            // Iterate through words from the start of the line to the end.
-            rangeForSpellChecking = getRangeForSpellCheckWithFineGranularity(startOfCurrentLine, endOfCurrentLine);
-            if (!rangeForSpellChecking) {
-                SpellingLog(Platform::LogLevelWarn, "InputHandler::spellCheckBlock Failed to set text range for spellchecking");
-                return;
-            }
-            startOfCurrentLine = VisiblePosition(rangeForSpellChecking->endPosition());
-            endOfCurrentLine = endOfLine(startOfCurrentLine);
-            rangeForSpellChecking = DOMSupport::trimWhitespaceFromRange(VisiblePosition(rangeForSpellChecking->startPosition()), VisiblePosition(rangeForSpellChecking->endPosition()));
-        }
-
-        SpellingLog(Platform::LogLevelInfo,
-            "InputHandler::spellCheckBlock Substring text is '%s', of size %d",
-            rangeForSpellChecking->text().latin1().data(),
-            rangeForSpellChecking->text().length());
-
-        // Call spellcheck with substring.
-        spellChecker->requestCheckingFor(SpellCheckRequest::create(TextCheckingTypeSpelling, TextCheckingProcessBatch, rangeForSpellChecking, rangeForSpellChecking));
-    }
-}
-
-PassRefPtr<Range> InputHandler::getRangeForSpellCheckWithFineGranularity(VisiblePosition startPosition, VisiblePosition endPosition)
-{
-    VisiblePosition endOfCurrentWord = endOfWord(startPosition);
-
-    // Keep iterating until one of our cases is hit, or we've incremented the starting position right to the end.
-    while (startPosition != endPosition) {
-        // Check the text length within this range.
-        if (VisibleSelection(startPosition, endOfCurrentWord).toNormalizedRange()->text().length() >= MaxSpellCheckingStringLength) {
-            // If this is not the first word, return a Range with end boundary set to the previous word.
-            if (startOfWord(endOfCurrentWord, LeftWordIfOnBoundary) != startPosition && !DOMSupport::isEmptyRangeOrAllSpaces(startPosition, endOfCurrentWord))
-                return VisibleSelection(startPosition, endOfWord(previousWordPosition(endOfCurrentWord), LeftWordIfOnBoundary)).toNormalizedRange();
-
-            // Our first word has gone over the character limit. Increment the starting position past an uncheckable word.
-            startPosition = endOfCurrentWord;
-            endOfCurrentWord = endOfWord(nextWordPosition(endOfCurrentWord));
-        } else if (endOfCurrentWord == endPosition) {
-            // Return the last segment if the end of our word lies at the end of the range.
-            return VisibleSelection(startPosition, endPosition).toNormalizedRange();
-        } else {
-            // Increment the current word.
-            endOfCurrentWord = endOfWord(nextWordPosition(endOfCurrentWord));
-        }
-    }
-    return 0;
 }
 
 bool InputHandler::openDatePopup(HTMLInputElement* element, BlackBerryInputType type)
@@ -1120,7 +1095,7 @@ void InputHandler::setInputValue(const WTF::String& value)
 
 void InputHandler::nodeTextChanged(const Node* node)
 {
-    if (processingChange() || !node || node != m_currentFocusElement || m_receivedBackspaceKeyDown)
+    if (processingChange() || !node || node != m_currentFocusElement || !m_shouldNotifyWebView)
         return;
 
     InputLog(Platform::LogLevelInfo, "InputHandler::nodeTextChanged");
@@ -1201,6 +1176,10 @@ void InputHandler::ensureFocusTextElementVisible(CaretScrollType scrollType)
     if (m_webPage->isUserScalable() && fontHeight && fontHeight * m_webPage->currentScale() < s_minimumTextHeightInPixels && !isRunningDrt())
         zoomScaleRequired = static_cast<double>(s_minimumTextHeightInPixels) / fontHeight;
     else
+        zoomScaleRequired = m_webPage->currentScale(); // Don't scale.
+
+    // Zoom level difference must exceed the given threshold before we perform a zoom animation.
+    if (abs(zoomScaleRequired - m_webPage->currentScale()) < zoomAnimationThreshold)
         zoomScaleRequired = m_webPage->currentScale(); // Don't scale.
 
     // The scroll location we should go to given the zoom required, could be adjusted later.
@@ -1284,9 +1263,10 @@ void InputHandler::ensureFocusTextElementVisible(CaretScrollType scrollType)
 
     if (destinationScrollLocation != mainFrameView->scrollPosition() || zoomScaleRequired != m_webPage->currentScale()) {
         InputLog(Platform::LogLevelInfo,
-            "InputHandler::ensureFocusTextElementVisible zooming in to %f and scrolling to point %s",
-            zoomScaleRequired,
-            Platform::IntPoint(destinationScrollLocation).toString().c_str());
+            "InputHandler::ensureFocusTextElementVisible zooming in to %f from %f and scrolling to point %s from %s",
+            zoomScaleRequired, m_webPage->currentScale(),
+            Platform::IntPoint(destinationScrollLocation).toString().c_str(),
+            Platform::IntPoint(mainFrameView->scrollPosition()).toString().c_str());
 
         // Animate to given scroll position & zoom level
         m_webPage->m_finalBlockPoint = WebCore::FloatPoint(destinationScrollLocation);
@@ -1499,7 +1479,7 @@ void InputHandler::selectionChanged()
 
     ASSERT(m_currentFocusElement->document() && m_currentFocusElement->document()->frame());
 
-    if (m_receivedBackspaceKeyDown)
+    if (!m_shouldNotifyWebView)
         return;
 
     int newSelectionStart = selectionStart();
@@ -1573,11 +1553,11 @@ void InputHandler::cancelSelection()
 bool InputHandler::handleKeyboardInput(const Platform::KeyboardEvent& keyboardEvent, bool changeIsPartOfComposition)
 {
     InputLog(Platform::LogLevelInfo,
-        "InputHandler::handleKeyboardInput received character='%c', type=%d",
+        "InputHandler::handleKeyboardInput received character='%lc', type=%d",
         keyboardEvent.character(), keyboardEvent.type());
 
-    // Clearing the m_receivedBackspaceKeyDown state on any KeyboardEvent.
-    m_receivedBackspaceKeyDown = false;
+    // Clearing the m_shouldNotifyWebView state on any KeyboardEvent.
+    m_shouldNotifyWebView = true;
 
     // Enable input mode if we are processing a key event.
     setInputModeEnabled();
@@ -1619,15 +1599,13 @@ bool InputHandler::handleKeyboardInput(const Platform::KeyboardEvent& keyboardEv
         else if (type == Platform::KeyboardEvent::KeyDown) {
             m_expectedKeyUpChar = keyboardEvent.character();
 
-            // If we receive the KeyDown of a Backspace, set this flag to prevent sending unnecessary selection and caret changes to IMF.
-            if (keyboardEvent.character() == KEYCODE_BACKSPACE)
-                m_receivedBackspaceKeyDown = true;
+            m_shouldNotifyWebView = shouldNotifyWebView(keyboardEvent);
         }
 
         Platform::KeyboardEvent adjustedKeyboardEvent(keyboardEvent.character(), type, adjustedModifiers);
         keyboardEventHandled = focusedFrame->eventHandler()->keyEvent(PlatformKeyboardEvent(adjustedKeyboardEvent));
 
-        m_receivedBackspaceKeyDown = false;
+        m_shouldNotifyWebView = true;
 
         if (isKeyChar) {
             type = Platform::KeyboardEvent::KeyUp;
@@ -1639,6 +1617,12 @@ bool InputHandler::handleKeyboardInput(const Platform::KeyboardEvent& keyboardEv
             ensureFocusTextElementVisible(EdgeIfNeeded);
     }
     return keyboardEventHandled;
+}
+
+bool InputHandler::shouldNotifyWebView(const Platform::KeyboardEvent& keyboardEvent)
+{
+    // If we receive the KeyDown of a Backspace or Enter key, set this flag to prevent sending unnecessary selection and caret changes to IMF.
+    return !(keyboardEvent.character() == KEYCODE_BACKSPACE || keyboardEvent.character() == KEYCODE_RETURN || keyboardEvent.character() == KEYCODE_KP_ENTER);
 }
 
 bool InputHandler::deleteSelection()
@@ -1723,22 +1707,6 @@ void InputHandler::removeAttributedTextMarker()
 
     m_composingTextStart = 0;
     m_composingTextEnd = 0;
-}
-
-void InputHandler::handleInputLocaleChanged(bool isRTL)
-{
-    if (!isActiveTextEdit())
-        return;
-
-    ASSERT(m_currentFocusElement->document() && m_currentFocusElement->document()->frame());
-    RenderObject* renderer = m_currentFocusElement->renderer();
-    if (!renderer)
-        return;
-
-    Editor* editor = m_currentFocusElement->document()->frame()->editor();
-    ASSERT(editor);
-    if ((renderer->style()->direction() == RTL) != isRTL)
-        editor->setBaseWritingDirection(isRTL ? RightToLeftWritingDirection : LeftToRightWritingDirection);
 }
 
 void InputHandler::clearCurrentFocusElement()
@@ -2454,6 +2422,12 @@ int32_t InputHandler::commitText(spannable_string_t* spannableString, int32_t re
     InputLog(Platform::LogLevelInfo, "InputHandler::commitText");
 
     return setSpannableTextAndRelativeCursor(spannableString, relativeCursorPosition, false /* markTextAsComposing */) ? 0 : -1;
+}
+
+void InputHandler::restoreViewState()
+{
+    setInputModeEnabled();
+    focusedNodeChanged();
 }
 
 }

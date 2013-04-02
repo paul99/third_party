@@ -660,7 +660,7 @@ Channel::OnInitializeDecoder(
     receiveCodec.channels = channels;
     receiveCodec.rate = rate;
     strncpy(receiveCodec.plname, payloadName, RTP_PAYLOAD_NAME_SIZE - 1);
-    
+
     _audioCodingModule.Codec(payloadName, dummyCodec, frequency, channels);
     receiveCodec.pacsize = dummyCodec.pacsize;
 
@@ -798,6 +798,8 @@ Channel::OnReceivedPayloadData(const WebRtc_UWord8* payloadData,
                  payloadSize,
                  rtpHeader->header.payloadType,
                  rtpHeader->type.Audio.channel);
+
+    _lastRemoteTimeStamp = rtpHeader->header.timestamp;
 
     if (!_playing)
     {
@@ -1131,6 +1133,7 @@ Channel::Channel(const WebRtc_Word32 channelId,
     _rtcpObserverPtr(NULL),
     _outputIsOnHold(false),
     _externalPlayout(false),
+    _externalMixing(false),
     _inputIsOnHold(false),
     _playing(false),
     _sending(false),
@@ -1152,6 +1155,7 @@ Channel::Channel(const WebRtc_Word32 channelId,
     _insertExtraRTPPacket(false),
     _extraMarkerBit(false),
     _lastLocalTimeStamp(0),
+    _lastRemoteTimeStamp(0),
     _lastPayloadType(0),
     _includeAudioLevelIndication(false),
     _rtpPacketTimedOut(false),
@@ -1598,13 +1602,16 @@ Channel::StartPlayout()
     {
         return 0;
     }
-    // Add participant as candidates for mixing.
-    if (_outputMixerPtr->SetMixabilityStatus(*this, true) != 0)
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_AUDIO_CONF_MIX_MODULE_ERROR, kTraceError,
-            "StartPlayout() failed to add participant to mixer");
-        return -1;
+
+    if (!_externalMixing) {
+        // Add participant as candidates for mixing.
+        if (_outputMixerPtr->SetMixabilityStatus(*this, true) != 0)
+        {
+            _engineStatisticsPtr->SetLastError(
+                VE_AUDIO_CONF_MIX_MODULE_ERROR, kTraceError,
+                "StartPlayout() failed to add participant to mixer");
+            return -1;
+        }
     }
 
     _playing = true;
@@ -1624,13 +1631,16 @@ Channel::StopPlayout()
     {
         return 0;
     }
-    // Remove participant as candidates for mixing
-    if (_outputMixerPtr->SetMixabilityStatus(*this, false) != 0)
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_AUDIO_CONF_MIX_MODULE_ERROR, kTraceError,
-            "StartPlayout() failed to remove participant from mixer");
-        return -1;
+
+    if (!_externalMixing) {
+        // Remove participant as candidates for mixing
+        if (_outputMixerPtr->SetMixabilityStatus(*this, false) != 0)
+        {
+            _engineStatisticsPtr->SetLastError(
+                VE_AUDIO_CONF_MIX_MODULE_ERROR, kTraceError,
+                "StopPlayout() failed to remove participant from mixer");
+            return -1;
+        }
     }
 
     _playing = false;
@@ -2093,6 +2103,9 @@ Channel::SetNetEQPlayoutMode(NetEqModes mode)
         case kNetEqFax:
             playoutMode = fax;
             break;
+        case kNetEqOff:
+            playoutMode = off;
+            break;
     }
     if (_audioCodingModule.SetPlayoutMode(playoutMode) != 0)
     {
@@ -2119,6 +2132,8 @@ Channel::GetNetEQPlayoutMode(NetEqModes& mode)
         case fax:
             mode = kNetEqFax;
             break;
+        case off:
+            mode = kNetEqOff;
     }
     WEBRTC_TRACE(kTraceStateInfo, kTraceVoice,
                  VoEId(_instanceId,_channelId),
@@ -3774,7 +3789,7 @@ int Channel::StartPlayingFileAsMicrophone(InStream* stream,
         _inputFilePlayerPtr = NULL;
         return -1;
     }
-    
+
     _inputFilePlayerPtr->RegisterModuleFileCallback(this);
     _inputFilePlaying = true;
 
@@ -3994,7 +4009,7 @@ int Channel::StartRecordingPlayout(OutStream* stream,
         _outputFileRecorderPtr = NULL;
         return -1;
     }
-    
+
     _outputFileRecorderPtr->RegisterModuleFileCallback(this);
     _outputFileRecording = true;
 
@@ -5579,60 +5594,33 @@ Channel::GetRTPStatistics(CallStatistics& stats)
     return 0;
 }
 
-int
-Channel::SetFECStatus(bool enable, int redPayloadtype)
-{
-    WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId, _channelId),
-                 "Channel::SetFECStatus()");
+int Channel::SetFECStatus(bool enable, int redPayloadtype) {
+  WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId, _channelId),
+               "Channel::SetFECStatus()");
 
-    CodecInst codec;
-
-    // Get default RED settings from the ACM database
-    bool foundRED(false);
-    const WebRtc_UWord8 nSupportedCodecs = AudioCodingModule::NumberOfCodecs();
-    for (int idx = 0; (!foundRED && idx < nSupportedCodecs); idx++)
-    {
-        _audioCodingModule.Codec(idx, codec);
-        if (!STR_CASE_CMP(codec.plname, "RED"))
-        {
-            foundRED = true;
-        }
-    }
-    if (!foundRED)
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_CODEC_ERROR, kTraceError,
-            "SetFECStatus() RED is not supported");
-        return -1;
+  if (enable) {
+    if (redPayloadtype < 0 || redPayloadtype > 127) {
+      _engineStatisticsPtr->SetLastError(
+          VE_PLTYPE_ERROR, kTraceError,
+          "SetFECStatus() invalid RED payload type");
+      return -1;
     }
 
-    if (redPayloadtype != -1)
-    {
-        codec.pltype = redPayloadtype;
+    if (SetRedPayloadType(redPayloadtype) < 0) {
+      _engineStatisticsPtr->SetLastError(
+          VE_CODEC_ERROR, kTraceError,
+          "SetSecondarySendCodec() Failed to register RED ACM");
+      return -1;
     }
+  }
 
-    if (_audioCodingModule.RegisterSendCodec(codec) != 0)
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_AUDIO_CODING_MODULE_ERROR, kTraceError,
-            "SetFECStatus() RED registration in ACM module failed");
-        return -1;
-    }
-    if (_rtpRtcpModule->SetSendREDPayloadType(codec.pltype) != 0)
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_RTP_RTCP_MODULE_ERROR, kTraceError,
-            "SetFECStatus() RED registration in RTP/RTCP module failed");
-        return -1;
-    }
-    if (_audioCodingModule.SetFECStatus(enable) != 0)
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_AUDIO_CODING_MODULE_ERROR, kTraceError,
-            "SetFECStatus() failed to set FEC state in the ACM");
-        return -1;
-    }
-    return 0;
+  if (_audioCodingModule.SetFECStatus(enable) != 0) {
+    _engineStatisticsPtr->SetLastError(
+        VE_AUDIO_CODING_MODULE_ERROR, kTraceError,
+        "SetFECStatus() failed to set FEC state in the ACM");
+    return -1;
+  }
+  return 0;
 }
 
 int
@@ -5815,7 +5803,7 @@ Channel::Demultiplex(const AudioFrame& audioFrame)
 {
     WEBRTC_TRACE(kTraceStream, kTraceVoice, VoEId(_instanceId,_channelId),
                  "Channel::Demultiplex()");
-    _audioFrame = audioFrame;
+    _audioFrame.CopyFrom(audioFrame);
     _audioFrame.id_ = _channelId;
     return 0;
 }
@@ -6005,6 +5993,24 @@ int Channel::DeRegisterExternalMediaProcessing(ProcessingTypes type)
         _inputExternalMedia = false;
         _inputExternalMediaCallbackPtr = NULL;
     }
+
+    return 0;
+}
+
+int Channel::SetExternalMixing(bool enabled) {
+    WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId,_channelId),
+                 "Channel::SetExternalMixing(enabled=%d)", enabled);
+
+    if (_playing)
+    {
+        _engineStatisticsPtr->SetLastError(
+            VE_INVALID_OPERATION, kTraceError,
+            "Channel::SetExternalMixing() "
+            "external mixing cannot be changed while playing.");
+        return -1;
+    }
+
+    _externalMixing = enabled;
 
     return 0;
 }
@@ -6346,7 +6352,7 @@ Channel::InsertInbandDtmfTone()
             // account.
             _inbandDtmfGenerator.ResetTone();
         }
-        
+
         WebRtc_Word16 toneBuffer[320];
         WebRtc_UWord16 toneSamples(0);
         // Get 10ms tone segment and set time since last tone to zero
@@ -6359,19 +6365,19 @@ Channel::InsertInbandDtmfTone()
         }
 
         // Replace mixed audio with DTMF tone.
-        for (int sample = 0; 
+        for (int sample = 0;
             sample < _audioFrame.samples_per_channel_;
             sample++)
         {
-            for (int channel = 0; 
-                channel < _audioFrame.num_channels_; 
+            for (int channel = 0;
+                channel < _audioFrame.num_channels_;
                 channel++)
             {
-                _audioFrame.data_[sample * _audioFrame.num_channels_ + channel] = 
-                        toneBuffer[sample];
+                const int index = sample * _audioFrame.num_channels_ + channel;
+                _audioFrame.data_[index] = toneBuffer[sample];
             }
         }
-        
+
         assert(_audioFrame.samples_per_channel_ == toneSamples);
     } else
     {
@@ -6525,14 +6531,14 @@ Channel::UpdatePacketDelay(const WebRtc_UWord32 timestamp,
             timeStampDiffMs = 0;
             return -1;
         }
-        if (timeStampDiffMs > 5000)
+        if (timeStampDiffMs > (2 * kVoiceEngineMaxMinPlayoutDelayMs))
         {
             timeStampDiffMs = 0;
         }
 
         if (_averageDelayMs == 0)
         {
-            _averageDelayMs = timeStampDiffMs;
+            _averageDelayMs = timeStampDiffMs * 10;
         }
         else
         {
@@ -6628,6 +6634,86 @@ int Channel::ApmProcessRx(AudioFrame& frame) {
   }
   if (audioproc->ProcessStream(&frame) != 0) {
     LOG_FERR0(LS_WARNING, ProcessStream);
+  }
+  return 0;
+}
+
+int Channel::SetSecondarySendCodec(const CodecInst& codec,
+                                   int red_payload_type) {
+  // Sanity check for payload type.
+  if (red_payload_type < 0 || red_payload_type > 127) {
+    _engineStatisticsPtr->SetLastError(
+        VE_PLTYPE_ERROR, kTraceError,
+        "SetRedPayloadType() invalid RED payload type");
+    return -1;
+  }
+
+  if (SetRedPayloadType(red_payload_type) < 0) {
+    _engineStatisticsPtr->SetLastError(
+        VE_AUDIO_CODING_MODULE_ERROR, kTraceError,
+        "SetSecondarySendCodec() Failed to register RED ACM");
+    return -1;
+  }
+  if (_audioCodingModule.RegisterSecondarySendCodec(codec) < 0) {
+    _engineStatisticsPtr->SetLastError(
+        VE_AUDIO_CODING_MODULE_ERROR, kTraceError,
+        "SetSecondarySendCodec() Failed to register secondary send codec in "
+        "ACM");
+    return -1;
+  }
+
+  return 0;
+}
+
+void Channel::RemoveSecondarySendCodec() {
+  _audioCodingModule.UnregisterSecondarySendCodec();
+}
+
+int Channel::GetSecondarySendCodec(CodecInst* codec) {
+  if (_audioCodingModule.SecondarySendCodec(codec) < 0) {
+    _engineStatisticsPtr->SetLastError(
+        VE_AUDIO_CODING_MODULE_ERROR, kTraceError,
+        "GetSecondarySendCodec() Failed to get secondary sent codec from ACM");
+    return -1;
+  }
+  return 0;
+}
+
+// Assuming this method is called with valid payload type.
+int Channel::SetRedPayloadType(int red_payload_type) {
+  CodecInst codec;
+  bool found_red = false;
+
+  // Get default RED settings from the ACM database
+  const int num_codecs = AudioCodingModule::NumberOfCodecs();
+  for (int idx = 0; idx < num_codecs; idx++) {
+    _audioCodingModule.Codec(idx, codec);
+    if (!STR_CASE_CMP(codec.plname, "RED")) {
+      found_red = true;
+      break;
+    }
+  }
+
+  if (!found_red) {
+    _engineStatisticsPtr->SetLastError(
+        VE_CODEC_ERROR, kTraceError,
+        "SetRedPayloadType() RED is not supported");
+    return -1;
+  }
+
+  codec.pltype = red_payload_type;
+  if (_audioCodingModule.RegisterSendCodec(codec) < 0) {
+    _engineStatisticsPtr->SetLastError(
+        VE_AUDIO_CODING_MODULE_ERROR, kTraceError,
+        "SetRedPayloadType() RED registration in ACM module failed");
+    return -1;
+  }
+
+  if (_rtpRtcpModule->SetSendREDPayloadType(red_payload_type) != 0) {
+    _engineStatisticsPtr->SetLastError(
+        VE_RTP_RTCP_MODULE_ERROR, kTraceError,
+        "SetRedPayloadType() RED registration in RTP/RTCP module failed");
+    return -1;
   }
   return 0;
 }

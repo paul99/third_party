@@ -26,15 +26,20 @@
 #include "config.h"
 #include "ProfilerOSRExitSite.h"
 
+#include "JSGlobalObject.h"
 #include "JSScope.h"
 #include "JSString.h"
+#include "Operations.h"
 #include <wtf/StringPrintStream.h>
 
 namespace JSC { namespace Profiler {
 
 JSValue OSRExitSite::toJS(ExecState* exec) const
 {
-    return jsString(exec, toString(RawPointer(m_codeAddress)));
+    JSArray* result = constructEmptyArray(exec, 0);
+    for (unsigned i = 0; i < m_codeAddresses.size(); ++i)
+        result->putDirectIndex(exec, i, jsString(exec, toString(RawPointer(m_codeAddresses[i]))));
+    return result;
 }
 
 } } // namespace JSC::Profiler

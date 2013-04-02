@@ -19,6 +19,17 @@ namespace libyuv {
 extern "C" {
 #endif
 
+#ifdef LIBYUV_LITTLE_ENDIAN
+#define WRITEWORD(p, v) *reinterpret_cast<uint32*>(p) = v
+#else
+static inline void WRITEWORD(uint8* p, uint32 v) {
+  p[0] = (uint8)(v & 255);
+  p[1] = (uint8)((v >> 8) & 255);
+  p[2] = (uint8)((v >> 16) & 255);
+  p[3] = (uint8)((v >> 24) & 255);
+}
+#endif
+
 void BGRAToARGBRow_C(const uint8* src_bgra, uint8* dst_argb, int width) {
   for (int x = 0; x < width; ++x) {
     // To support in-place conversion.
@@ -182,7 +193,6 @@ void ARGBToRAWRow_C(const uint8* src_argb, uint8* dst_rgb, int width) {
   }
 }
 
-// TODO(fbarchard): support big endian CPU
 void ARGBToRGB565Row_C(const uint8* src_argb, uint8* dst_rgb, int width) {
   for (int x = 0; x < width - 1; x += 2) {
     uint8 b0 = src_argb[0] >> 3;
@@ -191,8 +201,8 @@ void ARGBToRGB565Row_C(const uint8* src_argb, uint8* dst_rgb, int width) {
     uint8 b1 = src_argb[4] >> 3;
     uint8 g1 = src_argb[5] >> 2;
     uint8 r1 = src_argb[6] >> 3;
-    *reinterpret_cast<uint32*>(dst_rgb) = b0 | (g0 << 5) | (r0 << 11) |
-        (b1 << 16) | (g1 << 21) | (r1 << 27);
+    WRITEWORD(dst_rgb, b0 | (g0 << 5) | (r0 << 11) |
+              (b1 << 16) | (g1 << 21) | (r1 << 27));
     dst_rgb += 4;
     src_argb += 8;
   }
@@ -517,7 +527,7 @@ void ARGBToUV422Row_C(const uint8* src_argb,
     dst_u += 1;
     dst_v += 1;
   }
-  if ((width & 3) == 1) {
+  if (width & 1) {
     uint8 ab = src_argb[0];
     uint8 ag = src_argb[1];
     uint8 ar = src_argb[2];
@@ -563,7 +573,7 @@ void ARGBToUV411Row_C(const uint8* src_argb,
 // 0.11 * B + 0.59 * G + 0.30 * R
 // Coefficients rounded to multiple of 2 for consistency with SSSE3 version.
 static __inline int RGBToGray(uint8 r, uint8 g, uint8 b) {
-  return (( 76 * r + 152 * g +  28 * b) >> 8);
+  return (28 * b + 152 * g + 76 * r) >> 8;
 }
 
 void ARGBGrayRow_C(const uint8* src_argb, uint8* dst_argb, int width) {
@@ -665,6 +675,32 @@ void ARGBQuantizeRow_C(uint8* dst_argb, int scale, int interval_size,
   }
 }
 
+#define REPEAT8(v) (v) | ((v) << 8)
+#define SHADE(f, v) v * f >> 24
+
+void ARGBShadeRow_C(const uint8* src_argb, uint8* dst_argb, int width,
+                    uint32 value) {
+  const uint32 b_scale = REPEAT8(value & 0xff);
+  const uint32 g_scale = REPEAT8((value >> 8) & 0xff);
+  const uint32 r_scale = REPEAT8((value >> 16) & 0xff);
+  const uint32 a_scale = REPEAT8(value >> 24);
+
+  for (int i = 0; i < width; ++i) {
+    const uint32 b = REPEAT8(src_argb[0]);
+    const uint32 g = REPEAT8(src_argb[1]);
+    const uint32 r = REPEAT8(src_argb[2]);
+    const uint32 a = REPEAT8(src_argb[3]);
+    dst_argb[0] = SHADE(b, b_scale);
+    dst_argb[1] = SHADE(g, g_scale);
+    dst_argb[2] = SHADE(r, r_scale);
+    dst_argb[3] = SHADE(a, a_scale);
+    src_argb += 4;
+    dst_argb += 4;
+  }
+}
+#undef REPEAT8
+#undef SHADE
+
 void I400ToARGBRow_C(const uint8* src_y, uint8* dst_argb, int width) {
   // Copy a Y to RGB.
   for (int x = 0; x < width; ++x) {
@@ -722,7 +758,7 @@ static __inline void YuvPixel2(uint8 y, uint8 u, uint8 v,
   *r = Clip(static_cast<int32>((u * UR + v * VR) - (BR) + y1) >> 6);
 }
 
-#if defined(__ARM_NEON__)
+#if !defined(YUV_DISABLE_ASM) && (defined(__ARM_NEON__) || defined(LIBYUV_NEON))
 // C mimic assembly.
 // TODO(fbarchard): Remove subsampling from Neon.
 void I444ToARGBRow_C(const uint8* src_y,
@@ -1187,7 +1223,7 @@ void ARGBMirrorRow_C(const uint8* src, uint8* dst, int width) {
   }
 }
 
-void SplitUV_C(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int width) {
+void SplitUVRow_C(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int width) {
   for (int x = 0; x < width - 1; x += 2) {
     dst_u[x] = src_uv[0];
     dst_u[x + 1] = src_uv[2];
@@ -1201,8 +1237,8 @@ void SplitUV_C(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int width) {
   }
 }
 
-void MergeUV_C(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
-               int width) {
+void MergeUVRow_C(const uint8* src_u, const uint8* src_v, uint8* dst_uv,
+                  int width) {
   for (int x = 0; x < width - 1; x += 2) {
     dst_uv[0] = src_u[x];
     dst_uv[1] = src_v[x];
@@ -1220,7 +1256,7 @@ void CopyRow_C(const uint8* src, uint8* dst, int count) {
   memcpy(dst, src, count);
 }
 
-void SetRow8_C(uint8* dst, uint32 v8, int count) {
+void SetRow_C(uint8* dst, uint32 v8, int count) {
 #ifdef _MSC_VER
   // VC will generate rep stosb.
   for (int x = 0; x < count; ++x) {
@@ -1231,7 +1267,7 @@ void SetRow8_C(uint8* dst, uint32 v8, int count) {
 #endif
 }
 
-void SetRows32_C(uint8* dst, uint32 v32, int width,
+void ARGBSetRows_C(uint8* dst, uint32 v32, int width,
                  int dst_stride, int height) {
   for (int y = 0; y < height; ++y) {
     uint32* d = reinterpret_cast<uint32*>(dst);
@@ -1498,8 +1534,8 @@ void ComputeCumulativeSumRow_C(const uint8* row, int32* cumsum,
   }
 }
 
-void CumulativeSumToAverage_C(const int32* tl, const int32* bl,
-                              int w, int area, uint8* dst, int count) {
+void CumulativeSumToAverageRow_C(const int32* tl, const int32* bl,
+                                int w, int area, uint8* dst, int count) {
   float ooa = 1.0f / area;
   for (int i = 0; i < count; ++i) {
     dst[0] = static_cast<uint8>((bl[w + 0] + tl[0] - bl[0] - tl[w + 0]) * ooa);
@@ -1511,32 +1547,6 @@ void CumulativeSumToAverage_C(const int32* tl, const int32* bl,
     bl += 4;
   }
 }
-
-#define REPEAT8(v) (v) | ((v) << 8)
-#define SHADE(f, v) v * f >> 24
-
-void ARGBShadeRow_C(const uint8* src_argb, uint8* dst_argb, int width,
-                    uint32 value) {
-  const uint32 b_scale = REPEAT8(value & 0xff);
-  const uint32 g_scale = REPEAT8((value >> 8) & 0xff);
-  const uint32 r_scale = REPEAT8((value >> 16) & 0xff);
-  const uint32 a_scale = REPEAT8(value >> 24);
-
-  for (int i = 0; i < width; ++i) {
-    const uint32 b = REPEAT8(src_argb[0]);
-    const uint32 g = REPEAT8(src_argb[1]);
-    const uint32 r = REPEAT8(src_argb[2]);
-    const uint32 a = REPEAT8(src_argb[3]);
-    dst_argb[0] = SHADE(b, b_scale);
-    dst_argb[1] = SHADE(g, g_scale);
-    dst_argb[2] = SHADE(r, r_scale);
-    dst_argb[3] = SHADE(a, a_scale);
-    src_argb += 4;
-    dst_argb += 4;
-  }
-}
-#undef REPEAT8
-#undef SHADE
 
 // Copy pixels from rotated source to destination row with a slope.
 LIBYUV_API

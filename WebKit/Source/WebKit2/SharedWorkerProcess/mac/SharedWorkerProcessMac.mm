@@ -46,27 +46,13 @@ extern "C" int sandbox_init_with_parameters(const char *profile, uint64_t flags,
 
 namespace WebKit {
 
-static void initializeSandbox()
-{
-    NSBundle *webkit2Bundle = [NSBundle bundleForClass:NSClassFromString(@"WKView")];
-    const char* profilePath = [[webkit2Bundle pathForResource:@"com.apple.WebKit.SharedWorkerProcess" ofType:@"sb"] fileSystemRepresentation];
-
-    char* errorBuf;
-    if (sandbox_init_with_parameters(profilePath, SANDBOX_NAMED_EXTERNAL, 0, &errorBuf)) {
-        WTFLogAlways("SharedWorkerProcess: couldn't initialize sandbox profile [%s] error '%s'\n", profilePath, errorBuf);
-        exit(EX_NOPERM);
-    }
-}
-
-void SharedWorkerProcess::platformInitialize(const SharedWorkerProcessCreationParameters& parameters)
+void SharedWorkerProcess::platformInitializeSharedWorkerProcess(const SharedWorkerProcessCreationParameters& parameters)
 {
     NSString *applicationName = [NSString stringWithFormat:WEB_UI_STRING("Shared Web Worker (%@ Internet plug-in)",
         "visible name of the plug-in host process. The argument is the application name."),
         (NSString *)parameters.parentProcessName];
     
     WKSetVisibleApplicationName((CFStringRef)applicationName);
-
-    initializeSandbox();
 }
 
 } // namespace WebKit

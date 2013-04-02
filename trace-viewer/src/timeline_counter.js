@@ -4,25 +4,22 @@
 
 'use strict';
 
+base.require('timeline_guid');
+base.require('range');
+
 /**
  * @fileoverview Provides the TimelineCounter class.
  */
 base.exportTo('tracing', function() {
-
-  var nextCounterGUID = 1;
 
   /**
    * Stores all the samples for a given counter.
    * @constructor
    */
   function TimelineCounter(parent, id, category, name) {
-    if (parent == null) {
-      this.parent_id = null;
-    } else if (parent.pid != undefined) {
-      this.parent_id = parent.pid;
-    } else if (parent.cpuNumber != undefined) {
-      this.parent_id = parent.cpuNumber;
-    }
+    this.guid_ = tracing.GUID.allocate();
+
+    this.parent = parent;
     this.id = id;
     this.category = category || '';
     this.name = name;
@@ -30,16 +27,33 @@ base.exportTo('tracing', function() {
     this.seriesColors = [];
     this.timestamps = [];
     this.samples = [];
-    this.guid_ = nextCounterGUID++;
+    this.bounds = new base.Range();
   }
 
   TimelineCounter.prototype = {
     __proto__: Object.prototype,
+
     /*
      * @return {Number} A globally unique identifier for this counter.
      */
     get guid() {
       return this.guid_;
+    },
+
+    toJSON: function() {
+      var obj = new Object();
+      var keys = Object.keys(this);
+      for (var i = 0; i < keys.length; i++) {
+        var key = keys[i];
+        if (typeof this[key] == 'function')
+          continue;
+        if (key == 'parent') {
+          obj[key] = this[key].guid;
+          continue;
+        }
+        obj[key] = this[key];
+      }
+      return obj;
     },
 
     get numSeries() {
@@ -117,14 +131,13 @@ base.exportTo('tracing', function() {
         throw new Error('samples.length must be a multiple of numSamples.');
 
       this.totals = [];
-      if (this.samples.length == 0) {
-        this.minTimestamp = undefined;
-        this.maxTimestamp = undefined;
-        this.maxTotal = 0;
+      this.maxTotal = 0;
+      this.bounds.reset();
+      if (this.samples.length == 0)
         return;
-      }
-      this.minTimestamp = this.timestamps[0];
-      this.maxTimestamp = this.timestamps[this.timestamps.length - 1];
+
+      this.bounds.addValue(this.timestamps[0]);
+      this.bounds.addValue(this.timestamps[this.timestamps.length - 1]);
 
       var numSeries = this.numSeries;
       var maxTotal = -Infinity;
@@ -143,12 +156,12 @@ base.exportTo('tracing', function() {
   };
 
   /**
-   * Comparison between counters that orders by parent_id, then name.
+   * Comparison between counters that orders by parent.compareTo, then name.
    */
   TimelineCounter.compare = function(x, y) {
-    if (x.parent_id != y.parent_id) {
-      return x.parent_id - y.parent_id;
-    }
+    var tmp = x.parent.compareTo(y);
+    if (tmp != 0)
+      return tmp;
     var tmp = x.name.localeCompare(y.name);
     if (tmp == 0)
       return x.tid - y.tid;

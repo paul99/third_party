@@ -47,6 +47,9 @@ const unsigned lineWidth = 1;
 const float marginSize = 4;
 const float mediaControlsHeight = 44;
 const float mediaBackButtonHeight = 33;
+// Scale exit-fullscreen button size.
+const float mediaFullscreenButtonHeightRatio = 5 / 11.0;
+const float mediaFullscreenButtonWidthRatio = 3 / 11.0;
 const float mediaSliderOutlineWidth = 2;
 const float mediaSliderTrackRadius = 3;
 const float mediaSliderThumbWidth = 25;
@@ -164,17 +167,19 @@ static float determineFullScreenMultiplier(Element* element)
     float fullScreenMultiplier = 1.0;
 #if ENABLE(FULLSCREEN_API) && ENABLE(VIDEO)
     if (element && element->document()->webkitIsFullScreen() && element->document()->webkitCurrentFullScreenElement() == toParentMediaElement(element)) {
-        if (element->document()->page()->deviceScaleFactor() < scaleFactorThreshold)
-            fullScreenMultiplier = fullScreenEnlargementFactor;
+        if (Page* page = element->document()->page()) {
+            if (page->deviceScaleFactor() < scaleFactorThreshold)
+                fullScreenMultiplier = fullScreenEnlargementFactor;
 
-        // The way the BlackBerry port implements the FULLSCREEN_API for media elements
-        // might result in the controls being oversized, proportionally to the current page
-        // scale. That happens because the fullscreen element gets sized to be as big as the
-        // viewport size, and the viewport size might get outstretched to fit to the screen dimensions.
-        // To fix that, lets strips out the Page scale factor from the media controls multiplier.
-        float scaleFactor = element->document()->view()->hostWindow()->platformPageClient()->currentZoomFactor();
-        float scaleFactorFudge = 1 / element->document()->page()->deviceScaleFactor();
-        fullScreenMultiplier /= scaleFactor * scaleFactorFudge;
+            // The way the BlackBerry port implements the FULLSCREEN_API for media elements
+            // might result in the controls being oversized, proportionally to the current page
+            // scale. That happens because the fullscreen element gets sized to be as big as the
+            // viewport size, and the viewport size might get outstretched to fit to the screen dimensions.
+            // To fix that, lets strips out the Page scale factor from the media controls multiplier.
+            float scaleFactor = element->document()->view()->hostWindow()->platformPageClient()->currentZoomFactor();
+            float scaleFactorFudge = 1 / page->deviceScaleFactor();
+            fullScreenMultiplier /= scaleFactor * scaleFactorFudge;
+        }
     }
 #endif
     return fullScreenMultiplier;
@@ -436,7 +441,7 @@ IntRect RenderThemeBlackBerry::convertToPaintingRect(RenderObject* inputRenderer
 
 bool RenderThemeBlackBerry::paintSearchFieldCancelButton(RenderObject* cancelButtonObject, const PaintInfo& paintInfo, const IntRect& r)
 {
-    Node* input = cancelButtonObject->node()->shadowAncestorNode();
+    Node* input = cancelButtonObject->node()->deprecatedShadowAncestorNode();
     if (!input->renderer()->isBox())
         return false;
 
@@ -867,7 +872,6 @@ void RenderThemeBlackBerry::adjustMediaControlStyle(StyleResolver*, RenderStyle*
         break;
     case MediaCurrentTimePart:
     case MediaTimeRemainingPart:
-        style->setWidth(controlsHeight);
         style->setHeight(displayHeight);
         style->setPaddingRight(padding);
         style->setPaddingLeft(padding);
@@ -880,30 +884,6 @@ void RenderThemeBlackBerry::adjustMediaControlStyle(StyleResolver*, RenderStyle*
         break;
     default:
         break;
-    }
-
-    if (!isfinite(mediaElement->duration())) {
-        // Live streams have infinite duration with no timeline. Force the mute
-        // and fullscreen buttons to the right. This is needed when webkit does
-        // not render the timeline container because it has a webkit-box-flex
-        // of 1 and normally allows those buttons to be on the right.
-        switch (style->appearance()) {
-        case MediaEnterFullscreenButtonPart:
-        case MediaExitFullscreenButtonPart:
-            style->setPosition(AbsolutePosition);
-            style->setBottom(zero);
-            style->setLeft(zero);
-            style->setRight(controlsHeight);
-            break;
-        case MediaRewindButtonPart:
-            // We hi-jack the Rewind Button ID to use it for the divider image
-            style->setPosition(AbsolutePosition);
-            style->setBottom(zero);
-            style->setLeft(controlsHeight);
-            break;
-        default:
-            break;
-        }
     }
 }
 
@@ -1002,11 +982,16 @@ bool RenderThemeBlackBerry::paintMediaFullscreenButton(RenderObject* object, con
     static Image* mediaExitFullscreen = Image::loadPlatformResource("back").leakRef();
 
     Image* buttonImage = mediaEnterFullscreen;
+    IntRect currentRect(rect);
 #if ENABLE(FULLSCREEN_API)
-    if (mediaElement->document()->webkitIsFullScreen() && mediaElement->document()->webkitCurrentFullScreenElement() == mediaElement)
+    if (mediaElement->document()->webkitIsFullScreen() && mediaElement->document()->webkitCurrentFullScreenElement() == mediaElement) {
         buttonImage = mediaExitFullscreen;
+        IntRect fullscreenRect(rect.x() + (1 - mediaFullscreenButtonWidthRatio) * rect.width() / 2, rect.y() + (1 - mediaFullscreenButtonHeightRatio) * rect.height() / 2,
+            rect.width() * mediaFullscreenButtonWidthRatio, rect.height() * mediaFullscreenButtonHeightRatio);
+        currentRect = fullscreenRect;
+    }
 #endif
-    return paintMediaButton(paintInfo.context, rect, buttonImage);
+    return paintMediaButton(paintInfo.context, currentRect, buttonImage);
 #else
     UNUSED_PARAM(object);
     UNUSED_PARAM(paintInfo);
@@ -1037,8 +1022,8 @@ bool RenderThemeBlackBerry::paintMediaSliderTrack(RenderObject* object, const Pa
     int wLoaded = ceil((w - mediaSliderThumbWidth * fullScreenMultiplier) * loaded + mediaSliderThumbWidth * fullScreenMultiplier);
 
     IntRect played(x, y, wPlayed, h);
-    IntRect buffered(x, ceil(y + mediaSliderOutlineWidth), wLoaded, ceil(h - 2 * mediaSliderOutlineWidth));
-
+    IntRect buffered(x, y, wLoaded, h);
+#if USE(SKIA)
     // This is to paint main slider bar.
     bool result = paintSliderTrackRect(object, paintInfo, rect2);
 
@@ -1049,6 +1034,21 @@ bool RenderThemeBlackBerry::paintMediaSliderTrack(RenderObject* object, const Pa
         // This is to paint played part of bar (left of slider thumb) using selection color.
         paintSliderTrackRect(object, paintInfo, played, selection, selection, selection, selection);
     }
+#else // GL renderer
+    static Image* mediaBackground = Image::loadPlatformResource("core_slider_video_bg").leakRef();
+    static Image* mediaPlayer = Image::loadPlatformResource("core_slider_played_bg").leakRef();
+    static Image* mediaCache = Image::loadPlatformResource("core_slider_cache").leakRef();
+
+    bool result = paintSliderTrackRect(object, paintInfo, rect2, mediaBackground);
+
+    if (loaded > 0 || position > 0) {
+        // This is to paint buffered bar.
+        paintSliderTrackRect(object, paintInfo, buffered, mediaCache);
+
+        // This is to paint played part of bar (left of slider thumb) using selection color.
+        paintSliderTrackRect(object, paintInfo, played, mediaPlayer);
+    }
+#endif // USE(SKIA)
     return result;
 #else
     UNUSED_PARAM(object);
@@ -1085,8 +1085,14 @@ bool RenderThemeBlackBerry::paintMediaSliderThumb(RenderObject* object, const Pa
 
     return true;
 #else // GL renderer
-    static Image* mediaSliderThumb = Image::loadPlatformResource("core_slider_handle_disabled").leakRef();
+    static Image* disabledMediaSliderThumb = Image::loadPlatformResource("core_slider_handle_disabled").leakRef();
+    static Image* pressedMediaSliderThumb = Image::loadPlatformResource("core_slider_handle_pressed").leakRef();
+    static Image* mediaSliderThumb = Image::loadPlatformResource("core_media_handle").leakRef();
 
+    if (!isEnabled(object))
+        return paintMediaButton(paintInfo.context, rect, disabledMediaSliderThumb);
+    if (isPressed(object) || isHovered(object) || isFocused(object))
+        return paintMediaButton(paintInfo.context, rect, pressedMediaSliderThumb);
     return paintMediaButton(paintInfo.context, rect, mediaSliderThumb);
 #endif // USE(SKIA)
 #else
@@ -1115,13 +1121,26 @@ bool RenderThemeBlackBerry::paintMediaVolumeSliderTrack(RenderObject* object, co
     IntRect rect2(x, y, w, h);
     IntRect volumeRect(x, y, ceil(w * volume), h);
 
+#if USE(SKIA)
     // This is to paint main volume slider bar.
     bool result = paintSliderTrackRect(object, paintInfo, rect2, Color(mediaSliderTrackOutline).rgb(), Color(mediaSliderTrackOutline).rgb(), rangeSliderRegularTop, rangeSliderRegularTop);
 
     if (volume > 0) {
         // This is to paint volume bar (left of volume slider thumb) using selection color.
-        paintSliderTrackRect(object, paintInfo, volumeRect, Color(mediaSliderTrackOutline).rgb(), Color(mediaSliderTrackOutline).rgb(), selection, selection);
+        result |= paintSliderTrackRect(object, paintInfo, volumeRect, Color(mediaSliderTrackOutline).rgb(), Color(mediaSliderTrackOutline).rgb(), selection, selection);
     }
+#else // GL renderer
+    static Image* volumeBackground = Image::loadPlatformResource("core_slider_video_bg").leakRef();
+    static Image* volumeBar = Image::loadPlatformResource("core_slider_played_bg").leakRef();
+
+    // This is to paint main volume slider bar.
+    bool result = paintSliderTrackRect(object, paintInfo, rect2, volumeBackground);
+
+    if (volume > 0) {
+        // This is to paint volume bar (left of volume slider thumb) using selection color.
+        result |= paintSliderTrackRect(object, paintInfo, volumeRect, volumeBar);
+    }
+#endif // USE(SKIA)
     return result;
 #else
     UNUSED_PARAM(object);

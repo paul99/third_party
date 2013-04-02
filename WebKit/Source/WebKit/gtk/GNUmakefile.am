@@ -1,5 +1,7 @@
+if ENABLE_WEBKIT1
 lib_LTLIBRARIES += \
 	libwebkitgtk-@WEBKITGTK_API_MAJOR_VERSION@.@WEBKITGTK_API_MINOR_VERSION@.la
+endif
 
 nodist_libwebkitgtk_@WEBKITGTK_API_MAJOR_VERSION@_@WEBKITGTK_API_MINOR_VERSION@_la_SOURCES = \
 	$(webkitgtk_built_sources)
@@ -24,9 +26,6 @@ libwebkitgtk_@WEBKITGTK_API_MAJOR_VERSION@_@WEBKITGTK_API_MINOR_VERSION@_la_CFLA
 	$(global_cflags)
 
 if ENABLE_SPELLCHECK
-webkitgtk_cppflags += \
-	-DENABLE_SPELLCHECK=1
-
 webkitgtk_sources += \
 	Source/WebKit/gtk/WebCoreSupport/TextCheckerClientGtk.cpp \
 	Source/WebKit/gtk/WebCoreSupport/TextCheckerClientGtk.h
@@ -68,8 +67,8 @@ libwebkitgtk_@WEBKITGTK_API_MAJOR_VERSION@_@WEBKITGTK_API_MINOR_VERSION@_la_CPPF
 	$(LIBXSLT_CFLAGS) \
 	$(SQLITE3_CFLAGS) \
 	$(UNICODE_CFLAGS) \
-	$(XCOMPOSITE_LIBS) \
-	$(XDAMAGE_LIBS) \
+	$(XCOMPOSITE_CFLAGS) \
+	$(XDAMAGE_CFLAGS) \
 	$(XT_CFLAGS) \
 	$(ZLIB_CFLAGS)
 
@@ -85,6 +84,11 @@ libwebkitgtk_@WEBKITGTK_API_MAJOR_VERSION@_@WEBKITGTK_API_MINOR_VERSION@_la_LIBA
 	libWebCoreModules.la \
 	libWebCoreDOM.la \
 	libWebCoreGtk.la
+
+if ENABLE_INDEXED_DATABASE
+libwebkitgtk_@WEBKITGTK_API_MAJOR_VERSION@_@WEBKITGTK_API_MINOR_VERSION@_la_LIBADD += \
+	libLevelDB.la
+endif
 
 if ENABLE_SVG
 libwebkitgtk_@WEBKITGTK_API_MAJOR_VERSION@_@WEBKITGTK_API_MINOR_VERSION@_la_LIBADD += \
@@ -115,6 +119,7 @@ libwebkitgtk_@WEBKITGTK_API_MAJOR_VERSION@_@WEBKITGTK_API_MINOR_VERSION@_la_LIBA
 	$(PNG_LIBS) \
 	$(SQLITE3_LIBS) \
 	$(UNICODE_LIBS) \
+	$(WEBP_LIBS) \
 	$(XCOMPOSITE_LIBS) \
 	$(XDAMAGE_LIBS) \
 	$(XRENDER_LIBS) \
@@ -202,8 +207,6 @@ webkitgtk_sources += \
 	Source/WebKit/gtk/WebCoreSupport/FrameLoaderClientGtk.h \
 	Source/WebKit/gtk/WebCoreSupport/FrameNetworkingContextGtk.cpp \
 	Source/WebKit/gtk/WebCoreSupport/FrameNetworkingContextGtk.h \
-	Source/WebKit/gtk/WebCoreSupport/FullscreenVideoController.cpp \
-	Source/WebKit/gtk/WebCoreSupport/FullscreenVideoController.h \
 	Source/WebKit/gtk/WebCoreSupport/GeolocationClientGtk.cpp \
 	Source/WebKit/gtk/WebCoreSupport/GeolocationClientGtk.h \
 	Source/WebKit/gtk/WebCoreSupport/GtkAdjustmentWatcher.cpp \
@@ -277,6 +280,7 @@ webkitgtk_sources += \
 	Source/WebKit/gtk/webkit/webkitwebwindowfeatures.cpp \
 	Source/WebKit/gtk/webkit/webkitwebwindowfeaturesprivate.h
 
+if ENABLE_WEBKIT1
 pkgconfig_DATA += Source/WebKit/gtk/@WEBKITGTK_PC_NAME@-@WEBKITGTK_API_VERSION@.pc
 
 if ENABLE_INTROSPECTION
@@ -311,12 +315,14 @@ $(WEBKIT_GIRSOURCES): $(G_IR_SCANNER) $(JSCORE_GIRSOURCES) libwebkitgtk-@WEBKITG
 	     -I$(srcdir)/Source \
 	     -I$(WebKit) \
 	     -I$(GENSOURCES) \
+	     -I$(GENSOURCES_WEBKITDOM) \
 	     -I$(GENSOURCES_WEBKIT) \
 	     -I$(top_builddir)/Source/WebKit/gtk \
 	     -I$(top_srcdir)/Source/JavaScriptCore/ForwardingHeaders \
 	     -I$(top_srcdir) \
 	     $(GENSOURCES_WEBKIT)/webkitenumtypes.h \
 	     $(webkitgtk_h_api) \
+	     $(webkitgtk_gdom_built_h_api) \
 	     $(WebKit)/webkit/*.cpp
 
 girdir = $(datadir)/gir-1.0
@@ -333,6 +339,7 @@ JSCore-@WEBKITGTK_API_VERSION@.typelib: JSCore-@WEBKITGTK_API_VERSION@.gir $(G_I
 
 CLEANFILES += $(JSCORE_GIRSOURCES) $(WEBKIT_GIRSOURCES) $(typelibs_DATA)
 
+endif
 endif
 
 EXTRA_DIST += $(top_builddir)/Source/WebKit/gtk/JSCore-@WEBKITGTK_API_VERSION@.gir
@@ -428,15 +435,17 @@ webkit_tests_cflags = \
 	$(global_cppflags) \
 	$(global_cflags) \
 	$(javascriptcore_cppflags) \
+	$(FREETYPE_CFLAGS) \
 	$(GLIB_CFLAGS) \
 	$(GTK_CFLAGS) \
 	$(LIBSOUP_CFLAGS) \
-	$(XRENDER_LIBS) \
-	$(XT_LIBS)
+	$(XRENDER_CFLAGS) \
+	$(XT_CFLAGS)
 
 webkit_tests_ldadd = \
 	libjavascriptcoregtk-@WEBKITGTK_API_MAJOR_VERSION@.@WEBKITGTK_API_MINOR_VERSION@.la \
 	libwebkitgtk-@WEBKITGTK_API_MAJOR_VERSION@.@WEBKITGTK_API_MINOR_VERSION@.la \
+	$(FREETYPE_LIBS) \
 	$(GTK_LIBS) \
 	$(GLIB_LIBS) \
 	$(LIBSOUP_LIBS)
@@ -445,6 +454,7 @@ webkit_tests_ldflags = \
 	-no-install \
 	-no-fast-install
 
+if ENABLE_WEBKIT1
 noinst_PROGRAMS += \
 	Programs/unittests/testapplicationcache \
 	Programs/unittests/testcontextmenu \
@@ -474,6 +484,7 @@ noinst_PROGRAMS += \
 	Programs/unittests/testwebview \
 	Programs/unittests/testkeyevents \
 	Programs/unittests/testcopyandpaste
+endif
 
 # Add additional tests here
 Programs_unittests_testapplicationcache_SOURCES = Source/WebKit/gtk/tests/testapplicationcache.c

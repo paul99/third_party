@@ -5,9 +5,10 @@
 
     <uses-sdk android:minSdkVersion="${minApi}" android:targetSdkVersion="${targetApi}" />
 
-    <application android:label="@string/app_name"
-        android:icon="@drawable/ic_launcher"
-        android:theme="@style/AppTheme">
+    <application android:allowBackup="true"
+        android:label="@string/app_name"
+        android:icon="@drawable/ic_launcher"<#if baseTheme != "none">
+        android:theme="@style/AppTheme"</#if>>
 
     </application>
 

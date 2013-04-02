@@ -38,6 +38,10 @@ const char* exitKindToString(ExitKind kind)
         return "Unset";
     case BadType:
         return "BadType";
+    case BadFunction:
+        return "BadFunction";
+    case BadExecutable:
+        return "BadExecutable";
     case BadCache:
         return "BadCache";
     case BadWeakConstantCache:
@@ -65,7 +69,7 @@ const char* exitKindToString(ExitKind kind)
     case UncountableWatchpoint:
         return "UncountableWatchpoint";
     default:
-        ASSERT_NOT_REACHED();
+        RELEASE_ASSERT_NOT_REACHED();
         return "Unknown";
     }
 }
@@ -74,7 +78,7 @@ bool exitKindIsCountable(ExitKind kind)
 {
     switch (kind) {
     case ExitKindUnset:
-        ASSERT_NOT_REACHED();
+        RELEASE_ASSERT_NOT_REACHED();
     case BadType:
     case Uncountable:
     case UncountableWatchpoint:

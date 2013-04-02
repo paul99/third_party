@@ -84,6 +84,7 @@ public:
         fRenderTarget.reset(NULL);
 
         fCommon.fColor = 0xffffffff;
+        fCommon.fVertexLayout = kDefault_VertexLayout;
         fCommon.fViewMatrix.reset();
         fCommon.fSrcBlend = kOne_GrBlendCoeff;
         fCommon.fDstBlend = kZero_GrBlendCoeff;
@@ -107,7 +108,7 @@ public:
     void setFromPaint(const GrPaint& paint);
 
     ///////////////////////////////////////////////////////////////////////////
-    /// @name Vertex Format
+    /// @name Vertex Layout
     ////
 
     /**
@@ -163,21 +164,31 @@ public:
         /* vertices have coverage (GrColor)
          */
         kCoverage_VertexLayoutBit           = 1 << (STAGE_BIT_CNT + 1),
-        /* Use text vertices. (Pos and tex coords may be a different type for
-         * text [GrGpuTextVertex vs GrPoint].)
-         */
-        kTextFormat_VertexLayoutBit         = 1 << (STAGE_BIT_CNT + 2),
-
         /* Each vertex specificies an edge. Distance to the edge is used to
          * compute a coverage. See GrDrawState::setVertexEdgeType().
          */
-        kEdge_VertexLayoutBit               = 1 << (STAGE_BIT_CNT + 3),
+        kEdge_VertexLayoutBit               = 1 << (STAGE_BIT_CNT + 2),
         // for below assert
         kDummyVertexLayoutBit,
         kHighVertexLayoutBit = kDummyVertexLayoutBit - 1
     };
     // make sure we haven't exceeded the number of bits in GrVertexLayout.
     GR_STATIC_ASSERT(kHighVertexLayoutBit < ((uint64_t)1 << 8*sizeof(GrVertexLayout)));
+
+    enum VertexLayout {
+        kDefault_VertexLayout = 0
+    };
+
+    /**
+     *  Sets vertex layout for next draw.
+     *
+     *  @param layout    the vertex layout to set.
+     */
+    void setVertexLayout(GrVertexLayout layout) { fCommon.fVertexLayout = layout; }
+
+    GrVertexLayout getVertexLayout() const { return fCommon.fVertexLayout; }
+    size_t getVertexSize() const { return VertexSize(fCommon.fVertexLayout); }
+
 
     ////////////////////////////////////////////////////////////////////////////
     // Helpers for picking apart vertex layouts
@@ -1161,6 +1172,7 @@ private:
     struct CommonState {
         // These fields are roughly sorted by decreasing likelihood of being different in op==
         GrColor                         fColor;
+        GrVertexLayout                  fVertexLayout;
         SkMatrix                        fViewMatrix;
         GrBlendCoeff                    fSrcBlend;
         GrBlendCoeff                    fDstBlend;
@@ -1175,6 +1187,7 @@ private:
         DrawFace                        fDrawFace;
         bool operator== (const CommonState& other) const {
             return fColor == other.fColor &&
+                   fVertexLayout == other.fVertexLayout &&
                    fViewMatrix.cheapEqualTo(other.fViewMatrix) &&
                    fSrcBlend == other.fSrcBlend &&
                    fDstBlend == other.fDstBlend &&

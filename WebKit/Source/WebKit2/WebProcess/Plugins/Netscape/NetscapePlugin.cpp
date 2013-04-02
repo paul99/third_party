@@ -630,6 +630,8 @@ bool NetscapePlugin::initialize(const Parameters& parameters)
     m_layerHostingMode = parameters.layerHostingMode;
 #endif
 
+    platformPreInitialize();
+
     NetscapePlugin* previousNPPNewPlugin = currentNPPNewPlugin;
     
     m_inNPPNew = true;
@@ -926,6 +928,11 @@ bool NetscapePlugin::shouldAllowScripting()
     return true;
 }
 
+bool NetscapePlugin::shouldAllowNavigationFromDrags()
+{
+    return false;
+}
+
 bool NetscapePlugin::handlesPageScaleFactor()
 {
     return false;
@@ -952,6 +959,16 @@ NPObject* NetscapePlugin::pluginScriptableNPObject()
 #endif    
 
     return scriptableNPObject;
+}
+    
+unsigned NetscapePlugin::countFindMatches(const String&, WebCore::FindOptions, unsigned)
+{
+    return 0;
+}
+
+bool NetscapePlugin::findString(const String&, WebCore::FindOptions, unsigned)
+{
+    return false;
 }
 
 void NetscapePlugin::contentsScaleFactorChanged(float scaleFactor)

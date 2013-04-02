@@ -62,11 +62,11 @@ static const type& name() \
 #if defined(WIN32) || defined(_WIN32)
 
 #ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0500
+#define _WIN32_WINNT 0x0502
 #endif
 
 #ifndef WINVER
-#define WINVER 0x0500
+#define WINVER 0x0502
 #endif
 
 /* If we don't define these, they get defined in windef.h. */
@@ -106,8 +106,6 @@ static const type& name() \
 #ifndef PLUGIN_ARCHITECTURE_UNSUPPORTED
 #if PLATFORM(MAC)
 #define PLUGIN_ARCHITECTURE_MAC 1
-#elif PLATFORM(WIN)
-#define PLUGIN_ARCHITECTURE_WIN 1
 #elif (PLATFORM(GTK) || PLATFORM(EFL)) && (OS(UNIX) && !OS(MAC_OS_X))
 #define PLUGIN_ARCHITECTURE_X11 1
 #elif PLATFORM(QT)

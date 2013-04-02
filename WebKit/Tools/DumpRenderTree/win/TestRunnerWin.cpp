@@ -225,17 +225,6 @@ size_t TestRunner::webHistoryItemCount()
     return count;
 }
 
-unsigned TestRunner::workerThreadCount() const
-{
-    COMPtr<IWebWorkersPrivate> workers;
-    if (FAILED(WebKitCreateInstance(CLSID_WebWorkersPrivate, 0, __uuidof(workers), reinterpret_cast<void**>(&workers))))
-        return 0;
-    unsigned count;
-    if (FAILED(workers->workerThreadCount(&count)))
-        return 0;
-    return count;
-}
-
 JSRetainPtr<JSStringRef> TestRunner::platformName() const
 {
     JSRetainPtr<JSStringRef> platformName(Adopt, JSStringCreateWithUTF8CString("win"));
@@ -1011,69 +1000,6 @@ void TestRunner::setDomainRelaxationForbiddenForURLScheme(bool forbidden, JSStri
 void TestRunner::setAppCacheMaximumSize(unsigned long long size)
 {
     printf("ERROR: TestRunner::setAppCacheMaximumSize() not implemented\n");
-}
-
-bool TestRunner::pauseAnimationAtTimeOnElementWithId(JSStringRef animationName, double time, JSStringRef elementId)
-{
-    COMPtr<IDOMDocument> document;
-    if (FAILED(frame->DOMDocument(&document)))
-        return false;
-
-    BSTR idBSTR = JSStringCopyBSTR(elementId);
-    COMPtr<IDOMElement> element;
-    HRESULT hr = document->getElementById(idBSTR, &element);
-    SysFreeString(idBSTR);
-    if (FAILED(hr))
-        return false;
-
-    COMPtr<IWebFramePrivate> framePrivate(Query, frame);
-    if (!framePrivate)
-        return false;
-
-    BSTR nameBSTR = JSStringCopyBSTR(animationName);
-    BOOL wasRunning = FALSE;
-    hr = framePrivate->pauseAnimation(nameBSTR, element.get(), time, &wasRunning);
-    SysFreeString(nameBSTR);
-
-    return SUCCEEDED(hr) && wasRunning;
-}
-
-bool TestRunner::pauseTransitionAtTimeOnElementWithId(JSStringRef propertyName, double time, JSStringRef elementId)
-{
-    COMPtr<IDOMDocument> document;
-    if (FAILED(frame->DOMDocument(&document)))
-        return false;
-
-    BSTR idBSTR = JSStringCopyBSTR(elementId);
-    COMPtr<IDOMElement> element;
-    HRESULT hr = document->getElementById(idBSTR, &element);
-    SysFreeString(idBSTR);
-    if (FAILED(hr))
-        return false;
-
-    COMPtr<IWebFramePrivate> framePrivate(Query, frame);
-    if (!framePrivate)
-        return false;
-
-    BSTR nameBSTR = JSStringCopyBSTR(propertyName);
-    BOOL wasRunning = FALSE;
-    hr = framePrivate->pauseTransition(nameBSTR, element.get(), time, &wasRunning);
-    SysFreeString(nameBSTR);
-
-    return SUCCEEDED(hr) && wasRunning;
-}
-
-unsigned TestRunner::numberOfActiveAnimations() const
-{
-    COMPtr<IWebFramePrivate> framePrivate(Query, frame);
-    if (!framePrivate)
-        return 0;
-
-    UINT number = 0;
-    if (FAILED(framePrivate->numberOfActiveAnimations(&number)))
-        return 0;
-
-    return number;
 }
 
 static _bstr_t bstrT(JSStringRef jsString)

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
+ * Copyright (C) 2006, 2007, 2012 Apple Inc. All rights reserved.
  * Copyright (C) 2009 Google Inc. All rights reserved.
  * Copyright (C) 2007-2009 Torch Mobile, Inc.
  * Copyright (C) 2010 &yet, LLC. (nate@andyet.net)
@@ -74,6 +74,7 @@
 
 #include "JSObject.h"
 #include "JSScope.h"
+#include "Operations.h"
 
 #include <algorithm>
 #include <limits.h>
@@ -253,7 +254,7 @@ double parseDateFromNullTerminatedCharacters(ExecState* exec, const char* dateSt
     if (!haveTZ) {
         double utcOffset = getUTCOffset(exec);
         double dstOffset = getDSTOffset(exec, ms, utcOffset);
-        offset = static_cast<int>((utcOffset + dstOffset) / WTF::msPerMinute);
+        offset = (utcOffset + dstOffset) / WTF::msPerMinute;
     }
     return ms - (offset * WTF::msPerMinute);
 }

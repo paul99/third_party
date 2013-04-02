@@ -40,6 +40,9 @@
 #import "DOMCSSStyleDeclaration.h"
 #import "DOMCSSStyleRule.h"
 #import "DOMCSSStyleSheet.h"
+#if ENABLE(CSS3_CONDITIONAL_RULES)
+#import "DOMCSSSupportsRule.h"
+#endif
 #import "DOMCSSUnknownRule.h"
 #import "DOMCSSValueInternal.h"
 #import "DOMCSSValueList.h"
@@ -48,6 +51,10 @@
 #import "DOMWebKitCSSKeyframeRule.h"
 #import "DOMWebKitCSSKeyframesRule.h"
 #import "DOMWebKitCSSTransformValue.h"
+
+#if ENABLE(CSS_SHADERS)
+#import "DOMWebKitCSSFilterRule.h"
+#endif
 
 #if ENABLE(CSS_FILTERS)
 #import "DOMWebKitCSSFilterValue.h"
@@ -63,6 +70,10 @@
 
 #if ENABLE(SVG_DOM_OBJC_BINDINGS)
 #import "DOMSVGPaint.h"
+#endif
+
+#if ENABLE(SHADOW_DOM)
+#import "DOMCSSHostRule.h"
 #endif
 
 //------------------------------------------------------------------------------------------
@@ -99,6 +110,10 @@ Class kitClass(WebCore::CSSRule* impl)
             return [DOMWebKitCSSKeyframesRule class];
         case DOM_WEBKIT_KEYFRAME_RULE:
             return [DOMWebKitCSSKeyframeRule class];
+#if ENABLE(CSS3_CONDITIONAL_RULES)
+        case DOM_SUPPORTS_RULE:
+            return [DOMCSSSupportsRule class];
+#endif
 #if ENABLE(CSS_DEVICE_ADAPTATION)
         case DOM_WEBKIT_VIEWPORT_RULE:
             return [DOMWebKitCSSViewportRule class];
@@ -106,6 +121,14 @@ Class kitClass(WebCore::CSSRule* impl)
 #if ENABLE(CSS_REGIONS)
         case DOM_WEBKIT_REGION_RULE:
             return [DOMWebKitCSSRegionRule class];
+#endif
+#if ENABLE(SHADOW_DOM)
+        case DOM_HOST_RULE:
+            return [DOMCSSHostRule class];
+#endif
+#if ENABLE(CSS_SHADERS)
+        case DOM_WEBKIT_FILTER_RULE:
+            return [DOMWebKitCSSFilterRule class];
 #endif
     }
     ASSERT_NOT_REACHED();

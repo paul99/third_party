@@ -26,6 +26,7 @@
 // This all-in-one cpp file cuts down on template bloat to allow us to build our Windows release build.
 
 #include "ActiveDOMObject.cpp"
+#include "AncestorChainWalker.cpp"
 #include "Attr.cpp"
 #include "BeforeTextInsertedEvent.cpp"
 #include "BeforeUnloadEvent.cpp"
@@ -83,6 +84,7 @@
 #include "EventTarget.cpp"
 #include "ExceptionBase.cpp"
 #include "ExceptionCodePlaceholder.cpp"
+#include "FocusEvent.cpp"
 #include "IconURL.cpp"
 #include "IdTargetObserver.cpp"
 #include "IdTargetObserverRegistry.cpp"
@@ -139,6 +141,7 @@
 #include "TouchEvent.cpp"
 #include "TouchList.cpp"
 #include "TransformSourceLibxslt.cpp"
+#include "TransitionEvent.cpp"
 #include "Traversal.cpp"
 #include "TreeScope.cpp"
 #include "TreeScopeAdopter.cpp"
@@ -149,6 +152,7 @@
 #include "UserGestureIndicator.cpp"
 #include "UserTypingGestureIndicator.cpp"
 #include "ViewportArguments.cpp"
+#include "VisitedLinkState.cpp"
 #include "WebKitAnimationEvent.cpp"
 #include "WebKitNamedFlow.cpp"
 #include "WebKitTransitionEvent.cpp"

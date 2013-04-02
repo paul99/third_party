@@ -46,32 +46,33 @@ public:
     virtual ~ScrollingStateScrollingNode();
 
     enum ChangedProperty {
-        ViewportRect = 1 << 0,
-        ContentsSize = 1 << 1,
-        NonFastScrollableRegion = 1 << 2,
-        WheelEventHandlerCount = 1 << 3,
-        ShouldUpdateScrollLayerPositionOnMainThread = 1 << 4,
-        HorizontalScrollElasticity = 1 << 5,
-        VerticalScrollElasticity = 1 << 6,
-        HasEnabledHorizontalScrollbar = 1 << 7,
-        HasEnabledVerticalScrollbar = 1 << 8,
-        HorizontalScrollbarMode = 1 << 9,
-        VerticalScrollbarMode = 1 << 10,
-        ScrollOrigin = 1 << 11,
-        RequestedScrollPosition = 1 << 12,
+        ViewportRect = NumStateNodeBits,
+        ContentsSize,
+        FrameScaleFactor,
+        NonFastScrollableRegion,
+        WheelEventHandlerCount,
+        ShouldUpdateScrollLayerPositionOnMainThread,
+        HorizontalScrollElasticity,
+        VerticalScrollElasticity,
+        HasEnabledHorizontalScrollbar,
+        HasEnabledVerticalScrollbar,
+        HorizontalScrollbarMode,
+        VerticalScrollbarMode,
+        ScrollOrigin,
+        RequestedScrollPosition,
+        CounterScrollingLayer
     };
 
     virtual bool isScrollingNode() OVERRIDE { return true; }
-
-    virtual bool hasChangedProperties() const OVERRIDE { return m_changedProperties; }
-    virtual unsigned changedProperties() const OVERRIDE { return m_changedProperties; }
-    virtual void resetChangedProperties() OVERRIDE { m_changedProperties = 0; }
 
     const IntRect& viewportRect() const { return m_viewportRect; }
     void setViewportRect(const IntRect&);
 
     const IntSize& contentsSize() const { return m_contentsSize; }
     void setContentsSize(const IntSize&);
+
+    float frameScaleFactor() const { return m_frameScaleFactor; }
+    void setFrameScaleFactor(float);
 
     const Region& nonFastScrollableRegion() const { return m_nonFastScrollableRegion; }
     void setNonFastScrollableRegion(const Region&);
@@ -106,6 +107,11 @@ public:
     const IntPoint& scrollOrigin() const { return m_scrollOrigin; }
     void setScrollOrigin(const IntPoint&);
 
+    // This is a layer moved in the opposite direction to scrolling, for example for background-attachment:fixed
+    GraphicsLayer* counterScrollingLayer() const { return m_counterScrollingLayer; }
+    void setCounterScrollingLayer(GraphicsLayer*);
+    PlatformLayer* counterScrollingPlatformLayer() const;
+
     bool requestedScrollPositionRepresentsProgrammaticScroll() const { return m_requestedScrollPositionRepresentsProgrammaticScroll; }
 
     virtual void dumpProperties(TextStream&, int indent) const OVERRIDE;
@@ -114,10 +120,15 @@ private:
     ScrollingStateScrollingNode(ScrollingStateTree*, ScrollingNodeID);
     ScrollingStateScrollingNode(const ScrollingStateScrollingNode&);
 
-    unsigned m_changedProperties;
-
+    GraphicsLayer* m_counterScrollingLayer;
+#if PLATFORM(MAC)
+    RetainPtr<PlatformLayer> m_counterScrollingPlatformLayer;
+#endif
+    
     IntRect m_viewportRect;
     IntSize m_contentsSize;
+    
+    float m_frameScaleFactor;
 
     Region m_nonFastScrollableRegion;
 
@@ -141,7 +152,7 @@ private:
 
 inline ScrollingStateScrollingNode* toScrollingStateScrollingNode(ScrollingStateNode* node)
 {
-    ASSERT(!node || node->isScrollingNode());
+    ASSERT_WITH_SECURITY_IMPLICATION(!node || node->isScrollingNode());
     return static_cast<ScrollingStateScrollingNode*>(node);
 }
     

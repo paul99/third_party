@@ -1778,6 +1778,8 @@ static void parse_extension_descriptor(LIBMTP_mtpdevice_t *mtpdevice,
             char *minorstr = strndup(element + i + 1, strlen(element) - i - 1);
             major = atoi(majorstr);
             minor = atoi(minorstr);
+	    free(majorstr);
+	    free(minorstr);
             extension = malloc(sizeof(LIBMTP_device_extension_t));
             extension->name = name;
             extension->major = major;
@@ -2355,6 +2357,7 @@ void LIBMTP_Release_Device(LIBMTP_mtpdevice_t *device)
   iconv_close(params->cd_ucs2_to_locale);
   free(ptp_usb);
   ptp_free_params(params);
+  free(params);
   free_storage_list(device);
   // Free extension list...
   if (device->extensions != NULL) {

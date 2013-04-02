@@ -28,6 +28,22 @@ class ThreadWrapper;
 class ViENetwork;
 }
 
+enum RandomLossModel {
+  kNoLoss,
+  kUniformLoss,
+  kGilbertElliotLoss
+};
+struct NetworkParameters {
+  int packet_loss_rate;
+  int burst_length;  // Only applicable for kGilbertElliotLoss.
+  int mean_one_way_delay;
+  int std_dev_one_way_delay;
+  RandomLossModel loss_model;
+  NetworkParameters():
+    packet_loss_rate(0), burst_length(0), mean_one_way_delay(0),
+        std_dev_one_way_delay(0), loss_model(kNoLoss) {}
+};
+
 // Allows to subscribe for callback when a frame is started being sent.
 class SendFrameCallback
 {
@@ -80,10 +96,9 @@ public:
     // Only one observer can be set (multiple calls will overwrite each other).
     virtual void RegisterReceiveFrameCallback(ReceiveFrameCallback* callback);
 
-    // The probability of a packet of being dropped. Packets belonging to the
-    // first packet (same RTP timestamp) will never be dropped.
-    WebRtc_Word32 SetPacketLoss(WebRtc_Word32 lossRate);  // Rate in %
-    void SetNetworkDelay(WebRtc_Word64 delayMs);
+    // The network parameters of the link. Regarding packet losses, packets
+    // belonging to the first frame (same RTP timestamp) will never be dropped.
+    void SetNetworkParameters(const NetworkParameters& network_parameters);
     void SetSSRCFilter(WebRtc_UWord32 SSRC);
 
     void ClearStats();
@@ -104,6 +119,10 @@ protected:
     static bool ViEExternalTransportRun(void* object);
     bool ViEExternalTransportProcess();
 private:
+    // TODO(mikhal): Break these out to classes.
+    static int GaussianRandom(int mean_ms, int standard_deviation_ms);
+    bool UniformLoss(int loss_rate);
+    bool GilbertElliotLoss(int loss_rate, int burst_length);
     WebRtc_Word64 NowMs();
 
     enum
@@ -130,8 +149,7 @@ private:
     webrtc::CriticalSectionWrapper& _crit;
     webrtc::CriticalSectionWrapper& _statCrit;
 
-    WebRtc_Word32 _lossRate;
-    WebRtc_Word64 _networkDelayMs;
+    NetworkParameters network_parameters_;
     WebRtc_Word32 _rtpCount;
     WebRtc_Word32 _rtcpCount;
     WebRtc_Word32 _dropCount;
@@ -163,6 +181,8 @@ private:
     // Track RTP timestamps so we invoke callbacks properly (if registered).
     WebRtc_UWord32 _lastSendRTPTimestamp;
     WebRtc_UWord32 _lastReceiveRTPTimestamp;
+    int64_t last_receive_time_;
+    bool previous_drop_;
 };
 
 #endif  // WEBRTC_VIDEO_ENGINE_TEST_AUTOTEST_INTERFACE_TB_EXTERNAL_TRANSPORT_H_

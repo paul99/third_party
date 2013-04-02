@@ -22,7 +22,7 @@
 #ifndef WEBRTC_VIDEO_ENGINE_INCLUDE_VIE_RTP_RTCP_H_
 #define WEBRTC_VIDEO_ENGINE_INCLUDE_VIE_RTP_RTCP_H_
 
-#include "common_types.h"
+#include "webrtc/common_types.h"
 
 namespace webrtc {
 
@@ -199,6 +199,12 @@ class WEBRTC_DLLEXPORT ViERTP_RTCP {
                                      const unsigned char payload_typeRED,
                                      const unsigned char payload_typeFEC) = 0;
 
+  // Enables send side support for delayed video streaming (actual delay will
+  // be exhibited on the receiver side).
+  // Target delay should be set to zero for real-time mode.
+  virtual int EnableSenderStreamingMode(int video_channel,
+                                        int target_delay_ms) = 0;
+
   // This function enables RTCP key frame requests.
   virtual int SetKeyFrameRequestMethod(
     const int video_channel, const ViEKeyFrameRequestMethod method) = 0;
@@ -231,8 +237,6 @@ class WEBRTC_DLLEXPORT ViERTP_RTCP {
   // Enables transmission smoothening, i.e. packets belonging to the same frame
   // will be sent over a longer period of time instead of sending them
   // back-to-back.
-  // NOTE: This is still experimental functionality.
-  // TODO(mflodman) Remove this note when BUG=818 is closed.
   virtual int SetTransmissionSmoothingStatus(int video_channel,
                                              bool enable) = 0;
 
@@ -277,8 +281,8 @@ class WEBRTC_DLLEXPORT ViERTP_RTCP {
       unsigned int* estimated_bandwidth) const = 0;
 
   // This function gets the receive-side estimated bandwidth available for
-  // video, including overhead, in bits/s.
-  // Returns -1 when no valid estimate is available.
+  // video, including overhead, in bits/s. |estimated_bandwidth| is 0 if there
+  // is no valid estimate.
   virtual int GetEstimatedReceiveBandwidth(
       const int video_channel,
       unsigned int* estimated_bandwidth) const = 0;

@@ -36,7 +36,6 @@
 #include "GraphicsContext.h"
 #include "IntRect.h"
 #include "IntSize.h"
-#include "TextureMapperPlatformLayer.h"
 #include "TransformationMatrix.h"
 #include <wtf/UnusedParam.h>
 
@@ -130,15 +129,16 @@ public:
         AllEdges = LeftEdge | RightEdge | TopEdge | BottomEdge,
     };
 
-    virtual void drawBorder(const Color&, float borderWidth, const FloatRect& targetRect, const TransformationMatrix& modelViewMatrix = TransformationMatrix()) = 0;
-    virtual void drawRepaintCounter(int value, int pointSize, const FloatPoint&, const TransformationMatrix& modelViewMatrix = TransformationMatrix()) = 0;
+    virtual void drawBorder(const Color&, float borderWidth, const FloatRect&, const TransformationMatrix&) = 0;
+    virtual void drawRepaintCounter(int repaintCount, const Color&, const FloatPoint&, const TransformationMatrix&) = 0;
+
     virtual void drawTexture(const BitmapTexture&, const FloatRect& target, const TransformationMatrix& modelViewMatrix = TransformationMatrix(), float opacity = 1.0f, const BitmapTexture* maskTexture = 0, unsigned exposedEdges = AllEdges) = 0;
     virtual void drawSolidColor(const FloatRect&, const TransformationMatrix&, const Color&) = 0;
 
     // makes a surface the target for the following drawTexture calls.
     virtual void bindSurface(BitmapTexture* surface) = 0;
-    virtual void setGraphicsContext(GraphicsContext* context) { m_context = context; }
-    virtual GraphicsContext* graphicsContext() { return m_context; }
+    void setGraphicsContext(GraphicsContext* context) { m_context = context; }
+    GraphicsContext* graphicsContext() { return m_context; }
     virtual void beginClip(const TransformationMatrix&, const FloatRect&) = 0;
     virtual void endClip() = 0;
     virtual PassRefPtr<BitmapTexture> createTexture() = 0;
@@ -164,6 +164,8 @@ public:
 protected:
     explicit TextureMapper(AccelerationMode);
 
+    GraphicsContext* m_context;
+
 private:
 #if USE(TEXTURE_MAPPER_GL)
     static PassOwnPtr<TextureMapper> platformCreateAccelerated();
@@ -176,7 +178,6 @@ private:
     InterpolationQuality m_interpolationQuality;
     TextDrawingModeFlags m_textDrawingMode;
     OwnPtr<BitmapTexturePool> m_texturePool;
-    GraphicsContext* m_context;
     AccelerationMode m_accelerationMode;
 };
 

@@ -7,6 +7,8 @@
 /**
  * @fileoverview Provides the TimelineThread class.
  */
+base.require('range');
+base.require('timeline_guid');
 base.require('timeline_slice');
 base.require('timeline_slice_group');
 base.require('timeline_async_slice_group');
@@ -55,44 +57,51 @@ base.exportTo('tracing', function() {
    */
   function TimelineThread(parent, tid) {
     TimelineSliceGroup.call(this, TimelineThreadSlice);
+    this.guid_ = tracing.GUID.allocate();
     if (!parent)
       throw new Error('Parent must be provided.');
-    this.pid = parent.pid;
+    this.parent = parent;
     this.tid = tid;
     this.cpuSlices = undefined;
-    this.asyncSlices = new TimelineAsyncSliceGroup(this.ptid);
-  }
-
-  var ptidMap = {};
-
-  /**
-   * @return {String} A string that can be used as a unique key for a specific
-   * thread within a process.
-   */
-  TimelineThread.getPTIDFromPidAndTid = function(pid, tid) {
-    if (!ptidMap[pid])
-      ptidMap[pid] = {};
-    if (!ptidMap[pid][tid])
-      ptidMap[pid][tid] = pid + ':' + tid;
-    return ptidMap[pid][tid];
+    this.asyncSlices = new TimelineAsyncSliceGroup();
+    this.bounds = new base.Range();
   }
 
   TimelineThread.prototype = {
 
     __proto__: TimelineSliceGroup.prototype,
 
+    /*
+     * @return {Number} A globally unique identifier for this counter.
+     */
+    get guid() {
+      return this.guid_;
+    },
+
+    compareTo: function(that) {
+      return TimelineThread.compare(this, that);
+    },
+
+    toJSON: function() {
+      var obj = new Object();
+      var keys = Object.keys(this);
+      for (var i = 0; i < keys.length; i++) {
+        var key = keys[i];
+        if (typeof this[key] == 'function')
+          continue;
+        if (key == 'parent') {
+          obj[key] = this[key].guid;
+          continue;
+        }
+        obj[key] = this[key];
+      }
+      return obj;
+    },
+
     /**
      * Name of the thread, if present.
      */
     name: undefined,
-
-    /**
-     * @return {string} A concatenation of the pid and the thread's
-     * tid. Can be used to uniquely identify a thread.
-     */
-    get ptid() {
-      return TimelineThread.getPTIDFromPidAndTid(this.tid, this.pid);
-    },
 
     /**
      * Shifts all the timestamps inside this thread forward by the amount
@@ -128,33 +137,27 @@ base.exportTo('tracing', function() {
     },
 
     /**
-     * Updates the minTimestamp and maxTimestamp fields based on the
+     * Updates the bounds based on the
      * current objects associated with the thread.
      */
     updateBounds: function() {
       TimelineSliceGroup.prototype.updateBounds.call(this);
-      var values = [];
-      if (this.minTimestamp !== undefined)
-        values.push(this.minTimestamp, this.maxTimestamp);
 
-      if (this.asyncSlices.slices.length) {
-        this.asyncSlices.updateBounds();
-        values.push(this.asyncSlices.minTimestamp);
-        values.push(this.asyncSlices.maxTimestamp);
-      }
+      this.asyncSlices.updateBounds();
+      this.bounds.addRange(this.asyncSlices.bounds);
 
       if (this.cpuSlices && this.cpuSlices.length) {
-        values.push(this.cpuSlices[0].start);
-        values.push(this.cpuSlices[this.cpuSlices.length - 1].end);
+        this.bounds.addValue(this.cpuSlices[0].start);
+        this.bounds.addValue(
+          this.cpuSlices[this.cpuSlices.length - 1].end);
       }
+    },
 
-      if (values.length) {
-        this.minTimestamp = Math.min.apply(Math, values);
-        this.maxTimestamp = Math.max.apply(Math, values);
-      } else {
-        this.minTimestamp = undefined;
-        this.maxTimestamp = undefined;
-      }
+    addCategoriesToDict: function(categoriesDict) {
+      for (var i = 0; i < this.slices.length; i++)
+        categoriesDict[this.slices[i].category] = true;
+      for (var i = 0; i < this.asyncSlices.length; i++)
+        categoriesDict[this.asyncSlices.slices[i].category] = true;
     },
 
     /**
@@ -162,26 +165,27 @@ base.exportTo('tracing', function() {
      */
     get userFriendlyName() {
       var tname = this.name || this.tid;
-      return this.pid + ': ' + tname;
+      return this.parent.userFriendlyName + ': ' + tname;
     },
 
     /**
      * @return {String} User friendly details about this thread.
      */
     get userFriendlyDetails() {
-      return 'pid: ' + this.pid +
+      return this.parent.userFriendlyDetails +
           ', tid: ' + this.tid +
           (this.name ? ', name: ' + this.name : '');
     }
   };
 
   /**
-   * Comparison between threads that orders first by pid,
+   * Comparison between threads that orders first by parent.compareTo,
    * then by names, then by tid.
    */
   TimelineThread.compare = function(x, y) {
-    if (x.pid != y.pid)
-      return x.pid - y.pid;
+    var tmp = x.parent.compareTo(y.parent);
+    if (tmp != 0)
+      return tmp;
 
     if (x.name && y.name) {
       var tmp = x.name.localeCompare(y.name);

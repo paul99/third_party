@@ -35,7 +35,6 @@
 #import "DOMDictionaryInternal.h"
 #import "DOMDocumentInternal.h"
 #import "DOMEventInternal.h"
-#import "DOMIDBKeyInternal.h"
 #import "DOMNodeInternal.h"
 #import "DOMSVGDocumentInternal.h"
 #import "DOMSVGPointInternal.h"
@@ -55,7 +54,6 @@
 #import "EventListener.h"
 #import "ExceptionHandlers.h"
 #import "HTMLNames.h"
-#import "IDBKey.h"
 #import "JSMainThreadExecState.h"
 #import "KURL.h"
 #import "Node.h"
@@ -232,7 +230,7 @@
 - (NSString *)reflectedStringAttr
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->getAttribute(WebCore::HTMLNames::reflectedstringattrAttr);
+    return IMPL->fastGetAttribute(WebCore::HTMLNames::reflectedstringattrAttr);
 }
 
 - (void)setReflectedStringAttr:(NSString *)newReflectedStringAttr
@@ -268,7 +266,7 @@
 - (BOOL)reflectedBooleanAttr
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->hasAttribute(WebCore::HTMLNames::reflectedbooleanattrAttr);
+    return IMPL->fastHasAttribute(WebCore::HTMLNames::reflectedbooleanattrAttr);
 }
 
 - (void)setReflectedBooleanAttr:(BOOL)newReflectedBooleanAttr
@@ -292,7 +290,7 @@
 - (NSString *)reflectedStringAttr
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->getAttribute(WebCore::HTMLNames::customContentStringAttrAttr);
+    return IMPL->fastGetAttribute(WebCore::HTMLNames::customContentStringAttrAttr);
 }
 
 - (void)setReflectedStringAttr:(NSString *)newReflectedStringAttr
@@ -316,7 +314,7 @@
 - (BOOL)reflectedCustomBooleanAttr
 {
     WebCore::JSMainThreadNullState state;
-    return IMPL->hasAttribute(WebCore::HTMLNames::customContentBooleanAttrAttr);
+    return IMPL->fastHasAttribute(WebCore::HTMLNames::customContentBooleanAttrAttr);
 }
 
 - (void)setReflectedCustomBooleanAttr:(BOOL)newReflectedCustomBooleanAttr
@@ -767,12 +765,6 @@
 {
     WebCore::JSMainThreadNullState state;
     IMPL->serializedValue(WebCore::SerializedScriptValue::create(WTF::String(serializedArg)));
-}
-
-- (void)idbKey:(DOMIDBKey *)key
-{
-    WebCore::JSMainThreadNullState state;
-    IMPL->idbKey(core(key));
 }
 
 - (void)optionsObject:(DOMDictionary *)oo ooo:(DOMDictionary *)ooo

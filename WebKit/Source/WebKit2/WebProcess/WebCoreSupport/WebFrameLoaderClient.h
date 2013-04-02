@@ -28,12 +28,6 @@
 
 #include <WebCore/FrameLoaderClient.h>
 
-namespace WebCore {
-#if ENABLE(WEB_INTENTS)
-class IntentRequest;
-#endif
-}
-
 namespace WebKit {
 
 class PluginView;
@@ -218,17 +212,6 @@ private:
     virtual RemoteAXObjectRef accessibilityRemoteObject() OVERRIDE;
     
     virtual NSCachedURLResponse* willCacheResponse(WebCore::DocumentLoader*, unsigned long identifier, NSCachedURLResponse*) const OVERRIDE;
-#endif
-#if PLATFORM(WIN) && USE(CFNETWORK)
-    // FIXME: Windows should use willCacheResponse - <https://bugs.webkit.org/show_bug.cgi?id=57257>.
-    virtual bool shouldCacheResponse(WebCore::DocumentLoader*, unsigned long identifier, const WebCore::ResourceResponse&, const unsigned char* data, unsigned long long length) OVERRIDE;
-#endif
-
-#if ENABLE(WEB_INTENTS)
-    virtual void dispatchIntent(PassRefPtr<WebCore::IntentRequest>) OVERRIDE;
-#endif
-#if ENABLE(WEB_INTENTS_TAG)
-    virtual void registerIntentService(const String& action, const String& type, const WebCore::KURL& href, const String& title, const String& disposition) OVERRIDE;
 #endif
 
     virtual bool shouldUsePluginDocument(const String& /*mimeType*/) const OVERRIDE;

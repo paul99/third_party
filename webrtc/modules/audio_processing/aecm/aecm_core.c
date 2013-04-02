@@ -8,50 +8,40 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "aecm_core.h"
+#include "webrtc/modules/audio_processing/aecm/aecm_core.h"
 
 #include <assert.h>
 #include <stddef.h>
 #include <stdlib.h>
 
-#include "common_audio/signal_processing/include/real_fft.h"
-#include "cpu_features_wrapper.h"
-#include "delay_estimator_wrapper.h"
-#include "echo_control_mobile.h"
-#include "ring_buffer.h"
-#include "system_wrappers/interface/compile_assert.h"
-#include "typedefs.h"
+#include "webrtc/common_audio/signal_processing/include/real_fft.h"
+#include "webrtc/modules/audio_processing/utility/delay_estimator_wrapper.h"
+#include "webrtc/modules/audio_processing/aecm/include/echo_control_mobile.h"
+#include "webrtc/modules/audio_processing/utility/ring_buffer.h"
+#include "webrtc/system_wrappers/interface/compile_assert.h"
+#include "webrtc/system_wrappers/interface/cpu_features_wrapper.h"
+#include "webrtc/typedefs.h"
 
 #ifdef AEC_DEBUG
 FILE *dfile;
 FILE *testfile;
 #endif
 
-#ifdef AECM_SHORT
-
-// Square root of Hanning window in Q14
-const WebRtc_Word16 WebRtcAecm_kSqrtHanning[] =
-{
-    0, 804, 1606, 2404, 3196, 3981, 4756, 5520,
-    6270, 7005, 7723, 8423, 9102, 9760, 10394, 11003,
-    11585, 12140, 12665, 13160, 13623, 14053, 14449, 14811,
-    15137, 15426, 15679, 15893, 16069, 16207, 16305, 16364,
-    16384
-};
-
+// Square root of Hanning window in Q14.
+#if defined(WEBRTC_DETECT_ARM_NEON) || defined(WEBRTC_ARCH_ARM_NEON)
+// Table is defined in an ARM assembly file.
+extern const ALIGN8_BEG WebRtc_Word16 WebRtcAecm_kSqrtHanning[] ALIGN8_END;
 #else
-
-// Square root of Hanning window in Q14
-const ALIGN8_BEG WebRtc_Word16 WebRtcAecm_kSqrtHanning[] ALIGN8_END =
-{
-    0, 399, 798, 1196, 1594, 1990, 2386, 2780, 3172,
-    3562, 3951, 4337, 4720, 5101, 5478, 5853, 6224, 6591, 6954, 7313, 7668, 8019, 8364,
-    8705, 9040, 9370, 9695, 10013, 10326, 10633, 10933, 11227, 11514, 11795, 12068, 12335,
-    12594, 12845, 13089, 13325, 13553, 13773, 13985, 14189, 14384, 14571, 14749, 14918,
-    15079, 15231, 15373, 15506, 15631, 15746, 15851, 15947, 16034, 16111, 16179, 16237,
-    16286, 16325, 16354, 16373, 16384
+static const ALIGN8_BEG WebRtc_Word16 WebRtcAecm_kSqrtHanning[] ALIGN8_END = {
+  0, 399, 798, 1196, 1594, 1990, 2386, 2780, 3172,
+  3562, 3951, 4337, 4720, 5101, 5478, 5853, 6224,
+  6591, 6954, 7313, 7668, 8019, 8364, 8705, 9040,
+  9370, 9695, 10013, 10326, 10633, 10933, 11227, 11514,
+  11795, 12068, 12335, 12594, 12845, 13089, 13325, 13553,
+  13773, 13985, 14189, 14384, 14571, 14749, 14918, 15079,
+  15231, 15373, 15506, 15631, 15746, 15851, 15947, 16034,
+  16111, 16179, 16237, 16286, 16325, 16354, 16373, 16384
 };
-
 #endif
 
 //Q15 alpha = 0.99439986968132  const Factor for magnitude approximation
@@ -298,8 +288,15 @@ int WebRtcAecm_CreateCore(AecmCore_t **aecmInst)
         return -1;
     }
 
-    aecm->delay_estimator = WebRtc_CreateDelayEstimator(PART_LEN1, MAX_DELAY,
-                                                        0);
+    aecm->delay_estimator_farend = WebRtc_CreateDelayEstimatorFarend(PART_LEN1,
+                                                                     MAX_DELAY);
+    if (aecm->delay_estimator_farend == NULL) {
+      WebRtcAecm_FreeCore(aecm);
+      aecm = NULL;
+      return -1;
+    }
+    aecm->delay_estimator =
+        WebRtc_CreateDelayEstimator(aecm->delay_estimator_farend, 0);
     if (aecm->delay_estimator == NULL) {
       WebRtcAecm_FreeCore(aecm);
       aecm = NULL;
@@ -575,6 +572,9 @@ int WebRtcAecm_InitCore(AecmCore_t * const aecm, int samplingFreq)
     aecm->seed = 666;
     aecm->totCount = 0;
 
+    if (WebRtc_InitDelayEstimatorFarend(aecm->delay_estimator_farend) != 0) {
+      return -1;
+    }
     if (WebRtc_InitDelayEstimator(aecm->delay_estimator) != 0) {
       return -1;
     }
@@ -692,6 +692,7 @@ int WebRtcAecm_FreeCore(AecmCore_t *aecm)
     WebRtc_FreeBuffer(aecm->outFrameBuf);
 
     WebRtc_FreeDelayEstimator(aecm->delay_estimator);
+    WebRtc_FreeDelayEstimatorFarend(aecm->delay_estimator_farend);
     WebRtcSpl_FreeRealFFT(aecm->real_fft);
 
     free(aecm);
@@ -1602,11 +1603,13 @@ int WebRtcAecm_ProcessBlock(AecmCore_t * aecm,
     // Get the delay
     // Save far-end history and estimate delay
     UpdateFarHistory(aecm, xfa, far_q);
+    if (WebRtc_AddFarSpectrumFix(aecm->delay_estimator_farend, xfa, PART_LEN1,
+                                 far_q) == -1) {
+      return -1;
+    }
     delay = WebRtc_DelayEstimatorProcessFix(aecm->delay_estimator,
-                                            xfa,
                                             dfaNoisy,
                                             PART_LEN1,
-                                            far_q,
                                             zerosDBufNoisy);
     if (delay == -1)
     {

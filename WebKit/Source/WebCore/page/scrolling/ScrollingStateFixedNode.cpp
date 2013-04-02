@@ -26,6 +26,7 @@
 #include "config.h"
 #include "ScrollingStateFixedNode.h"
 
+#include "GraphicsLayer.h"
 #include "ScrollingStateTree.h"
 #include "TextStream.h"
 #include <wtf/OwnPtr.h>
@@ -41,14 +42,12 @@ PassOwnPtr<ScrollingStateFixedNode> ScrollingStateFixedNode::create(ScrollingSta
 
 ScrollingStateFixedNode::ScrollingStateFixedNode(ScrollingStateTree* tree, ScrollingNodeID nodeID)
     : ScrollingStateNode(tree, nodeID)
-    , m_changedProperties(0)
 {
 }
 
 ScrollingStateFixedNode::ScrollingStateFixedNode(const ScrollingStateFixedNode& node)
     : ScrollingStateNode(node)
     , m_constraints(FixedPositionViewportConstraints(node.viewportConstraints()))
-    , m_changedProperties(node.changedProperties())
 {
 }
 
@@ -67,8 +66,14 @@ void ScrollingStateFixedNode::updateConstraints(const FixedPositionViewportConst
         return;
 
     m_constraints = constraints;
-    m_changedProperties = ViewportConstraints;
+    setPropertyChanged(ViewportConstraints);
     m_scrollingStateTree->setHasChangedProperties(true);
+}
+
+void ScrollingStateFixedNode::syncLayerPositionForViewportRect(const LayoutRect& viewportRect)
+{
+    FloatPoint position = m_constraints.layerPositionForViewportRect(viewportRect);
+    graphicsLayer()->syncPosition(position);
 }
 
 void ScrollingStateFixedNode::dumpProperties(TextStream& ts, int indent) const

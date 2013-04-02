@@ -35,6 +35,7 @@
 #include "JSClassRef.h"
 #include "JSGlobalObject.h"
 #include "JSObject.h"
+#include "Operations.h"
 #include <wtf/text/StringBuilder.h>
 #include <wtf/text/StringHash.h>
 
@@ -65,7 +66,16 @@ JSContextGroupRef JSContextGroupRetain(JSContextGroupRef group)
 
 void JSContextGroupRelease(JSContextGroupRef group)
 {
-    toJS(group)->deref();
+    IdentifierTable* savedIdentifierTable;
+    JSGlobalData& globalData = *toJS(group);
+
+    {
+        JSLockHolder lock(globalData);
+        savedIdentifierTable = wtfThreadData().setCurrentIdentifierTable(globalData.identifierTable);
+        globalData.deref();
+    }
+
+    wtfThreadData().setCurrentIdentifierTable(savedIdentifierTable);
 }
 
 // From the API's perspective, a global context remains alive iff it has been JSGlobalContextRetained.
@@ -180,7 +190,7 @@ JSStringRef JSContextCreateBacktrace(JSContextRef ctx, unsigned maxStackSize)
         }
     }
     while (true) {
-        ASSERT(callFrame);
+        RELEASE_ASSERT(callFrame);
         int signedLineNumber;
         intptr_t sourceID;
         String urlString;

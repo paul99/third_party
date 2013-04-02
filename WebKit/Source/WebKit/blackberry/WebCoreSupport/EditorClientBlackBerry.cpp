@@ -253,6 +253,16 @@ void EditorClientBlackBerry::didWriteSelectionToPasteboard()
     notImplemented();
 }
 
+void EditorClientBlackBerry::willWriteSelectionToPasteboard(WebCore::Range*)
+{
+    notImplemented();
+}
+
+void EditorClientBlackBerry::getClientPasteboardDataForRange(WebCore::Range*, Vector<String>&, Vector<RefPtr<WebCore::SharedBuffer> >&)
+{
+    notImplemented();
+}
+
 void EditorClientBlackBerry::didSetSelectionTypesForPasteboard()
 {
     notImplemented();
@@ -393,15 +403,6 @@ static const KeyDownEntry keyDownEntries[] = {
     { 'Z',       CtrlKey,            "Undo"                                        },
     { 'Z',       CtrlKey | ShiftKey, "Redo"                                        },
     { 'Y',       CtrlKey,            "Redo"                                        },
-
-    { VK_TAB,    0,                  "InsertTab"                                   },
-    { VK_TAB,    ShiftKey,           "InsertBacktab"                               },
-    { VK_RETURN, 0,                  "InsertNewline"                               },
-    { VK_RETURN, CtrlKey,            "InsertNewline"                               },
-    { VK_RETURN, AltKey,             "InsertNewline"                               },
-    { VK_RETURN, ShiftKey,           "InsertLineBreak"                             },
-    { VK_RETURN, AltKey | ShiftKey,  "InsertNewline"                               },
-
 };
 
 static const KeyPressEntry keyPressEntries[] = {
@@ -463,6 +464,9 @@ void EditorClientBlackBerry::handleKeyboardEvent(KeyboardEvent* event)
     ASSERT(frame);
 
     String commandName = interpretKeyEvent(event);
+
+    // Check to see we are not trying to insert text on key down.
+    ASSERT(!(event->type() == eventNames().keydownEvent && frame->editor()->command(commandName).isTextInsertion()));
 
     if (!commandName.isEmpty()) {
         // Hot key handling. Cancel processing mode.

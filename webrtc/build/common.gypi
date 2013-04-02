@@ -130,7 +130,12 @@
     'include_dirs': [
       # TODO(andrew): Remove '..' when we've added webrtc/ to include paths.
       '..',
+      # Allow includes to be prefixed with webrtc/ in case it is not an
+      # immediate subdirectory of <(DEPTH).
       '../..',
+      # To include the top-level directory when building in Chrome, so we can
+      # use full paths (e.g. headers inside testing/ or third_party/).
+      '<(DEPTH)',
     ],
     'defines': [
       # TODO(leozwang): Run this as a gclient hook rather than at build-time:
@@ -216,12 +221,12 @@
           'WEBRTC_WIN',
         ],
         # TODO(andrew): enable all warnings when possible.
-        # 4389: Signed/unsigned mismatch.
-        # 4373: MSVC legacy warning for ignoring const / volatile in
-        # signatures. TODO(phoglund): get rid of 4373 supression when
+        # TODO(phoglund): get rid of 4373 supression when
         # http://code.google.com/p/webrtc/issues/detail?id=261 is solved.
-        'msvs_disabled_warnings': [4389, 4373],
-
+        'msvs_disabled_warnings': [
+          4373,  # legacy warning for ignoring const / volatile in signatures.
+          4389,  # Signed/unsigned mismatch.
+        ],
         # Re-enable some warnings that Chromium disables.
         'msvs_disabled_warnings!': [4189,],
       }],
@@ -240,6 +245,16 @@
            ['enable_android_opensl==1', {
              'defines': [
                'WEBRTC_ANDROID_OPENSLES',
+             ],
+           }],
+           ['clang!=1', {
+             # The Android NDK doesn't provide optimized versions of these
+             # functions. Ensure they are disabled for all compilers.
+             'cflags': [
+               '-fno-builtin-cos',
+               '-fno-builtin-sin',
+               '-fno-builtin-cosf',
+               '-fno-builtin-sinf',
              ],
            }],
          ],

@@ -42,7 +42,6 @@
 #include "Settings.h"
 #include "WorkQueue.h"
 #include "WorkQueueItem.h"
-#include "WorkerThread.h"
 
 #include <JavaScriptCore/APICast.h>
 #include <SharedPointer.h>
@@ -339,75 +338,6 @@ void TestRunner::setWindowIsKey(bool windowIsKey)
 {
     m_windowIsKey = windowIsKey;
     notImplemented();
-}
-
-bool TestRunner::pauseAnimationAtTimeOnElementWithId(JSStringRef animationName, double time, JSStringRef elementId)
-{
-    if (!mainFrame)
-        return false;
-
-    int nameLen = JSStringGetMaximumUTF8CStringSize(animationName);
-    int idLen = JSStringGetMaximumUTF8CStringSize(elementId);
-    OwnArrayPtr<char> name = adoptArrayPtr(new char[nameLen]);
-    OwnArrayPtr<char> eId = adoptArrayPtr(new char[idLen]);
-
-    JSStringGetUTF8CString(animationName, name.get(), nameLen);
-    JSStringGetUTF8CString(elementId, eId.get(), idLen);
-
-    WebCore::AnimationController* animationController = mainFrame->animation();
-    if (!animationController)
-        return false;
-
-    WebCore::Node* node = mainFrame->document()->getElementById(eId.get());
-    if (!node || !node->renderer())
-        return false;
-
-    return animationController->pauseAnimationAtTime(node->renderer(), name.get(), time);
-}
-
-bool TestRunner::pauseTransitionAtTimeOnElementWithId(JSStringRef propertyName, double time, JSStringRef elementId)
-{
-    if (!mainFrame)
-        return false;
-
-    int nameLen = JSStringGetMaximumUTF8CStringSize(propertyName);
-    int idLen = JSStringGetMaximumUTF8CStringSize(elementId);
-    OwnArrayPtr<char> name = adoptArrayPtr(new char[nameLen]);
-    OwnArrayPtr<char> eId = adoptArrayPtr(new char[idLen]);
-
-    JSStringGetUTF8CString(propertyName, name.get(), nameLen);
-    JSStringGetUTF8CString(elementId, eId.get(), idLen);
-
-    WebCore::AnimationController* animationController = mainFrame->animation();
-    if (!animationController)
-        return false;
-
-    WebCore::Node* node = mainFrame->document()->getElementById(eId.get());
-    if (!node || !node->renderer())
-        return false;
-
-    return animationController->pauseTransitionAtTime(node->renderer(), name.get(), time);
-}
-
-unsigned TestRunner::numberOfActiveAnimations() const
-{
-    if (!mainFrame)
-        return false;
-
-    WebCore::AnimationController* animationController = mainFrame->animation();
-    if (!animationController)
-        return false;
-
-    return animationController->numberOfActiveAnimations(mainFrame->document());
-}
-
-unsigned TestRunner::workerThreadCount() const
-{
-#if ENABLE_WORKERS
-    return WebCore::WorkerThread::workerThreadCount();
-#else
-    return 0;
-#endif
 }
 
 void TestRunner::removeAllVisitedLinks()

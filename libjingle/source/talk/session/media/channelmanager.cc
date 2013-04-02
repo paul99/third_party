@@ -118,8 +118,8 @@ struct VolumeLevel : public talk_base::MessageData {
   bool result;
 };
 
-struct VideoOptions : public talk_base::MessageData {
-  explicit VideoOptions(const Device* d) : cam_device(d), result(false) {}
+struct VideoOptionsParams : public talk_base::MessageData {
+  explicit VideoOptionsParams(const Device* d) : cam_device(d), result(false) {}
   const Device* cam_device;
   bool result;
 };
@@ -725,7 +725,7 @@ bool ChannelManager::SetVideoOptions(const std::string& cam_name) {
 
   // If we're running, tell the media engine about it.
   if (initialized_ && ret) {
-    VideoOptions options(&device);
+    VideoOptionsParams options(&device);
     ret = (Send(MSG_SETVIDEOOPTIONS, &options) && options.result);
   }
 
@@ -1080,7 +1080,7 @@ void ChannelManager::OnMessage(talk_base::Message* message) {
       break;
     }
     case MSG_SETVIDEOOPTIONS: {
-      VideoOptions* p = static_cast<VideoOptions*>(data);
+      VideoOptionsParams* p = static_cast<VideoOptionsParams*>(data);
       p->result = SetVideoOptions_w(p->cam_device);
       break;
     }
@@ -1221,6 +1221,12 @@ bool ChannelManager::GetVideoCaptureDevices(std::vector<std::string>* names) {
     GetDeviceNames(devs, names);
 
   return ret;
+}
+
+void ChannelManager::SetVideoCaptureDeviceMaxFormat(
+    const std::string& uvc_id,
+    const VideoFormat& max_format) {
+  device_manager_->SetVideoCaptureDeviceMaxFormat(uvc_id, max_format);
 }
 
 VideoFormat ChannelManager::GetStartCaptureFormat() {

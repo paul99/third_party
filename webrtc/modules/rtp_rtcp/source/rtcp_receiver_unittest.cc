@@ -92,6 +92,18 @@ class PacketBuilder {
     Add32(0);  // Sender's octet count
   }
 
+  void AddRrPacket(WebRtc_UWord32 sender_ssrc, WebRtc_UWord32 rtp_ssrc,
+                   WebRtc_UWord32 extended_max) {
+    AddRtcpHeader(201, 1);
+    Add32(sender_ssrc);
+    Add32(rtp_ssrc);
+    Add32(0);  // No loss.
+    Add32(extended_max);
+    Add32(0);  // Jitter.
+    Add32(0);  // Last SR.
+    Add32(0);  // Delay since last SR.
+  }
+
   const WebRtc_UWord8* packet() {
     PatchLengthField();
     return buffer_;
@@ -121,34 +133,6 @@ class PacketBuilder {
   int pos_of_len_;
   WebRtc_UWord8 buffer_[kMaxPacketSize];
 };
-
-// Fake system clock, controllable to the millisecond.
-// The Epoch for this clock is Jan 1, 1970, as evidenced
-// by the NTP calculation.
-class FakeSystemClock : public RtpRtcpClock {
- public:
-  FakeSystemClock()
-      : time_in_ms_(1335900000) {}  // A nonzero, but fake, value.
-
-  virtual WebRtc_Word64 GetTimeInMS() {
-    return time_in_ms_;
-  }
-
-  virtual void CurrentNTP(WebRtc_UWord32& secs,
-                          WebRtc_UWord32& frac) {
-    secs = (time_in_ms_ / 1000) + ModuleRTPUtility::NTP_JAN_1970;
-    // NTP_FRAC is 2^32 - number of ticks per second in the NTP fraction.
-    frac = (WebRtc_UWord32)((time_in_ms_ % 1000)
-                            * ModuleRTPUtility::NTP_FRAC / 1000);
-  }
-
-  void AdvanceClock(int ms_to_advance) {
-    time_in_ms_ += ms_to_advance;
-  }
- private:
-  WebRtc_Word64 time_in_ms_;
-};
-
 
 // This test transport verifies that no functions get called.
 class TestTransport : public Transport,
@@ -184,31 +168,30 @@ class RtcpReceiverTest : public ::testing::Test {
  protected:
   RtcpReceiverTest()
       : over_use_detector_options_(),
+        system_clock_(1335900000),
         remote_bitrate_observer_(),
         remote_bitrate_estimator_(
             RemoteBitrateEstimator::Create(
-                &remote_bitrate_observer_,
                 over_use_detector_options_,
-                RemoteBitrateEstimator::kMultiStreamEstimation)) {
-    // system_clock_ = ModuleRTPUtility::GetSystemClock();
-    system_clock_ = new FakeSystemClock();
+                RemoteBitrateEstimator::kMultiStreamEstimation,
+                &remote_bitrate_observer_,
+                &system_clock_)) {
     test_transport_ = new TestTransport();
 
     RtpRtcp::Configuration configuration;
     configuration.id = 0;
     configuration.audio = false;
-    configuration.clock = system_clock_;
+    configuration.clock = &system_clock_;
     configuration.outgoing_transport = test_transport_;
     configuration.remote_bitrate_estimator = remote_bitrate_estimator_.get();
     rtp_rtcp_impl_ = new ModuleRtpRtcpImpl(configuration);
-    rtcp_receiver_ = new RTCPReceiver(0, system_clock_, rtp_rtcp_impl_);
+    rtcp_receiver_ = new RTCPReceiver(0, &system_clock_, rtp_rtcp_impl_);
     test_transport_->SetRTCPReceiver(rtcp_receiver_);
   }
   ~RtcpReceiverTest() {
     delete rtcp_receiver_;
     delete rtp_rtcp_impl_;
     delete test_transport_;
-    delete system_clock_;
   }
 
   // Injects an RTCP packet into the receiver.
@@ -222,12 +205,34 @@ class RtcpReceiverTest : public ::testing::Test {
     RTCPHelp::RTCPPacketInformation rtcpPacketInformation;
     int result = rtcp_receiver_->IncomingRTCPPacket(rtcpPacketInformation,
                                                     &rtcpParser);
-    rtcp_packet_info_ = rtcpPacketInformation;
+    // The NACK list is on purpose not copied below as it isn't needed by the
+    // test.
+    rtcp_packet_info_.rtcpPacketTypeFlags =
+        rtcpPacketInformation.rtcpPacketTypeFlags;
+    rtcp_packet_info_.remoteSSRC = rtcpPacketInformation.remoteSSRC;
+    rtcp_packet_info_.applicationSubType =
+        rtcpPacketInformation.applicationSubType;
+    rtcp_packet_info_.applicationName = rtcpPacketInformation.applicationName;
+    rtcp_packet_info_.reportBlock = rtcpPacketInformation.reportBlock;
+    rtcp_packet_info_.fractionLost = rtcpPacketInformation.fractionLost;
+    rtcp_packet_info_.roundTripTime = rtcpPacketInformation.roundTripTime;
+    rtcp_packet_info_.lastReceivedExtendedHighSeqNum =
+        rtcpPacketInformation.lastReceivedExtendedHighSeqNum;
+    rtcp_packet_info_.jitter = rtcpPacketInformation.jitter;
+    rtcp_packet_info_.interArrivalJitter =
+        rtcpPacketInformation.interArrivalJitter;
+    rtcp_packet_info_.sliPictureId = rtcpPacketInformation.sliPictureId;
+    rtcp_packet_info_.rpsiPictureId = rtcpPacketInformation.rpsiPictureId;
+    rtcp_packet_info_.receiverEstimatedMaxBitrate =
+        rtcpPacketInformation.receiverEstimatedMaxBitrate;
+    rtcp_packet_info_.ntp_secs = rtcpPacketInformation.ntp_secs;
+    rtcp_packet_info_.ntp_frac = rtcpPacketInformation.ntp_frac;
+    rtcp_packet_info_.rtp_timestamp = rtcpPacketInformation.rtp_timestamp;
     return result;
   }
 
   OverUseDetectorOptions over_use_detector_options_;
-  FakeSystemClock* system_clock_;
+  SimulatedClock system_clock_;
   ModuleRtpRtcpImpl* rtp_rtcp_impl_;
   RTCPReceiver* rtcp_receiver_;
   TestTransport* test_transport_;
@@ -253,6 +258,66 @@ TEST_F(RtcpReceiverTest, InjectSrPacket) {
   EXPECT_EQ(kSenderSsrc, rtcp_packet_info_.remoteSSRC);
   EXPECT_EQ(0U,
             kRtcpSr & rtcp_packet_info_.rtcpPacketTypeFlags);
+}
+
+TEST_F(RtcpReceiverTest, ReceiveReportTimeout) {
+  const uint32_t kSenderSsrc = 0x10203;
+  const uint32_t kSourceSsrc = 0x40506;
+  const int64_t kRtcpIntervalMs = 1000;
+
+  rtcp_receiver_->SetSSRC(kSourceSsrc);
+
+  uint32_t sequence_number = 1234;
+  system_clock_.AdvanceTimeMilliseconds(3 * kRtcpIntervalMs);
+
+  // No RR received, shouldn't trigger a timeout.
+  EXPECT_FALSE(rtcp_receiver_->RtcpRrTimeout(kRtcpIntervalMs));
+  EXPECT_FALSE(rtcp_receiver_->RtcpRrSequenceNumberTimeout(kRtcpIntervalMs));
+
+  // Add a RR and advance the clock just enough to not trigger a timeout.
+  PacketBuilder p1;
+  p1.AddRrPacket(kSenderSsrc, kSourceSsrc, sequence_number);
+  EXPECT_EQ(0, InjectRtcpPacket(p1.packet(), p1.length()));
+  system_clock_.AdvanceTimeMilliseconds(3 * kRtcpIntervalMs - 1);
+  EXPECT_FALSE(rtcp_receiver_->RtcpRrTimeout(kRtcpIntervalMs));
+  EXPECT_FALSE(rtcp_receiver_->RtcpRrSequenceNumberTimeout(kRtcpIntervalMs));
+
+  // Add a RR with the same extended max as the previous RR to trigger a
+  // sequence number timeout, but not a RR timeout.
+  PacketBuilder p2;
+  p2.AddRrPacket(kSenderSsrc, kSourceSsrc, sequence_number);
+  EXPECT_EQ(0, InjectRtcpPacket(p2.packet(), p2.length()));
+  system_clock_.AdvanceTimeMilliseconds(2);
+  EXPECT_FALSE(rtcp_receiver_->RtcpRrTimeout(kRtcpIntervalMs));
+  EXPECT_TRUE(rtcp_receiver_->RtcpRrSequenceNumberTimeout(kRtcpIntervalMs));
+
+  // Advance clock enough to trigger an RR timeout too.
+  system_clock_.AdvanceTimeMilliseconds(3 * kRtcpIntervalMs);
+  EXPECT_TRUE(rtcp_receiver_->RtcpRrTimeout(kRtcpIntervalMs));
+
+  // We should only get one timeout even though we still haven't received a new
+  // RR.
+  EXPECT_FALSE(rtcp_receiver_->RtcpRrTimeout(kRtcpIntervalMs));
+  EXPECT_FALSE(rtcp_receiver_->RtcpRrSequenceNumberTimeout(kRtcpIntervalMs));
+
+  // Add a new RR with increase sequence number to reset timers.
+  PacketBuilder p3;
+  sequence_number++;
+  p2.AddRrPacket(kSenderSsrc, kSourceSsrc, sequence_number);
+  EXPECT_EQ(0, InjectRtcpPacket(p2.packet(), p2.length()));
+  EXPECT_FALSE(rtcp_receiver_->RtcpRrTimeout(kRtcpIntervalMs));
+  EXPECT_FALSE(rtcp_receiver_->RtcpRrSequenceNumberTimeout(kRtcpIntervalMs));
+
+  // Verify we can get a timeout again once we've received new RR.
+  system_clock_.AdvanceTimeMilliseconds(2 * kRtcpIntervalMs);
+  PacketBuilder p4;
+  p4.AddRrPacket(kSenderSsrc, kSourceSsrc, sequence_number);
+  EXPECT_EQ(0, InjectRtcpPacket(p4.packet(), p4.length()));
+  system_clock_.AdvanceTimeMilliseconds(kRtcpIntervalMs + 1);
+  EXPECT_FALSE(rtcp_receiver_->RtcpRrTimeout(kRtcpIntervalMs));
+  EXPECT_TRUE(rtcp_receiver_->RtcpRrSequenceNumberTimeout(kRtcpIntervalMs));
+  system_clock_.AdvanceTimeMilliseconds(2 * kRtcpIntervalMs);
+  EXPECT_TRUE(rtcp_receiver_->RtcpRrTimeout(kRtcpIntervalMs));
 }
 
 TEST_F(RtcpReceiverTest, TmmbrReceivedWithNoIncomingPacket) {
@@ -343,7 +408,8 @@ TEST_F(RtcpReceiverTest, TmmbrThreeConstraintsTimeOut) {
     p.AddTmmbrBandwidth(30000, 0, 0);  // 30 Kbits/sec bandwidth, no overhead.
 
     EXPECT_EQ(0, InjectRtcpPacket(p.packet(), p.length()));
-    system_clock_->AdvanceClock(5000);  // 5 seconds between each packet.
+    // 5 seconds between each packet.
+    system_clock_.AdvanceTimeMilliseconds(5000);
   }
   // It is now starttime+15.
   EXPECT_EQ(3, rtcp_receiver_->TMMBRReceived(0, 0, NULL));
@@ -353,7 +419,7 @@ TEST_F(RtcpReceiverTest, TmmbrThreeConstraintsTimeOut) {
   EXPECT_LT(0U, candidate_set.Tmmbr(0));
   // We expect the timeout to be 25 seconds. Advance the clock by 12
   // seconds, timing out the first packet.
-  system_clock_->AdvanceClock(12000);
+  system_clock_.AdvanceTimeMilliseconds(12000);
   // Odd behaviour: Just counting them does not trigger the timeout.
   EXPECT_EQ(3, rtcp_receiver_->TMMBRReceived(0, 0, NULL));
   // Odd behaviour: There's only one left after timeout, not 2.

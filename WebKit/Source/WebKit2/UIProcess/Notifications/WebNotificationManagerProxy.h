@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2013 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,6 +28,7 @@
 
 #include "APIObject.h"
 #include "MessageReceiver.h"
+#include "WebContextSupplement.h"
 #include "WebNotificationProvider.h"
 #include <WebCore/NotificationClient.h>
 #include <wtf/HashMap.h>
@@ -42,14 +43,13 @@ class WebContext;
 class WebPageProxy;
 class WebSecurityOrigin;
 
-class WebNotificationManagerProxy : public APIObject, private CoreIPC::MessageReceiver {
+class WebNotificationManagerProxy : public APIObject, public WebContextSupplement, private CoreIPC::MessageReceiver {
 public:
     static const Type APIType = TypeNotificationManager;
-    
+
+    static const char* supplementName();
+
     static PassRefPtr<WebNotificationManagerProxy> create(WebContext*);
-    
-    void invalidate();
-    void clearContext() { m_context = 0; }
 
     void initializeProvider(const WKNotificationProvider*);
     void populateCopyOfNotificationPermissions(HashMap<String, bool>&);
@@ -61,15 +61,23 @@ public:
     void providerDidCloseNotifications(ImmutableArray* notificationIDs);
     void providerDidUpdateNotificationPolicy(const WebSecurityOrigin*, bool allowed);
     void providerDidRemoveNotificationPolicies(ImmutableArray* origins);
-    
+
+    using APIObject::ref;
+    using APIObject::deref;
+
 private:
     explicit WebNotificationManagerProxy(WebContext*);
     
     virtual Type type() const { return APIType; }
 
+    // WebContextSupplement
+    virtual void contextDestroyed() OVERRIDE;
+    virtual void processDidClose(WebProcessProxy*) OVERRIDE;
+    virtual void refWebContextSupplement() OVERRIDE;
+    virtual void derefWebContextSupplement() OVERRIDE;
+
     // CoreIPC::MessageReceiver
-    virtual void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&) OVERRIDE;
-    void didReceiveWebNotificationManagerProxyMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
+    virtual void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageDecoder&) OVERRIDE;
     
     // Message handlers
     void cancel(uint64_t notificationID);
@@ -78,7 +86,6 @@ private:
 
     typedef HashMap<uint64_t, RefPtr<WebNotification> > WebNotificationMap;
     
-    WebContext* m_context;
     WebNotificationProvider m_provider;
     WebNotificationMap m_notifications;
 };

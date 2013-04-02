@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <template
-    format="1"
-    revision="1"
+    format="3"
+    revision="2"
     name="New Blank Activity"
     description="Creates a new blank activity, with optional inner navigation.">
     <dependency name="android-support-v4" revision="8" />
@@ -27,17 +27,20 @@
         help="The name of the layout to create for the activity" />
 
     <parameter
-        id="navType"
-        name="Navigation Type"
-        type="enum"
-        default="none"
-        help="The type of navigation to use for the activity" >
-        <option id="none" default="true">None</option>
-        <option id="tabs" minApi="14">Tabs</option>
-        <option id="tabs_pager" minApi="14">Tabs + Swipe</option>
-        <option id="pager_strip" minApi="14">Swipe Views + Title Strip</option>
-        <option id="dropdown" minApi="14">Dropdown</option>
-    </parameter>
+        id="activityTitle"
+        name="Title"
+        type="string"
+        constraints="nonempty"
+        default="MainActivity"
+        suggest="${activityClass}"
+        help="The name of the activity. For launcher activities, the application title." />
+
+    <parameter
+        id="isLauncher"
+        name="Launcher Activity"
+        type="boolean"
+        default="false"
+        help="If true, this activity will have a CATEGORY_LAUNCHER intent filter, making it visible in the launcher" />
 
     <parameter
         id="parentActivityClass"
@@ -48,13 +51,17 @@
         help="The hierarchical parent activity, used to provide a default implementation for the 'Up' button" />
 
     <parameter
-        id="activityTitle"
-        name="Title"
-        type="string"
-        constraints="nonempty"
-        default="MainActivity"
-        suggest="${activityClass}"
-        help="The name of the activity. For launcher activities, the application title." />
+        id="navType"
+        name="Navigation Type"
+        type="enum"
+        default="none"
+        help="The type of navigation to use for the activity" >
+        <option id="none" default="true">None</option>
+        <option id="tabs" minApi="11">Tabs</option>
+        <option id="tabs_pager" minApi="11">Tabs + Swipe</option>
+        <option id="pager_strip" minApi="11">Swipe Views + Title Strip</option>
+        <option id="dropdown" minApi="11">Dropdown</option>
+    </parameter>
 
     <parameter
         id="packageName"

@@ -56,35 +56,25 @@ class MockPeerConnection : public PeerConnectionInterface {
           const MediaConstraintsInterface* constraints));
   MOCK_METHOD1(RemoveStream,
       void(MediaStreamInterface* stream));
+  MOCK_METHOD1(CreateDtmfSender,
+      talk_base::scoped_refptr<DtmfSenderInterface>(
+          AudioTrackInterface* track));
   MOCK_METHOD2(GetStats,
       bool(StatsObserver* observer, MediaStreamTrackInterface* track));
   MOCK_METHOD0(ready_state,
-      ReadyState());
+        ReadyState());
+  MOCK_METHOD0(signaling_state,
+      SignalingState());
   MOCK_METHOD0(ice_state,
       IceState());
-  MOCK_METHOD1(CanSendDtmf,
-      bool(const AudioTrackInterface* track));
-  MOCK_METHOD4(SendDtmf,
-      bool(const AudioTrackInterface* send_track,
-           const std::string& tones, int duration,
-           const AudioTrackInterface* play_track));
+  MOCK_METHOD0(ice_connection_state,
+      IceConnectionState());
+  MOCK_METHOD0(ice_gathering_state,
+      IceGatheringState());
   MOCK_METHOD2(CreateDataChannel,
         talk_base::scoped_refptr<DataChannelInterface>(
             const std::string& label,
             const DataChannelInit* config));
-  MOCK_METHOD1(CreateOffer,
-      SessionDescriptionInterface*(const MediaHints& hints));
-  MOCK_METHOD2(CreateAnswer,
-      SessionDescriptionInterface*(const MediaHints& hints,
-          const SessionDescriptionInterface* offer));
-  MOCK_METHOD1(StartIce,
-      bool(IceOptions options));
-  MOCK_METHOD2(SetLocalDescription,
-      bool(Action action, SessionDescriptionInterface* desc));
-  MOCK_METHOD2(SetRemoteDescription,
-      bool(Action action, SessionDescriptionInterface* desc));
-  MOCK_METHOD1(ProcessIceMessage,
-      bool(const IceCandidateInterface* ice_candidate));
   MOCK_CONST_METHOD0(local_description,
       const SessionDescriptionInterface*());
   MOCK_CONST_METHOD0(remote_description,
@@ -201,6 +191,18 @@ TEST_F(PeerConnectionProxyTest, RemoveStream) {
   pc_proxy_->RemoveStream(fake_stream);
 }
 
+TEST_F(PeerConnectionProxyTest, CreateDtmfSender) {
+  AudioTrackInterface* fake_track =
+      GetFakePointer1<AudioTrackInterface>();
+  EXPECT_CALL(*pc_, CreateDtmfSender(fake_track))
+      .Times(Exactly(1))
+      .WillOnce(
+          DoAll(InvokeWithoutArgs(this, &PeerConnectionProxyTest::CheckThread),
+                Return(GetFakePointer2<DtmfSenderInterface>())));
+  EXPECT_EQ(GetFakePointer2<DtmfSenderInterface>(),
+            pc_proxy_->CreateDtmfSender(fake_track));
+}
+
 TEST_F(PeerConnectionProxyTest, GetStats) {
   StatsObserver* fake_stats_observer =
       GetFakePointer1<StatsObserver>();
@@ -214,13 +216,13 @@ TEST_F(PeerConnectionProxyTest, GetStats) {
   EXPECT_TRUE(pc_proxy_->GetStats(fake_stats_observer, fake_track));
 }
 
-TEST_F(PeerConnectionProxyTest, ready_state) {
-  EXPECT_CALL(*pc_, ready_state())
+TEST_F(PeerConnectionProxyTest, signaling_state) {
+  EXPECT_CALL(*pc_, signaling_state())
       .Times(Exactly(1))
       .WillOnce(
           DoAll(InvokeWithoutArgs(this, &PeerConnectionProxyTest::CheckThread),
-                Return(PeerConnectionInterface::kActive)));
-  EXPECT_EQ(PeerConnectionInterface::kActive, pc_proxy_->ready_state());
+                Return(PeerConnectionInterface::kStable)));
+  EXPECT_EQ(PeerConnectionInterface::kStable, pc_proxy_->signaling_state());
 }
 
 TEST_F(PeerConnectionProxyTest, ice_state) {
@@ -232,90 +234,24 @@ TEST_F(PeerConnectionProxyTest, ice_state) {
   EXPECT_EQ(PeerConnectionInterface::kIceCompleted, pc_proxy_->ice_state());
 }
 
-TEST_F(PeerConnectionProxyTest, CanSendDtmf) {
-  AudioTrackInterface* fake_track =
-        GetFakePointer1<AudioTrackInterface>();
-  EXPECT_CALL(*pc_, CanSendDtmf(fake_track))
+TEST_F(PeerConnectionProxyTest, ice_connection_state) {
+  EXPECT_CALL(*pc_, ice_connection_state())
       .Times(Exactly(1))
       .WillOnce(
           DoAll(InvokeWithoutArgs(this, &PeerConnectionProxyTest::CheckThread),
-                Return(true)));
-  EXPECT_EQ(true, pc_proxy_->CanSendDtmf(fake_track));
+                Return(PeerConnectionInterface::kIceConnectionCompleted)));
+  EXPECT_EQ(PeerConnectionInterface::kIceConnectionCompleted,
+            pc_proxy_->ice_connection_state());
 }
 
-TEST_F(PeerConnectionProxyTest, SendDtmf) {
-  AudioTrackInterface* fake_send_track =
-        GetFakePointer1<AudioTrackInterface>();
-  AudioTrackInterface* fake_play_track =
-        GetFakePointer2<AudioTrackInterface>();
-  const std::string tones = "123,abc";
-  int duration = 120;
-  EXPECT_CALL(*pc_, SendDtmf(fake_send_track, tones, duration, fake_play_track))
+TEST_F(PeerConnectionProxyTest, ice_gathering_state) {
+  EXPECT_CALL(*pc_, ice_gathering_state())
       .Times(Exactly(1))
       .WillOnce(
           DoAll(InvokeWithoutArgs(this, &PeerConnectionProxyTest::CheckThread),
-                Return(true)));
-  EXPECT_EQ(true, pc_proxy_->SendDtmf(fake_send_track, tones, duration,
-                                      fake_play_track));
-}
-
-TEST_F(PeerConnectionProxyTest, CreateOfferJSEP00) {
-  EXPECT_CALL(*pc_, CreateOffer(_))
-      .Times(Exactly(1))
-      .WillOnce(
-          DoAll(InvokeWithoutArgs(this, &PeerConnectionProxyTest::CheckThread),
-                Return(GetFakePointer1<SessionDescriptionInterface>())));
-  EXPECT_EQ(GetFakePointer1<SessionDescriptionInterface>(),
-            pc_proxy_->CreateOffer(MediaHints()));
-}
-
-TEST_F(PeerConnectionProxyTest, CreateAnswerJSEP00) {
-  SessionDescriptionInterface* fake_desc =
-      GetFakePointer1<SessionDescriptionInterface>();
-  EXPECT_CALL(*pc_, CreateAnswer(_ , fake_desc))
-      .Times(Exactly(1))
-      .WillOnce(
-          DoAll(InvokeWithoutArgs(this, &PeerConnectionProxyTest::CheckThread),
-                Return(GetFakePointer2<SessionDescriptionInterface>())));
-  EXPECT_EQ(GetFakePointer2<SessionDescriptionInterface>(),
-            pc_proxy_->CreateAnswer(MediaHints(), fake_desc));
-}
-
-TEST_F(PeerConnectionProxyTest, SetLocalDescriptionJSEP00) {
-  SessionDescriptionInterface* fake_desc =
-      GetFakePointer1<SessionDescriptionInterface>();
-  EXPECT_CALL(*pc_, SetLocalDescription(JsepInterface::kAnswer,
-                                        fake_desc))
-      .Times(Exactly(1))
-      .WillOnce(
-          DoAll(InvokeWithoutArgs(this, &PeerConnectionProxyTest::CheckThread),
-                Return(true)));
-  EXPECT_TRUE(pc_proxy_->SetLocalDescription(JsepInterface::kAnswer,
-                                             fake_desc));
-}
-
-TEST_F(PeerConnectionProxyTest, SetRemoteDescriptionJSEP00) {
-  SessionDescriptionInterface* fake_desc =
-      GetFakePointer1<SessionDescriptionInterface>();
-  EXPECT_CALL(*pc_, SetRemoteDescription(JsepInterface::kAnswer,
-                                         fake_desc))
-      .Times(Exactly(1))
-      .WillOnce(
-          DoAll(InvokeWithoutArgs(this, &PeerConnectionProxyTest::CheckThread),
-                Return(true)));
-  EXPECT_TRUE(pc_proxy_->SetRemoteDescription(JsepInterface::kAnswer,
-                                              fake_desc));
-}
-
-TEST_F(PeerConnectionProxyTest, ProcessIceMessageJSEP00) {
-  IceCandidateInterface* fake_candidate =
-      GetFakePointer1<IceCandidateInterface>();
-  EXPECT_CALL(*pc_, ProcessIceMessage(fake_candidate))
-      .Times(Exactly(1))
-      .WillOnce(
-          DoAll(InvokeWithoutArgs(this, &PeerConnectionProxyTest::CheckThread),
-                Return(true)));
-  EXPECT_TRUE(pc_proxy_->ProcessIceMessage(fake_candidate));
+                Return(PeerConnectionInterface::kIceGatheringGathering)));
+  EXPECT_EQ(PeerConnectionInterface::kIceGatheringGathering,
+            pc_proxy_->ice_gathering_state());
 }
 
 TEST_F(PeerConnectionProxyTest, local_description) {
@@ -390,7 +326,8 @@ TEST_F(PeerConnectionProxyTest, UpdateIce) {
       .WillOnce(
           DoAll(InvokeWithoutArgs(this, &PeerConnectionProxyTest::CheckThread),
                 Return(true)));
-  EXPECT_TRUE(pc_proxy_->UpdateIce(JsepInterface::IceServers(), constraints));
+  EXPECT_TRUE(pc_proxy_->UpdateIce(PeerConnectionInterface::IceServers(),
+                                   constraints));
 }
 
 TEST_F(PeerConnectionProxyTest, AddIceCandidate) {

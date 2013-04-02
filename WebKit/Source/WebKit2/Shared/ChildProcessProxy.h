@@ -27,6 +27,7 @@
 #define ChildProcessProxy_h
 
 #include "Connection.h"
+#include "MessageReceiverMap.h"
 #include "ProcessLauncher.h"
 
 namespace WebKit {
@@ -35,7 +36,7 @@ class ChildProcessProxy : ProcessLauncher::Client, public CoreIPC::Connection::C
     WTF_MAKE_NONCOPYABLE(ChildProcessProxy);
 
 public:
-    ChildProcessProxy(CoreIPC::Connection::QueueClient* = 0);
+    ChildProcessProxy();
     virtual ~ChildProcessProxy();
 
     // FIXME: This function does an unchecked upcast, and it is only used in a deprecated code path. Would like to get rid of it.
@@ -53,6 +54,10 @@ public:
         return m_connection.get();
     }
 
+    void addMessageReceiver(CoreIPC::StringReference messageReceiverName, CoreIPC::MessageReceiver*);
+    void addMessageReceiver(CoreIPC::StringReference messageReceiverName, uint64_t destinationID, CoreIPC::MessageReceiver*);
+    void removeMessageReceiver(CoreIPC::StringReference messageReceiverName, uint64_t destinationID);
+
     bool isValid() const { return m_connection; }
     bool isLaunching() const;
     bool canSendMessage() const { return isValid() || isLaunching(); }
@@ -65,15 +70,20 @@ protected:
     // ProcessLauncher::Client
     virtual void didFinishLaunching(ProcessLauncher*, CoreIPC::Connection::Identifier) OVERRIDE;
 
+    bool dispatchMessage(CoreIPC::Connection*, CoreIPC::MessageDecoder&);
+    bool dispatchSyncMessage(CoreIPC::Connection*, CoreIPC::MessageDecoder&, OwnPtr<CoreIPC::MessageEncoder>&);
+
 private:
     virtual void getLaunchOptions(ProcessLauncher::LaunchOptions&) = 0;
+    virtual void connectionWillOpen(CoreIPC::Connection*);
+    virtual void connectionWillClose(CoreIPC::Connection*);
 
-    bool sendMessage(CoreIPC::MessageID, PassOwnPtr<CoreIPC::MessageEncoder>, unsigned messageSendFlags);
+    bool sendMessage(PassOwnPtr<CoreIPC::MessageEncoder>, unsigned messageSendFlags);
 
-    Vector<std::pair<CoreIPC::Connection::OutgoingMessage, unsigned> > m_pendingMessages;
+    Vector<std::pair<OwnPtr<CoreIPC::MessageEncoder>, unsigned> > m_pendingMessages;
     RefPtr<ProcessLauncher> m_processLauncher;
     RefPtr<CoreIPC::Connection> m_connection;
-    CoreIPC::Connection::QueueClient* m_queueClient;
+    CoreIPC::MessageReceiverMap m_messageReceiverMap;
 };
 
 template<typename T>
@@ -84,7 +94,7 @@ bool ChildProcessProxy::send(const T& message, uint64_t destinationID, unsigned 
     OwnPtr<CoreIPC::MessageEncoder> encoder = CoreIPC::MessageEncoder::create(T::receiverName(), T::name(), destinationID);
     encoder->encode(message);
 
-    return sendMessage(CoreIPC::MessageID(T::messageID), encoder.release(), messageSendFlags);
+    return sendMessage(encoder.release(), messageSendFlags);
 }
 
 template<typename U> 
@@ -98,6 +108,6 @@ bool ChildProcessProxy::sendSync(const U& message, const typename U::Reply& repl
     return connection()->sendSync(message, reply, destinationID, timeout);
 }
 
-}
+} // namespace WebKit
 
 #endif // ChildProcessProxy_h

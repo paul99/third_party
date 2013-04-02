@@ -180,7 +180,7 @@ void ViEAutoTest::ViECodecStandardTest() {
     TestCodecObserver codec_observer;
     EXPECT_EQ(0, codec->RegisterDecoderObserver(video_channel, codec_observer));
     ViETest::Log("Loop through all codecs for %d seconds",
-                 KAutoTestSleepTimeMs / 1000);
+                 kAutoTestSleepTimeMs / 1000);
 
     for (int i = 0; i < codec->NumberOfCodecs() - 2; i++) {
       EXPECT_EQ(0, codec->GetCodec(i, video_codec));
@@ -196,7 +196,7 @@ void ViEAutoTest::ViECodecStandardTest() {
       RenderFilter frame_counter;
       EXPECT_EQ(0, image_process->RegisterRenderEffectFilter(video_channel,
                                                              frame_counter));
-      AutoTestSleep(KAutoTestSleepTimeMs);
+      AutoTestSleep(kAutoTestSleepTimeMs);
 
       // Verify we've received and decoded correct payload.
       EXPECT_EQ(video_codec.codecType,
@@ -229,7 +229,12 @@ void ViEAutoTest::ViECodecStandardTest() {
       break;
     }
   }
-  AutoTestSleep(KAutoTestSleepTimeMs);
+  AutoTestSleep(kAutoTestSleepTimeMs);
+
+  // Verify the delay estimate is larger than 0.
+  int delay_ms = 0;
+  EXPECT_EQ(0, codec->GetReceiveSideDelay(video_channel, &delay_ms));
+  EXPECT_GT(delay_ms, 0);
 
   EXPECT_EQ(0, base->StopSend(video_channel));
   EXPECT_EQ(0, codec->DeregisterEncoderObserver(video_channel));
@@ -403,7 +408,7 @@ void ViEAutoTest::ViECodecExtendedTest() {
     EXPECT_EQ(0, video_engine.base->StartReceive(video_channel_2));
     EXPECT_EQ(0, video_engine.base->StartSend(video_channel_2));
 
-    AutoTestSleep(KAutoTestSleepTimeMs);
+    AutoTestSleep(kAutoTestSleepTimeMs);
 
     EXPECT_EQ(0, video_engine.base->StopReceive(video_channel_1));
     EXPECT_EQ(0, video_engine.base->StopSend(video_channel_1));
@@ -448,6 +453,7 @@ void ViEAutoTest::ViECodecAPITest() {
     if (video_codec.codecType == webrtc::kVideoCodecVP8) {
       video_codec.codecSpecific.VP8.automaticResizeOn = true;
       video_codec.codecSpecific.VP8.frameDroppingOn = true;
+      video_codec.codecSpecific.VP8.keyFrameInterval = 300;
       EXPECT_EQ(0, codec->SetSendCodec(video_channel, video_codec));
       break;
     }
@@ -457,12 +463,11 @@ void ViEAutoTest::ViECodecAPITest() {
   EXPECT_EQ(webrtc::kVideoCodecVP8, video_codec.codecType);
   EXPECT_TRUE(video_codec.codecSpecific.VP8.automaticResizeOn);
   EXPECT_TRUE(video_codec.codecSpecific.VP8.frameDroppingOn);
+  EXPECT_EQ(300, video_codec.codecSpecific.VP8.keyFrameInterval);
 
   for (int i = 0; i < number_of_codecs; i++) {
     EXPECT_EQ(0, codec->GetCodec(i, video_codec));
     if (video_codec.codecType == webrtc::kVideoCodecI420) {
-      video_codec.codecSpecific.VP8.automaticResizeOn = false;
-      video_codec.codecSpecific.VP8.frameDroppingOn = false;
       EXPECT_EQ(0, codec->SetSendCodec(video_channel, video_codec));
       break;
     }
@@ -470,8 +475,6 @@ void ViEAutoTest::ViECodecAPITest() {
   memset(&video_codec, 0, sizeof(video_codec));
   EXPECT_EQ(0, codec->GetSendCodec(video_channel, video_codec));
   EXPECT_EQ(webrtc::kVideoCodecI420, video_codec.codecType);
-  EXPECT_FALSE(video_codec.codecSpecific.VP8.automaticResizeOn);
-  EXPECT_FALSE(video_codec.codecSpecific.VP8.frameDroppingOn);
 
   EXPECT_EQ(0, base->DeleteChannel(video_channel));
 
@@ -518,7 +521,7 @@ void ViEAutoTest::ViECodecExternalCodecTest() {
     channel.StartSend();
 
     ViETest::Log("Using internal I420 codec");
-    AutoTestSleep(KAutoTestSleepTimeMs / 2);
+    AutoTestSleep(kAutoTestSleepTimeMs / 2);
 
     webrtc::ViEExternalCodec* vie_external_codec =
         webrtc::ViEExternalCodec::GetInterface(ViE.video_engine);
@@ -537,7 +540,7 @@ void ViEAutoTest::ViECodecExternalCodecTest() {
 
       // Test to register on wrong channel.
       error = vie_external_codec->RegisterExternalSendCodec(
-          channel.videoChannel + 5, codec.plType, &ext_encoder);
+          channel.videoChannel + 5, codec.plType, &ext_encoder, false);
       number_of_errors += ViETest::TestError(error == -1,
                                              "ERROR: %s at line %d",
                                              __FUNCTION__, __LINE__);
@@ -546,7 +549,7 @@ void ViEAutoTest::ViECodecExternalCodecTest() {
           "ERROR: %s at line %d", __FUNCTION__, __LINE__);
 
       error = vie_external_codec->RegisterExternalSendCodec(
-                channel.videoChannel, codec.plType, &ext_encoder);
+                channel.videoChannel, codec.plType, &ext_encoder, false);
       number_of_errors += ViETest::TestError(error == 0, "ERROR: %s at line %d",
                                              __FUNCTION__, __LINE__);
 
@@ -566,7 +569,7 @@ void ViEAutoTest::ViECodecExternalCodecTest() {
                                              __FUNCTION__, __LINE__);
 
       ViETest::Log("Using external I420 codec");
-      AutoTestSleep(KAutoTestSleepTimeMs);
+      AutoTestSleep(kAutoTestSleepTimeMs);
 
       // Test to deregister on wrong channel
       error = vie_external_codec->DeRegisterExternalSendCodec(
@@ -648,7 +651,7 @@ void ViEAutoTest::ViECodecExternalCodecTest() {
                                              __FUNCTION__, __LINE__);
 
       error = vie_external_codec->RegisterExternalSendCodec(
-                channel.videoChannel, codec.plType, &ext_encoder);
+                channel.videoChannel, codec.plType, &ext_encoder, false);
       number_of_errors += ViETest::TestError(error == 0, "ERROR: %s at line %d",
                                              __FUNCTION__, __LINE__);
 
@@ -658,7 +661,7 @@ void ViEAutoTest::ViECodecExternalCodecTest() {
       number_of_errors += ViETest::TestError(error == 0, "ERROR: %s at line %d",
                                              __FUNCTION__, __LINE__);
 
-      AutoTestSleep(KAutoTestSleepTimeMs / 2);
+      AutoTestSleep(kAutoTestSleepTimeMs / 2);
 
       /// **************************************************************
       //  Testing finished. Tear down Video Engine
@@ -714,7 +717,7 @@ void ViEAutoTest::ViECodecExternalCodecTest() {
     }  // tbI420Encoder and ext_decoder goes out of scope.
 
     ViETest::Log("Using internal I420 codec");
-    AutoTestSleep(KAutoTestSleepTimeMs / 2);
+    AutoTestSleep(kAutoTestSleepTimeMs / 2);
   }
   if (number_of_errors > 0) {
     // Test failed

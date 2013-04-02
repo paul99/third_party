@@ -27,7 +27,7 @@ static unsigned int do_16x16_motion_iteration(VP9_COMP *cpi,
   BLOCKD *d = &xd->block[0];
   vp9_variance_fn_ptr_t v_fn_ptr = cpi->fn_ptr[BLOCK_16X16];
   unsigned int best_err;
-  int step_param, further_steps;
+  int step_param;
 
   int tmp_col_min = x->mv_col_min;
   int tmp_col_max = x->mv_col_max;
@@ -38,10 +38,8 @@ static unsigned int do_16x16_motion_iteration(VP9_COMP *cpi,
   // Further step/diamond searches as necessary
   if (cpi->Speed < 8) {
     step_param = cpi->sf.first_step + ((cpi->Speed > 5) ? 1 : 0);
-    further_steps = (cpi->sf.max_step_search_steps - 1) - step_param;
   } else {
     step_param = cpi->sf.first_step + 2;
-    further_steps = 0;
   }
 
   vp9_clamp_mv_min_max(x, ref_mv);
@@ -72,11 +70,6 @@ static unsigned int do_16x16_motion_iteration(VP9_COMP *cpi,
         NULL, NULL,
         & distortion, &sse);
   }
-
-#if CONFIG_PRED_FILTER
-  // Disable the prediction filter
-  xd->mode_info_context->mbmi.pred_filter_enabled = 0;
-#endif
 
   vp9_set_mbmode_and_mvs(x, NEWMV, dst_mv);
   vp9_build_1st_inter16x16_predictors_mby(xd, xd->predictor, 16, 0);

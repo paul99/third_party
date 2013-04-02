@@ -34,7 +34,6 @@
 namespace CoreIPC {
 class Connection;
 class MessageDecoder;
-class MessageID;
 }
 
 namespace WebCore {
@@ -44,20 +43,12 @@ class IntRect;
 class IntSize;
 class GraphicsLayer;
 class GraphicsLayerFactory;
-
-#if PLATFORM(WIN) && USE(AVFOUNDATION)
-struct GraphicsDeviceAdapter;
-#endif
 }
 
 namespace WebKit {
 
 class UpdateInfo;
 class WebPage;
-
-#if PLATFORM(WIN)
-struct WindowGeometry;
-#endif
 
 class LayerTreeHost : public RefCounted<LayerTreeHost> {
 public:
@@ -78,7 +69,7 @@ public:
     virtual void forceRepaint() = 0;
     virtual bool forceRepaintAsync(uint64_t /*callbackID*/) { return false; }
     virtual void sizeDidChange(const WebCore::IntSize& newSize) = 0;
-    virtual void deviceScaleFactorDidChange() = 0;
+    virtual void deviceOrPageScaleFactorChanged() = 0;
 
     virtual void didInstallPageOverlay() = 0;
     virtual void didUninstallPageOverlay() = 0;
@@ -96,19 +87,11 @@ public:
     virtual void setVisibleContentsRect(const WebCore::FloatRect&, float /* scale */, const WebCore::FloatPoint&) { }
     virtual void renderNextFrame() { }
     virtual void purgeBackingStores() { }
-    virtual void didReceiveCoordinatedLayerTreeHostMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&) = 0;
-#endif
-
-#if PLATFORM(WIN)
-    virtual void scheduleChildWindowGeometryUpdate(const WindowGeometry&) = 0;
+    virtual void didReceiveCoordinatedLayerTreeHostMessage(CoreIPC::Connection*, CoreIPC::MessageDecoder&) = 0;
 #endif
 
 #if PLATFORM(MAC)
     virtual void setLayerHostingMode(LayerHostingMode) { }
-#endif
-
-#if PLATFORM(WIN) && USE(AVFOUNDATION)
-    virtual WebCore::GraphicsDeviceAdapter* graphicsDeviceAdapter() const { return 0; }
 #endif
 
 #if USE(COORDINATED_GRAPHICS) && ENABLE(REQUEST_ANIMATION_FRAME)
@@ -125,7 +108,7 @@ protected:
 #endif
 };
 
-#if !PLATFORM(WIN) && !USE(COORDINATED_GRAPHICS)
+#if !USE(COORDINATED_GRAPHICS)
 inline bool LayerTreeHost::supportsAcceleratedCompositing()
 {
     return true;

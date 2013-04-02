@@ -74,12 +74,20 @@ namespace JSC {
     v(bool, showDisassembly, false) \
     v(bool, showDFGDisassembly, false) \
     v(bool, showAllDFGNodes, false) \
+    v(bool, dumpBytecodeAtDFGTime, false) \
+    v(bool, dumpGraphAtEachPhase, false) \
+    v(bool, verboseCompilation, false) \
+    v(bool, logCompilationChanges, false) \
+    v(bool, printEachOSRExit, false) \
+    v(bool, validateGraph, false) \
+    v(bool, validateGraphAtEachPhase, false) \
     \
     v(bool, enableProfiler, false) \
     \
     v(unsigned, maximumOptimizationCandidateInstructionCount, 10000) \
     \
     v(unsigned, maximumFunctionForCallInlineCandidateInstructionCount, 180) \
+    v(unsigned, maximumFunctionForClosureCallInlineCandidateInstructionCount, 100) \
     v(unsigned, maximumFunctionForConstructInlineCandidateInstructionCount, 100) \
     \
     /* Depth of inline stack, so 1 = no inlining, 2 = one level, etc. */ \
@@ -95,11 +103,11 @@ namespace JSC {
     v(int32, executionCounterIncrementForLoop, 1) \
     v(int32, executionCounterIncrementForReturn, 15) \
     \
+    v(int32, evalThresholdMultiplier, 10) \
+    \
     v(bool, randomizeExecutionCountsBetweenCheckpoints, false) \
     v(int32, maximumExecutionCountsBetweenCheckpoints, 1000) \
     \
-    v(double, likelyToTakeSlowCaseThreshold, 0.15) \
-    v(double, couldTakeSlowCaseThreshold, 0.05) \
     v(unsigned, likelyToTakeSlowCaseMinimumCount, 100) \
     v(unsigned, couldTakeSlowCaseMinimumCount, 10) \
     \
@@ -119,7 +127,6 @@ namespace JSC {
     v(double, structureCheckVoteRatioForHoisting, 1) \
     \
     v(unsigned, minimumNumberOfScansBetweenRebalance, 100) \
-    v(unsigned, gcMarkStackSegmentSize, pageSize()) \
     v(unsigned, numberOfGCMarkers, computeNumberOfGCMarkers(7)) \
     v(unsigned, opaqueRootMergeThreshold, 1000) \
     v(double, minHeapUtilization, 0.8) \

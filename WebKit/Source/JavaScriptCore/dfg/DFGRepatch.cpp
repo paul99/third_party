@@ -37,6 +37,7 @@
 #include "Operations.h"
 #include "PolymorphicPutByIdList.h"
 #include "RepatchBuffer.h"
+#include "StructureRareDataInlines.h"
 #include <wtf/StringPrintStream.h>
 
 namespace JSC { namespace DFG {
@@ -323,7 +324,7 @@ static bool tryCacheGetByID(ExecState* exec, JSValue baseValue, const Identifier
     // Optimize self access.
     if (slot.slotBase() == baseValue) {
         if ((slot.cachedPropertyType() != PropertySlot::Value)
-            || !MacroAssembler::isCompactPtrAlignedAddressOffset(offsetRelativeToPatchedStorage(slot.cachedOffset()))) {
+            || !MacroAssembler::isCompactPtrAlignedAddressOffset(maxOffsetRelativeToPatchedStorage(slot.cachedOffset()))) {
             dfgRepatchCall(codeBlock, stubInfo.callReturnLocation, operationGetByIdBuildList);
             return true;
         }
@@ -664,7 +665,7 @@ static void emitPutReplaceStub(
     GPRReg valueGPR = static_cast<GPRReg>(stubInfo.patch.dfg.valueGPR);
     GPRReg scratchGPR = RegisterSet(stubInfo.patch.dfg.usedRegisters).getFreeGPR();
     bool needToRestoreScratch = false;
-#if ENABLE(GGC) || ENABLE(WRITE_BARRIER_PROFILING)
+#if ENABLE(WRITE_BARRIER_PROFILING)
     GPRReg scratchGPR2;
     const bool writeBarrierNeeded = true;
 #else
@@ -688,7 +689,7 @@ static void emitPutReplaceStub(
         MacroAssembler::Address(baseGPR, JSCell::structureOffset()),
         MacroAssembler::TrustedImmPtr(structure));
     
-#if ENABLE(GGC) || ENABLE(WRITE_BARRIER_PROFILING)
+#if ENABLE(WRITE_BARRIER_PROFILING)
 #if USE(JSVALUE64)
     scratchGPR2 = SpeculativeJIT::selectScratchGPR(baseGPR, valueGPR, scratchGPR);
 #else
@@ -779,7 +780,7 @@ static void emitPutTransitionStub(
     
     bool needSecondScratch = false;
     bool needThirdScratch = false;
-#if ENABLE(GGC) || ENABLE(WRITE_BARRIER_PROFILING)
+#if ENABLE(WRITE_BARRIER_PROFILING)
     needSecondScratch = true;
 #endif
     if (structure->outOfLineCapacity() != oldStructure->outOfLineCapacity()
@@ -826,7 +827,7 @@ static void emitPutTransitionStub(
         }
     }
 
-#if ENABLE(GGC) || ENABLE(WRITE_BARRIER_PROFILING)
+#if ENABLE(WRITE_BARRIER_PROFILING)
     ASSERT(needSecondScratch);
     ASSERT(scratchGPR2 != InvalidGPRReg);
     // Must always emit this write barrier as the structure transition itself requires it
@@ -1214,12 +1215,12 @@ void dfgLinkClosureCall(ExecState* exec, CallLinkInfo& callLinkInfo, CodeBlock* 
     JITCompiler::Jump done = stubJit.jump();
     
     slowPath.link(&stubJit);
-    stubJit.move(CCallHelpers::TrustedImmPtr(callLinkInfo.callReturnLocation.executableAddress()), GPRInfo::nonArgGPR2);
-    stubJit.restoreReturnAddressBeforeReturn(GPRInfo::nonArgGPR2);
     stubJit.move(calleeGPR, GPRInfo::nonArgGPR0);
 #if USE(JSVALUE32_64)
     stubJit.move(CCallHelpers::TrustedImm32(JSValue::CellTag), GPRInfo::nonArgGPR1);
 #endif
+    stubJit.move(CCallHelpers::TrustedImmPtr(callLinkInfo.callReturnLocation.executableAddress()), GPRInfo::nonArgGPR2);
+    stubJit.restoreReturnAddressBeforeReturn(GPRInfo::nonArgGPR2);
     JITCompiler::Jump slow = stubJit.jump();
     
     LinkBuffer patchBuffer(*globalData, &stubJit, callerCodeBlock);
@@ -1258,9 +1259,9 @@ void dfgResetGetByID(RepatchBuffer& repatchBuffer, StructureStubInfo& stubInfo)
             MacroAssembler::Address(
                 static_cast<MacroAssembler::RegisterID>(stubInfo.patch.dfg.baseGPR),
                 JSCell::structureOffset()),
-            reinterpret_cast<void*>(-1));
+            reinterpret_cast<void*>(unusedPointer));
     }
-    repatchBuffer.repatch(structureLabel, reinterpret_cast<void*>(-1));
+    repatchBuffer.repatch(structureLabel, reinterpret_cast<void*>(unusedPointer));
 #if USE(JSVALUE64)
     repatchBuffer.repatch(stubInfo.callReturnLocation.dataLabelCompactAtOffset(stubInfo.patch.dfg.deltaCallToLoadOrStore), 0);
 #else
@@ -1292,9 +1293,9 @@ void dfgResetPutByID(RepatchBuffer& repatchBuffer, StructureStubInfo& stubInfo)
             MacroAssembler::Address(
                 static_cast<MacroAssembler::RegisterID>(stubInfo.patch.dfg.baseGPR),
                 JSCell::structureOffset()),
-            reinterpret_cast<void*>(-1));
+            reinterpret_cast<void*>(unusedPointer));
     }
-    repatchBuffer.repatch(structureLabel, reinterpret_cast<void*>(-1));
+    repatchBuffer.repatch(structureLabel, reinterpret_cast<void*>(unusedPointer));
 #if USE(JSVALUE64)
     repatchBuffer.repatch(stubInfo.callReturnLocation.dataLabel32AtOffset(stubInfo.patch.dfg.deltaCallToLoadOrStore), 0);
 #else

@@ -30,26 +30,9 @@ static uint32 ReferenceHashDjb2(const uint8* src, uint64 count, uint32 seed) {
   return hash;
 }
 
-TEST_F(libyuvTest, BenchmakDjb2_C) {
+TEST_F(libyuvTest, BenchmakDjb2_Opt) {
   const int kMaxTest = benchmark_width_ * benchmark_height_;
-  align_buffer_16(src_a, kMaxTest)
-  for (int i = 0; i < kMaxTest; ++i) {
-    src_a[i] = i;
-  }
-  uint32 h2 = ReferenceHashDjb2(src_a, kMaxTest, 5381);
-  uint32 h1;
-  MaskCpuFlags(0);
-  for (int i = 0; i < benchmark_iterations_; ++i) {
-    h1 = HashDjb2(src_a, kMaxTest, 5381);
-  }
-  MaskCpuFlags(-1);
-  EXPECT_EQ(h1, h2);
-  free_aligned_buffer_16(src_a)
-}
-
-TEST_F(libyuvTest, BenchmakDjb2_OPT) {
-  const int kMaxTest = benchmark_width_ * benchmark_height_;
-  align_buffer_16(src_a, kMaxTest)
+  align_buffer_64(src_a, kMaxTest)
 
   for (int i = 0; i < kMaxTest; ++i) {
     src_a[i] = i;
@@ -60,12 +43,12 @@ TEST_F(libyuvTest, BenchmakDjb2_OPT) {
     h1 = HashDjb2(src_a, kMaxTest, 5381);
   }
   EXPECT_EQ(h1, h2);
-  free_aligned_buffer_16(src_a)
+  free_aligned_buffer_64(src_a)
 }
 
-TEST_F(libyuvTest, BenchmakDjb2_Unaligned_OPT) {
+TEST_F(libyuvTest, BenchmakDjb2_Unaligned) {
   const int kMaxTest = benchmark_width_ * benchmark_height_;
-  align_buffer_16(src_a, kMaxTest + 1)
+  align_buffer_64(src_a, kMaxTest + 1)
   for (int i = 0; i < kMaxTest; ++i) {
     src_a[i + 1] = i;
   }
@@ -75,46 +58,13 @@ TEST_F(libyuvTest, BenchmakDjb2_Unaligned_OPT) {
     h1 = HashDjb2(src_a + 1, kMaxTest, 5381);
   }
   EXPECT_EQ(h1, h2);
-  free_aligned_buffer_16(src_a)
+  free_aligned_buffer_64(src_a)
 }
 
-TEST_F(libyuvTest, BenchmarkSumSquareError_C) {
+TEST_F(libyuvTest, BenchmarkSumSquareError_Opt) {
   const int kMaxWidth = 4096 * 3;
-  align_buffer_16(src_a, kMaxWidth)
-  align_buffer_16(src_b, kMaxWidth)
-  memset(src_a, 0, kMaxWidth);
-  memset(src_b, 0, kMaxWidth);
-
-  MaskCpuFlags(0);
-  memcpy(src_a, "test0123test4567", 16);
-  memcpy(src_b, "tick0123tock4567", 16);
-  uint64 h1 = ComputeSumSquareError(src_a, src_b, 16);
-  EXPECT_EQ(790u, h1);
-
-  for (int i = 0; i < kMaxWidth; ++i) {
-    src_a[i] = i;
-    src_b[i] = i;
-  }
-  memset(src_a, 0, kMaxWidth);
-  memset(src_b, 0, kMaxWidth);
-
-  int count = benchmark_iterations_ *
-      (benchmark_width_ * benchmark_height_ + kMaxWidth - 1) / kMaxWidth;
-  for (int i = 0; i < count; ++i) {
-    h1 = ComputeSumSquareError(src_a, src_b, kMaxWidth);
-  }
-
-  MaskCpuFlags(-1);
-  EXPECT_EQ(0, h1);
-
-  free_aligned_buffer_16(src_a)
-  free_aligned_buffer_16(src_b)
-}
-
-TEST_F(libyuvTest, BenchmarkSumSquareError_OPT) {
-  const int kMaxWidth = 4096 * 3;
-  align_buffer_16(src_a, kMaxWidth)
-  align_buffer_16(src_b, kMaxWidth)
+  align_buffer_64(src_a, kMaxWidth)
+  align_buffer_64(src_b, kMaxWidth)
   memset(src_a, 0, kMaxWidth);
   memset(src_b, 0, kMaxWidth);
 
@@ -138,14 +88,14 @@ TEST_F(libyuvTest, BenchmarkSumSquareError_OPT) {
 
   EXPECT_EQ(0, h1);
 
-  free_aligned_buffer_16(src_a)
-  free_aligned_buffer_16(src_b)
+  free_aligned_buffer_64(src_a)
+  free_aligned_buffer_64(src_b)
 }
 
 TEST_F(libyuvTest, SumSquareError) {
   const int kMaxWidth = 4096 * 3;
-  align_buffer_16(src_a, kMaxWidth)
-  align_buffer_16(src_b, kMaxWidth)
+  align_buffer_64(src_a, kMaxWidth)
+  align_buffer_64(src_b, kMaxWidth)
   memset(src_a, 0, kMaxWidth);
   memset(src_b, 0, kMaxWidth);
 
@@ -180,40 +130,13 @@ TEST_F(libyuvTest, SumSquareError) {
 
   EXPECT_EQ(c_err, opt_err);
 
-  free_aligned_buffer_16(src_a)
-  free_aligned_buffer_16(src_b)
+  free_aligned_buffer_64(src_a)
+  free_aligned_buffer_64(src_b)
 }
 
-TEST_F(libyuvTest, BenchmarkPsnr_C) {
-  align_buffer_16(src_a, benchmark_width_ * benchmark_height_)
-  align_buffer_16(src_b, benchmark_width_ * benchmark_height_)
-  for (int i = 0; i < benchmark_width_ * benchmark_height_; ++i) {
-    src_a[i] = i;
-    src_b[i] = i;
-  }
-
-  MaskCpuFlags(0);
-
-  double c_time = get_time();
-  for (int i = 0; i < benchmark_iterations_; ++i)
-    CalcFramePsnr(src_a, benchmark_width_,
-                  src_b, benchmark_width_,
-                  benchmark_width_, benchmark_height_);
-
-  c_time = (get_time() - c_time) / benchmark_iterations_;
-  printf("BenchmarkPsnr_C - %8.2f us c\n", c_time * 1e6);
-
-  MaskCpuFlags(-1);
-
-  EXPECT_EQ(0, 0);
-
-  free_aligned_buffer_16(src_a)
-  free_aligned_buffer_16(src_b)
-}
-
-TEST_F(libyuvTest, BenchmarkPsnr_OPT) {
-  align_buffer_16(src_a, benchmark_width_ * benchmark_height_)
-  align_buffer_16(src_b, benchmark_width_ * benchmark_height_)
+TEST_F(libyuvTest, BenchmarkPsnr_Opt) {
+  align_buffer_64(src_a, benchmark_width_ * benchmark_height_)
+  align_buffer_64(src_b, benchmark_width_ * benchmark_height_)
   for (int i = 0; i < benchmark_width_ * benchmark_height_; ++i) {
     src_a[i] = i;
     src_b[i] = i;
@@ -228,12 +151,12 @@ TEST_F(libyuvTest, BenchmarkPsnr_OPT) {
                   benchmark_width_, benchmark_height_);
 
   opt_time = (get_time() - opt_time) / benchmark_iterations_;
-  printf("BenchmarkPsnr_OPT - %8.2f us opt\n", opt_time * 1e6);
+  printf("BenchmarkPsnr_Opt - %8.2f us opt\n", opt_time * 1e6);
 
   EXPECT_EQ(0, 0);
 
-  free_aligned_buffer_16(src_a)
-  free_aligned_buffer_16(src_b)
+  free_aligned_buffer_64(src_a)
+  free_aligned_buffer_64(src_b)
 }
 
 TEST_F(libyuvTest, Psnr) {
@@ -242,8 +165,8 @@ TEST_F(libyuvTest, Psnr) {
   const int b = 128;
   const int kSrcPlaneSize = (kSrcWidth + b * 2) * (kSrcHeight + b * 2);
   const int kSrcStride = 2 * b + kSrcWidth;
-  align_buffer_16(src_a, kSrcPlaneSize)
-  align_buffer_16(src_b, kSrcPlaneSize)
+  align_buffer_64(src_a, kSrcPlaneSize)
+  align_buffer_64(src_b, kSrcPlaneSize)
   memset(src_a, 0, kSrcPlaneSize);
   memset(src_b, 0, kSrcPlaneSize);
 
@@ -309,40 +232,13 @@ TEST_F(libyuvTest, Psnr) {
 
   EXPECT_EQ(opt_err, c_err);
 
-  free_aligned_buffer_16(src_a)
-  free_aligned_buffer_16(src_b)
+  free_aligned_buffer_64(src_a)
+  free_aligned_buffer_64(src_b)
 }
 
-TEST_F(libyuvTest, BenchmarkSsim_C) {
-  align_buffer_16(src_a, benchmark_width_ * benchmark_height_)
-  align_buffer_16(src_b, benchmark_width_ * benchmark_height_)
-  for (int i = 0; i < benchmark_width_ * benchmark_height_; ++i) {
-    src_a[i] = i;
-    src_b[i] = i;
-  }
-
-  MaskCpuFlags(0);
-
-  double c_time = get_time();
-  for (int i = 0; i < benchmark_iterations_; ++i)
-    CalcFrameSsim(src_a, benchmark_width_,
-                  src_b, benchmark_width_,
-                  benchmark_width_, benchmark_height_);
-
-  c_time = (get_time() - c_time) / benchmark_iterations_;
-  printf("BenchmarkSsim_C - %8.2f us c\n", c_time * 1e6);
-
-  MaskCpuFlags(-1);
-
-  EXPECT_EQ(0, 0);  // Pass if we get this far.
-
-  free_aligned_buffer_16(src_a)
-  free_aligned_buffer_16(src_b)
-}
-
-TEST_F(libyuvTest, BenchmarkSsim_OPT) {
-  align_buffer_16(src_a, benchmark_width_ * benchmark_height_)
-  align_buffer_16(src_b, benchmark_width_ * benchmark_height_)
+TEST_F(libyuvTest, BenchmarkSsim_Opt) {
+  align_buffer_64(src_a, benchmark_width_ * benchmark_height_)
+  align_buffer_64(src_b, benchmark_width_ * benchmark_height_)
   for (int i = 0; i < benchmark_width_ * benchmark_height_; ++i) {
     src_a[i] = i;
     src_b[i] = i;
@@ -357,12 +253,12 @@ TEST_F(libyuvTest, BenchmarkSsim_OPT) {
                   benchmark_width_, benchmark_height_);
 
   opt_time = (get_time() - opt_time) / benchmark_iterations_;
-  printf("BenchmarkSsim_OPT - %8.2f us opt\n", opt_time * 1e6);
+  printf("BenchmarkSsim_Opt - %8.2f us opt\n", opt_time * 1e6);
 
   EXPECT_EQ(0, 0);  // Pass if we get this far.
 
-  free_aligned_buffer_16(src_a)
-  free_aligned_buffer_16(src_b)
+  free_aligned_buffer_64(src_a)
+  free_aligned_buffer_64(src_b)
 }
 
 TEST_F(libyuvTest, Ssim) {
@@ -371,8 +267,8 @@ TEST_F(libyuvTest, Ssim) {
   const int b = 128;
   const int kSrcPlaneSize = (kSrcWidth + b * 2) * (kSrcHeight + b * 2);
   const int kSrcStride = 2 * b + kSrcWidth;
-  align_buffer_16(src_a, kSrcPlaneSize)
-  align_buffer_16(src_b, kSrcPlaneSize)
+  align_buffer_64(src_a, kSrcPlaneSize)
+  align_buffer_64(src_b, kSrcPlaneSize)
   memset(src_a, 0, kSrcPlaneSize);
   memset(src_b, 0, kSrcPlaneSize);
 
@@ -434,8 +330,8 @@ TEST_F(libyuvTest, Ssim) {
 
   EXPECT_EQ(opt_err, c_err);
 
-  free_aligned_buffer_16(src_a)
-  free_aligned_buffer_16(src_b)
+  free_aligned_buffer_64(src_a)
+  free_aligned_buffer_64(src_b)
 }
 
 }  // namespace libyuv

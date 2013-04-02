@@ -32,6 +32,7 @@
 #include "SimplePDFPlugin.h"
 #include "WebEvent.h"
 #include <WebCore/AffineTransform.h>
+#include <WebCore/FindOptions.h>
 #include <WebCore/ScrollableArea.h>
 #include <wtf/RetainPtr.h>
 
@@ -41,6 +42,7 @@ typedef const struct OpaqueJSValue* JSValueRef;
 
 OBJC_CLASS PDFAnnotation;
 OBJC_CLASS PDFLayerController;
+OBJC_CLASS PDFSelection;
 OBJC_CLASS WKPDFLayerControllerDelegate;
 
 namespace CoreIPC {
@@ -68,6 +70,7 @@ public:
     
     using ScrollableArea::notifyScrollPositionChanged;
     void notifyContentScaleFactorChanged(CGFloat scaleFactor);
+    void notifyDisplayModeChanged(int);
 
     void clickedLink(NSURL *);
     void saveToPDF();
@@ -96,6 +99,13 @@ private:
     virtual bool handleEditingCommand(const String& commandName, const String& argument) OVERRIDE;
     virtual bool isEditingCommandEnabled(const String&) OVERRIDE;
     virtual bool handlesPageScaleFactor() OVERRIDE;
+
+    virtual unsigned countFindMatches(const String& target, WebCore::FindOptions, unsigned maxMatchCount) OVERRIDE;
+    virtual bool findString(const String& target, WebCore::FindOptions, unsigned maxMatchCount) OVERRIDE;
+
+    PDFSelection *nextMatchForString(const String& target, BOOL searchForward, BOOL caseSensitive, BOOL wrapSearch, PDFSelection *initialSelection, BOOL startInSelection);
+
+    virtual bool performDictionaryLookupAtLocation(const WebCore::FloatPoint&) OVERRIDE;
 
     // ScrollableArea functions.
     virtual void setScrollOffset(const WebCore::IntPoint&) OVERRIDE;
@@ -129,6 +139,8 @@ private:
     WebCore::IntPoint m_lastMousePositionInPluginCoordinates;
 
     String m_temporaryPDFUUID;
+
+    String m_lastFoundString;
     
     RetainPtr<WKPDFLayerControllerDelegate> m_pdfLayerControllerDelegate;
 };

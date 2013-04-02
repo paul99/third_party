@@ -187,6 +187,7 @@ void Cursor::ensurePlatformCursor() const
         break;
 
     case Cursor::WestResize:
+    case Cursor::WestPanning:
 #if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
         m_platformCursor = wkCursor("ResizeWest");
 #else
@@ -203,7 +204,6 @@ void Cursor::ensurePlatformCursor() const
         break;
 
     case Cursor::EastWestResize:
-    case Cursor::WestPanning:
 #if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
         m_platformCursor = wkCursor("ResizeEastWest");
 #else
@@ -340,6 +340,7 @@ Cursor::Cursor(const Cursor& other)
     : m_type(other.m_type)
     , m_image(other.m_image)
     , m_hotSpot(other.m_hotSpot)
+    , m_imageScaleFactor(other.m_imageScaleFactor)
     , m_platformCursor(other.m_platformCursor)
 {
 }
@@ -349,6 +350,7 @@ Cursor& Cursor::operator=(const Cursor& other)
     m_type = other.m_type;
     m_image = other.m_image;
     m_hotSpot = other.m_hotSpot;
+    m_imageScaleFactor = other.m_imageScaleFactor;
     m_platformCursor = other.m_platformCursor;
     return *this;
 }

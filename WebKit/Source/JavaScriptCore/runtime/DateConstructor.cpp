@@ -25,6 +25,7 @@
 #include "DateConversion.h"
 #include "DateInstance.h"
 #include "DatePrototype.h"
+#include "JSCJSValueInlines.h"
 #include "JSDateMath.h"
 #include "JSFunction.h"
 #include "JSGlobalObject.h"

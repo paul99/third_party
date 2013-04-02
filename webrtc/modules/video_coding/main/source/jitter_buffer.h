@@ -12,17 +12,18 @@
 #define WEBRTC_MODULES_VIDEO_CODING_MAIN_SOURCE_JITTER_BUFFER_H_
 
 #include <list>
+#include <vector>
 
-#include "modules/interface/module_common_types.h"
-#include "modules/video_coding/main/interface/video_coding_defines.h"
-#include "modules/video_coding/main/source/decoding_state.h"
-#include "modules/video_coding/main/source/event.h"
-#include "modules/video_coding/main/source/inter_frame_delay.h"
-#include "modules/video_coding/main/source/jitter_buffer_common.h"
-#include "modules/video_coding/main/source/jitter_estimator.h"
-#include "system_wrappers/interface/constructor_magic.h"
-#include "system_wrappers/interface/critical_section_wrapper.h"
-#include "typedefs.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/modules/video_coding/main/interface/video_coding_defines.h"
+#include "webrtc/modules/video_coding/main/source/decoding_state.h"
+#include "webrtc/modules/video_coding/main/source/event.h"
+#include "webrtc/modules/video_coding/main/source/inter_frame_delay.h"
+#include "webrtc/modules/video_coding/main/source/jitter_buffer_common.h"
+#include "webrtc/modules/video_coding/main/source/jitter_estimator.h"
+#include "webrtc/system_wrappers/interface/constructor_magic.h"
+#include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/typedefs.h"
 
 namespace webrtc {
 
@@ -35,7 +36,7 @@ enum VCMNackMode {
 typedef std::list<VCMFrameBuffer*> FrameList;
 
 // forward declarations
-class TickTimeBase;
+class Clock;
 class VCMFrameBuffer;
 class VCMPacket;
 class VCMEncodedFrame;
@@ -49,8 +50,10 @@ struct VCMJitterSample {
 
 class VCMJitterBuffer {
  public:
-  VCMJitterBuffer(TickTimeBase* clock, int vcm_id = -1, int receiver_id = -1,
-                  bool master = true);
+  VCMJitterBuffer(Clock* clock,
+                  int vcm_id,
+                  int receiver_id,
+                  bool master);
   virtual ~VCMJitterBuffer();
 
   // Makes |this| a deep copy of |rhs|.
@@ -124,6 +127,11 @@ class VCMJitterBuffer {
   VCMFrameBufferEnum InsertPacket(VCMEncodedFrame* frame,
                                   const VCMPacket& packet);
 
+  // Enable a max filter on the jitter estimate, and setting of the initial
+  // delay (only when in max mode). When disabled (default), the last jitter
+  // estimate will be used.
+  void EnableMaxJitterEstimate(bool enable, uint32_t initial_delay_ms);
+
   // Returns the estimated jitter in milliseconds.
   uint32_t EstimatedJitterMs();
 
@@ -138,6 +146,9 @@ class VCMJitterBuffer {
   // wait for retransmissions.
   void SetNackMode(VCMNackMode mode, int low_rtt_nack_threshold_ms,
                    int high_rtt_nack_threshold_ms);
+
+  void SetNackSettings(size_t max_nack_list_size,
+                       int max_packet_age_to_nack);
 
   // Returns the current NACK mode.
   VCMNackMode nack_mode() const;
@@ -206,7 +217,7 @@ class VCMJitterBuffer {
 
   int vcm_id_;
   int receiver_id_;
-  TickTimeBase* clock_;
+  Clock* clock_;
   // If we are running (have started) or not.
   bool running_;
   CriticalSectionWrapper* crit_sect_;
@@ -254,9 +265,11 @@ class VCMJitterBuffer {
   int low_rtt_nack_threshold_ms_;
   int high_rtt_nack_threshold_ms_;
   // Holds the internal NACK list (the missing sequence numbers).
-  int32_t nack_seq_nums_internal_[kNackHistoryLength];
-  uint16_t nack_seq_nums_[kNackHistoryLength];
+  std::vector<int> nack_seq_nums_internal_;
+  std::vector<uint16_t> nack_seq_nums_;
   unsigned int nack_seq_nums_length_;
+  size_t max_nack_list_size_;
+  int max_packet_age_to_nack_;  // Measured in sequence numbers.
   bool waiting_for_key_frame_;
 
   DISALLOW_COPY_AND_ASSIGN(VCMJitterBuffer);

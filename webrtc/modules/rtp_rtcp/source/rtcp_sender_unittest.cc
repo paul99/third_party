@@ -80,8 +80,28 @@ class TestTransport : public Transport,
     EXPECT_TRUE(rtcpParser.IsValid());
     RTCPHelp::RTCPPacketInformation rtcpPacketInformation;
     EXPECT_EQ(0, rtcp_receiver_->IncomingRTCPPacket(rtcpPacketInformation,
-                                                   &rtcpParser));
-    rtcp_packet_info_ = rtcpPacketInformation;
+                                                    &rtcpParser));
+    rtcp_packet_info_.rtcpPacketTypeFlags =
+        rtcpPacketInformation.rtcpPacketTypeFlags;
+    rtcp_packet_info_.remoteSSRC = rtcpPacketInformation.remoteSSRC;
+    rtcp_packet_info_.applicationSubType =
+        rtcpPacketInformation.applicationSubType;
+    rtcp_packet_info_.applicationName = rtcpPacketInformation.applicationName;
+    rtcp_packet_info_.reportBlock = rtcpPacketInformation.reportBlock;
+    rtcp_packet_info_.fractionLost = rtcpPacketInformation.fractionLost;
+    rtcp_packet_info_.roundTripTime = rtcpPacketInformation.roundTripTime;
+    rtcp_packet_info_.lastReceivedExtendedHighSeqNum =
+        rtcpPacketInformation.lastReceivedExtendedHighSeqNum;
+    rtcp_packet_info_.jitter = rtcpPacketInformation.jitter;
+    rtcp_packet_info_.interArrivalJitter =
+        rtcpPacketInformation.interArrivalJitter;
+    rtcp_packet_info_.sliPictureId = rtcpPacketInformation.sliPictureId;
+    rtcp_packet_info_.rpsiPictureId = rtcpPacketInformation.rpsiPictureId;
+    rtcp_packet_info_.receiverEstimatedMaxBitrate =
+        rtcpPacketInformation.receiverEstimatedMaxBitrate;
+    rtcp_packet_info_.ntp_secs = rtcpPacketInformation.ntp_secs;
+    rtcp_packet_info_.ntp_frac = rtcpPacketInformation.ntp_frac;
+    rtcp_packet_info_.rtp_timestamp = rtcpPacketInformation.rtp_timestamp;
 
     return packet_len;
   }
@@ -99,13 +119,14 @@ class RtcpSenderTest : public ::testing::Test {
  protected:
   RtcpSenderTest()
       : over_use_detector_options_(),
+        system_clock_(Clock::GetRealTimeClock()),
         remote_bitrate_observer_(),
         remote_bitrate_estimator_(
             RemoteBitrateEstimator::Create(
-                &remote_bitrate_observer_,
                 over_use_detector_options_,
-                RemoteBitrateEstimator::kMultiStreamEstimation)) {
-    system_clock_ = ModuleRTPUtility::GetSystemClock();
+                RemoteBitrateEstimator::kMultiStreamEstimation,
+                &remote_bitrate_observer_,
+                system_clock_)) {
     test_transport_ = new TestTransport();
 
     RtpRtcp::Configuration configuration;
@@ -129,7 +150,6 @@ class RtcpSenderTest : public ::testing::Test {
     delete rtcp_receiver_;
     delete rtp_rtcp_impl_;
     delete test_transport_;
-    delete system_clock_;
   }
 
   // Helper function: Incoming RTCP has a specific packet type.
@@ -139,7 +159,7 @@ class RtcpSenderTest : public ::testing::Test {
   }
 
   OverUseDetectorOptions over_use_detector_options_;
-  RtpRtcpClock* system_clock_;
+  Clock* system_clock_;
   ModuleRtpRtcpImpl* rtp_rtcp_impl_;
   RTCPSender* rtcp_sender_;
   RTCPReceiver* rtcp_receiver_;

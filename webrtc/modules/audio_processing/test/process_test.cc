@@ -19,11 +19,13 @@
 
 #include "gtest/gtest.h"
 
-#include "audio_processing.h"
-#include "cpu_features_wrapper.h"
-#include "module_common_types.h"
-#include "scoped_ptr.h"
-#include "tick_util.h"
+#include "webrtc/modules/audio_processing/include/audio_processing.h"
+#include "webrtc/modules/interface/module_common_types.h"
+#include "webrtc/system_wrappers/interface/cpu_features_wrapper.h"
+#include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "webrtc/system_wrappers/interface/tick_util.h"
+#include "webrtc/test/testsupport/fileutils.h"
+#include "webrtc/test/testsupport/perf_test.h"
 #ifdef WEBRTC_ANDROID_PLATFORM_BUILD
 #include "external/webrtc/webrtc/modules/audio_processing/debug.pb.h"
 #else
@@ -134,18 +136,18 @@ void usage() {
   printf("  --debug_file FILE  Dump a debug recording.\n");
 }
 
-static double MicLevel2Gain(int level) {
-  return pow(10.0, ((level - 127.0) / 128.0 * 80.) / 20.);
+static float MicLevel2Gain(int level) {
+  return pow(10.0f, ((level - 127.0f) / 128.0f * 40.0f) / 20.0f);
 }
 
 static void SimulateMic(int mic_level, AudioFrame* frame) {
   mic_level = std::min(std::max(mic_level, 0), 255);
-  double mic_gain = MicLevel2Gain(mic_level);
+  float mic_gain = MicLevel2Gain(mic_level);
   int num_samples = frame->samples_per_channel_ * frame->num_channels_;
-  double v;
+  float v;
   for (int n = 0; n < num_samples; n++) {
     v = floor(frame->data_[n] * mic_gain + 0.5);
-    v = std::max(std::min(32767., v), -32768.);
+    v = std::max(std::min(32767.0f, v), -32768.0f);
     frame->data_[n] = static_cast<int16_t>(v);
   }
 }
@@ -434,14 +436,15 @@ void void_main(int argc, char* argv[]) {
     printf("Reverse channels: %d \n", num_render_channels);
   }
 
+  const std::string out_path = webrtc::test::OutputPath();
   const char far_file_default[] = "apm_far.pcm";
   const char near_file_default[] = "apm_near.pcm";
-  const char out_file_default[] = "out.pcm";
+  const std::string out_file_default = out_path + "out.pcm";
   const char event_filename[] = "apm_event.dat";
   const char delay_filename[] = "apm_delay.dat";
   const char drift_filename[] = "apm_drift.dat";
-  const char vad_file_default[] = "vad_out.dat";
-  const char ns_prob_file_default[] = "ns_prob.dat";
+  const std::string vad_file_default = out_path + "vad_out.dat";
+  const std::string ns_prob_file_default = out_path + "ns_prob.dat";
 
   if (!simulating) {
     far_filename = far_file_default;
@@ -449,15 +452,15 @@ void void_main(int argc, char* argv[]) {
   }
 
   if (!out_filename) {
-    out_filename = out_file_default;
+    out_filename = out_file_default.c_str();
   }
 
   if (!vad_out_filename) {
-    vad_out_filename = vad_file_default;
+    vad_out_filename = vad_file_default.c_str();
   }
 
   if (!ns_prob_filename) {
-    ns_prob_filename = ns_prob_file_default;
+    ns_prob_filename = ns_prob_file_default.c_str();
   }
 
   FILE* pb_file = NULL;
@@ -615,6 +618,7 @@ void void_main(int argc, char* argv[]) {
         far_frame.num_channels_ = msg.num_reverse_channels();
         near_frame.sample_rate_hz_ = msg.sample_rate();
         near_frame.samples_per_channel_ = samples_per_channel;
+        near_frame.num_channels_ = msg.num_input_channels();
 
         if (verbose) {
           printf("Init at frame: %d (primary), %d (reverse)\n",
@@ -677,10 +681,6 @@ void void_main(int argc, char* argv[]) {
           fflush(stdout);
         }
 
-        if (apm->gain_control()->mode() == GainControl::kAdaptiveAnalog) {
-          SimulateMic(capture_level, &near_frame);
-        }
-
         if (perf_testing) {
           t0 = TickTime::Now();
         }
@@ -689,8 +689,7 @@ void void_main(int argc, char* argv[]) {
                   apm->gain_control()->set_stream_analog_level(msg.level()));
         ASSERT_EQ(apm->kNoError,
                   apm->set_stream_delay_ms(msg.delay() + extra_delay_ms));
-        ASSERT_EQ(apm->kNoError,
-            apm->echo_cancellation()->set_stream_drift_samples(msg.drift()));
+        apm->echo_cancellation()->set_stream_drift_samples(msg.drift());
 
         int err = apm->ProcessStream(&near_frame);
         if (err == apm->kBadStreamParameterWarning) {
@@ -699,8 +698,6 @@ void void_main(int argc, char* argv[]) {
         ASSERT_TRUE(err == apm->kNoError ||
                     err == apm->kBadStreamParameterWarning);
         ASSERT_TRUE(near_frame.num_channels_ == apm->num_output_channels());
-
-        capture_level = apm->gain_control()->stream_analog_level();
 
         stream_has_voice =
             static_cast<int8_t>(apm->voice_detection()->stream_has_voice());
@@ -717,10 +714,6 @@ void void_main(int argc, char* argv[]) {
                                sizeof(ns_speech_prob),
                                1,
                                ns_prob_file));
-        }
-
-        if (apm->gain_control()->mode() != GainControl::kAdaptiveAnalog) {
-          ASSERT_EQ(msg.level(), capture_level);
         }
 
         if (perf_testing) {
@@ -885,7 +878,8 @@ void void_main(int argc, char* argv[]) {
               fread(&drift_samples, sizeof(drift_samples), 1, drift_file));
         }
 
-        if (apm->gain_control()->mode() == GainControl::kAdaptiveAnalog) {
+        if (apm->gain_control()->is_enabled() &&
+            apm->gain_control()->mode() == GainControl::kAdaptiveAnalog) {
           SimulateMic(capture_level, &near_frame);
         }
 
@@ -893,15 +887,12 @@ void void_main(int argc, char* argv[]) {
           t0 = TickTime::Now();
         }
 
-        // TODO(ajm): fake an analog gain while simulating.
-
-        int capture_level_in = capture_level;
+        const int capture_level_in = capture_level;
         ASSERT_EQ(apm->kNoError,
                   apm->gain_control()->set_stream_analog_level(capture_level));
         ASSERT_EQ(apm->kNoError,
                   apm->set_stream_delay_ms(delay_ms + extra_delay_ms));
-        ASSERT_EQ(apm->kNoError,
-            apm->echo_cancellation()->set_stream_drift_samples(drift_samples));
+        apm->echo_cancellation()->set_stream_drift_samples(drift_samples);
 
         int err = apm->ProcessStream(&near_frame);
         if (err == apm->kBadStreamParameterWarning) {
@@ -1032,6 +1023,9 @@ void void_main(int argc, char* argv[]) {
           (exec_time * 1.0) / primary_count,
           (max_time_us + max_time_reverse_us) / 1000.0,
           (min_time_us + min_time_reverse_us) / 1000.0);
+      // Record the results with Perf test tools.
+      webrtc::test::PrintResult("time_per_10ms_frame", "", "audioproc",
+          (exec_time * 1000) / primary_count, "us", false);
     } else {
       printf("Warning: no capture frames\n");
     }

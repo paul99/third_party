@@ -342,21 +342,18 @@ axs.utils.getAriaPropertyValue = function(a, b, c) {
   return d
 };
 axs.utils.isValidTokenValue = function(a, b) {
-  var c = a.replace(/^aria-/, ""), c = axs.constants.ARIA_PROPERTIES[c], d = c.valuesSet;
-  console.log("isValidTokenValue", a, b, c, d);
-  return axs.utils.isPossibleValue(b, d, a)
+  var c = a.replace(/^aria-/, "");
+  return axs.utils.isPossibleValue(b, axs.constants.ARIA_PROPERTIES[c].valuesSet, a)
 };
 axs.utils.isPossibleValue = function(a, b, c) {
   return!b[a] ? {valid:!1, value:a, reason:'"' + a + '" is not a valid value for ' + c, possibleValues:Object.keys(b)} : {valid:!0, value:a}
 };
 axs.utils.isValidBoolean = function(a) {
-  console.log("isValidBoolean", a);
   try {
     var b = JSON.parse(a)
   }catch(c) {
     b = ""
   }
-  console.log("isValidBoolean", a, b);
   return"boolean" != typeof b ? {valid:!1, value:a, reason:'"' + a + '" is not a true/false value'} : {valid:!0, value:b}
 };
 axs.utils.isValidIDRefValue = function(a, b) {
@@ -370,13 +367,64 @@ axs.utils.isElementImplicitlyFocusable = function(a) {
   return a instanceof HTMLAnchorElement || a instanceof HTMLAreaElement ? a.hasAttribute("href") : a instanceof HTMLInputElement || a instanceof HTMLSelectElement || a instanceof HTMLTextAreaElement || a instanceof HTMLButtonElement || a instanceof HTMLIFrameElement ? !a.disabled : !1
 };
 axs.utils.values = function(a) {
-  console.log("axs.utils.values", a);
   var b = [], c;
   for(c in a) {
     a.hasOwnProperty(c) && "function" != typeof a[c] && b.push(a[c])
   }
-  console.log("values", b, a);
   return b
+};
+axs.utils.namedValues = function(a) {
+  var b = {}, c;
+  for(c in a) {
+    a.hasOwnProperty(c) && "function" != typeof a[c] && (b[c] = a[c])
+  }
+  return b
+};
+axs.utils.getQuerySelectorText = function(a) {
+  if(null == a || "HTML" == a.tagName) {
+    return"html"
+  }
+  if("BODY" == a.tagName) {
+    return"body"
+  }
+  if(a.hasAttribute) {
+    if(a.id) {
+      return"#" + a.id
+    }
+    if(a.className) {
+      for(var b = "", c = 0;c < a.classList.length;c++) {
+        b += "." + a.classList[c]
+      }
+      var d = 0;
+      if(a.parentNode) {
+        for(c = 0;c < a.parentNode.children.length;c++) {
+          var e = a.parentNode.children[c];
+          e.webkitMatchesSelector(b) && d++;
+          if(e === a) {
+            break
+          }
+        }
+      }else {
+        d = 1
+      }
+      return 1 == d ? axs.utils.getQuerySelectorText(a.parentNode) + " > " + b : axs.utils.getQuerySelectorText(a.parentNode) + " > " + b + ":nth-of-type(" + d + ")"
+    }
+    if(a.parentNode) {
+      b = a.parentNode.children;
+      d = 1;
+      for(c = 0;b[c] !== a;) {
+        b[c].tagName == a.tagName && d++, c++
+      }
+      c = "";
+      "BODY" != a.parentNode.tagName && (c = axs.utils.getQuerySelectorText(a.parentNode) + " > ");
+      return 1 == d ? c + a.tagName : c + a.tagName + ":nth-of-type(" + d + ")"
+    }
+  }else {
+    if(a.selectorText) {
+      return a.selectorText
+    }
+  }
+  return""
 };
 axs.AuditRule = function(a) {
   for(var b = !0, c = [], d = 0;d < axs.AuditRule.requiredFields.length;d++) {
@@ -390,36 +438,45 @@ axs.AuditRule = function(a) {
   this.severity = a.severity;
   this.relevantNodesSelector_ = a.relevantNodesSelector;
   this.test_ = a.test;
-  this.code = a.code
+  this.code = a.code;
+  this.requiresConsoleAPI = !!a.opt_requiresConsoleAPI
 };
 axs.AuditRule.requiredFields = ["name", "severity", "relevantNodesSelector", "test", "code"];
 axs.AuditRule.NOT_APPLICABLE = {result:axs.constants.AuditResult.NA};
 axs.AuditRule.prototype.addNode = function(a, b) {
   a.push(b)
 };
-axs.AuditRule.prototype.run = function(a) {
-  var a = this.relevantNodesSelector_(a || document), b = [];
-  if(a instanceof XPathResult) {
-    if(a.resultType == XPathResult.ORDERED_NODE_SNAPSHOT_TYPE) {
-      if(!a.snapshotLength) {
+axs.AuditRule.prototype.run = function(a, b) {
+  function c(a) {
+    for(var b = 0;b < d.length;b++) {
+      if(a.webkitMatchesSelector(d[b])) {
+        return!0
+      }
+    }
+    return!1
+  }
+  var d = a || [], e = this.relevantNodesSelector_(b || document), f = [];
+  if(e instanceof XPathResult) {
+    if(e.resultType == XPathResult.ORDERED_NODE_SNAPSHOT_TYPE) {
+      if(!e.snapshotLength) {
         return axs.AuditRule.NOT_APPLICABLE
       }
-      for(var c = 0;c < a.snapshotLength;c++) {
-        var d = a.snapshotItem(c);
-        this.test_(d) && this.addNode(b, d)
+      for(var g = 0;g < e.snapshotLength;g++) {
+        var h = e.snapshotItem(g);
+        this.test_(h) && !c(h) && this.addNode(f, h)
       }
     }else {
-      return console.warn("Unknown XPath result type", a), null
+      return console.warn("Unknown XPath result type", e), null
     }
   }else {
-    if(!a.length) {
+    if(!e.length) {
       return{result:axs.constants.AuditResult.NA}
     }
-    for(c = 0;c < a.length;c++) {
-      d = a[c], this.test_(d) && this.addNode(b, d)
+    for(g = 0;g < e.length;g++) {
+      h = e[g], this.test_(h) && !c(h) && this.addNode(f, h)
     }
   }
-  return{result:b.length ? axs.constants.AuditResult.FAIL : axs.constants.AuditResult.PASS, elements:b}
+  return{result:f.length ? axs.constants.AuditResult.FAIL : axs.constants.AuditResult.PASS, elements:f}
 };
 axs.AuditRule.specs = {};
 axs.AuditRules = {};
@@ -427,14 +484,55 @@ axs.AuditRules.getRule = function(a) {
   if(!axs.AuditRules.rules) {
     axs.AuditRules.rules = {};
     for(var b in axs.AuditRule.specs) {
-      var c = axs.AuditRule.specs[b];
-      if(!c.opt_requiresConsoleAPI) {
-        var d = new axs.AuditRule(c);
-        axs.AuditRules.rules[c.name] = d
-      }
+      var c = axs.AuditRule.specs[b], d = new axs.AuditRule(c);
+      axs.AuditRules.rules[c.name] = d
     }
   }
   return axs.AuditRules.rules[a]
+};
+axs.Audit = {};
+axs.AuditConfiguration = function() {
+  this.rules_ = {};
+  this.withConsoleApi = !1
+};
+axs.AuditConfiguration.prototype = {ignoreSelectors:function(a, b) {
+  a in this.rules_ || (this.rules_[a] = {});
+  "ignore" in this.rules_[a] || (this.rules_[a].ignore = []);
+  Array.prototype.push.call(this.rules_[a].ignore, b)
+}, getIgnoreSelectors:function(a) {
+  return a in this.rules_ && "ignore" in this.rules_[a] ? this.rules_[a].ignore : []
+}};
+axs.Audit.run = function(a) {
+  var a = a || new axs.AuditConfiguration, b = a.withConsoleApi, c = [], d;
+  for(d in axs.AuditRule.specs) {
+    var e = axs.AuditRules.getRule(d);
+    if(e && !e.disabled && (b || !e.requiresConsoleAPI)) {
+      var f = a.getIgnoreSelectors(e.name), f = e.run(f);
+      f.rule = axs.utils.namedValues(e);
+      c.push(f)
+    }
+  }
+  return c
+};
+axs.Audit.createReport = function(a) {
+  var b;
+  b = "*** Begin accessibility audit results ***\nAn accessibility audit found ";
+  for(var c = 0, d = "", e = 0, f = "", g = 0;g < a.length;g++) {
+    var h = a[g];
+    h.rule.severity == axs.constants.Severity.Severe ? (e++, f += "\n\n" + axs.Audit.accessibilityErrorMessage(h)) : (c++, d += "\n\n" + axs.Audit.accessibilityErrorMessage(h))
+  }
+  0 < e && (b += e + (1 == e ? " error " : " errors "), 0 < c && (b += "and "));
+  0 < c && (b += c + (1 == c ? " warning " : " warnings "));
+  b += "on this page.\nFor more information, please see http://chromium.org/developers/accessibility/webui-accessibility-audit";
+  b += f;
+  b += d;
+  return b += "\n*** End accessibility audit results ***"
+};
+axs.Audit.accessibilityErrorMessage = function(a) {
+  for(var b = a.rule.severity == axs.constants.Severity.Severe ? "Error: " : "Warning: ", b = b + (a.rule.name + " (" + a.rule.code + ") failed on the following " + (1 == a.elements.length ? "element" : "elements")), b = 1 == a.elements.length ? b + ":" : b + (" (1 - " + Math.min(5, a.elements.length) + " of " + a.elements.length + "):"), c = Math.min(a.elements.length, 5), d = 0;d < c;d++) {
+    b += "\n" + axs.utils.getQuerySelectorText(a.elements[d])
+  }
+  return b
 };
 axs.AuditRule.specs.badAriaAttributeValue = {name:"badAriaAttributeValue", severity:axs.constants.Severity.Severe, relevantNodesSelector:function(a) {
   var b = "", c;
@@ -442,17 +540,13 @@ axs.AuditRule.specs.badAriaAttributeValue = {name:"badAriaAttributeValue", sever
     b += "[aria-" + c + "],"
   }
   b = b.substring(0, b.length - 1);
-  console.log("selector", b);
   return a.querySelectorAll(b)
 }, test:function(a) {
-  console.log("checking", a);
   for(var b in axs.constants.ARIA_PROPERTIES) {
     var c = "aria-" + b;
-    console.log("property", c);
     if(a.hasAttribute(c)) {
-      var d = a.getAttribute(c), c = axs.utils.getAriaPropertyValue(c, d, a);
-      console.log("propertyValue", c, d);
-      if(!c.valid) {
+      var d = a.getAttribute(c);
+      if(!axs.utils.getAriaPropertyValue(c, d, a).valid) {
         return!0
       }
     }
@@ -502,7 +596,11 @@ axs.AuditRule.specs.nonExistentAriaLabelledbyElement = {name:"nonExistentAriaLab
 axs.AuditRule.specs.requiredAriaAttributeMissing = {name:"requiredAriaAttributeMissing", severity:axs.constants.Severity.Severe, relevantNodesSelector:function(a) {
   return a.querySelectorAll("[role]")
 }, test:function(a) {
-  var b = axs.utils.getRole(a).details.requiredPropertiesSet, c;
+  var b = axs.utils.getRole(a);
+  if(!b.valid) {
+    return!1
+  }
+  var b = b.details.requiredPropertiesSet, c;
   for(c in b) {
     if(!a.hasAttribute(c)) {
       return!0

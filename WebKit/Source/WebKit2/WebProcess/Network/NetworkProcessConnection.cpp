@@ -31,6 +31,8 @@
 #include "WebCoreArgumentCoders.h"
 #include "WebProcess.h"
 #include "WebResourceBuffer.h"
+#include "WebResourceLoadScheduler.h"
+#include "WebResourceLoaderMessages.h"
 #include <WebCore/ResourceBuffer.h>
 
 #if ENABLE(NETWORK_PROCESS)
@@ -41,7 +43,7 @@ namespace WebKit {
 
 NetworkProcessConnection::NetworkProcessConnection(CoreIPC::Connection::Identifier connectionIdentifier)
 {
-    m_connection = CoreIPC::Connection::createClientConnection(connectionIdentifier, this, WebProcess::shared().runLoop());
+    m_connection = CoreIPC::Connection::createClientConnection(connectionIdentifier, this, RunLoop::main());
     m_connection->open();
 }
 
@@ -49,11 +51,23 @@ NetworkProcessConnection::~NetworkProcessConnection()
 {
 }
 
-void NetworkProcessConnection::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
+void NetworkProcessConnection::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageDecoder& decoder)
 {
-    if (messageID.is<CoreIPC::MessageClassWebResourceLoader>()) {
+    if (decoder.messageReceiverName() == Messages::WebResourceLoader::messageReceiverName()) {
         if (WebResourceLoader* webResourceLoader = WebProcess::shared().webResourceLoadScheduler().webResourceLoaderForIdentifier(decoder.destinationID()))
-            webResourceLoader->didReceiveWebResourceLoaderMessage(connection, messageID, decoder);
+            webResourceLoader->didReceiveWebResourceLoaderMessage(connection, decoder);
+        
+        return;
+    }
+
+    ASSERT_NOT_REACHED();
+}
+
+void NetworkProcessConnection::didReceiveSyncMessage(CoreIPC::Connection* connection, CoreIPC::MessageDecoder& decoder, OwnPtr<CoreIPC::MessageEncoder>& replyEncoder)
+{
+    if (decoder.messageReceiverName() == Messages::WebResourceLoader::messageReceiverName()) {
+        if (WebResourceLoader* webResourceLoader = WebProcess::shared().webResourceLoadScheduler().webResourceLoaderForIdentifier(decoder.destinationID()))
+            webResourceLoader->didReceiveSyncWebResourceLoaderMessage(connection, decoder, replyEncoder);
         
         return;
     }

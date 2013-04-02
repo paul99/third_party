@@ -32,6 +32,7 @@ set(JavaScriptCore_SOURCES
     API/JSContextRef.cpp
     API/JSObjectRef.cpp
     API/JSProfilerPrivate.cpp
+    API/JSScriptRef.cpp
     API/JSStringRef.cpp
     API/JSValueRef.cpp
     API/JSWeakObjectMapRefPrivate.cpp
@@ -57,8 +58,9 @@ set(JavaScriptCore_SOURCES
     bytecode/MethodOfGettingAValueProfile.cpp
     bytecode/Opcode.cpp
     bytecode/PolymorphicPutByIdList.cpp
-    bytecode/SpeculatedType.cpp
+    bytecode/PreciseJumpTargets.cpp
     bytecode/PutByIdStatus.cpp
+    bytecode/SpeculatedType.cpp
     bytecode/ReduceWhitespace.cpp
     bytecode/ResolveGlobalStatus.cpp
     bytecode/SamplingTool.cpp
@@ -77,33 +79,40 @@ set(JavaScriptCore_SOURCES
     dfg/DFGAssemblyHelpers.cpp
     dfg/DFGByteCodeParser.cpp
     dfg/DFGCapabilities.cpp
+    dfg/DFGCommon.cpp
     dfg/DFGCFAPhase.cpp
     dfg/DFGCFGSimplificationPhase.cpp
+    dfg/DFGCPSRethreadingPhase.cpp
     dfg/DFGConstantFoldingPhase.cpp
-    dfg/DFGCorrectableJumpPoint.cpp
     dfg/DFGCSEPhase.cpp
     dfg/DFGDisassembler.cpp
     dfg/DFGDominators.cpp
     dfg/DFGDriver.cpp
+    dfg/DFGEdge.cpp
     dfg/DFGFixupPhase.cpp
     dfg/DFGGraph.cpp
     dfg/DFGJITCompiler.cpp
+    dfg/DFGLongLivedState.cpp
     dfg/DFGMinifiedNode.cpp
+    dfg/DFGNode.cpp
     dfg/DFGNodeFlags.cpp
     dfg/DFGOSREntry.cpp
     dfg/DFGOSRExit.cpp
     dfg/DFGOSRExitCompiler.cpp
     dfg/DFGOSRExitCompiler32_64.cpp
     dfg/DFGOSRExitCompiler64.cpp
+    dfg/DFGOSRExitJumpPlaceholder.cpp
     dfg/DFGOperations.cpp
     dfg/DFGPhase.cpp
     dfg/DFGPredictionPropagationPhase.cpp
+    dfg/DFGPredictionInjectionPhase.cpp
     dfg/DFGRepatch.cpp
     dfg/DFGSpeculativeJIT.cpp
     dfg/DFGSpeculativeJIT32_64.cpp
     dfg/DFGSpeculativeJIT64.cpp
     dfg/DFGStructureCheckHoistingPhase.cpp
     dfg/DFGThunks.cpp
+    dfg/DFGUnificationPhase.cpp
     dfg/DFGValueSource.cpp
     dfg/DFGVariableAccessDataDump.cpp
     dfg/DFGVariableEvent.cpp
@@ -165,6 +174,7 @@ set(JavaScriptCore_SOURCES
     jit/JITPropertyAccess.cpp
     jit/JITStubRoutine.cpp
     jit/JITStubs.cpp
+    jit/JITThunks.cpp
     jit/JumpReplacementWatchpoint.cpp
     jit/ThunkGenerators.cpp
 
@@ -175,23 +185,14 @@ set(JavaScriptCore_SOURCES
     parser/SourceProviderCache.cpp
 
     profiler/ProfilerBytecode.cpp
-    profiler/ProfilerBytecode.h
     profiler/ProfilerBytecodeSequence.cpp
     profiler/ProfilerBytecodes.cpp
-    profiler/ProfilerBytecodes.h
     profiler/ProfilerCompilation.cpp
-    profiler/ProfilerCompilation.h
     profiler/ProfilerCompilationKind.cpp
-    profiler/ProfilerCompilationKind.h
     profiler/ProfilerCompiledBytecode.cpp
-    profiler/ProfilerCompiledBytecode.h
     profiler/ProfilerDatabase.cpp
-    profiler/ProfilerDatabase.h
-    profiler/ProfilerExecutionCounter.h
     profiler/ProfilerOrigin.cpp
-    profiler/ProfilerOrigin.h
     profiler/ProfilerOriginStack.cpp
-    profiler/ProfilerOriginStack.h
     profiler/ProfilerOSRExit.cpp
     profiler/ProfilerOSRExitSite.cpp
     profiler/ProfilerProfiledBytecodes.cpp
@@ -224,6 +225,7 @@ set(JavaScriptCore_SOURCES
     runtime/ExceptionHelpers.cpp
     runtime/Executable.cpp
     runtime/FunctionConstructor.cpp
+    runtime/FunctionExecutableDump.cpp
     runtime/FunctionPrototype.cpp
     runtime/GCActivityCallback.cpp
     runtime/GetterSetter.cpp
@@ -254,7 +256,7 @@ set(JavaScriptCore_SOURCES
     runtime/JSString.cpp
     runtime/JSStringJoiner.cpp
     runtime/JSSymbolTableObject.cpp
-    runtime/JSValue.cpp
+    runtime/JSCJSValue.cpp
     runtime/JSVariableObject.cpp
     runtime/JSWrapperObject.cpp
     runtime/LiteralParser.cpp
@@ -262,11 +264,8 @@ set(JavaScriptCore_SOURCES
     runtime/MathObject.cpp
     runtime/MemoryStatistics.cpp
     runtime/NameConstructor.cpp
-    runtime/NameConstructor.h
     runtime/NameInstance.cpp
-    runtime/NameInstance.h
     runtime/NamePrototype.cpp
-    runtime/NamePrototype.h
     runtime/NativeErrorConstructor.cpp
     runtime/NativeErrorPrototype.cpp
     runtime/NumberConstructor.cpp
@@ -279,6 +278,7 @@ set(JavaScriptCore_SOURCES
     runtime/PropertyDescriptor.cpp
     runtime/PropertyNameArray.cpp
     runtime/PropertySlot.cpp
+    runtime/PrototypeMap.cpp
     runtime/RegExp.cpp
     runtime/RegExpCache.cpp
     runtime/RegExpConstructor.cpp
@@ -294,6 +294,7 @@ set(JavaScriptCore_SOURCES
     runtime/StringPrototype.cpp
     runtime/StringRecursionChecker.cpp
     runtime/Structure.cpp
+    runtime/StructureRareData.cpp
     runtime/StructureChain.cpp
     runtime/SymbolTable.cpp
     runtime/TimeoutChecker.cpp
@@ -451,6 +452,7 @@ set(JavaScriptCore_FORWARDING_HEADERS_FILES
     API/JSContextRefPrivate.h
     API/JSObjectRef.h
     API/JSObjectRefPrivate.h
+    API/JSScriptRefPrivate.h
     API/JSStringRef.h
     API/JSStringRefCF.h
     API/JSStringRefBSTR.h

@@ -30,6 +30,7 @@
 #include "DataURL.h"
 #include "HTTPParsers.h"
 #include "MIMETypeRegistry.h"
+#include "NetworkingContext.h"
 #include "NotImplemented.h"
 #include "ResourceError.h"
 #include "ResourceHandleClient.h"
@@ -264,7 +265,7 @@ bool ResourceHandle::onRequestComplete()
     return false;
 }
 
-bool ResourceHandle::start(NetworkingContext* context)
+bool ResourceHandle::start()
 {
     if (firstRequest().url().isLocalFile() || firstRequest().url().protocolIsData()) {
         ref(); // balanced by deref in fileLoadTimer
@@ -276,7 +277,7 @@ bool ResourceHandle::start(NetworkingContext* context)
     }
 
     if (!d->m_internetHandle)
-        d->m_internetHandle = asynchronousInternetHandle(context->userAgent());
+        d->m_internetHandle = asynchronousInternetHandle(d->m_context->userAgent());
 
     if (!d->m_internetHandle)
         return false;
@@ -418,22 +419,16 @@ void ResourceHandle::loadResourceSynchronously(NetworkingContext* context, const
     UNUSED_PARAM(storedCredentials);
 
     WebCoreSynchronousLoader syncLoader(error, response, data, request.httpUserAgent());
-    ResourceHandle handle(request, &syncLoader, true, false);
+    ResourceHandle handle(context, request, &syncLoader, true, false);
 
     handle.setSynchronousInternetHandle(syncLoader.internetHandle());
-    handle.start(context);
+    handle.start();
 }
 
 void ResourceHandle::setSynchronousInternetHandle(HINTERNET internetHandle)
 {
     d->m_internetHandle = internetHandle;
     d->m_loadSynchronously = true;
-}
-
-bool ResourceHandle::willLoadFromCache(ResourceRequest&, Frame*)
-{
-    notImplemented();
-    return false;
 }
 
 void prefetchDNS(const String&)

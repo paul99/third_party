@@ -166,6 +166,8 @@ namespace JSC {
         static void visitChildren(JSCell*, SlotVisitor&);
 
     protected:
+        friend class JSValue;
+        
         bool isRope() const { return m_value.isNull(); }
         bool is8Bit() const { return m_flags & Is8Bit; }
         void setIs8Bit(bool flag)
@@ -333,7 +335,7 @@ namespace JSC {
 
     inline JSString* jsEmptyString(JSGlobalData* globalData)
     {
-        return globalData->smallStrings.emptyString(globalData);
+        return globalData->smallStrings.emptyString();
     }
 
     ALWAYS_INLINE JSString* jsSingleCharacterString(JSGlobalData* globalData, UChar c)
@@ -386,7 +388,7 @@ namespace JSC {
     {
         int size = s.length();
         if (!size)
-            return globalData->smallStrings.emptyString(globalData);
+            return globalData->smallStrings.emptyString();
         if (size == 1) {
             UChar c = s.characterAt(0);
             if (c <= maxSingleCharacterString)
@@ -402,7 +404,7 @@ namespace JSC {
         ASSERT(offset + length <= static_cast<unsigned>(s->length()));
         JSGlobalData* globalData = &exec->globalData();
         if (!length)
-            return globalData->smallStrings.emptyString(globalData);
+            return globalData->smallStrings.emptyString();
         return jsSubstring(globalData, s->value(exec), offset, length);
     }
 
@@ -412,7 +414,7 @@ namespace JSC {
         ASSERT(length <= static_cast<unsigned>(s.length()));
         ASSERT(offset + length <= static_cast<unsigned>(s.length()));
         if (!length)
-            return globalData->smallStrings.emptyString(globalData);
+            return globalData->smallStrings.emptyString();
         if (length == 1) {
             UChar c = s.characterAt(offset);
             if (c <= maxSingleCharacterString)
@@ -427,7 +429,7 @@ namespace JSC {
         ASSERT(length <= static_cast<unsigned>(s.length()));
         ASSERT(offset + length <= static_cast<unsigned>(s.length()));
         if (!length)
-            return globalData->smallStrings.emptyString(globalData);
+            return globalData->smallStrings.emptyString();
         if (length == 1) {
             UChar c = s.characterAt(offset);
             if (c <= maxSingleCharacterString)
@@ -440,7 +442,7 @@ namespace JSC {
     {
         int size = s.length();
         if (!size)
-            return globalData->smallStrings.emptyString(globalData);
+            return globalData->smallStrings.emptyString();
         if (size == 1) {
             UChar c = s.characterAt(0);
             if (c <= maxSingleCharacterString)
@@ -490,13 +492,6 @@ namespace JSC {
     }
 
     inline bool isJSString(JSValue v) { return v.isCell() && v.asCell()->classInfo() == &JSString::s_info; }
-
-    inline bool JSCell::toBoolean(ExecState* exec) const
-    {
-        if (isString()) 
-            return static_cast<const JSString*>(this)->toBoolean();
-        return !structure()->masqueradesAsUndefined(exec->lexicalGlobalObject());
-    }
 
     // --- JSValue inlines ----------------------------
     

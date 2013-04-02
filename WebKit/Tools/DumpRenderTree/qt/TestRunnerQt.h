@@ -56,13 +56,13 @@ class DumpRenderTree;
 class TestRunner : public QObject {
     Q_OBJECT
     Q_PROPERTY(int webHistoryItemCount READ webHistoryItemCount)
-    Q_PROPERTY(int workerThreadCount READ workerThreadCount)
     Q_PROPERTY(bool globalFlag READ globalFlag WRITE setGlobalFlag)
 public:
     TestRunner(WebCore::DumpRenderTree*);
 
     bool shouldDisallowIncreaseForApplicationCacheQuota() const { return m_disallowIncreaseForApplicationCacheQuota; }
     bool shouldDumpAsText() const { return m_textDump; }
+    bool shouldDumpAsAudio() const { return m_audioDump; }
     bool shouldDumpPixels() const { return m_shouldDumpPixels; }
     bool shouldDumpBackForwardList() const { return m_dumpBackForwardList; }
     bool shouldDumpChildrenAsText() const { return m_dumpChildrenAsText; }
@@ -77,6 +77,8 @@ public:
     bool waitForPolicy() const { return m_waitForPolicy; }
     bool ignoreReqestForPermission() const { return m_ignoreDesktopNotification; }
     bool isPrinting() { return m_isPrinting; }
+
+    const QByteArray& audioData() const { return m_audioData; }
 
     void reset();
 
@@ -105,6 +107,7 @@ public Q_SLOTS:
     void dumpDatabaseCallbacks() { m_dumpDatabaseCallbacks = true; }
     void dumpApplicationCacheDelegateCallbacks() { m_dumpApplicationCacheDelegateCallbacks = true; }
     void dumpStatusCallbacks() { m_dumpStatusCallbacks = true; }
+    void dumpNotifications();
     void setCanOpenWindows() { m_canOpenWindows = true; }
     void setPrinting() { m_isPrinting = true; }
     void waitUntilDone();
@@ -183,11 +186,7 @@ public Q_SLOTS:
     bool isCommandEnabled(const QString& name) const;
     bool findString(const QString&, const QStringList& optionArray);
 
-    bool pauseAnimationAtTimeOnElementWithId(const QString& animationName, double time, const QString& elementId);
-    bool pauseTransitionAtTimeOnElementWithId(const QString& propertyName, double time, const QString& elementId);
     bool elementDoesAutoCompleteForElementWithId(const QString& elementId);
-
-    unsigned numberOfActiveAnimations() const;
 
     void addOriginAccessWhitelistEntry(const QString& sourceOrigin, const QString& destinationProtocol, const QString& destinationHost, bool allowDestinationSubdomains);
     void removeOriginAccessWhitelistEntry(const QString& sourceOrigin, const QString& destinationProtocol, const QString& destinationHost, bool allowDestinationSubdomains);
@@ -212,7 +211,6 @@ public Q_SLOTS:
     void setUserStyleSheetLocation(const QString& url);
     void setUserStyleSheetEnabled(bool);
     void setDomainRelaxationForbiddenForURLScheme(bool forbidden, const QString& scheme);
-    int workerThreadCount();
     bool callShouldCloseOnWebView();
     // For now, this is a no-op. This may change depending on outcome of
     // https://bugs.webkit.org/show_bug.cgi?id=33333
@@ -275,6 +273,8 @@ public Q_SLOTS:
     void setAlwaysAcceptCookies(bool);
     void setAlwaysBlockCookies(bool);
 
+    void setAudioData(const QByteArray&);
+
 private Q_SLOTS:
     void processWork();
 
@@ -284,6 +284,7 @@ private:
 private:
     bool m_hasDumped;
     bool m_textDump;
+    bool m_audioDump;
     bool m_shouldDumpPixels;
     bool m_disallowIncreaseForApplicationCacheQuota;
     bool m_dumpBackForwardList;
@@ -309,8 +310,9 @@ private:
     QWebFrame* m_topLoadingFrame;
     WebCore::DumpRenderTree* m_drt;
     QWebHistory* m_webHistory;
-    QStringList m_desktopNotificationAllowedOrigins;
     bool m_ignoreDesktopNotification;
+
+    QByteArray m_audioData;
 
     bool m_shouldTimeout;
     int m_timeout;

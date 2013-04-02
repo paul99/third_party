@@ -25,6 +25,7 @@
 #if PLATFORM(QT)
 #include "NativeImageQt.h"
 #endif
+#include "NotImplemented.h"
 
 
 #if USE(TEXTURE_MAPPER)
@@ -164,19 +165,30 @@ void TextureMapperImageBuffer::drawSolidColor(const FloatRect& rect, const Trans
     context->restore();
 }
 
+void TextureMapperImageBuffer::drawBorder(const Color&, float /* borderWidth */, const FloatRect&, const TransformationMatrix&)
+{
+    notImplemented();
+}
+
+void TextureMapperImageBuffer::drawRepaintCounter(int /* repaintCount */, const Color&, const FloatPoint&, const TransformationMatrix&)
+{
+    notImplemented();
+}
+
 #if ENABLE(CSS_FILTERS)
 PassRefPtr<BitmapTexture> BitmapTextureImageBuffer::applyFilters(TextureMapper*, const BitmapTexture& contentTexture, const FilterOperations& filters)
 {
     RefPtr<FilterEffectRenderer> renderer = FilterEffectRenderer::create();
     renderer->setSourceImageRect(FloatRect(FloatPoint::zero(), contentTexture.size()));
 
-    // The document parameter is only needed for CSS shaders.
-    renderer->build(0 /*document */, filters);
-    renderer->allocateBackingStoreIfNeeded();
-    GraphicsContext* context = renderer->inputContext();
-    context->drawImageBuffer(static_cast<const BitmapTextureImageBuffer&>(contentTexture).m_image.get(), ColorSpaceDeviceRGB, IntPoint::zero());
-    renderer->apply();
-    m_image->context()->drawImageBuffer(renderer->output(), ColorSpaceDeviceRGB, renderer->outputRect());
+    // The renderer parameter is only needed for CSS shaders and reference filters.
+    if (renderer->build(0 /*renderer */, filters)) {
+        renderer->allocateBackingStoreIfNeeded();
+        GraphicsContext* context = renderer->inputContext();
+        context->drawImageBuffer(static_cast<const BitmapTextureImageBuffer&>(contentTexture).m_image.get(), ColorSpaceDeviceRGB, IntPoint::zero());
+        renderer->apply();
+        m_image->context()->drawImageBuffer(renderer->output(), ColorSpaceDeviceRGB, renderer->outputRect());
+    }
     return this;
 }
 #endif

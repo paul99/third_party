@@ -27,7 +27,7 @@
 #include "config.h"
 #include "ewk_settings.h"
 
-#include "EwkViewImpl.h"
+#include "EwkView.h"
 #include "ewk_settings_private.h"
 #include <WebKit2/WebPageGroup.h>
 #include <WebKit2/WebPageProxy.h>
@@ -45,12 +45,12 @@ using namespace WebKit;
 
 const WebKit::WebPreferences* EwkSettings::preferences() const
 {
-    return m_viewImpl->page()->pageGroup()->preferences();
+    return m_view->page()->pageGroup()->preferences();
 }
 
 WebKit::WebPreferences* EwkSettings::preferences()
 {
-    return m_viewImpl->page()->pageGroup()->preferences();
+    return m_view->page()->pageGroup()->preferences();
 }
 
 #if ENABLE(SPELLCHECK)
@@ -89,6 +89,8 @@ Eina_Bool ewk_settings_fullscreen_enabled_set(Ewk_Settings* settings, Eina_Bool 
     settings->preferences()->setFullScreenEnabled(enable);
     return true;
 #else
+    UNUSED_PARAM(settings);
+    UNUSED_PARAM(enable);
     return false;
 #endif
 }
@@ -99,6 +101,7 @@ Eina_Bool ewk_settings_fullscreen_enabled_get(const Ewk_Settings* settings)
     EINA_SAFETY_ON_NULL_RETURN_VAL(settings, false);
     return settings->preferences()->fullScreenEnabled();
 #else
+    UNUSED_PARAM(settings);
     return false;
 #endif
 }

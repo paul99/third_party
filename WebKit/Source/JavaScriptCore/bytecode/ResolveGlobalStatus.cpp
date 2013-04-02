@@ -27,7 +27,8 @@
 #include "ResolveGlobalStatus.h"
 
 #include "CodeBlock.h"
-#include "JSValue.h"
+#include "JSCJSValue.h"
+#include "Operations.h"
 #include "Structure.h"
 
 namespace JSC {

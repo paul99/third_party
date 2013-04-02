@@ -39,8 +39,7 @@ inline Butterfly* Butterfly::createUninitialized(JSGlobalData& globalData, size_
 {
     void* temp;
     size_t size = totalSize(preCapacity, propertyCapacity, hasIndexingHeader, indexingPayloadSizeInBytes);
-    if (!globalData.heap.tryAllocateStorage(size, &temp))
-        CRASH();
+    RELEASE_ASSERT(globalData.heap.tryAllocateStorage(size, &temp));
     Butterfly* result = fromBase(temp, preCapacity, propertyCapacity);
     return result;
 }
@@ -75,7 +74,7 @@ inline void* Butterfly::base(Structure* structure)
 
 inline Butterfly* Butterfly::growPropertyStorage(JSGlobalData& globalData, size_t preCapacity, size_t oldPropertyCapacity, bool hasIndexingHeader, size_t indexingPayloadSizeInBytes, size_t newPropertyCapacity)
 {
-    ASSERT(newPropertyCapacity > oldPropertyCapacity);
+    RELEASE_ASSERT(newPropertyCapacity > oldPropertyCapacity);
     Butterfly* result = createUninitialized(
         globalData, preCapacity, newPropertyCapacity, hasIndexingHeader, indexingPayloadSizeInBytes);
     memcpy(
@@ -97,6 +96,13 @@ inline Butterfly* Butterfly::growPropertyStorage(JSGlobalData& globalData, Struc
 {
     return growPropertyStorage(
         globalData, oldStructure, oldStructure->outOfLineCapacity(), newPropertyCapacity);
+}
+
+inline Butterfly* Butterfly::createOrGrowArrayRight(Butterfly* oldButterfly, JSGlobalData& globalData, Structure* oldStructure, size_t propertyCapacity, bool hadIndexingHeader, size_t oldIndexingPayloadSizeInBytes, size_t newIndexingPayloadSizeInBytes)
+{
+    if (!oldButterfly)
+        return create(globalData, 0, propertyCapacity, true, IndexingHeader(), newIndexingPayloadSizeInBytes);
+    return oldButterfly->growArrayRight(globalData, oldStructure, propertyCapacity, hadIndexingHeader, oldIndexingPayloadSizeInBytes, newIndexingPayloadSizeInBytes);
 }
 
 inline Butterfly* Butterfly::growArrayRight(JSGlobalData& globalData, Structure* oldStructure, size_t propertyCapacity, bool hadIndexingHeader, size_t oldIndexingPayloadSizeInBytes, size_t newIndexingPayloadSizeInBytes)

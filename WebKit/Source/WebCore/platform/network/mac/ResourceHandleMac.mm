@@ -33,7 +33,6 @@
 #import "BlobRegistry.h"
 #import "BlockExceptions.h"
 #import "CookieStorage.h"
-#import "CookieStorageCFNet.h"
 #import "CredentialStorage.h"
 #import "CachedResourceLoader.h"
 #import "EmptyProtocolDefinitions.h"
@@ -42,6 +41,7 @@
 #import "FrameLoader.h"
 #import "Logging.h"
 #import "MIMETypeRegistry.h"
+#import "NetworkingContext.h"
 #import "Page.h"
 #import "ResourceError.h"
 #import "ResourceResponse.h"
@@ -147,7 +147,7 @@ static bool shouldRelaxThirdPartyCookiePolicy(NetworkingContext* context, const 
 {
     // If a URL already has cookies, then we'll relax the 3rd party cookie policy and accept new cookies.
 
-    RetainPtr<CFHTTPCookieStorageRef> cfCookieStorage = currentCFHTTPCookieStorage(context);
+    RetainPtr<CFHTTPCookieStorageRef> cfCookieStorage = context->storageSession().cookieStorage();
     NSHTTPCookieAcceptPolicy cookieAcceptPolicy = static_cast<NSHTTPCookieAcceptPolicy>(wkGetHTTPCookieAcceptPolicy(cfCookieStorage.get()));
 
     if (cookieAcceptPolicy != NSHTTPCookieAcceptPolicyOnlyFromMainDocumentDomain)
@@ -218,19 +218,19 @@ void ResourceHandle::createNSURLConnection(id delegate, bool shouldUseCredential
 
 }
 
-bool ResourceHandle::start(NetworkingContext* context)
+bool ResourceHandle::start()
 {
-    if (!context)
+    if (!d->m_context)
         return false;
 
     BEGIN_BLOCK_OBJC_EXCEPTIONS;
 
     // If NetworkingContext is invalid then we are no longer attached to a Page,
     // this must be an attempted load from an unload event handler, so let's just block it.
-    if (!context->isValid())
+    if (!d->m_context->isValid())
         return false;
 
-    d->m_storageSession = context->storageSession();
+    d->m_storageSession = d->m_context->storageSession().platformSession();
 
     ASSERT(!d->m_proxy);
     d->m_proxy.adoptNS(wkCreateNSURLConnectionDelegateProxy());
@@ -238,16 +238,16 @@ bool ResourceHandle::start(NetworkingContext* context)
 
     bool shouldUseCredentialStorage = !client() || client()->shouldUseCredentialStorage(this);
 
-    d->m_needsSiteSpecificQuirks = context->needsSiteSpecificQuirks();
+    d->m_needsSiteSpecificQuirks = d->m_context->needsSiteSpecificQuirks();
 
     createNSURLConnection(
         d->m_proxy.get(),
         shouldUseCredentialStorage,
-        shouldRelaxThirdPartyCookiePolicy(context, firstRequest().url()),
-        d->m_shouldContentSniff || context->localFileContentSniffingEnabled());
+        shouldRelaxThirdPartyCookiePolicy(d->m_context.get(), firstRequest().url()),
+        d->m_shouldContentSniff || d->m_context->localFileContentSniffingEnabled());
 
     bool scheduled = false;
-    if (SchedulePairHashSet* scheduledPairs = context->scheduledRunLoopPairs()) {
+    if (SchedulePairHashSet* scheduledPairs = d->m_context->scheduledRunLoopPairs()) {
         SchedulePairHashSet::iterator end = scheduledPairs->end();
         for (SchedulePairHashSet::iterator it = scheduledPairs->begin(); it != end; ++it) {
             if (NSRunLoop *runLoop = (*it)->nsRunLoop()) {
@@ -257,7 +257,7 @@ bool ResourceHandle::start(NetworkingContext* context)
         }
     }
 
-    if (NSOperationQueue *operationQueue = context->scheduledOperationQueue()) {
+    if (NSOperationQueue *operationQueue = d->m_context->scheduledOperationQueue()) {
         ASSERT(!scheduled);
         [connection() setDelegateQueue:operationQueue];
         scheduled = true;
@@ -287,12 +287,6 @@ bool ResourceHandle::start(NetworkingContext* context)
 void ResourceHandle::cancel()
 {
     LOG(Network, "Handle %p cancel connection %p", this, d->m_connection.get());
-
-    if (!d->m_proxy) {
-        // If the proxy is null, the connection has been handed off to NSURLDownload, so ResourceHandle should not cancel it.
-        // FIXME: We should do what we do in the CFNetwork port and null out the NSURLConnection object instead.
-        return;
-    }
 
     // Leaks were seen on HTTP tests without this; can be removed once <rdar://problem/6886937> is fixed.
     if (d->m_currentMacChallenge)
@@ -363,19 +357,6 @@ bool ResourceHandle::loadsBlocked()
     return false;
 }
 
-bool ResourceHandle::willLoadFromCache(ResourceRequest& request, Frame*)
-{
-    request.setCachePolicy(ReturnCacheDataDontLoad);
-    NSURLResponse *nsURLResponse = nil;
-    BEGIN_BLOCK_OBJC_EXCEPTIONS;
-
-    [NSURLConnection sendSynchronousRequest:request.nsURLRequest() returningResponse:&nsURLResponse error:nil];
-    
-    END_BLOCK_OBJC_EXCEPTIONS;
-    
-    return nsURLResponse;
-}
-
 CFStringRef ResourceHandle::synchronousLoadRunLoopMode()
 {
     return CFSTR("WebCoreSynchronousLoaderRunLoopMode");
@@ -400,9 +381,9 @@ void ResourceHandle::loadResourceSynchronously(NetworkingContext* context, const
     OwnPtr<WebCoreSynchronousLoaderClient> client = WebCoreSynchronousLoaderClient::create();
     client->setAllowStoredCredentials(storedCredentials == AllowStoredCredentials);
 
-    RefPtr<ResourceHandle> handle = adoptRef(new ResourceHandle(request, client.get(), false /*defersLoading*/, true /*shouldContentSniff*/));
+    RefPtr<ResourceHandle> handle = adoptRef(new ResourceHandle(context, request, client.get(), false /*defersLoading*/, true /*shouldContentSniff*/));
 
-    handle->d->m_storageSession = context->storageSession();
+    handle->d->m_storageSession = context->storageSession().platformSession();
 
     if (context && handle->d->m_scheduledFailureType != NoFailure) {
         error = context->blockedError(request);
@@ -478,10 +459,12 @@ void ResourceHandle::willSendRequest(ResourceRequest& request, const ResourceRes
         }
     }
 
-    if (d->m_storageSession)
-        request.setStorageSession(d->m_storageSession.get());
-
+    RefPtr<ResourceHandle> protect(this);
     client()->willSendRequest(this, request, redirectResponse);
+
+    // Client call may not preserve the session, especially if the request is sent over IPC.
+    if (!request.isNull())
+        request.setStorageSession(d->m_storageSession.get());
 }
 
 bool ResourceHandle::shouldUseCredentialStorage()
@@ -685,7 +668,7 @@ void ResourceHandle::receivedCancellation(const AuthenticationChallenge& challen
     ResourceRequest request = newRequest;
 
     // Should not set Referer after a redirect from a secure resource to non-secure one.
-    if (!request.url().protocolIs("https") && protocolIs(request.httpReferrer(), "https"))
+    if (!request.url().protocolIs("https") && protocolIs(request.httpReferrer(), "https") && m_handle->context()->shouldClearReferrerOnHTTPSToHTTPRedirect())
         request.clearHTTPReferrer();
 
     m_handle->willSendRequest(request, redirectResponse);

@@ -25,11 +25,12 @@
 
 #include "CallFrame.h"
 #include "CodeProfiling.h"
+#include "Debugger.h"
+#include "Interpreter.h"
 #include "JSGlobalObject.h"
 #include "JSLock.h"
-#include "Interpreter.h"
+#include "Operations.h"
 #include "Parser.h"
-#include "Debugger.h"
 #include <wtf/WTFThreadData.h>
 #include <stdio.h>
 
@@ -38,7 +39,7 @@ namespace JSC {
 bool checkSyntax(ExecState* exec, const SourceCode& source, JSValue* returnedException)
 {
     JSLockHolder lock(exec);
-    ASSERT(exec->globalData().identifierTable == wtfThreadData().currentIdentifierTable());
+    RELEASE_ASSERT(exec->globalData().identifierTable == wtfThreadData().currentIdentifierTable());
 
     ProgramExecutable* program = ProgramExecutable::create(exec, source);
     JSObject* error = program->checkSyntax(exec);
@@ -54,9 +55,8 @@ bool checkSyntax(ExecState* exec, const SourceCode& source, JSValue* returnedExc
 JSValue evaluate(ExecState* exec, const SourceCode& source, JSValue thisValue, JSValue* returnedException)
 {
     JSLockHolder lock(exec);
-    ASSERT(exec->globalData().identifierTable == wtfThreadData().currentIdentifierTable());
-    if (exec->globalData().isCollectorBusy())
-        CRASH();
+    RELEASE_ASSERT(exec->globalData().identifierTable == wtfThreadData().currentIdentifierTable());
+    RELEASE_ASSERT(!exec->globalData().isCollectorBusy());
 
     CodeProfiling profile(source);
 
@@ -82,7 +82,7 @@ JSValue evaluate(ExecState* exec, const SourceCode& source, JSValue thisValue, J
         return jsUndefined();
     }
 
-    ASSERT(result);
+    RELEASE_ASSERT(result);
     return result;
 }
 

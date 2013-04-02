@@ -180,7 +180,8 @@ _PATH_RULES_SPECIFIER = [
 
     ([# The GTK+ API use upper case, underscore separated, words in
       # certain types of enums (e.g. signals, properties).
-      "Source/WebKit2/UIProcess/API/gtk"],
+      "Source/WebKit2/UIProcess/API/gtk",
+      "Source/WebKit2/WebProcess/InjectedBundle/API/gtk"],
      ["-readability/enum_casing"]),
 
     ([# Header files in ForwardingHeaders have no header guards or
@@ -221,10 +222,13 @@ _PATH_RULES_SPECIFIER = [
     ([# The WebKit2 C API has names with underscores and whitespace-aligned
       # struct members. Also, we allow unnecessary parameter names in
       # WebKit2 APIs because we're matching CF's header style.
+      # Additionally, we use word which starts with non-capital letter 'k'
+      # for types of enums.
       "Source/WebKit2/UIProcess/API/C/",
       "Source/WebKit2/Shared/API/c/",
       "Source/WebKit2/WebProcess/InjectedBundle/API/c/"],
-     ["-readability/naming",
+     ["-readability/enum_casing",
+      "-readability/naming",
       "-readability/parameter_name",
       "-whitespace/declaration"]),
     ([# These files define GObjects, which implies some definitions of
@@ -329,7 +333,9 @@ _SKIPPED_FILES_WITH_WARNING = [
     # except those ending in ...Private.h are GTK+ API headers,
     # which differ greatly from WebKit coding style.
     re.compile(r'Source/WebKit2/UIProcess/API/gtk/WebKit(?!.*Private\.h).*\.h$'),
-    'Source/WebKit2/UIProcess/API/gtk/webkit2.h']
+    re.compile(r'Source/WebKit2/WebProcess/InjectedBundle/API/gtk/WebKit(?!.*Private\.h).*\.h$'),
+    'Source/WebKit2/UIProcess/API/gtk/webkit2.h',
+    'Source/WebKit2/WebProcess/InjectedBundle/API/gtk/webkit-web-extension.h']
 
 # Files to skip that are more common or obvious.
 #
@@ -337,6 +343,7 @@ _SKIPPED_FILES_WITH_WARNING = [
 # with FileType.NONE are automatically skipped without warning.
 _SKIPPED_FILES_WITHOUT_WARNING = [
     "LayoutTests" + os.path.sep,
+    "Source/ThirdParty/leveldb" + os.path.sep,
     # Prevents this being recognized as a text file.
     "Source/WebCore/GNUmakefile.features.am.in",
     ]

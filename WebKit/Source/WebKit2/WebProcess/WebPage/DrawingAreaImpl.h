@@ -74,16 +74,12 @@ private:
     virtual void scheduleCompositingLayerFlush() OVERRIDE;
 #endif
 
-#if PLATFORM(WIN)
-    virtual void scheduleChildWindowGeometryUpdate(const WindowGeometry&);
-#endif
-
 #if PLATFORM(MAC)
     virtual void setLayerHostingMode(uint32_t) OVERRIDE;
 #endif
 
 #if USE(COORDINATED_GRAPHICS)
-    virtual void didReceiveCoordinatedLayerTreeHostMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
+    virtual void didReceiveCoordinatedLayerTreeHostMessage(CoreIPC::Connection*, CoreIPC::MessageDecoder&);
 #endif
 
     // CoreIPC message handlers.

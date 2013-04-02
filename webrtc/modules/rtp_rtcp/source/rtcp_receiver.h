@@ -27,7 +27,7 @@ class ModuleRtpRtcpImpl;
 class RTCPReceiver : public TMMBRHelp
 {
 public:
-    RTCPReceiver(const WebRtc_Word32 id, RtpRtcpClock* clock,
+    RTCPReceiver(const WebRtc_Word32 id, Clock* clock,
                  ModuleRtpRtcpImpl* owner);
     virtual ~RTCPReceiver();
 
@@ -37,6 +37,7 @@ public:
     WebRtc_Word32 SetRTCPStatus(const RTCPMethod method);
 
     WebRtc_Word64 LastReceived();
+    WebRtc_Word64 LastReceivedReceiverReport() const;
 
     void SetSSRC( const WebRtc_UWord32 ssrc);
     void SetRelaySSRC( const WebRtc_UWord32 ssrc);
@@ -82,6 +83,16 @@ public:
     // get statistics
     WebRtc_Word32 StatisticsReceived(
         std::vector<RTCPReportBlock>* receiveBlocks) const;
+
+    // Returns true if we haven't received an RTCP RR for several RTCP
+    // intervals, but only triggers true once.
+    bool RtcpRrTimeout(int64_t rtcp_interval_ms);
+
+    // Returns true if we haven't received an RTCP RR telling the receive side
+    // has not received RTP packets for too long, i.e. extended highest sequence
+    // number hasn't increased for several RTCP intervals. The function only
+    // returns true once until a new RR is received.
+    bool RtcpRrSequenceNumberTimeout(int64_t rtcp_interval_ms);
 
     // Get TMMBR
     WebRtc_Word32 TMMBRReceived(const WebRtc_UWord32 size,
@@ -187,8 +198,10 @@ protected:
                        RTCPHelp::RTCPPacketInformation& rtcpPacketInformation);
 
  private:
+  typedef std::map<WebRtc_UWord32, RTCPHelp::RTCPReceiveInformation*>
+      ReceivedInfoMap;
   WebRtc_Word32           _id;
-  RtpRtcpClock&           _clock;
+  Clock*                  _clock;
   RTCPMethod              _method;
   WebRtc_Word64           _lastReceived;
   ModuleRtpRtcpImpl&      _rtpRtcp;
@@ -211,12 +224,18 @@ protected:
   // Received report blocks.
   std::map<WebRtc_UWord32, RTCPHelp::RTCPReportBlockInformation*>
       _receivedReportBlockMap;
-  std::map<WebRtc_UWord32, RTCPHelp::RTCPReceiveInformation*>
-      _receivedInfoMap;
+  ReceivedInfoMap _receivedInfoMap;
   std::map<WebRtc_UWord32, RTCPUtility::RTCPCnameInformation*>
       _receivedCnameMap;
 
   WebRtc_UWord32            _packetTimeOutMS;
+
+  // The last time we received an RTCP RR.
+  int64_t _lastReceivedRrMs;
+
+  // The time we last received an RTCP RR telling we have ssuccessfully
+  // delivered RTP packet to the remote side.
+  int64_t _lastIncreasedSequenceNumberMs;
 
   // Externally set RTT. This value can only be used if there are no valid
   // RTT estimates.

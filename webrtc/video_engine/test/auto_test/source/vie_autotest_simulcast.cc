@@ -437,10 +437,12 @@ int VideoEngineSimulcastTest(void* window1, void* window2) {
     }
   }
 
-  ext_transport.SetPacketLoss(0);
-
-  // Set network delay value.
-  ext_transport.SetNetworkDelay(10);
+  // Set network one-way delay value.
+  // 10 ms one-way delay.
+  NetworkParameters network;
+  network.loss_model = kUniformLoss;
+  network.mean_one_way_delay = 10;
+  ext_transport.SetNetworkParameters(network);
 
   if (relay_mode == kRelayOneStream) {
     ext_transport.SetSSRCFilter(num_streams);

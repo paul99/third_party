@@ -129,6 +129,8 @@ class InvalidationClientImplTest : public UnitTestBase {
   // components and setting up common expectations for certain mock objects.
   virtual void SetUp() {
     UnitTestBase::SetUp();
+    InitCommonExpectations();  // Set up expectations for common mock operations
+
 
     // Clear throttle limits so that it does not interfere with any test.
     InvalidationClientImpl::InitConfig(&config);
@@ -416,8 +418,7 @@ TEST_F(InvalidationClientImplTest, IncomingAuthErrorMessage) {
   EXPECT_CALL(listener, InformRegistrationStatus(Eq(client.get()), Eq(oids[0]),
       InvalidationListener::REGISTERED));
 
-  // Expect error and registration failure from the ticl + a schedule for
-  // ticl.stop.
+  // Expect error and registration failure from the ticl.
   EXPECT_CALL(listener, InformError(Eq(client.get()), _));
   EXPECT_CALL(listener, InformRegistrationFailure(Eq(client.get()), Eq(oids[0]),
       Eq(false), _));

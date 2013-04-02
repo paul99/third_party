@@ -514,7 +514,7 @@ bool FrameLoaderClientBlackBerry::canShowMIMETypeAsHTML(const String&) const
 
 bool FrameLoaderClientBlackBerry::isMainFrame() const
 {
-    return m_frame == m_webPagePrivate->m_mainFrame;
+    return m_webPagePrivate && m_frame == m_webPagePrivate->m_mainFrame;
 }
 
 void FrameLoaderClientBlackBerry::dispatchDidStartProvisionalLoad()
@@ -590,6 +590,10 @@ void FrameLoaderClientBlackBerry::dispatchDidCommitLoad()
 
 void FrameLoaderClientBlackBerry::dispatchDidHandleOnloadEvents()
 {
+    // Onload event handler may have detached the frame from the page.
+    if (!m_frame->page())
+        return;
+
     m_webPagePrivate->m_client->notifyDocumentOnLoad(isMainFrame());
     if (m_webPagePrivate->m_dumpRenderTree)
         m_webPagePrivate->m_dumpRenderTree->didHandleOnloadEventsForFrame(m_frame);
@@ -894,12 +898,7 @@ void FrameLoaderClientBlackBerry::dispatchDidLayout(LayoutMilestones milestones)
         if (m_webPagePrivate->shouldZoomToInitialScaleOnLoad()) {
             BackingStorePrivate* backingStorePrivate = m_webPagePrivate->m_backingStore->d;
             m_webPagePrivate->zoomToInitialScaleOnLoad(); // Set the proper zoom level first.
-            backingStorePrivate->clearVisibleZoom(); // Clear the visible zoom since we're explicitly rendering+blitting below.
-            if (backingStorePrivate->renderVisibleContents()) {
-                if (!backingStorePrivate->shouldDirectRenderingToWindow())
-                    backingStorePrivate->blitVisibleContents();
-                m_webPagePrivate->m_client->notifyPixelContentRendered(backingStorePrivate->visibleContentsRect());
-            }
+            backingStorePrivate->renderAndBlitVisibleContentsImmediately();
         }
 
         m_webPagePrivate->m_client->notifyFirstVisuallyNonEmptyLayout();
@@ -972,8 +971,7 @@ void FrameLoaderClientBlackBerry::notifyBackForwardListChanged() const
 
 Frame* FrameLoaderClientBlackBerry::dispatchCreatePage(const NavigationAction& navigation)
 {
-    UNUSED_PARAM(navigation);
-    WebPage* webPage = m_webPagePrivate->m_client->createWindow(0, 0, -1, -1, WebPageClient::FlagWindowDefault, BlackBerry::Platform::String::emptyString(), BlackBerry::Platform::String::emptyString());
+    WebPage* webPage = m_webPagePrivate->m_client->createWindow(0, 0, -1, -1, WebPageClient::FlagWindowDefault, navigation.url().string(), BlackBerry::Platform::String::emptyString());
     if (!webPage)
         return 0;
 
@@ -982,11 +980,18 @@ Frame* FrameLoaderClientBlackBerry::dispatchCreatePage(const NavigationAction& n
 
 void FrameLoaderClientBlackBerry::detachedFromParent2()
 {
+    // It is possible this function is called from CachedFrame::destroy() after the frame is detached from its previous page.
+    if (!m_webPagePrivate)
+        return;
+
     if (m_frame->document())
         m_webPagePrivate->clearDocumentData(m_frame->document());
 
     m_webPagePrivate->frameUnloaded(m_frame);
     m_webPagePrivate->m_client->notifyFrameDetached(m_frame);
+
+    // Do not access the page again from this point.
+    m_webPagePrivate = 0;
 }
 
 void FrameLoaderClientBlackBerry::dispatchWillSendRequest(DocumentLoader* docLoader, long unsigned, ResourceRequest& request, const ResourceResponse&)
@@ -1064,7 +1069,11 @@ void FrameLoaderClientBlackBerry::saveViewStateToItem(HistoryItem* item)
     HistoryItemViewState& viewState = item->viewState();
     if (viewState.shouldSaveViewState) {
         viewState.orientation = m_webPagePrivate->mainFrame()->orientation();
-        viewState.isZoomToFitScale = m_webPagePrivate->currentScale() == m_webPagePrivate->zoomToFitScale();
+        viewState.isZoomToFitScale = fabsf(m_webPagePrivate->currentScale() - m_webPagePrivate->zoomToFitScale()) < 0.01;
+        // FIXME: for the web page which has viewport, if the page was rotated, we can get the correct scale
+        // as initial-scale or zoomToFitScale isn't changed most of the time and the scale can still be clamped
+        // during zoomAboutPoint when restoring the view state. However, there are still chances to get the
+        // wrong scale in theory, we don't have a way to save the scale of the previous orientation currently.
         viewState.scale = m_webPagePrivate->currentScale();
         viewState.shouldReflowBlock = m_webPagePrivate->m_shouldReflowBlock;
         viewState.minimumScale = m_webPagePrivate->m_minimumScale;
@@ -1128,6 +1137,8 @@ void FrameLoaderClientBlackBerry::restoreViewState()
     bool scaleChanged = scale != m_webPagePrivate->currentScale();
     bool reflowChanged = shouldReflowBlock != m_webPagePrivate->m_shouldReflowBlock;
     bool orientationChanged = viewState.orientation % 180 != m_webPagePrivate->mainFrame()->orientation() % 180;
+
+    m_webPagePrivate->m_inputHandler->restoreViewState();
 
     if (!scrollChanged && !scaleChanged && !reflowChanged && !orientationChanged)
         return;
@@ -1261,6 +1272,11 @@ void FrameLoaderClientBlackBerry::didSaveToPageCache()
     // When page goes into PageCache, clean up any possible
     // document data cache we might have.
     m_webPagePrivate->clearDocumentData(m_frame->document());
+
+    if (!isMainFrame()) {
+        // Clear the reference to the WebPagePrivate object as the page may be destroyed when the frame is still in the page cache.
+        m_webPagePrivate = 0;
+    }
 }
 
 void FrameLoaderClientBlackBerry::provisionalLoadStarted()
@@ -1281,6 +1297,11 @@ ResourceError FrameLoaderClientBlackBerry::cannotShowURLError(const ResourceRequ
 
 void FrameLoaderClientBlackBerry::didRestoreFromPageCache()
 {
+    if (!isMainFrame()) {
+        // Reconnect to the WebPagePrivate object now. We know the page must exist at this point.
+        m_webPagePrivate = static_cast<FrameLoaderClientBlackBerry*>(m_frame->page()->mainFrame()->loader()->client())->m_webPagePrivate;
+    }
+
     m_webPagePrivate->m_didRestoreFromPageCache = true;
 }
 

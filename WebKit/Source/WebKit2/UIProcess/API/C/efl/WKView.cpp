@@ -20,32 +20,85 @@
 #include "config.h"
 #include "WKView.h"
 
-#include "EwkViewImpl.h"
+#include "EwkView.h"
 #include "WKAPICast.h"
-#include "ewk_view_private.h"
+#include "ewk_context_private.h"
+#include <WebKit2/WKImageCairo.h>
 
 using namespace WebKit;
 
+static inline WKViewRef createWKView(Evas* canvas, WKContextRef contextRef, WKPageGroupRef pageGroupRef, EwkView::ViewBehavior behavior)
+{
+    RefPtr<EwkContext> context = contextRef ? EwkContext::create(contextRef) : EwkContext::defaultContext();
+    Evas_Object* evasObject = EwkView::createEvasObject(canvas, context, pageGroupRef, behavior);
+    if (!evasObject)
+        return 0;
+
+    return static_cast<WKViewRef>(WKRetain(toEwkView(evasObject)->wkView()));
+}
+
 WKViewRef WKViewCreate(Evas* canvas, WKContextRef contextRef, WKPageGroupRef pageGroupRef)
 {
-    return toAPI(ewk_view_base_add(canvas, contextRef, pageGroupRef, EwkViewImpl::LegacyBehavior));
+    return createWKView(canvas, contextRef, pageGroupRef, EwkView::LegacyBehavior);
 }
 
 WKViewRef WKViewCreateWithFixedLayout(Evas* canvas, WKContextRef contextRef, WKPageGroupRef pageGroupRef)
 {
-    return toAPI(ewk_view_base_add(canvas, contextRef, pageGroupRef, EwkViewImpl::DefaultBehavior));
+    return createWKView(canvas, contextRef, pageGroupRef, EwkView::DefaultBehavior);
+}
+
+void WKViewInitialize(WKViewRef viewRef)
+{
+    toImpl(viewRef)->initialize();
 }
 
 WKPageRef WKViewGetPage(WKViewRef viewRef)
 {
-    EwkViewImpl* viewImpl = EwkViewImpl::fromEvasObject(toImpl(viewRef));
-
-    return viewImpl->wkPage();
+    return toImpl(viewRef)->pageRef();
 }
 
-WKImageRef WKViewGetSnapshot(WKViewRef viewRef)
+void WKViewSetDrawsBackground(WKViewRef viewRef, bool flag)
 {
-    EwkViewImpl* viewImpl = EwkViewImpl::fromEvasObject(toImpl(viewRef));
+    toImpl(viewRef)->setDrawsBackground(flag);
+}
 
-    return viewImpl->takeSnapshot();
+bool WKViewGetDrawsBackground(WKViewRef viewRef)
+{
+    return toImpl(viewRef)->drawsBackground();
+}
+
+void WKViewSetDrawsTransparentBackground(WKViewRef viewRef, bool flag)
+{
+    toImpl(viewRef)->setDrawsTransparentBackground(flag);
+}
+
+bool WKViewGetDrawsTransparentBackground(WKViewRef viewRef)
+{
+    return toImpl(viewRef)->drawsTransparentBackground();
+}
+
+void WKViewSetThemePath(WKViewRef viewRef, WKStringRef theme)
+{
+    toImpl(viewRef)->setThemePath(theme);
+}
+
+void WKViewSuspendActiveDOMObjectsAndAnimations(WKViewRef viewRef)
+{
+    toImpl(viewRef)->suspendActiveDOMObjectsAndAnimations();
+}
+
+void WKViewResumeActiveDOMObjectsAndAnimations(WKViewRef viewRef)
+{
+    toImpl(viewRef)->resumeActiveDOMObjectsAndAnimations();
+}
+
+Evas_Object* WKViewGetEvasObject(WKViewRef viewRef)
+{
+    return toImpl(viewRef)->evasObject();
+}
+
+WKImageRef WKViewCreateSnapshot(WKViewRef viewRef)
+{
+    EwkView* ewkView = toEwkView(toImpl(viewRef)->evasObject());
+    return WKImageCreateFromCairoSurface(ewkView->takeSnapshot().get(), 0 /* options */);
 }

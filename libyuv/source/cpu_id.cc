@@ -138,9 +138,8 @@ static int MipsCpuCaps(const char* search_string) {
 #endif
 
 // CPU detect function for SIMD instruction sets.
-// TODO(fbarchard): Use constant if/when valgrind says cpu_info is initialized.
 LIBYUV_API
-int cpu_info_ = 1;  // 1 means cpu info is not initialized yet.
+int cpu_info_ = kCpuInit;  // cpu_info is not initialized yet.
 
 // Test environment variable for disabling CPU features. Any non-zero value
 // to disable. Zero ignored to make it easy to set the variable on/off.
@@ -163,6 +162,7 @@ int InitCpuFlags(void) {
               ((cpu_info[2] & 0x00000200) ? kCpuHasSSSE3 : 0) |
               ((cpu_info[2] & 0x00080000) ? kCpuHasSSE41 : 0) |
               ((cpu_info[2] & 0x00100000) ? kCpuHasSSE42 : 0) |
+              ((cpu_info[2] & 0x00400000) ? kCpuHasMOVBE : 0) |
               (((cpu_info[2] & 0x18000000) == 0x18000000) ? kCpuHasAVX : 0) |
               kCpuHasX86;
 #ifdef HAS_XGETBV
@@ -189,6 +189,9 @@ int InitCpuFlags(void) {
   }
   if (TestEnv("LIBYUV_DISABLE_SSE42")) {
     cpu_info_ &= ~kCpuHasSSE42;
+  }
+  if (TestEnv("LIBYUV_DISABLE_MOVBE")) {
+    cpu_info_ &= ~kCpuHasMOVBE;
   }
   if (TestEnv("LIBYUV_DISABLE_AVX")) {
     cpu_info_ &= ~kCpuHasAVX;

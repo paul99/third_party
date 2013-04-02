@@ -44,15 +44,12 @@ bool mightCompileProgram(CodeBlock*);
 bool mightCompileFunctionForCall(CodeBlock*);
 bool mightCompileFunctionForConstruct(CodeBlock*);
 bool mightInlineFunctionForCall(CodeBlock*);
+bool mightInlineFunctionForClosureCall(CodeBlock*);
 bool mightInlineFunctionForConstruct(CodeBlock*);
 
 // Opcode checking.
 inline bool canInlineResolveOperations(OpcodeID opcode, ResolveOperations* operations)
 {
-    // Don't try to inline a resolve for which we have no information
-    if (operations->isEmpty())
-        return false;
-
     for (unsigned i = 0; i < operations->size(); i++) {
         switch (operations->data()[i].m_operation) {
         case ResolveOperation::ReturnGlobalObjectAsBase:
@@ -68,13 +65,18 @@ inline bool canInlineResolveOperations(OpcodeID opcode, ResolveOperations* opera
             continue;
 
         case ResolveOperation::Fail:
-            // The DFG can handle generic cases of failed resolves
-            ASSERT(opcode != op_resolve_base_to_global_dynamic);
-            ASSERT(opcode != op_resolve_base_to_scope_with_top_scope_check);
-            ASSERT(opcode != op_resolve_base_to_global);
-            ASSERT(opcode != op_resolve_base_to_scope);
-            if (opcode != op_resolve && opcode != op_resolve_base)
+            switch (opcode) {
+            case op_resolve_base_to_global_dynamic:
+            case op_resolve_base_to_scope_with_top_scope_check:
+            case op_resolve_base_to_global:
+            case op_resolve_base_to_scope:
+                CRASH();
+            case op_resolve_with_base:
+            case op_resolve_with_this:
                 return false;
+            default:
+                continue;
+            }
 
         case ResolveOperation::SkipTopScopeNode:
             // We don't inline code blocks that create activations. Creation of
@@ -196,6 +198,7 @@ inline CapabilityLevel canCompileOpcode(OpcodeID opcodeID, CodeBlock*, Instructi
     case op_jneq_ptr:
     case op_put_to_base_variable:
     case op_put_to_base:
+    case op_typeof:
         return CanCompile;
         
     case op_call_varargs:
@@ -271,6 +274,7 @@ inline bool mightCompileProgram(CodeBlock*) { return false; }
 inline bool mightCompileFunctionForCall(CodeBlock*) { return false; }
 inline bool mightCompileFunctionForConstruct(CodeBlock*) { return false; }
 inline bool mightInlineFunctionForCall(CodeBlock*) { return false; }
+inline bool mightInlineFunctionForClosureCall(CodeBlock*) { return false; }
 inline bool mightInlineFunctionForConstruct(CodeBlock*) { return false; }
 
 inline CapabilityLevel canCompileOpcode(OpcodeID, CodeBlock*, Instruction*) { return CannotCompile; }
@@ -316,6 +320,11 @@ inline bool canInlineFunctionForCall(CodeBlock* codeBlock)
     return mightInlineFunctionForCall(codeBlock) && canInlineOpcodes(codeBlock);
 }
 
+inline bool canInlineFunctionForClosureCall(CodeBlock* codeBlock)
+{
+    return mightInlineFunctionForClosureCall(codeBlock) && canInlineOpcodes(codeBlock);
+}
+
 inline bool canInlineFunctionForConstruct(CodeBlock* codeBlock)
 {
     return mightInlineFunctionForConstruct(codeBlock) && canInlineOpcodes(codeBlock);
@@ -329,8 +338,12 @@ inline bool mightInlineFunctionFor(CodeBlock* codeBlock, CodeSpecializationKind 
     return mightInlineFunctionForConstruct(codeBlock);
 }
 
-inline bool canInlineFunctionFor(CodeBlock* codeBlock, CodeSpecializationKind kind)
+inline bool canInlineFunctionFor(CodeBlock* codeBlock, CodeSpecializationKind kind, bool isClosureCall)
 {
+    if (isClosureCall) {
+        ASSERT(kind == CodeForCall);
+        return canInlineFunctionForClosureCall(codeBlock);
+    }
     if (kind == CodeForCall)
         return canInlineFunctionForCall(codeBlock);
     ASSERT(kind == CodeForConstruct);

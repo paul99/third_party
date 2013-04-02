@@ -27,6 +27,8 @@
 #include "ProfilerOSRExit.h"
 
 #include "JSGlobalObject.h"
+#include "ObjectConstructor.h"
+#include "Operations.h"
 
 namespace JSC { namespace Profiler {
 

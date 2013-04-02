@@ -32,38 +32,14 @@ option java_outer_classname = "Channel";
 
 
 
-import "channel_common.proto";
-
 message NetworkEndpointId {
   enum NetworkAddress {
     TEST = 1;  // A delivery service for testing
 
     // Low numbers reserved.
     ANDROID = 113;  // Android delivery service using c2dm / http.
+    LCS = 114;  // Lightweight connection service (Marmoset) channel.
   }
   optional NetworkAddress network_address = 1;
   optional bytes client_address = 2;
-}
-
-// Message sent from the client to the server and vice-versa via the
-// delivery service.
-message AddressedMessage {
-  // The encoding type for the network_message field.
-  optional ChannelMessageEncoding.MessageEncoding encoding = 1;
-
-  // Authenticated user identifier.
-  optional bytes auth_user_id = 2;
-
-  // Network id for the client
-  optional NetworkEndpointId client_network_id = 3;
-
-  // ClientToServerMessage or ServerToClientMessage.
-  optional bytes network_message = 4;
-
-  // (For debugging) Caller's info, e.g., task address
-  optional string caller_info = 5;
-}
-
-// Response to AddressedMessage
-message AddressedMessageResponse {
 }

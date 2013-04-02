@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2010 Google Inc. All rights reserved.
  * Copyright (C) 2010 Pawel Hajdan (phajdan.jr@chromium.org)
+ * Copyright (C) 2012 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -34,24 +35,31 @@
 
 #include "WebAnimationController.h"
 #include "WebBindings.h"
+#include "WebDeviceOrientation.h"
 #include "WebDocument.h"
 #include "WebElement.h"
 #include "WebFindOptions.h"
 #include "WebFrame.h"
 #include "WebInputElement.h"
+#include "WebIntent.h"
+#include "WebIntentRequest.h"
+#include "WebPermissions.h"
 #include "WebPreferences.h"
 #include "WebScriptSource.h"
 #include "WebSecurityPolicy.h"
+#include "WebSerializedScriptValue.h"
 #include "WebSettings.h"
 #include "WebSurroundingText.h"
+#include "WebTask.h"
 #include "WebTestDelegate.h"
 #include "WebView.h"
-#include "WebWorkerInfo.h"
-#include "platform/WebPoint.h"
 #include "v8/include/v8.h"
-#include <wtf/text/WTFString.h>
+#include <limits>
+#include <memory>
+#include <public/WebData.h>
+#include <public/WebPoint.h>
 
-#if OS(LINUX) || OS(ANDROID)
+#if defined(__linux__) || defined(ANDROID)
 #include "linux/WebFontRendering.h"
 #endif
 
@@ -60,19 +68,121 @@ using namespace std;
 
 namespace WebTestRunner {
 
-TestRunner::TestRunner()
-    : m_delegate(0)
-    , m_webView(0)
+namespace {
+
+class EmptyWebDeliveredIntentClient : public WebDeliveredIntentClient {
+public:
+    EmptyWebDeliveredIntentClient() { }
+    ~EmptyWebDeliveredIntentClient() { }
+
+    virtual void postResult(const WebSerializedScriptValue& data) const { }
+    virtual void postFailure(const WebSerializedScriptValue& data) const { }
+    virtual void destroy() { }
+};
+
+class InvokeCallbackTask : public WebMethodTask<TestRunner> {
+public:
+    InvokeCallbackTask(TestRunner* object, auto_ptr<CppVariant> callbackArguments)
+        : WebMethodTask<TestRunner>(object)
+        , m_callbackArguments(callbackArguments)
+    {
+    }
+
+    virtual void runIfValid()
+    {
+        CppVariant invokeResult;
+        m_callbackArguments->invokeDefault(m_callbackArguments.get(), 1, invokeResult);
+    }
+
+private:
+    auto_ptr<CppVariant> m_callbackArguments;
+};
+
+}
+
+TestRunner::WorkQueue::~WorkQueue()
 {
+    reset();
+}
+
+void TestRunner::WorkQueue::processWorkSoon()
+{
+    if (m_controller->topLoadingFrame())
+        return;
+
+    if (!m_queue.empty()) {
+        // We delay processing queued work to avoid recursion problems.
+        m_controller->m_delegate->postTask(new WorkQueueTask(this));
+    } else if (!m_controller->m_waitUntilDone)
+        m_controller->m_delegate->testFinished();
+}
+
+void TestRunner::WorkQueue::processWork()
+{
+    // Quit doing work once a load is in progress.
+    while (!m_queue.empty()) {
+        bool startedLoad = m_queue.front()->run(m_controller->m_delegate, m_controller->m_webView);
+        delete m_queue.front();
+        m_queue.pop_front();
+        if (startedLoad)
+            return;
+    }
+
+    if (!m_controller->m_waitUntilDone && !m_controller->topLoadingFrame())
+        m_controller->m_delegate->testFinished();
+}
+
+void TestRunner::WorkQueue::reset()
+{
+    m_frozen = false;
+    while (!m_queue.empty()) {
+        delete m_queue.front();
+        m_queue.pop_front();
+    }
+}
+
+void TestRunner::WorkQueue::addWork(WorkItem* work)
+{
+    if (m_frozen) {
+        delete work;
+        return;
+    }
+    m_queue.push_back(work);
+}
+
+
+TestRunner::TestRunner()
+    : m_testIsRunning(false)
+    , m_workQueue(this)
+    , m_delegate(0)
+    , m_webView(0)
+    , m_intentClient(new EmptyWebDeliveredIntentClient)
+    , m_webPermissions(new WebPermissions)
+{
+    // Initialize the map that associates methods of this class with the names
+    // they will use when called by JavaScript. The actual binding of those
+    // names to their methods will be done by calling bindToJavaScript() (defined
+    // by CppBoundClass, the parent to TestRunner).
+
+    // Methods controlling test execution.
+    bindMethod("notifyDone", &TestRunner::notifyDone);
+    bindMethod("queueBackNavigation", &TestRunner::queueBackNavigation);
+    bindMethod("queueForwardNavigation", &TestRunner::queueForwardNavigation);
+    bindMethod("queueLoadingScript", &TestRunner::queueLoadingScript);
+    bindMethod("queueLoad", &TestRunner::queueLoad);
+    bindMethod("queueLoadHTMLString", &TestRunner::queueLoadHTMLString);
+    bindMethod("queueNonLoadingScript", &TestRunner::queueNonLoadingScript);
+    bindMethod("queueReload", &TestRunner::queueReload);
+    bindMethod("setCloseRemainingWindowsWhenComplete", &TestRunner::setCloseRemainingWindowsWhenComplete);
+    bindMethod("setCustomPolicyDelegate", &TestRunner::setCustomPolicyDelegate);
+    bindMethod("waitForPolicyDelegate", &TestRunner::waitForPolicyDelegate);
+    bindMethod("waitUntilDone", &TestRunner::waitUntilDone);
+    bindMethod("windowCount", &TestRunner::windowCount);
     // Methods implemented in terms of chromium's public WebKit API.
     bindMethod("setTabKeyCyclesThroughElements", &TestRunner::setTabKeyCyclesThroughElements);
-    bindMethod("setAsynchronousSpellCheckingEnabled", &TestRunner::setAsynchronousSpellCheckingEnabled);
     bindMethod("execCommand", &TestRunner::execCommand);
     bindMethod("isCommandEnabled", &TestRunner::isCommandEnabled);
-    bindMethod("pauseAnimationAtTimeOnElementWithId", &TestRunner::pauseAnimationAtTimeOnElementWithId);
-    bindMethod("pauseTransitionAtTimeOnElementWithId", &TestRunner::pauseTransitionAtTimeOnElementWithId);
     bindMethod("elementDoesAutoCompleteForElementWithId", &TestRunner::elementDoesAutoCompleteForElementWithId);
-    bindMethod("numberOfActiveAnimations", &TestRunner::numberOfActiveAnimations);
     bindMethod("callShouldCloseOnWebView", &TestRunner::callShouldCloseOnWebView);
     bindMethod("setDomainRelaxationForbiddenForURLScheme", &TestRunner::setDomainRelaxationForbiddenForURLScheme);
     bindMethod("evaluateScriptInIsolatedWorldAndReturnValue", &TestRunner::evaluateScriptInIsolatedWorldAndReturnValue);
@@ -86,10 +196,8 @@ TestRunner::TestRunner()
     bindMethod("addUserScript", &TestRunner::addUserScript);
     bindMethod("addUserStyleSheet", &TestRunner::addUserStyleSheet);
     bindMethod("startSpeechInput", &TestRunner::startSpeechInput);
-    bindMethod("loseCompositorContext", &TestRunner::loseCompositorContext);
     bindMethod("markerTextForListItem", &TestRunner::markerTextForListItem);
     bindMethod("findString", &TestRunner::findString);
-    bindMethod("setMinimumTimerInterval", &TestRunner::setMinimumTimerInterval);
     bindMethod("setAutofilled", &TestRunner::setAutofilled);
     bindMethod("setValueForUser", &TestRunner::setValueForUser);
     bindMethod("enableFixedLayoutMode", &TestRunner::enableFixedLayoutMode);
@@ -100,7 +208,16 @@ TestRunner::TestRunner()
     bindMethod("setPageVisibility", &TestRunner::setPageVisibility);
     bindMethod("setTextDirection", &TestRunner::setTextDirection);
     bindMethod("textSurroundingNode", &TestRunner::textSurroundingNode);
-    bindMethod("setTouchDragDropEnabled", &TestRunner::setTouchDragDropEnabled);
+    bindMethod("disableAutoResizeMode", &TestRunner::disableAutoResizeMode);
+    bindMethod("enableAutoResizeMode", &TestRunner::enableAutoResizeMode);
+    bindMethod("setSmartInsertDeleteEnabled", &TestRunner::setSmartInsertDeleteEnabled);
+    bindMethod("setSelectTrailingWhitespaceEnabled", &TestRunner::setSelectTrailingWhitespaceEnabled);
+    bindMethod("setMockDeviceOrientation", &TestRunner::setMockDeviceOrientation);
+    bindMethod("didAcquirePointerLock", &TestRunner::didAcquirePointerLock);
+    bindMethod("didLosePointerLock", &TestRunner::didLosePointerLock);
+    bindMethod("didNotAcquirePointerLock", &TestRunner::didNotAcquirePointerLock);
+    bindMethod("setPointerLockWillRespondAsynchronously", &TestRunner::setPointerLockWillRespondAsynchronously);
+    bindMethod("setPointerLockWillFailSynchronously", &TestRunner::setPointerLockWillFailSynchronously);
 
     // The following modify WebPreferences.
     bindMethod("setUserStyleSheetEnabled", &TestRunner::setUserStyleSheetEnabled);
@@ -113,19 +230,89 @@ TestRunner::TestRunner()
     bindMethod("setAllowFileAccessFromFileURLs", &TestRunner::setAllowFileAccessFromFileURLs);
     bindMethod("overridePreference", &TestRunner::overridePreference);
     bindMethod("setPluginsEnabled", &TestRunner::setPluginsEnabled);
+    bindMethod("setAsynchronousSpellCheckingEnabled", &TestRunner::setAsynchronousSpellCheckingEnabled);
+    bindMethod("setMinimumTimerInterval", &TestRunner::setMinimumTimerInterval);
+    bindMethod("setTouchDragDropEnabled", &TestRunner::setTouchDragDropEnabled);
+
+    // The following modify the state of the TestRunner.
+    bindMethod("dumpEditingCallbacks", &TestRunner::dumpEditingCallbacks);
+    bindMethod("dumpAsText", &TestRunner::dumpAsText);
+    bindMethod("dumpChildFramesAsText", &TestRunner::dumpChildFramesAsText);
+    bindMethod("dumpChildFrameScrollPositions", &TestRunner::dumpChildFrameScrollPositions);
+    bindMethod("setAudioData", &TestRunner::setAudioData);
+    bindMethod("dumpFrameLoadCallbacks", &TestRunner::dumpFrameLoadCallbacks);
+    bindMethod("dumpUserGestureInFrameLoadCallbacks", &TestRunner::dumpUserGestureInFrameLoadCallbacks);
+    bindMethod("setStopProvisionalFrameLoads", &TestRunner::setStopProvisionalFrameLoads);
+    bindMethod("dumpTitleChanges", &TestRunner::dumpTitleChanges);
+    bindMethod("dumpCreateView", &TestRunner::dumpCreateView);
+    bindMethod("setCanOpenWindows", &TestRunner::setCanOpenWindows);
+    bindMethod("dumpResourceLoadCallbacks", &TestRunner::dumpResourceLoadCallbacks);
+    bindMethod("dumpResourceRequestCallbacks", &TestRunner::dumpResourceRequestCallbacks);
+    bindMethod("dumpResourceResponseMIMETypes", &TestRunner::dumpResourceResponseMIMETypes);
+    bindMethod("dumpPermissionClientCallbacks", &TestRunner::dumpPermissionClientCallbacks);
+    bindMethod("setImagesAllowed", &TestRunner::setImagesAllowed);
+    bindMethod("setScriptsAllowed", &TestRunner::setScriptsAllowed);
+    bindMethod("setStorageAllowed", &TestRunner::setStorageAllowed);
+    bindMethod("setPluginsAllowed", &TestRunner::setPluginsAllowed);
+    bindMethod("setAllowDisplayOfInsecureContent", &TestRunner::setAllowDisplayOfInsecureContent);
+    bindMethod("setAllowRunningOfInsecureContent", &TestRunner::setAllowRunningOfInsecureContent);
+    bindMethod("dumpStatusCallbacks", &TestRunner::dumpWindowStatusChanges);
+    bindMethod("dumpProgressFinishedCallback", &TestRunner::dumpProgressFinishedCallback);
+    bindMethod("dumpBackForwardList", &TestRunner::dumpBackForwardList);
+    bindMethod("setDeferMainResourceDataLoad", &TestRunner::setDeferMainResourceDataLoad);
+    bindMethod("dumpSelectionRect", &TestRunner::dumpSelectionRect);
+    bindMethod("testRepaint", &TestRunner::testRepaint);
+    bindMethod("repaintSweepHorizontally", &TestRunner::repaintSweepHorizontally);
+    bindMethod("setPrinting", &TestRunner::setPrinting);
+    bindMethod("setShouldStayOnPageAfterHandlingBeforeUnload", &TestRunner::setShouldStayOnPageAfterHandlingBeforeUnload);
+    bindMethod("setWillSendRequestClearHeader", &TestRunner::setWillSendRequestClearHeader);
+    bindMethod("setWillSendRequestReturnsNull", &TestRunner::setWillSendRequestReturnsNull);
+    bindMethod("setWillSendRequestReturnsNullOnRedirect", &TestRunner::setWillSendRequestReturnsNullOnRedirect);
+
+    // The following methods interact with the WebTestProxy.
+#if ENABLE_WEB_INTENTS
+    bindMethod("sendWebIntentResponse", &TestRunner::sendWebIntentResponse);
+    bindMethod("deliverWebIntent", &TestRunner::deliverWebIntent);
+#endif
+
+    // The following methods interact with the WebTestDelegate.
+    bindMethod("showWebInspector", &TestRunner::showWebInspector);
+    bindMethod("closeWebInspector", &TestRunner::closeWebInspector);
+    bindMethod("evaluateInWebInspector", &TestRunner::evaluateInWebInspector);
+    bindMethod("clearAllDatabases", &TestRunner::clearAllDatabases);
+    bindMethod("setDatabaseQuota", &TestRunner::setDatabaseQuota);
+    bindMethod("setAlwaysAcceptCookies", &TestRunner::setAlwaysAcceptCookies);
+    bindMethod("setWindowIsKey", &TestRunner::setWindowIsKey);
+    bindMethod("pathToLocalResource", &TestRunner::pathToLocalResource);
+    bindMethod("setBackingScaleFactor", &TestRunner::setBackingScaleFactor);
+    bindMethod("setPOSIXLocale", &TestRunner::setPOSIXLocale);
+    bindMethod("numberOfPendingGeolocationPermissionRequests", &TestRunner:: numberOfPendingGeolocationPermissionRequests);
+    bindMethod("setGeolocationPermission", &TestRunner::setGeolocationPermission);
+    bindMethod("setMockGeolocationPositionUnavailableError", &TestRunner::setMockGeolocationPositionUnavailableError);
+    bindMethod("setMockGeolocationPosition", &TestRunner::setMockGeolocationPosition);
+    bindMethod("grantWebNotificationPermission", &TestRunner::grantWebNotificationPermission);
+    bindMethod("simulateLegacyWebNotificationClick", &TestRunner::simulateLegacyWebNotificationClick);
+    bindMethod("addMockSpeechInputResult", &TestRunner::addMockSpeechInputResult);
+    bindMethod("setMockSpeechInputDumpRect", &TestRunner::setMockSpeechInputDumpRect);
+    bindMethod("addMockSpeechRecognitionResult", &TestRunner::addMockSpeechRecognitionResult);
+    bindMethod("setMockSpeechRecognitionError", &TestRunner::setMockSpeechRecognitionError);
+    bindMethod("wasMockSpeechRecognitionAborted", &TestRunner::wasMockSpeechRecognitionAborted);
+    bindMethod("display", &TestRunner::display);
+    bindMethod("displayInvalidatedRegion", &TestRunner::displayInvalidatedRegion);
 
     // Properties.
-    bindProperty("workerThreadCount", &TestRunner::workerThreadCount);
     bindProperty("globalFlag", &m_globalFlag);
+    bindProperty("titleTextDirection", &m_titleTextDirection);
     bindProperty("platformName", &m_platformName);
+    // webHistoryItemCount is used by tests in LayoutTests\http\tests\history
+    bindProperty("webHistoryItemCount", &m_webHistoryItemCount);
+    bindProperty("interceptPostMessage", &m_interceptPostMessage);
 
     // The following are stubs.
     bindMethod("dumpDatabaseCallbacks", &TestRunner::notImplemented);
-#if ENABLE(NOTIFICATIONS)
     bindMethod("denyWebNotificationPermission", &TestRunner::notImplemented);
     bindMethod("removeAllWebNotificationPermissions", &TestRunner::notImplemented);
     bindMethod("simulateWebNotificationClick", &TestRunner::notImplemented);
-#endif
     bindMethod("setIconDatabaseEnabled", &TestRunner::notImplemented);
     bindMethod("setScrollbarPolicy", &TestRunner::notImplemented);
     bindMethod("clearAllApplicationCaches", &TestRunner::notImplemented);
@@ -151,12 +338,22 @@ TestRunner::TestRunner()
     bindFallbackMethod(&TestRunner::fallbackMethod);
 }
 
+TestRunner::~TestRunner()
+{
+}
+
+void TestRunner::setDelegate(WebTestDelegate* delegate)
+{
+    m_delegate = delegate;
+    m_webPermissions->setDelegate(delegate);
+}
+
 void TestRunner::reset()
 {
     if (m_webView) {
         m_webView->setZoomLevel(false, 0);
         m_webView->setTabKeyCyclesThroughElements(true);
-#if !OS(DARWIN) && !OS(WINDOWS) // Actually, TOOLKIT_GTK
+#if !defined(__APPLE__) && !defined(WIN32) // Actually, TOOLKIT_GTK
         // (Constants copied because we can't depend on the header that defined
         // them from this file.)
         m_webView->setSelectionColors(0xff1e90ff, 0xff000000, 0xffc8c8c8, 0xff323232);
@@ -164,28 +361,663 @@ void TestRunner::reset()
         m_webView->removeAllUserContent();
         m_webView->disableAutoResizeMode();
     }
+    m_topLoadingFrame = 0;
+    m_waitUntilDone = false;
+    m_policyDelegateEnabled = false;
+    m_policyDelegateIsPermissive = false;
+    m_policyDelegateShouldNotifyDone = false;
+
     WebSecurityPolicy::resetOriginAccessWhitelists();
-#if OS(LINUX) || OS(ANDROID)
+#if defined(__linux__) || defined(ANDROID)
     WebFontRendering::setSubpixelPositioning(false);
 #endif
 
+    if (m_delegate) {
+        // Reset the default quota for each origin to 5MB
+        m_delegate->setDatabaseQuota(5 * 1024 * 1024);
+        m_delegate->setDeviceScaleFactor(1);
+        m_delegate->setAcceptAllCookies(false);
+        m_delegate->setLocale("");
+    }
+
+    m_dumpEditingCallbacks = false;
+    m_dumpAsText = false;
+    m_generatePixelResults = true;
+    m_dumpChildFrameScrollPositions = false;
+    m_dumpChildFramesAsText = false;
+    m_dumpAsAudio = false;
+    m_dumpFrameLoadCallbacks = false;
+    m_dumpUserGestureInFrameLoadCallbacks = false;
+    m_stopProvisionalFrameLoads = false;
+    m_dumpTitleChanges = false;
+    m_dumpCreateView = false;
+    m_canOpenWindows = false;
+    m_dumpResourceLoadCallbacks = false;
+    m_dumpResourceRequestCallbacks = false;
+    m_dumpResourceResponseMIMETypes = false;
+    m_dumpWindowStatusChanges = false;
+    m_dumpProgressFinishedCallback = false;
+    m_dumpBackForwardList = false;
+    m_deferMainResourceDataLoad = true;
+    m_dumpSelectionRect = false;
+    m_testRepaint = false;
+    m_sweepHorizontally = false;
+    m_isPrinting = false;
+    m_shouldStayOnPageAfterHandlingBeforeUnload = false;
+    m_shouldBlockRedirects = false;
+    m_willSendRequestShouldReturnNull = false;
+    m_smartInsertDeleteEnabled = true;
+#ifdef WIN32
+    m_selectTrailingWhitespaceEnabled = true;
+#else
+    m_selectTrailingWhitespaceEnabled = false;
+#endif
+
+    m_httpHeadersToClear.clear();
+
     m_globalFlag.set(false);
+    m_titleTextDirection.set("ltr");
+    m_webHistoryItemCount.set(0);
+    m_interceptPostMessage.set(false);
     m_platformName.set("chromium");
 
     m_userStyleSheetLocation = WebURL();
+
+    m_webPermissions->reset();
+
+    m_taskList.revokeAll();
+    m_workQueue.reset();
+
+    if (m_closeRemainingWindows && m_delegate)
+        m_delegate->closeRemainingWindows();
+    else
+        m_closeRemainingWindows = true;
+}
+
+
+void TestRunner::setTestIsRunning(bool running)
+{
+    m_testIsRunning = running;
+}
+
+bool TestRunner::shouldDumpEditingCallbacks() const
+{
+    return m_dumpEditingCallbacks;
+}
+
+bool TestRunner::shouldDumpAsText() const
+{
+    return m_dumpAsText;
+}
+
+void TestRunner::setShouldDumpAsText(bool value)
+{
+    m_dumpAsText = value;
+}
+
+bool TestRunner::shouldGeneratePixelResults() const
+{
+    return m_generatePixelResults;
+}
+
+void TestRunner::setShouldGeneratePixelResults(bool value)
+{
+    m_generatePixelResults = value;
+}
+
+bool TestRunner::shouldDumpChildFrameScrollPositions() const
+{
+    return m_dumpChildFrameScrollPositions;
+}
+
+bool TestRunner::shouldDumpChildFramesAsText() const
+{
+    return m_dumpChildFramesAsText;
+}
+
+bool TestRunner::shouldDumpAsAudio() const
+{
+    return m_dumpAsAudio;
+}
+
+const WebArrayBufferView* TestRunner::audioData() const
+{
+    return &m_audioData;
+}
+
+bool TestRunner::shouldDumpFrameLoadCallbacks() const
+{
+    return m_testIsRunning && m_dumpFrameLoadCallbacks;
+}
+
+void TestRunner::setShouldDumpFrameLoadCallbacks(bool value)
+{
+    m_dumpFrameLoadCallbacks = value;
+}
+
+bool TestRunner::shouldDumpUserGestureInFrameLoadCallbacks() const
+{
+    return m_testIsRunning && m_dumpUserGestureInFrameLoadCallbacks;
+}
+
+bool TestRunner::stopProvisionalFrameLoads() const
+{
+    return m_stopProvisionalFrameLoads;
+}
+
+bool TestRunner::shouldDumpTitleChanges() const
+{
+    return m_dumpTitleChanges;
+}
+
+bool TestRunner::shouldDumpCreateView() const
+{
+    return m_dumpCreateView;
+}
+
+bool TestRunner::canOpenWindows() const
+{
+    return m_canOpenWindows;
+}
+
+bool TestRunner::shouldDumpResourceLoadCallbacks() const
+{
+    return m_testIsRunning && m_dumpResourceLoadCallbacks;
+}
+
+bool TestRunner::shouldDumpResourceRequestCallbacks() const
+{
+    return m_testIsRunning && m_dumpResourceRequestCallbacks;
+}
+
+bool TestRunner::shouldDumpResourceResponseMIMETypes() const
+{
+    return m_testIsRunning && m_dumpResourceResponseMIMETypes;
+}
+
+WebPermissionClient* TestRunner::webPermissions() const
+{
+    return m_webPermissions.get();
+}
+
+bool TestRunner::shouldDumpStatusCallbacks() const
+{
+    return m_dumpWindowStatusChanges;
+}
+
+bool TestRunner::shouldDumpProgressFinishedCallback() const
+{
+    return m_dumpProgressFinishedCallback;
+}
+
+bool TestRunner::shouldDumpBackForwardList() const
+{
+    return m_dumpBackForwardList;
+}
+
+bool TestRunner::deferMainResourceDataLoad() const
+{
+    return m_deferMainResourceDataLoad;
+}
+
+bool TestRunner::shouldDumpSelectionRect() const
+{
+    return m_dumpSelectionRect;
+}
+
+bool TestRunner::testRepaint() const
+{
+    return m_testRepaint;
+}
+
+bool TestRunner::sweepHorizontally() const
+{
+    return m_sweepHorizontally;
+}
+
+bool TestRunner::isPrinting() const
+{
+    return m_isPrinting;
+}
+
+bool TestRunner::shouldStayOnPageAfterHandlingBeforeUnload() const
+{
+    return m_shouldStayOnPageAfterHandlingBeforeUnload;
+}
+
+void TestRunner::setTitleTextDirection(WebKit::WebTextDirection dir)
+{
+    m_titleTextDirection.set(dir == WebKit::WebTextDirectionLeftToRight ? "ltr" : "rtl");
+}
+
+const std::set<std::string>* TestRunner::httpHeadersToClear() const
+{
+    return &m_httpHeadersToClear;
+}
+
+bool TestRunner::shouldBlockRedirects() const
+{
+    return m_shouldBlockRedirects;
+}
+
+bool TestRunner::willSendRequestShouldReturnNull() const
+{
+    return m_willSendRequestShouldReturnNull;
+}
+
+void TestRunner::setTopLoadingFrame(WebFrame* frame, bool clear)
+{
+    if (frame->top()->view() != m_webView)
+        return;
+    if (clear) {
+        m_topLoadingFrame = 0;
+        locationChangeDone();
+    } else if (!m_topLoadingFrame)
+        m_topLoadingFrame = frame;
+}
+
+WebFrame* TestRunner::topLoadingFrame() const
+{
+    return m_topLoadingFrame;
+}
+
+void TestRunner::policyDelegateDone()
+{
+    WEBKIT_ASSERT(m_waitUntilDone);
+    m_delegate->testFinished();
+    m_waitUntilDone = false;
+}
+
+bool TestRunner::policyDelegateEnabled() const
+{
+    return m_policyDelegateEnabled;
+}
+
+bool TestRunner::policyDelegateIsPermissive() const
+{
+    return m_policyDelegateIsPermissive;
+}
+
+bool TestRunner::policyDelegateShouldNotifyDone() const
+{
+    return m_policyDelegateShouldNotifyDone;
+}
+
+bool TestRunner::shouldInterceptPostMessage() const
+{
+    return m_interceptPostMessage.isBool() && m_interceptPostMessage.toBoolean();
+}
+
+bool TestRunner::isSmartInsertDeleteEnabled() const
+{
+    return m_smartInsertDeleteEnabled;
+}
+
+bool TestRunner::isSelectTrailingWhitespaceEnabled() const
+{
+    return m_selectTrailingWhitespaceEnabled;
+}
+
+void TestRunner::showDevTools()
+{
+    m_delegate->showDevTools();
+}
+
+void TestRunner::waitUntilDone(const CppArgumentList&, CppVariant* result)
+{
+    if (!m_delegate->isBeingDebugged())
+        m_delegate->postDelayedTask(new NotifyDoneTimedOutTask(this), m_delegate->layoutTestTimeout());
+    m_waitUntilDone = true;
+    result->setNull();
+}
+
+void TestRunner::notifyDone(const CppArgumentList&, CppVariant* result)
+{
+    // Test didn't timeout. Kill the timeout timer.
+    taskList()->revokeAll();
+
+    completeNotifyDone(false);
+    result->setNull();
+}
+
+void TestRunner::completeNotifyDone(bool isTimeout)
+{
+    if (m_waitUntilDone && !topLoadingFrame() && m_workQueue.isEmpty()) {
+        if (isTimeout)
+            m_delegate->testTimedOut();
+        else
+            m_delegate->testFinished();
+    }
+    m_waitUntilDone = false;
+}
+
+class WorkItemBackForward : public TestRunner::WorkItem {
+public:
+    WorkItemBackForward(int distance) : m_distance(distance) { }
+    bool run(WebTestDelegate* delegate, WebView*)
+    {
+        delegate->goToOffset(m_distance);
+        return true; // FIXME: Did it really start a navigation?
+    }
+
+private:
+    int m_distance;
+};
+
+void TestRunner::queueBackNavigation(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isNumber())
+        m_workQueue.addWork(new WorkItemBackForward(-arguments[0].toInt32()));
+    result->setNull();
+}
+
+void TestRunner::queueForwardNavigation(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isNumber())
+        m_workQueue.addWork(new WorkItemBackForward(arguments[0].toInt32()));
+    result->setNull();
+}
+
+class WorkItemReload : public TestRunner::WorkItem {
+public:
+    bool run(WebTestDelegate* delegate, WebView*)
+    {
+        delegate->reload();
+        return true;
+    }
+};
+
+void TestRunner::queueReload(const CppArgumentList&, CppVariant* result)
+{
+    m_workQueue.addWork(new WorkItemReload);
+    result->setNull();
+}
+
+class WorkItemLoadingScript : public TestRunner::WorkItem {
+public:
+    WorkItemLoadingScript(const string& script) : m_script(script) { }
+    bool run(WebTestDelegate*, WebView* webView)
+    {
+        webView->mainFrame()->executeScript(WebScriptSource(WebString::fromUTF8(m_script)));
+        return true; // FIXME: Did it really start a navigation?
+    }
+
+private:
+    string m_script;
+};
+
+class WorkItemNonLoadingScript : public TestRunner::WorkItem {
+public:
+    WorkItemNonLoadingScript(const string& script) : m_script(script) { }
+    bool run(WebTestDelegate*, WebView* webView)
+    {
+        webView->mainFrame()->executeScript(WebScriptSource(WebString::fromUTF8(m_script)));
+        return false;
+    }
+
+private:
+    string m_script;
+};
+
+void TestRunner::queueLoadingScript(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isString())
+        m_workQueue.addWork(new WorkItemLoadingScript(arguments[0].toString()));
+    result->setNull();
+}
+
+void TestRunner::queueNonLoadingScript(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isString())
+        m_workQueue.addWork(new WorkItemNonLoadingScript(arguments[0].toString()));
+    result->setNull();
+}
+
+class WorkItemLoad : public TestRunner::WorkItem {
+public:
+    WorkItemLoad(const WebURL& url, const string& target)
+        : m_url(url)
+        , m_target(target) { }
+    bool run(WebTestDelegate* delegate, WebView*)
+    {
+        delegate->loadURLForFrame(m_url, m_target);
+        return true; // FIXME: Did it really start a navigation?
+    }
+
+private:
+    WebURL m_url;
+    string m_target;
+};
+
+void TestRunner::queueLoad(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isString()) {
+        // FIXME: Implement WebURL::resolve() and avoid GURL.
+        GURL currentURL = m_webView->mainFrame()->document().url();
+        GURL fullURL = currentURL.Resolve(arguments[0].toString());
+
+        string target = "";
+        if (arguments.size() > 1 && arguments[1].isString())
+            target = arguments[1].toString();
+
+        m_workQueue.addWork(new WorkItemLoad(fullURL, target));
+    }
+    result->setNull();
+}
+
+class WorkItemLoadHTMLString : public TestRunner::WorkItem  {
+public:
+    WorkItemLoadHTMLString(const std::string& html, const WebURL& baseURL)
+        : m_html(html)
+        , m_baseURL(baseURL) { }
+    WorkItemLoadHTMLString(const std::string& html, const WebURL& baseURL, const WebURL& unreachableURL)
+        : m_html(html)
+        , m_baseURL(baseURL)
+        , m_unreachableURL(unreachableURL) { }
+    bool run(WebTestDelegate*, WebView* webView)
+    {
+        webView->mainFrame()->loadHTMLString(
+            WebKit::WebData(m_html.data(), m_html.length()), m_baseURL, m_unreachableURL);
+        return true;
+    }
+
+private:
+    std::string m_html;
+    WebURL m_baseURL;
+    WebURL m_unreachableURL;
+};
+
+void TestRunner::queueLoadHTMLString(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isString()) {
+        string html = arguments[0].toString();
+        WebURL baseURL(GURL(""));
+        if (arguments.size() > 1 && arguments[1].isString())
+            baseURL = WebURL(GURL(arguments[1].toString()));
+        if (arguments.size() > 2 && arguments[2].isString())
+            m_workQueue.addWork(new WorkItemLoadHTMLString(html, baseURL, WebURL(GURL(arguments[2].toString()))));
+        else
+            m_workQueue.addWork(new WorkItemLoadHTMLString(html, baseURL));
+    }
+    result->setNull();
+}
+
+void TestRunner::locationChangeDone()
+{
+    m_webHistoryItemCount.set(m_delegate->navigationEntryCount());
+
+    // No more new work after the first complete load.
+    m_workQueue.setFrozen(true);
+
+    if (!m_waitUntilDone)
+        m_workQueue.processWorkSoon();
+}
+
+void TestRunner::windowCount(const CppArgumentList&, CppVariant* result)
+{
+    result->set(static_cast<int>(m_delegate->windowCount()));
+}
+
+void TestRunner::setCloseRemainingWindowsWhenComplete(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isBool())
+        m_closeRemainingWindows = arguments[0].value.boolValue;
+    result->setNull();
+}
+
+void TestRunner::setCustomPolicyDelegate(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isBool()) {
+        m_policyDelegateEnabled = arguments[0].value.boolValue;
+        m_policyDelegateIsPermissive = false;
+        if (arguments.size() > 1 && arguments[1].isBool())
+            m_policyDelegateIsPermissive = arguments[1].value.boolValue;
+    }
+    result->setNull();
+}
+
+void TestRunner::waitForPolicyDelegate(const CppArgumentList&, CppVariant* result)
+{
+    m_policyDelegateEnabled = true;
+    m_policyDelegateShouldNotifyDone = true;
+    m_waitUntilDone = true;
+    result->setNull();
+}
+
+void TestRunner::dumpPermissionClientCallbacks(const CppArgumentList&, CppVariant* result)
+{
+    m_webPermissions->setDumpCallbacks(true);
+    result->setNull();
+}
+
+void TestRunner::setImagesAllowed(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isBool())
+        m_webPermissions->setImagesAllowed(arguments[0].toBoolean());
+    result->setNull();
+}
+
+void TestRunner::setScriptsAllowed(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isBool())
+        m_webPermissions->setScriptsAllowed(arguments[0].toBoolean());
+    result->setNull();
+}
+
+void TestRunner::setStorageAllowed(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isBool())
+        m_webPermissions->setStorageAllowed(arguments[0].toBoolean());
+    result->setNull();
+}
+
+void TestRunner::setPluginsAllowed(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isBool())
+        m_webPermissions->setPluginsAllowed(arguments[0].toBoolean());
+    result->setNull();
+}
+
+void TestRunner::setAllowDisplayOfInsecureContent(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isBool())
+        m_webPermissions->setDisplayingInsecureContentAllowed(arguments[0].toBoolean());
+
+    result->setNull();
+}
+
+void TestRunner::setAllowRunningOfInsecureContent(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isBool())
+        m_webPermissions->setRunningInsecureContentAllowed(arguments[0].value.boolValue);
+
+    result->setNull();
+}
+
+void TestRunner::dumpWindowStatusChanges(const CppArgumentList&, CppVariant* result)
+{
+    m_dumpWindowStatusChanges = true;
+    result->setNull();
+}
+
+void TestRunner::dumpProgressFinishedCallback(const CppArgumentList&, CppVariant* result)
+{
+    m_dumpProgressFinishedCallback = true;
+    result->setNull();
+}
+
+void TestRunner::dumpBackForwardList(const CppArgumentList&, CppVariant* result)
+{
+    m_dumpBackForwardList = true;
+    result->setNull();
+}
+
+void TestRunner::setDeferMainResourceDataLoad(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() == 1)
+        m_deferMainResourceDataLoad = cppVariantToBool(arguments[0]);
+}
+
+void TestRunner::dumpSelectionRect(const CppArgumentList& arguments, CppVariant* result)
+{
+    m_dumpSelectionRect = true;
+    result->setNull();
+}
+
+void TestRunner::testRepaint(const CppArgumentList&, CppVariant* result)
+{
+    m_testRepaint = true;
+    result->setNull();
+}
+
+void TestRunner::repaintSweepHorizontally(const CppArgumentList&, CppVariant* result)
+{
+    m_sweepHorizontally = true;
+    result->setNull();
+}
+
+void TestRunner::setPrinting(const CppArgumentList& arguments, CppVariant* result)
+{
+    m_isPrinting = true;
+    result->setNull();
+}
+
+void TestRunner::setShouldStayOnPageAfterHandlingBeforeUnload(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() == 1 && arguments[0].isBool())
+        m_shouldStayOnPageAfterHandlingBeforeUnload = arguments[0].toBoolean();
+
+    result->setNull();
+}
+
+void TestRunner::setWillSendRequestClearHeader(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isString()) {
+        string header = arguments[0].toString();
+        if (!header.empty())
+            m_httpHeadersToClear.insert(header);
+    }
+    result->setNull();
+}
+
+void TestRunner::setWillSendRequestReturnsNullOnRedirect(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isBool())
+        m_shouldBlockRedirects = arguments[0].toBoolean();
+    result->setNull();
+}
+
+void TestRunner::setWillSendRequestReturnsNull(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isBool())
+        m_willSendRequestShouldReturnNull = arguments[0].toBoolean();
+    result->setNull();
 }
 
 void TestRunner::setTabKeyCyclesThroughElements(const CppArgumentList& arguments, CppVariant* result)
 {
     if (arguments.size() > 0 && arguments[0].isBool())
         m_webView->setTabKeyCyclesThroughElements(arguments[0].toBoolean());
-    result->setNull();
-}
-
-void TestRunner::setAsynchronousSpellCheckingEnabled(const CppArgumentList& arguments, CppVariant* result)
-{
-    if (arguments.size() > 0 && arguments[0].isBool())
-        m_webView->settings()->setAsynchronousSpellCheckingEnabled(cppVariantToBool(arguments[0]));
     result->setNull();
 }
 
@@ -218,38 +1050,6 @@ void TestRunner::isCommandEnabled(const CppArgumentList& arguments, CppVariant* 
     result->set(rv);
 }
 
-bool TestRunner::pauseAnimationAtTimeOnElementWithId(const WebString& animationName, double time, const WebString& elementId)
-{
-    WebFrame* webFrame = m_webView->mainFrame();
-    if (!webFrame)
-        return false;
-
-    WebAnimationController* controller = webFrame->animationController();
-    if (!controller)
-        return false;
-
-    WebElement element = webFrame->document().getElementById(elementId);
-    if (element.isNull())
-        return false;
-    return controller->pauseAnimationAtTime(element, animationName, time);
-}
-
-bool TestRunner::pauseTransitionAtTimeOnElementWithId(const WebString& propertyName, double time, const WebString& elementId)
-{
-    WebFrame* webFrame = m_webView->mainFrame();
-    if (!webFrame)
-        return false;
-
-    WebAnimationController* controller = webFrame->animationController();
-    if (!controller)
-        return false;
-
-    WebElement element = webFrame->document().getElementById(elementId);
-    if (element.isNull())
-        return false;
-    return controller->pauseTransitionAtTime(element, propertyName, time);
-}
-
 bool TestRunner::elementDoesAutoCompleteForElementWithId(const WebString& elementId)
 {
     WebFrame* webFrame = m_webView->mainFrame();
@@ -264,41 +1064,6 @@ bool TestRunner::elementDoesAutoCompleteForElementWithId(const WebString& elemen
     return inputElement.autoComplete();
 }
 
-int TestRunner::numberOfActiveAnimations()
-{
-    WebFrame* webFrame = m_webView->mainFrame();
-    if (!webFrame)
-        return -1;
-
-    WebAnimationController* controller = webFrame->animationController();
-    if (!controller)
-        return -1;
-
-    return controller->numberOfActiveAnimations();
-}
-
-void TestRunner::pauseAnimationAtTimeOnElementWithId(const CppArgumentList& arguments, CppVariant* result)
-{
-    result->set(false);
-    if (arguments.size() > 2 && arguments[0].isString() && arguments[1].isNumber() && arguments[2].isString()) {
-        WebString animationName = cppVariantToWebString(arguments[0]);
-        double time = arguments[1].toDouble();
-        WebString elementId = cppVariantToWebString(arguments[2]);
-        result->set(pauseAnimationAtTimeOnElementWithId(animationName, time, elementId));
-    }
-}
-
-void TestRunner::pauseTransitionAtTimeOnElementWithId(const CppArgumentList& arguments, CppVariant* result)
-{
-    result->set(false);
-    if (arguments.size() > 2 && arguments[0].isString() && arguments[1].isNumber() && arguments[2].isString()) {
-        WebString propertyName = cppVariantToWebString(arguments[0]);
-        double time = arguments[1].toDouble();
-        WebString elementId = cppVariantToWebString(arguments[2]);
-        result->set(pauseTransitionAtTimeOnElementWithId(propertyName, time, elementId));
-    }
-}
-
 void TestRunner::elementDoesAutoCompleteForElementWithId(const CppArgumentList& arguments, CppVariant* result)
 {
     if (arguments.size() != 1 || !arguments[0].isString()) {
@@ -307,11 +1072,6 @@ void TestRunner::elementDoesAutoCompleteForElementWithId(const CppArgumentList& 
     }
     WebString elementId = cppVariantToWebString(arguments[0]);
     result->set(elementDoesAutoCompleteForElementWithId(elementId));
-}
-
-void TestRunner::numberOfActiveAnimations(const CppArgumentList&, CppVariant* result)
-{
-    result->set(numberOfActiveAnimations());
 }
 
 void TestRunner::callShouldCloseOnWebView(const CppArgumentList&, CppVariant* result)
@@ -492,16 +1252,6 @@ void TestRunner::startSpeechInput(const CppArgumentList& arguments, CppVariant* 
     input->startSpeechInput();
 }
 
-void TestRunner::loseCompositorContext(const CppArgumentList& args, CppVariant*)
-{
-    int numTimes;
-    if (args.size() == 1 || !args[0].isNumber())
-        numTimes = 1;
-    else
-        numTimes = args[0].toInt32();
-    m_webView->loseCompositorContext(numTimes);
-}
-
 void TestRunner::markerTextForListItem(const CppArgumentList& args, CppVariant* result)
 {
     WebElement element;
@@ -519,7 +1269,7 @@ void TestRunner::findString(const CppArgumentList& arguments, CppVariant* result
     WebFindOptions findOptions;
     bool wrapAround = false;
     if (arguments.size() >= 2) {
-        Vector<std::string> optionsArray = arguments[1].toStringVector();
+        vector<string> optionsArray = arguments[1].toStringVector();
         findOptions.matchCase = true;
 
         for (size_t i = 0; i < optionsArray.size(); ++i) {
@@ -537,14 +1287,6 @@ void TestRunner::findString(const CppArgumentList& arguments, CppVariant* result
     WebFrame* frame = m_webView->mainFrame();
     const bool findResult = frame->find(0, cppVariantToWebString(arguments[0]), findOptions, wrapAround, 0);
     result->set(findResult);
-}
-
-void TestRunner::setMinimumTimerInterval(const CppArgumentList& arguments, CppVariant* result)
-{
-    result->setNull();
-    if (arguments.size() < 1 || !arguments[0].isNumber())
-        return;
-    m_webView->settings()->setMinimumTimerInterval(arguments[0].toDouble());
 }
 
 void TestRunner::setAutofilled(const CppArgumentList& arguments, CppVariant* result)
@@ -607,7 +1349,7 @@ void TestRunner::selectionAsMarkup(const CppArgumentList& arguments, CppVariant*
 
 void TestRunner::setTextSubpixelPositioning(const CppArgumentList& arguments, CppVariant* result)
 {
-#if OS(LINUX) || OS(ANDROID)
+#if defined(__linux__) || defined(ANDROID)
     // Since FontConfig doesn't provide a variable to control subpixel positioning, we'll fall back
     // to setting it globally for all fonts.
     if (arguments.size() > 0 && arguments[0].isBool())
@@ -681,13 +1423,73 @@ void TestRunner::textSurroundingNode(const CppArgumentList& arguments, CppVarian
     result->set(surroundingText.textContent().utf8());
 }
 
-void TestRunner::setTouchDragDropEnabled(const CppArgumentList& arguments, CppVariant* result)
+void TestRunner::setSmartInsertDeleteEnabled(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isBool())
+        m_smartInsertDeleteEnabled = arguments[0].value.boolValue;
+    result->setNull();
+}
+
+void TestRunner::setSelectTrailingWhitespaceEnabled(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isBool())
+        m_selectTrailingWhitespaceEnabled = arguments[0].value.boolValue;
+    result->setNull();
+}
+
+void TestRunner::enableAutoResizeMode(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() != 4) {
+        result->set(false);
+        return;
+    }
+    int minWidth = cppVariantToInt32(arguments[0]);
+    int minHeight = cppVariantToInt32(arguments[1]);
+    WebKit::WebSize minSize(minWidth, minHeight);
+
+    int maxWidth = cppVariantToInt32(arguments[2]);
+    int maxHeight = cppVariantToInt32(arguments[3]);
+    WebKit::WebSize maxSize(maxWidth, maxHeight);
+
+    m_webView->enableAutoResizeMode(minSize, maxSize);
+    result->set(true);
+}
+
+void TestRunner::disableAutoResizeMode(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() !=2) {
+        result->set(false);
+        return;
+    }
+    int newWidth = cppVariantToInt32(arguments[0]);
+    int newHeight = cppVariantToInt32(arguments[1]);
+    WebKit::WebSize newSize(newWidth, newHeight);
+
+    m_delegate->setClientWindowRect(WebRect(0, 0, newSize.width, newSize.height));
+    m_webView->disableAutoResizeMode();
+    m_webView->resize(newSize);
+    result->set(true);
+}
+
+void TestRunner::setMockDeviceOrientation(const CppArgumentList& arguments, CppVariant* result)
 {
     result->setNull();
-    if (arguments.size() != 1 || !arguments[0].isBool())
+    if (arguments.size() < 6 || !arguments[0].isBool() || !arguments[1].isNumber() || !arguments[2].isBool() || !arguments[3].isNumber() || !arguments[4].isBool() || !arguments[5].isNumber())
         return;
 
-    m_webView->settings()->setTouchDragDropEnabled(arguments[0].toBoolean());
+    WebDeviceOrientation orientation;
+    orientation.setNull(false);
+    if (arguments[0].toBoolean())
+        orientation.setAlpha(arguments[1].toDouble());
+    if (arguments[2].toBoolean())
+        orientation.setBeta(arguments[3].toDouble());
+    if (arguments[4].toBoolean())
+        orientation.setGamma(arguments[5].toDouble());
+
+    // Note that we only call setOrientation on the main page's mock since this is all that the
+    // tests require. If necessary, we could get a list of WebViewHosts from the TestShell and
+    // call setOrientation on each DeviceOrientationClientMock.
+    m_delegate->setDeviceOrientation(orientation);
 }
 
 void TestRunner::setUserStyleSheetEnabled(const CppArgumentList& arguments, CppVariant* result)
@@ -816,7 +1618,7 @@ void TestRunner::overridePreference(const CppArgumentList& arguments, CppVariant
     else if (key == "WebKitShouldRespectImageOrientation")
         prefs->shouldRespectImageOrientation = cppVariantToBool(value);
     else if (key == "WebKitWebAudioEnabled")
-        ASSERT(cppVariantToBool(value));
+        WEBKIT_ASSERT(cppVariantToBool(value));
     else {
         string message("Invalid name for preference: ");
         message.append(key);
@@ -834,9 +1636,356 @@ void TestRunner::setPluginsEnabled(const CppArgumentList& arguments, CppVariant*
     result->setNull();
 }
 
-void TestRunner::workerThreadCount(CppVariant* result)
+void TestRunner::setAsynchronousSpellCheckingEnabled(const CppArgumentList& arguments, CppVariant* result)
 {
-    result->set(static_cast<int>(WebWorkerInfo::dedicatedWorkerCount()));
+    if (arguments.size() > 0 && arguments[0].isBool()) {
+        m_delegate->preferences()->asynchronousSpellCheckingEnabled = cppVariantToBool(arguments[0]);
+        m_delegate->applyPreferences();
+    }
+    result->setNull();
+}
+
+void TestRunner::setMinimumTimerInterval(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isNumber()) {
+        m_delegate->preferences()->minimumTimerInterval = arguments[0].toDouble();
+        m_delegate->applyPreferences();
+    }
+    result->setNull();
+}
+
+void TestRunner::setTouchDragDropEnabled(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isBool()) {
+        m_delegate->preferences()->touchDragDropEnabled = arguments[0].toBoolean();
+        m_delegate->applyPreferences();
+    }
+    result->setNull();
+}
+
+#if ENABLE_WEB_INTENTS
+void TestRunner::sendWebIntentResponse(const CppArgumentList& arguments, CppVariant* result)
+{
+    v8::HandleScope scope;
+    v8::Local<v8::Context> ctx = m_webView->mainFrame()->mainWorldScriptContext();
+    result->set(m_webView->mainFrame()->selectionAsMarkup().utf8());
+    v8::Context::Scope cscope(ctx);
+
+    WebIntentRequest* request = m_delegate->currentWebIntentRequest();
+    if (request->isNull())
+        return;
+
+    if (arguments.size() == 1) {
+        WebCString reply = cppVariantToWebString(arguments[0]).utf8();
+        v8::Handle<v8::Value> v8value = v8::String::New(reply.data(), reply.length());
+        request->postResult(WebSerializedScriptValue::serialize(v8value));
+    } else {
+        v8::Handle<v8::Value> v8value = v8::String::New("ERROR");
+        request->postFailure(WebSerializedScriptValue::serialize(v8value));
+    }
+    result->setNull();
+}
+
+void TestRunner::deliverWebIntent(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() <  3)
+        return;
+
+    v8::HandleScope scope;
+    v8::Local<v8::Context> ctx = m_webView->mainFrame()->mainWorldScriptContext();
+    result->set(m_webView->mainFrame()->selectionAsMarkup().utf8());
+    v8::Context::Scope cscope(ctx);
+
+    WebString action = cppVariantToWebString(arguments[0]);
+    WebString type = cppVariantToWebString(arguments[1]);
+    WebCString data = cppVariantToWebString(arguments[2]).utf8();
+    WebSerializedScriptValue serializedData = WebSerializedScriptValue::serialize(v8::String::New(data.data(), data.length()));
+
+    WebIntent intent = WebIntent::create(action, type, serializedData.toString(), WebVector<WebString>(), WebVector<WebString>());
+
+    m_webView->mainFrame()->deliverIntent(intent, 0, m_intentClient.get());
+}
+#endif
+
+void TestRunner::showWebInspector(const CppArgumentList&, CppVariant* result)
+{
+    showDevTools();
+    result->setNull();
+}
+
+void TestRunner::closeWebInspector(const CppArgumentList& args, CppVariant* result)
+{
+    m_delegate->closeDevTools();
+    result->setNull();
+}
+
+void TestRunner::evaluateInWebInspector(const CppArgumentList& arguments, CppVariant* result)
+{
+    result->setNull();
+    if (arguments.size() < 2 || !arguments[0].isNumber() || !arguments[1].isString())
+        return;
+    m_delegate->evaluateInWebInspector(arguments[0].toInt32(), arguments[1].toString());
+}
+
+void TestRunner::clearAllDatabases(const CppArgumentList& arguments, CppVariant* result)
+{
+    result->setNull();
+    m_delegate->clearAllDatabases();
+}
+
+void TestRunner::setDatabaseQuota(const CppArgumentList& arguments, CppVariant* result)
+{
+    result->setNull();
+    if ((arguments.size() >= 1) && arguments[0].isNumber())
+        m_delegate->setDatabaseQuota(arguments[0].toInt32());
+}
+
+void TestRunner::setAlwaysAcceptCookies(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0)
+        m_delegate->setAcceptAllCookies(cppVariantToBool(arguments[0]));
+    result->setNull();
+}
+
+void TestRunner::setWindowIsKey(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() > 0 && arguments[0].isBool())
+        m_delegate->setFocus(arguments[0].value.boolValue);
+    result->setNull();
+}
+
+void TestRunner::pathToLocalResource(const CppArgumentList& arguments, CppVariant* result)
+{
+    result->setNull();
+    if (arguments.size() <= 0 || !arguments[0].isString())
+        return;
+
+    result->set(m_delegate->pathToLocalResource(arguments[0].toString()));
+}
+
+void TestRunner::setBackingScaleFactor(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() < 2 || !arguments[0].isNumber() || !arguments[1].isObject())
+        return;
+
+    float value = arguments[0].value.doubleValue;
+    m_delegate->setDeviceScaleFactor(value);
+
+    auto_ptr<CppVariant> callbackArguments(new CppVariant());
+    callbackArguments->set(arguments[1]);
+    result->setNull();
+    m_delegate->postTask(new InvokeCallbackTask(this, callbackArguments));
+}
+
+void TestRunner::setPOSIXLocale(const CppArgumentList& arguments, CppVariant* result)
+{
+    result->setNull();
+    if (arguments.size() == 1 && arguments[0].isString())
+        m_delegate->setLocale(arguments[0].toString());
+}
+
+void TestRunner::numberOfPendingGeolocationPermissionRequests(const CppArgumentList& arguments, CppVariant* result)
+{
+    result->set(m_delegate->numberOfPendingGeolocationPermissionRequests());
+}
+
+// FIXME: For greater test flexibility, we should be able to set each page's geolocation mock individually.
+// https://bugs.webkit.org/show_bug.cgi?id=52368
+void TestRunner::setGeolocationPermission(const CppArgumentList& arguments, CppVariant* result)
+{
+    result->setNull();
+    if (arguments.size() < 1 || !arguments[0].isBool())
+        return;
+    m_delegate->setGeolocationPermission(arguments[0].toBoolean());
+}
+
+void TestRunner::setMockGeolocationPosition(const CppArgumentList& arguments, CppVariant* result)
+{
+    result->setNull();
+    if (arguments.size() < 3 || !arguments[0].isNumber() || !arguments[1].isNumber() || !arguments[2].isNumber())
+        return;
+    m_delegate->setMockGeolocationPosition(arguments[0].toDouble(), arguments[1].toDouble(), arguments[2].toDouble());
+}
+
+void TestRunner::setMockGeolocationPositionUnavailableError(const CppArgumentList& arguments, CppVariant* result)
+{
+    result->setNull();
+    if (arguments.size() != 1 || !arguments[0].isString())
+        return;
+    m_delegate->setMockGeolocationPositionUnavailableError(arguments[0].toString());
+}
+
+void TestRunner::grantWebNotificationPermission(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() != 1 || !arguments[0].isString()) {
+        result->set(false);
+        return;
+    }
+    m_delegate->grantWebNotificationPermission(arguments[0].toString());
+    result->set(true);
+}
+
+void TestRunner::simulateLegacyWebNotificationClick(const CppArgumentList& arguments, CppVariant* result)
+{
+    if (arguments.size() != 1 || !arguments[0].isString()) {
+        result->set(false);
+        return;
+    }
+    result->set(m_delegate->simulateLegacyWebNotificationClick(arguments[0].toString()));
+}
+
+void TestRunner::addMockSpeechInputResult(const CppArgumentList& arguments, CppVariant* result)
+{
+    result->setNull();
+    if (arguments.size() < 3 || !arguments[0].isString() || !arguments[1].isNumber() || !arguments[2].isString())
+        return;
+
+    m_delegate->addMockSpeechInputResult(arguments[0].toString(), arguments[1].toDouble(), arguments[2].toString());
+}
+
+void TestRunner::setMockSpeechInputDumpRect(const CppArgumentList& arguments, CppVariant* result)
+{
+    result->setNull();
+    if (arguments.size() < 1 || !arguments[0].isBool())
+        return;
+
+    m_delegate->setMockSpeechInputDumpRect(arguments[0].toBoolean());
+}
+
+void TestRunner::addMockSpeechRecognitionResult(const CppArgumentList& arguments, CppVariant* result)
+{
+    result->setNull();
+    if (arguments.size() < 2 || !arguments[0].isString() || !arguments[1].isNumber())
+        return;
+
+    m_delegate->addMockSpeechRecognitionResult(arguments[0].toString(), arguments[1].toDouble());
+}
+
+void TestRunner::setMockSpeechRecognitionError(const CppArgumentList& arguments, CppVariant* result)
+{
+    result->setNull();
+    if (arguments.size() != 2 || !arguments[0].isString() || !arguments[1].isString())
+        return;
+
+    m_delegate->setMockSpeechRecognitionError(arguments[0].toString(), arguments[1].toString());
+}
+
+void TestRunner::wasMockSpeechRecognitionAborted(const CppArgumentList&, CppVariant* result)
+{
+    result->set(m_delegate->wasMockSpeechRecognitionAborted());
+}
+
+void TestRunner::display(const CppArgumentList& arguments, CppVariant* result)
+{
+    m_delegate->display();
+    result->setNull();
+}
+
+void TestRunner::displayInvalidatedRegion(const CppArgumentList& arguments, CppVariant* result)
+{
+    m_delegate->displayInvalidatedRegion();
+    result->setNull();
+}
+
+void TestRunner::dumpEditingCallbacks(const CppArgumentList&, CppVariant* result)
+{
+    m_dumpEditingCallbacks = true;
+    result->setNull();
+}
+
+void TestRunner::dumpAsText(const CppArgumentList& arguments, CppVariant* result)
+{
+    m_dumpAsText = true;
+    m_generatePixelResults = false;
+
+    // Optional paramater, describing whether it's allowed to dump pixel results in dumpAsText mode.
+    if (arguments.size() > 0 && arguments[0].isBool())
+        m_generatePixelResults = arguments[0].value.boolValue;
+
+    result->setNull();
+}
+
+void TestRunner::dumpChildFrameScrollPositions(const CppArgumentList&, CppVariant* result)
+{
+    m_dumpChildFrameScrollPositions = true;
+    result->setNull();
+}
+
+void TestRunner::dumpChildFramesAsText(const CppArgumentList&, CppVariant* result)
+{
+    m_dumpChildFramesAsText = true;
+    result->setNull();
+}
+
+void TestRunner::setAudioData(const CppArgumentList& arguments, CppVariant* result)
+{
+    result->setNull();
+
+    if (arguments.size() < 1 || !arguments[0].isObject())
+        return;
+
+    // Check that passed-in object is, in fact, an ArrayBufferView.
+    NPObject* npobject = NPVARIANT_TO_OBJECT(arguments[0]);
+    if (!npobject)
+        return;
+    if (!WebBindings::getArrayBufferView(npobject, &m_audioData))
+        return;
+
+    m_dumpAsAudio = true;
+}
+
+void TestRunner::dumpFrameLoadCallbacks(const CppArgumentList&, CppVariant* result)
+{
+    m_dumpFrameLoadCallbacks = true;
+    result->setNull();
+}
+
+void TestRunner::dumpUserGestureInFrameLoadCallbacks(const CppArgumentList&, CppVariant* result)
+{
+    m_dumpUserGestureInFrameLoadCallbacks = true;
+    result->setNull();
+}
+
+void TestRunner::setStopProvisionalFrameLoads(const CppArgumentList&, CppVariant* result)
+{
+    result->setNull();
+    m_stopProvisionalFrameLoads = true;
+}
+
+void TestRunner::dumpTitleChanges(const CppArgumentList&, CppVariant* result)
+{
+    m_dumpTitleChanges = true;
+    result->setNull();
+}
+
+void TestRunner::dumpCreateView(const CppArgumentList&, CppVariant* result)
+{
+    m_dumpCreateView = true;
+    result->setNull();
+}
+
+void TestRunner::setCanOpenWindows(const CppArgumentList&, CppVariant* result)
+{
+    m_canOpenWindows = true;
+    result->setNull();
+}
+
+void TestRunner::dumpResourceLoadCallbacks(const CppArgumentList&, CppVariant* result)
+{
+    m_dumpResourceLoadCallbacks = true;
+    result->setNull();
+}
+
+void TestRunner::dumpResourceRequestCallbacks(const CppArgumentList&, CppVariant* result)
+{
+    m_dumpResourceRequestCallbacks = true;
+    result->setNull();
+}
+
+void TestRunner::dumpResourceResponseMIMETypes(const CppArgumentList&, CppVariant* result)
+{
+    m_dumpResourceResponseMIMETypes = true;
+    result->setNull();
 }
 
 // Need these conversions because the format of the value for booleans
@@ -896,6 +2045,36 @@ void TestRunner::fallbackMethod(const CppArgumentList&, CppVariant* result)
 
 void TestRunner::notImplemented(const CppArgumentList&, CppVariant* result)
 {
+    result->setNull();
+}
+
+void TestRunner::didAcquirePointerLock(const CppArgumentList&, CppVariant* result)
+{
+    m_delegate->didAcquirePointerLock();
+    result->setNull();
+}
+
+void TestRunner::didNotAcquirePointerLock(const CppArgumentList&, CppVariant* result)
+{
+    m_delegate->didNotAcquirePointerLock();
+    result->setNull();
+}
+
+void TestRunner::didLosePointerLock(const CppArgumentList&, CppVariant* result)
+{
+    m_delegate->didLosePointerLock();
+    result->setNull();
+}
+
+void TestRunner::setPointerLockWillRespondAsynchronously(const CppArgumentList&, CppVariant* result)
+{
+    m_delegate->setPointerLockWillRespondAsynchronously();
+    result->setNull();
+}
+
+void TestRunner::setPointerLockWillFailSynchronously(const CppArgumentList&, CppVariant* result)
+{
+    m_delegate->setPointerLockWillFailSynchronously();
     result->setNull();
 }
 

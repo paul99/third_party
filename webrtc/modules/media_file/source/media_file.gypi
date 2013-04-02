@@ -10,7 +10,7 @@
   'targets': [
     {
       'target_name': 'media_file',
-      'type': '<(library)',
+      'type': 'static_library',
       'dependencies': [
         'webrtc_utility',
         '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
@@ -38,6 +38,8 @@
         'media_file_utility.cc',
         'media_file_utility.h',
       ], # source
+      # TODO(jschuh): Bug 1348: fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
   ], # targets
   'conditions': [

@@ -19,14 +19,20 @@
 #ifndef GOOGLE_CACHEINVALIDATION_IMPL_RUN_STATE_H_
 #define GOOGLE_CACHEINVALIDATION_IMPL_RUN_STATE_H_
 
+#include "google/cacheinvalidation/client.pb.h"
 #include "google/cacheinvalidation/deps/logging.h"
 #include "google/cacheinvalidation/deps/mutex.h"
 
 namespace invalidation {
 
+using ::ipc::invalidation::RunStateP_State;
+using ::ipc::invalidation::RunStateP_State_NOT_STARTED;
+using ::ipc::invalidation::RunStateP_State_STARTED;
+using ::ipc::invalidation::RunStateP_State_STOPPED;
+
 class RunState {
  public:
-  RunState() : current_state_(NOT_STARTED) {}
+  RunState() : current_state_(RunStateP_State_NOT_STARTED) {}
 
   /* Marks the current state to be STARTED.
    *
@@ -34,8 +40,9 @@ class RunState {
    */
   void Start() {
     MutexLock m(&lock_);
-    CHECK(current_state_ == NOT_STARTED) << "Cannot start: " << current_state_;
-    current_state_ = STARTED;
+    CHECK(current_state_ == RunStateP_State_NOT_STARTED) << "Cannot start: "
+        << current_state_;
+    current_state_ = RunStateP_State_STARTED;
   }
 
   /* Marks the current state to be STOPPED.
@@ -44,8 +51,9 @@ class RunState {
    */
   void Stop() {
     MutexLock m(&lock_);
-    CHECK(current_state_ == STARTED) << "Cannot stop: " << current_state_;
-    current_state_ = STOPPED;
+    CHECK(current_state_ == RunStateP_State_STARTED) << "Cannot stop: "
+        << current_state_;
+    current_state_ = RunStateP_State_STOPPED;
   }
 
   /* Returns true iff Start has been called on this but Stop has not been
@@ -54,25 +62,18 @@ class RunState {
   bool IsStarted() const {
     // Don't treat locking a mutex as mutation.
     MutexLock m((Mutex *) &lock_);  // NOLINT
-    return current_state_ == STARTED;
+    return current_state_ == RunStateP_State_STARTED;
   }
 
   /* Returns true iff Start and Stop have been called on this object. */
   bool IsStopped() const {
     // Don't treat locking a mutex as mutation.
     MutexLock m((Mutex *) &lock_);  // NOLINT
-    return current_state_ == STOPPED;
+    return current_state_ == RunStateP_State_STOPPED;
   }
 
  private:
-  /* Whether the instance has been started and/or stopped. */
-  enum CurrentState {
-    NOT_STARTED,
-    STARTED,
-    STOPPED
-  };
-
-  CurrentState current_state_;
+  RunStateP_State current_state_;
   Mutex lock_;
 };
 

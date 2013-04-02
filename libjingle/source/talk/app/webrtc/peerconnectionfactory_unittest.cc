@@ -58,13 +58,16 @@ class NullPeerConnectionObserver : public PeerConnectionObserver {
   virtual void OnError() {}
   virtual void OnMessage(const std::string& msg) {}
   virtual void OnSignalingMessage(const std::string& msg) {}
-  virtual void OnStateChange(StateType state_changed) {}
+  virtual void OnSignalingChange(
+      PeerConnectionInterface::SignalingState new_state) {}
   virtual void OnAddStream(MediaStreamInterface* stream) {}
   virtual void OnRemoveStream(MediaStreamInterface* stream) {}
   virtual void OnRenegotiationNeeded() {}
-  virtual void OnIceChange() {}
+  virtual void OnIceConnectionChange(
+      PeerConnectionInterface::IceConnectionState new_state) {}
+  virtual void OnIceGatheringChange(
+      PeerConnectionInterface::IceGatheringState new_state) {}
   virtual void OnIceCandidate(const webrtc::IceCandidateInterface* candidate) {}
-  virtual void OnIceComplete() {}
 };
 
 }  // namespace
@@ -90,7 +93,7 @@ TEST(PeerConnectionFactoryTestInternal, CreatePCUsingInternalModules) {
       webrtc::CreatePeerConnectionFactory());
 
   NullPeerConnectionObserver observer;
-  webrtc::JsepInterface::IceServers servers;
+  webrtc::PeerConnectionInterface::IceServers servers;
 
   talk_base::scoped_refptr<PeerConnectionInterface> pc(
       factory->CreatePeerConnection(servers, NULL, &observer));
@@ -99,8 +102,8 @@ TEST(PeerConnectionFactoryTestInternal, CreatePCUsingInternalModules) {
 }
 
 TEST_F(PeerConnectionFactoryTest, CreatePCUsingIceServers) {
-  webrtc::JsepInterface::IceServers ice_servers;
-  webrtc::JsepInterface::IceServer ice_server;
+  webrtc::PeerConnectionInterface::IceServers ice_servers;
+  webrtc::PeerConnectionInterface::IceServer ice_server;
   ice_server.uri = kStunIceServer;
   ice_servers.push_back(ice_server);
   ice_server.uri = kTurnIceServer;
@@ -114,8 +117,8 @@ TEST_F(PeerConnectionFactoryTest, CreatePCUsingIceServers) {
 }
 
 TEST_F(PeerConnectionFactoryTest, CreatePCUsingInvalidTurnUrl) {
-  webrtc::JsepInterface::IceServers ice_servers;
-  webrtc::JsepInterface::IceServer ice_server;
+  webrtc::PeerConnectionInterface::IceServers ice_servers;
+  webrtc::PeerConnectionInterface::IceServer ice_server;
   ice_server.uri = kInvalidTurnIceServer;
   ice_server.password = kTurnPassword;
   ice_servers.push_back(ice_server);

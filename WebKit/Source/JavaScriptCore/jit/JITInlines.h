@@ -42,16 +42,6 @@ ALWAYS_INLINE JSValue JIT::getConstantOperand(unsigned src)
     return m_codeBlock->getConstant(src);
 }
 
-ALWAYS_INLINE void JIT::emitPutCellToCallFrameHeader(RegisterID from, JSStack::CallFrameHeaderEntry entry)
-{
-#if USE(JSVALUE32_64)
-    store32(TrustedImm32(JSValue::CellTag), tagFor(entry, callFrameRegister));
-    store32(from, payloadFor(entry, callFrameRegister));
-#else
-    store64(from, addressFor(entry, callFrameRegister));
-#endif
-}
-
 ALWAYS_INLINE void JIT::emitPutIntToCallFrameHeader(RegisterID from, JSStack::CallFrameHeaderEntry entry)
 {
 #if USE(JSVALUE32_64)
@@ -60,20 +50,6 @@ ALWAYS_INLINE void JIT::emitPutIntToCallFrameHeader(RegisterID from, JSStack::Ca
 #else
     store64(from, addressFor(entry, callFrameRegister));
 #endif
-}
-
-ALWAYS_INLINE void JIT::emitPutToCallFrameHeader(RegisterID from, JSStack::CallFrameHeaderEntry entry)
-{
-#if USE(JSVALUE32_64)
-    storePtr(from, payloadFor(entry, callFrameRegister));
-#else
-    store64(from, addressFor(entry, callFrameRegister));
-#endif
-}
-
-ALWAYS_INLINE void JIT::emitPutImmediateToCallFrameHeader(void* value, JSStack::CallFrameHeaderEntry entry)
-{
-    storePtr(TrustedImmPtr(value), Address(callFrameRegister, entry * sizeof(Register)));
 }
 
 ALWAYS_INLINE void JIT::emitGetFromCallFrameHeaderPtr(JSStack::CallFrameHeaderEntry entry, RegisterID to, RegisterID from)
@@ -195,81 +171,6 @@ ALWAYS_INLINE void JIT::endUninterruptedSequence(int insnSpace, int constSpace, 
 
 #endif
 
-#if CPU(ARM)
-
-ALWAYS_INLINE void JIT::preserveReturnAddressAfterCall(RegisterID reg)
-{
-    move(linkRegister, reg);
-}
-
-ALWAYS_INLINE void JIT::restoreReturnAddressBeforeReturn(RegisterID reg)
-{
-    move(reg, linkRegister);
-}
-
-ALWAYS_INLINE void JIT::restoreReturnAddressBeforeReturn(Address address)
-{
-    loadPtr(address, linkRegister);
-}
-#elif CPU(SH4)
-
-ALWAYS_INLINE void JIT::preserveReturnAddressAfterCall(RegisterID reg)
-{
-    m_assembler.stspr(reg);
-}
-
-ALWAYS_INLINE void JIT::restoreReturnAddressBeforeReturn(RegisterID reg)
-{
-    m_assembler.ldspr(reg);
-}
-
-ALWAYS_INLINE void JIT::restoreReturnAddressBeforeReturn(Address address)
-{
-    loadPtrLinkReg(address);
-}
-
-#elif CPU(MIPS)
-
-ALWAYS_INLINE void JIT::preserveReturnAddressAfterCall(RegisterID reg)
-{
-    move(returnAddressRegister, reg);
-}
-
-ALWAYS_INLINE void JIT::restoreReturnAddressBeforeReturn(RegisterID reg)
-{
-    move(reg, returnAddressRegister);
-}
-
-ALWAYS_INLINE void JIT::restoreReturnAddressBeforeReturn(Address address)
-{
-    loadPtr(address, returnAddressRegister);
-}
-
-#else // CPU(X86) || CPU(X86_64)
-
-ALWAYS_INLINE void JIT::preserveReturnAddressAfterCall(RegisterID reg)
-{
-    pop(reg);
-}
-
-ALWAYS_INLINE void JIT::restoreReturnAddressBeforeReturn(RegisterID reg)
-{
-    push(reg);
-}
-
-ALWAYS_INLINE void JIT::restoreReturnAddressBeforeReturn(Address address)
-{
-    push(address);
-}
-
-#endif
-
-ALWAYS_INLINE void JIT::restoreArgumentReference()
-{
-    move(stackPointerRegister, firstArgumentRegister);
-    poke(callFrameRegister, OBJECT_OFFSETOF(struct JITStackFrame, callFrame) / sizeof(void*));
-}
-
 ALWAYS_INLINE void JIT::updateTopCallFrame()
 {
     ASSERT(static_cast<int>(m_bytecodeOffset) >= 0);
@@ -351,12 +252,6 @@ ALWAYS_INLINE JIT::Jump JIT::emitJumpIfNotObject(RegisterID structureReg)
     return branch8(Below, Address(structureReg, Structure::typeInfoTypeOffset()), TrustedImm32(ObjectType));
 }
 
-ALWAYS_INLINE JIT::Jump JIT::emitJumpIfNotType(RegisterID baseReg, RegisterID scratchReg, JSType type)
-{
-    loadPtr(Address(baseReg, JSCell::structureOffset()), scratchReg);
-    return branch8(NotEqual, Address(scratchReg, Structure::typeInfoTypeOffset()), TrustedImm32(type));
-}
-
 #if ENABLE(SAMPLING_FLAGS)
 ALWAYS_INLINE void JIT::setSamplingFlag(int32_t flag)
 {
@@ -415,33 +310,21 @@ ALWAYS_INLINE bool JIT::isOperandConstantImmediateChar(unsigned src)
     return m_codeBlock->isConstantRegisterIndex(src) && getConstantOperand(src).isString() && asString(getConstantOperand(src).asCell())->length() == 1;
 }
 
-template <typename ClassType, MarkedBlock::DestructorType destructorType, typename StructureType> inline void JIT::emitAllocateBasicJSObject(StructureType structure, RegisterID result, RegisterID storagePtr)
+template<typename StructureType>
+inline void JIT::emitAllocateJSObject(RegisterID allocator, StructureType structure, RegisterID result, RegisterID scratch)
 {
-    size_t size = ClassType::allocationSize(INLINE_STORAGE_CAPACITY);
-    MarkedAllocator* allocator = 0;
-    if (destructorType == MarkedBlock::Normal)
-        allocator = &m_globalData->heap.allocatorForObjectWithNormalDestructor(size);
-    else if (destructorType == MarkedBlock::ImmortalStructure)
-        allocator = &m_globalData->heap.allocatorForObjectWithImmortalStructureDestructor(size);
-    else
-        allocator = &m_globalData->heap.allocatorForObjectWithoutDestructor(size);
-    loadPtr(&allocator->m_freeList.head, result);
+    loadPtr(Address(allocator, MarkedAllocator::offsetOfFreeListHead()), result);
     addSlowCase(branchTestPtr(Zero, result));
 
     // remove the object from the free list
-    loadPtr(Address(result), storagePtr);
-    storePtr(storagePtr, &allocator->m_freeList.head);
+    loadPtr(Address(result), scratch);
+    storePtr(scratch, Address(allocator, MarkedAllocator::offsetOfFreeListHead()));
 
     // initialize the object's structure
     storePtr(structure, Address(result, JSCell::structureOffset()));
 
     // initialize the object's property storage pointer
     storePtr(TrustedImmPtr(0), Address(result, JSObject::butterflyOffset()));
-}
-
-template <typename T> inline void JIT::emitAllocateJSFinalObject(T structure, RegisterID result, RegisterID scratch)
-{
-    emitAllocateBasicJSObject<JSFinalObject, MarkedBlock::None, T>(structure, result, scratch);
 }
 
 #if ENABLE(VALUE_PROFILER)
@@ -614,10 +497,10 @@ inline void JIT::emitLoad(const JSValue& v, RegisterID tag, RegisterID payload)
 
 inline void JIT::emitLoad(int index, RegisterID tag, RegisterID payload, RegisterID base)
 {
-    ASSERT(tag != payload);
+    RELEASE_ASSERT(tag != payload);
 
     if (base == callFrameRegister) {
-        ASSERT(payload != base);
+        RELEASE_ASSERT(payload != base);
         emitLoadPayload(index, payload);
         emitLoadTag(index, tag);
         return;
@@ -928,11 +811,6 @@ ALWAYS_INLINE void JIT::emitJumpSlowCaseIfJSCell(RegisterID reg)
     addSlowCase(emitJumpIfJSCell(reg));
 }
 
-ALWAYS_INLINE JIT::Jump JIT::emitJumpIfNotJSCell(RegisterID reg)
-{
-    return branchTest64(NonZero, reg, tagMaskRegister);
-}
-
 ALWAYS_INLINE void JIT::emitJumpSlowCaseIfNotJSCell(RegisterID reg)
 {
     addSlowCase(emitJumpIfNotJSCell(reg));
@@ -997,14 +875,6 @@ ALWAYS_INLINE void JIT::emitJumpSlowCaseIfNotImmediateNumber(RegisterID reg)
 ALWAYS_INLINE void JIT::emitFastArithReTagImmediate(RegisterID src, RegisterID dest)
 {
     emitFastArithIntToImmNoCheck(src, dest);
-}
-
-// operand is int32_t, must have been zero-extended if register is 64-bit.
-ALWAYS_INLINE void JIT::emitFastArithIntToImmNoCheck(RegisterID src, RegisterID dest)
-{
-    if (src != dest)
-        move(src, dest);
-    or64(tagTypeNumberRegister, dest);
 }
 
 ALWAYS_INLINE void JIT::emitTagAsBoolImmediate(RegisterID reg)

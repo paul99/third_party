@@ -3143,8 +3143,7 @@ void tst_QWebPage::deleteQWebViewTwice()
         mainWindow.setCentralWidget(webView);
         webView->load(QUrl("qrc:///resources/frame_a.html"));
         mainWindow.show();
-        connect(webView, SIGNAL(loadFinished(bool)), &mainWindow, SLOT(close()));
-        QApplication::instance()->exec();
+        QVERIFY(::waitForSignal(webView, SIGNAL(loadFinished(bool))));
     }
 }
 

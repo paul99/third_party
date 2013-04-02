@@ -38,6 +38,7 @@
 #include "JSFunction.h"
 #include "JSNameScope.h"
 #include "LowLevelInterpreter.h"
+#include "Operations.h"
 #include "Options.h"
 #include "StrongInlines.h"
 #include <wtf/text/WTFString.h>
@@ -142,7 +143,7 @@ void ResolveResult::checkValidity()
         ASSERT(!m_local);
         return;
     default:
-        ASSERT_NOT_REACHED();
+        RELEASE_ASSERT_NOT_REACHED();
     }
 }
 #endif
@@ -154,7 +155,9 @@ ParserError BytecodeGenerator::generate()
     m_codeBlock->setThisRegister(m_thisRegister.index());
 
     m_scopeNode->emitBytecode(*this);
-    
+
+    m_staticPropertyAnalyzer.kill();
+
     for (unsigned i = 0; i < m_tryRanges.size(); ++i) {
         TryRange& range = m_tryRanges[i];
         int start = range.start->bind();
@@ -243,6 +246,7 @@ BytecodeGenerator::BytecodeGenerator(JSGlobalData& globalData, ProgramNode* prog
     , m_hasCreatedActivation(true)
     , m_firstLazyFunction(0)
     , m_lastLazyFunction(0)
+    , m_staticPropertyAnalyzer(&m_instructions)
     , m_globalData(&globalData)
     , m_lastOpcodeID(op_end)
 #ifndef NDEBUG
@@ -293,6 +297,7 @@ BytecodeGenerator::BytecodeGenerator(JSGlobalData& globalData, FunctionBodyNode*
     , m_hasCreatedActivation(false)
     , m_firstLazyFunction(0)
     , m_lastLazyFunction(0)
+    , m_staticPropertyAnalyzer(&m_instructions)
     , m_globalData(&globalData)
     , m_lastOpcodeID(op_end)
 #ifndef NDEBUG
@@ -359,7 +364,7 @@ BytecodeGenerator::BytecodeGenerator(JSGlobalData& globalData, FunctionBodyNode*
         capturedArguments.resize(parameters.size());
         for (size_t i = 0; i < parameters.size(); ++i) {
             capturedArguments[i] = 0;
-            if (!functionBody->captures(parameters[i]) && !shouldCaptureAllTheThings)
+            if (!functionBody->captures(parameters.at(i)) && !shouldCaptureAllTheThings)
                 continue;
             capturesAnyArgumentByName = true;
             capturedArguments[i] = addVar();
@@ -460,12 +465,12 @@ BytecodeGenerator::BytecodeGenerator(JSGlobalData& globalData, FunctionBodyNode*
     for (size_t i = 0; i < parameters.size(); ++i, --nextParameterIndex) {
         int index = nextParameterIndex;
         if (capturedArguments.size() && capturedArguments[i]) {
-            ASSERT((functionBody->hasCapturedVariables() && functionBody->captures(parameters[i])) || shouldCaptureAllTheThings);
+            ASSERT((functionBody->hasCapturedVariables() && functionBody->captures(parameters.at(i))) || shouldCaptureAllTheThings);
             index = capturedArguments[i]->index();
             RegisterID original(nextParameterIndex);
             emitMove(capturedArguments[i], &original);
         }
-        addParameter(parameters[i], index);
+        addParameter(parameters.at(i), index);
     }
     preserveLastVar();
 
@@ -474,19 +479,10 @@ BytecodeGenerator::BytecodeGenerator(JSGlobalData& globalData, FunctionBodyNode*
 
     if (isConstructor()) {
         prependComment("'this' because we are a Constructor function");
-
-        RefPtr<RegisterID> func = newTemporary(); 
-
-        UnlinkedValueProfile profile = emitProfiledOpcode(op_get_callee);
-        instructions().append(func->index());
-        instructions().append(profile);
-
-        emitOpcode(op_create_this); 
-        instructions().append(m_thisRegister.index()); 
-        instructions().append(func->index()); 
+        emitCreateThis(&m_thisRegister);
     } else if (!codeBlock->isStrictMode() && (functionBody->usesThis() || codeBlock->usesEval() || m_shouldEmitDebugHooks)) {
         UnlinkedValueProfile profile = emitProfiledOpcode(op_convert_this);
-        instructions().append(m_thisRegister.index());
+        instructions().append(kill(&m_thisRegister));
         instructions().append(profile);
     }
 }
@@ -510,6 +506,7 @@ BytecodeGenerator::BytecodeGenerator(JSGlobalData& globalData, EvalNode* evalNod
     , m_hasCreatedActivation(true)
     , m_firstLazyFunction(0)
     , m_lastLazyFunction(0)
+    , m_staticPropertyAnalyzer(&m_instructions)
     , m_globalData(&globalData)
     , m_lastOpcodeID(op_end)
 #ifndef NDEBUG
@@ -748,6 +745,11 @@ UnlinkedArrayAllocationProfile BytecodeGenerator::newArrayAllocationProfile()
 #else
     return 0;
 #endif
+}
+
+UnlinkedObjectAllocationProfile BytecodeGenerator::newObjectAllocationProfile()
+{
+    return m_codeBlock->addObjectAllocationProfile();
 }
 
 UnlinkedValueProfile BytecodeGenerator::emitProfiledOpcode(OpcodeID opcodeID)
@@ -1110,6 +1112,8 @@ unsigned BytecodeGenerator::addRegExp(RegExp* r)
 
 RegisterID* BytecodeGenerator::emitMove(RegisterID* dst, RegisterID* src)
 {
+    m_staticPropertyAnalyzer.mov(dst->index(), src->index());
+
     emitOpcode(op_mov);
     instructions().append(dst->index());
     instructions().append(src->index());
@@ -1332,7 +1336,7 @@ RegisterID* BytecodeGenerator::emitResolve(RegisterID* dst, const ResolveResult&
         return emitGetLocalVar(dst, resolveResult, property);
 
     UnlinkedValueProfile profile = emitProfiledOpcode(op_resolve);
-    instructions().append(dst->index());
+    instructions().append(kill(dst));
     instructions().append(addConstant(property));
     instructions().append(getResolveOperations(property));
     instructions().append(profile);
@@ -1344,7 +1348,7 @@ RegisterID* BytecodeGenerator::emitResolveBase(RegisterID* dst, const ResolveRes
     ASSERT_UNUSED(resolveResult, !resolveResult.isRegister());
     // We can't optimise at all :-(
     UnlinkedValueProfile profile = emitProfiledOpcode(op_resolve_base);
-    instructions().append(dst->index());
+    instructions().append(kill(dst));
     instructions().append(addConstant(property));
     instructions().append(false);
     instructions().append(getResolveBaseOperations(property));
@@ -1358,7 +1362,7 @@ RegisterID* BytecodeGenerator::emitResolveBaseForPut(RegisterID* dst, const Reso
     ASSERT_UNUSED(resolveResult, !resolveResult.isRegister());
     // We can't optimise at all :-(
     UnlinkedValueProfile profile = emitProfiledOpcode(op_resolve_base);
-    instructions().append(dst->index());
+    instructions().append(kill(dst));
     instructions().append(addConstant(property));
     instructions().append(m_codeBlock->isStrictMode());
     uint32_t putToBaseIndex = 0;
@@ -1373,7 +1377,7 @@ RegisterID* BytecodeGenerator::emitResolveWithBaseForPut(RegisterID* baseDst, Re
 {
     ASSERT_UNUSED(resolveResult, !resolveResult.isRegister());
     UnlinkedValueProfile profile = emitProfiledOpcode(op_resolve_with_base);
-    instructions().append(baseDst->index());
+    instructions().append(kill(baseDst));
     instructions().append(propDst->index());
     instructions().append(addConstant(property));
     uint32_t putToBaseIndex = 0;
@@ -1393,7 +1397,7 @@ RegisterID* BytecodeGenerator::emitResolveWithThis(RegisterID* baseDst, Register
     }
 
     UnlinkedValueProfile profile = emitProfiledOpcode(op_resolve_with_this);
-    instructions().append(baseDst->index());
+    instructions().append(kill(baseDst));
     instructions().append(propDst->index());
     instructions().append(addConstant(property));
     instructions().append(getResolveWithThisOperations(property));
@@ -1411,7 +1415,7 @@ RegisterID* BytecodeGenerator::emitGetLocalVar(RegisterID* dst, const ResolveRes
         return moveToDestinationIfNeeded(dst, resolveResult.local());
 
     default:
-        ASSERT_NOT_REACHED();
+        RELEASE_ASSERT_NOT_REACHED();
         return 0;
     }
 }
@@ -1432,7 +1436,7 @@ RegisterID* BytecodeGenerator::emitGetById(RegisterID* dst, RegisterID* base, co
     m_codeBlock->addPropertyAccessInstruction(instructions().size());
 
     UnlinkedValueProfile profile = emitProfiledOpcode(op_get_by_id);
-    instructions().append(dst->index());
+    instructions().append(kill(dst));
     instructions().append(base->index());
     instructions().append(addConstant(property));
     instructions().append(0);
@@ -1455,11 +1459,15 @@ RegisterID* BytecodeGenerator::emitGetArgumentsLength(RegisterID* dst, RegisterI
 
 RegisterID* BytecodeGenerator::emitPutById(RegisterID* base, const Identifier& property, RegisterID* value)
 {
+    unsigned propertyIndex = addConstant(property);
+
+    m_staticPropertyAnalyzer.putById(base->index(), propertyIndex);
+
     m_codeBlock->addPropertyAccessInstruction(instructions().size());
 
     emitOpcode(op_put_by_id);
     instructions().append(base->index());
-    instructions().append(addConstant(property));
+    instructions().append(propertyIndex);
     instructions().append(value->index());
     instructions().append(0);
     instructions().append(0);
@@ -1481,11 +1489,15 @@ RegisterID* BytecodeGenerator::emitPutToBase(RegisterID* base, const Identifier&
 
 RegisterID* BytecodeGenerator::emitDirectPutById(RegisterID* base, const Identifier& property, RegisterID* value)
 {
+    unsigned propertyIndex = addConstant(property);
+
+    m_staticPropertyAnalyzer.putById(base->index(), propertyIndex);
+
     m_codeBlock->addPropertyAccessInstruction(instructions().size());
     
     emitOpcode(op_put_by_id);
     instructions().append(base->index());
-    instructions().append(addConstant(property));
+    instructions().append(propertyIndex);
     instructions().append(value->index());
     instructions().append(0);
     instructions().append(0);
@@ -1499,9 +1511,13 @@ RegisterID* BytecodeGenerator::emitDirectPutById(RegisterID* base, const Identif
 
 void BytecodeGenerator::emitPutGetterSetter(RegisterID* base, const Identifier& property, RegisterID* getter, RegisterID* setter)
 {
+    unsigned propertyIndex = addConstant(property);
+
+    m_staticPropertyAnalyzer.putById(base->index(), propertyIndex);
+
     emitOpcode(op_put_getter_setter);
     instructions().append(base->index());
-    instructions().append(addConstant(property));
+    instructions().append(propertyIndex);
     instructions().append(getter->index());
     instructions().append(setter->index());
 }
@@ -1519,7 +1535,7 @@ RegisterID* BytecodeGenerator::emitGetArgumentByVal(RegisterID* dst, RegisterID*
 {
     UnlinkedArrayProfile arrayProfile = newArrayProfile();
     UnlinkedValueProfile profile = emitProfiledOpcode(op_get_argument_by_val);
-    instructions().append(dst->index());
+    instructions().append(kill(dst));
     ASSERT(base->index() == m_codeBlock->argumentsRegister());
     instructions().append(base->index());
     instructions().append(property->index());
@@ -1545,7 +1561,7 @@ RegisterID* BytecodeGenerator::emitGetByVal(RegisterID* dst, RegisterID* base, R
     }
     UnlinkedArrayProfile arrayProfile = newArrayProfile();
     UnlinkedValueProfile profile = emitProfiledOpcode(op_get_by_val);
-    instructions().append(dst->index());
+    instructions().append(kill(dst));
     instructions().append(base->index());
     instructions().append(property->index());
     instructions().append(arrayProfile);
@@ -1582,10 +1598,33 @@ RegisterID* BytecodeGenerator::emitPutByIndex(RegisterID* base, unsigned index, 
     return value;
 }
 
+RegisterID* BytecodeGenerator::emitCreateThis(RegisterID* dst)
+{
+    RefPtr<RegisterID> func = newTemporary(); 
+
+    UnlinkedValueProfile profile = emitProfiledOpcode(op_get_callee);
+    instructions().append(func->index());
+    instructions().append(profile);
+
+    size_t begin = instructions().size();
+    m_staticPropertyAnalyzer.createThis(m_thisRegister.index(), begin + 3);
+
+    emitOpcode(op_create_this); 
+    instructions().append(m_thisRegister.index()); 
+    instructions().append(func->index()); 
+    instructions().append(0);
+    return dst;
+}
+
 RegisterID* BytecodeGenerator::emitNewObject(RegisterID* dst)
 {
+    size_t begin = instructions().size();
+    m_staticPropertyAnalyzer.newObject(dst->index(), begin + 2);
+
     emitOpcode(op_new_object);
     instructions().append(dst->index());
+    instructions().append(0);
+    instructions().append(newObjectAllocationProfile());
     return dst;
 }
 
@@ -1766,10 +1805,8 @@ ExpectedFunction BytecodeGenerator::emitExpectedFunctionSnippet(RegisterID* dst,
         instructions().append(Special::ObjectConstructor);
         instructions().append(realCall->bind(begin, instructions().size()));
         
-        if (dst != ignoredResult()) {
-            emitOpcode(op_new_object);
-            instructions().append(dst->index());
-        }
+        if (dst != ignoredResult())
+            emitNewObject(dst);
         break;
     }
         
@@ -1861,7 +1898,7 @@ RegisterID* BytecodeGenerator::emitCall(OpcodeID opcodeID, RegisterID* dst, Regi
     instructions().append(arrayProfile);
     if (dst != ignoredResult()) {
         UnlinkedValueProfile profile = emitProfiledOpcode(op_call_put_result);
-        instructions().append(dst->index()); // dst
+        instructions().append(kill(dst));
         instructions().append(profile);
     }
     
@@ -1894,7 +1931,7 @@ RegisterID* BytecodeGenerator::emitCallVarargs(RegisterID* dst, RegisterID* func
     instructions().append(firstFreeRegister->index());
     if (dst != ignoredResult()) {
         UnlinkedValueProfile profile = emitProfiledOpcode(op_call_put_result);
-        instructions().append(dst->index());
+        instructions().append(kill(dst));
         instructions().append(profile);
     }
     if (m_shouldEmitProfileHooks) {
@@ -1977,7 +2014,7 @@ RegisterID* BytecodeGenerator::emitConstruct(RegisterID* dst, RegisterID* func, 
     instructions().append(0);
     if (dst != ignoredResult()) {
         UnlinkedValueProfile profile = emitProfiledOpcode(op_call_put_result);
-        instructions().append(dst->index()); // dst
+        instructions().append(kill(dst));
         instructions().append(profile);
     }
 
@@ -2396,7 +2433,7 @@ void BytecodeGenerator::beginSwitch(RegisterID* scrutineeRegister, SwitchInfo::S
             emitOpcode(op_switch_string);
             break;
         default:
-            ASSERT_NOT_REACHED();
+            RELEASE_ASSERT_NOT_REACHED();
     }
 
     instructions().append(0); // place holder for table index

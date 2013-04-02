@@ -125,7 +125,6 @@ public:
 
     void waitForPolicyDelegate();
     size_t webHistoryItemCount();
-    unsigned workerThreadCount() const;
     int windowCount();
     
 #if PLATFORM(MAC) || PLATFORM(GTK) || PLATFORM(WIN)
@@ -287,10 +286,6 @@ public:
 
     const std::string& encodedAudioData() const { return m_encodedAudioData; }
     void setEncodedAudioData(const std::string& encodedAudioData) { m_encodedAudioData = encodedAudioData; }
-    
-    bool pauseAnimationAtTimeOnElementWithId(JSStringRef animationName, double time, JSStringRef elementId);
-    bool pauseTransitionAtTimeOnElementWithId(JSStringRef propertyName, double time, JSStringRef elementId);
-    unsigned numberOfActiveAnimations() const;
 
     void addOriginAccessWhitelistEntry(JSStringRef sourceOrigin, JSStringRef destinationProtocol, JSStringRef destinationHost, bool allowDestinationSubdomains);
     void removeOriginAccessWhitelistEntry(JSStringRef sourceOrigin, JSStringRef destinationProtocol, JSStringRef destinationHost, bool allowDestinationSubdomains);

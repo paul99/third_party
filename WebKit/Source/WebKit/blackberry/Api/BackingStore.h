@@ -20,7 +20,6 @@
 #define BackingStore_h
 
 #include "BlackBerryGlobal.h"
-#include <BlackBerryPlatformGraphics.h>
 #include <BlackBerryPlatformMisc.h>
 
 namespace WebCore {
@@ -34,6 +33,11 @@ class IntRect;
 namespace BlackBerry {
 namespace Platform {
 class IntRect;
+class FloatPoint;
+
+namespace Graphics {
+class Buffer;
+}
 }
 }
 
@@ -66,20 +70,15 @@ public:
     void blitVisibleContents();
     void repaint(int x, int y, int width, int height, bool contentChanged, bool immediate);
 
-    // In the defers blit mode, any blit requests will just return early, and
-    // a blit job will be queued that is executed by calling blitOnIdle().
-    bool defersBlit() const;
-    void setDefersBlit(bool);
-
     bool hasBlitJobs() const;
     void blitOnIdle();
 
     bool isDirectRenderingToWindow() const;
 
-    void createBackingStoreMemory();
-    void releaseBackingStoreMemory();
+    void acquireBackingStoreMemory();
+    void releaseOwnedBackingStoreMemory();
 
-    void drawContents(Platform::Graphics::Drawable*, const Platform::IntRect& /*contentsRect*/, const Platform::IntSize& /*destinationSize*/);
+    bool drawContents(BlackBerry::Platform::Graphics::Buffer*, const BlackBerry::Platform::IntRect& dstRect, double scale, const BlackBerry::Platform::FloatPoint& documentScrollPosition);
 
 private:
     friend class BlackBerry::WebKit::BackingStoreClient;

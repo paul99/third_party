@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2012 Google Inc.
  *
@@ -19,10 +18,6 @@
 #include "SkTemplates.h"
 #include "SkBitmapCache.h"
 #include "SkShader.h"
-
-#ifndef SK_DISABLE_DITHER_32BIT_GRADIENT
-    #define USE_DITHER_32BIT_GRADIENT
-#endif
 
 static inline void sk_memset32_dither(uint32_t dst[], uint32_t v0, uint32_t v1,
                                int count) {
@@ -108,17 +103,13 @@ public:
         /// Seems like enough for visual accuracy. TODO: if pos[] deserves
         /// it, use a larger cache.
         kCache32Bits    = 8,
-        kCache32Count = (1 << kCache32Bits),
+        kCache32Count   = (1 << kCache32Bits),
         kCache32Shift   = 16 - kCache32Bits,
         kSqrt32Shift    = 8 - kCache32Bits,
 
         /// This value is used to *read* the dither cache; it may be 0
         /// if dithering is disabled.
-#ifdef USE_DITHER_32BIT_GRADIENT
         kDitherStride32 = kCache32Count,
-#else
-        kDitherStride32 = 0,
-#endif
         kDitherStride16 = kCache16Count,
     };
 
@@ -174,6 +165,24 @@ private:
 
     typedef SkShader INHERITED;
 };
+
+static inline int init_dither_toggle(int x, int y) {
+    x &= 1;
+    y = (y & 1) << 1;
+    return (x | y) * SkGradientShaderBase::kDitherStride32;
+}
+
+static inline int next_dither_toggle(int toggle) {
+    return toggle ^ SkGradientShaderBase::kDitherStride32;
+}
+
+static inline int init_dither_toggle16(int x, int y) {
+    return ((x ^ y) & 1) * SkGradientShaderBase::kDitherStride16;
+}
+
+static inline int next_dither_toggle16(int toggle) {
+    return toggle ^ SkGradientShaderBase::kDitherStride16;
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 

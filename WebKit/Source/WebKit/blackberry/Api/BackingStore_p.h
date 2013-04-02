@@ -33,6 +33,7 @@
 
 namespace WebCore {
 class IntRect;
+class FloatPoint;
 class FloatRect;
 class LayerRenderer;
 class TransformationMatrix;
@@ -128,8 +129,6 @@ public:
     // BlackBerry::Platform::Graphics::Window::GLES2Usage.
     bool isOpenGLCompositing() const;
 
-    bool isSuspended() const { return m_suspendBackingStoreUpdates; }
-
     // Suspends all backingstore updates so that rendering to the backingstore is disabled.
     void suspendBackingStoreUpdates();
 
@@ -141,6 +140,9 @@ public:
 
     // Resumes all screen updates so that 'blitVisibleContents' is enabled.
     void resumeScreenUpdates(BackingStore::ResumeUpdateOperation);
+
+    // Update m_suspendScreenUpdates*Thread based on a number of conditions.
+    void updateSuspendScreenUpdateState();
 
     // The functions repaint(), slowScroll(), scroll(), scrollingStartedHelper() are
     // called from outside WebKit and within WebKit via ChromeClientBlackBerry.
@@ -177,12 +179,12 @@ public:
     void setBackingStoreRect(const Platform::IntRect&, double scale);
     void updateTilesAfterBackingStoreRectChange();
 
-    typedef WTF::Vector<TileIndex> TileIndexList;
     TileIndexList indexesForBackingStoreRect(const Platform::IntRect&) const;
+    TileIndexList indexesForVisibleContentsRect(BackingStoreGeometry*) const;
 
     TileIndex indexOfTile(const Platform::IntPoint& origin, const Platform::IntRect& backingStoreRect) const;
     void clearAndUpdateTileOfNotRenderedRegion(const TileIndex&, TileBuffer*, const Platform::IntRectRegion&, BackingStoreGeometry*, bool update = true);
-    bool isCurrentVisibleJob(const TileIndex&, TileBuffer*, BackingStoreGeometry*) const;
+    bool isCurrentVisibleJob(const TileIndex&, BackingStoreGeometry*) const;
 
     // Not thread safe. Call only when threads are in sync.
     void clearRenderedRegion(TileBuffer*, const Platform::IntRectRegion&);
@@ -191,21 +193,23 @@ public:
     // tile matrix geometry.
     void scrollBackingStore(int deltaX, int deltaY);
 
-    // Render the tiles dirty rect and invalidate the screen.
-    bool renderDirectToWindow(const Platform::IntRect&);
+    // Render the given dirty rect and invalidate the screen.
+    Platform::IntRect renderDirectToWindow(const Platform::IntRect&);
 
-    // Render the tiles dirty rect.
-    // NOTE: This will not update the screen. To do that you should call
-    // blitVisibleContents() after this method.
-    bool render(const Platform::IntRect&);
+    // Render the given tiles if enough back buffers are available.
+    // Return the actual set of rendered tiles.
+    // NOTE: This should only be called by RenderQueue and resumeScreenUpdates().
+    //   If you want to render to get contents to the screen, you should call
+    //   renderAndBlitImmediately() or renderAndBlitVisibleContentsImmediately().
+    TileIndexList render(const TileIndexList&);
 
     // Called by the render queue to ensure that the queue is in a
     // constant state before performing a render job.
     void requestLayoutIfNeeded() const;
 
     // Helper render methods.
-    bool renderVisibleContents();
-    bool renderBackingStore();
+    void renderAndBlitVisibleContentsImmediately();
+    void renderAndBlitImmediately(const Platform::IntRect&);
     void blitVisibleContents(bool force = false);
 
     // Assumes the rect to be in window/viewport coordinates.
@@ -241,7 +245,7 @@ public:
     bool isTileVisible(const Platform::IntPoint&) const;
 
     // Returns a rect that is the union of all tiles that are visible.
-    Platform::IntRect visibleTilesRect(BackingStoreGeometry*) const;
+    TileIndexList visibleTileIndexes(BackingStoreGeometry*) const;
 
     // Used to clip to the visible content for instance.
     Platform::IntRect tileVisibleContentsRect(const TileIndex&, BackingStoreGeometry*) const;
@@ -251,8 +255,6 @@ public:
 
     // This is called by WebPage once load is committed to reset the render queue.
     void resetRenderQueue();
-    // This is called by FrameLoaderClient that explicitly paints on first visible layout.
-    void clearVisibleZoom();
 
     // This is called by WebPage once load is committed to reset all the tiles.
     void resetTiles();
@@ -293,7 +295,6 @@ public:
 
     // Create the surfaces of the backing store.
     void createSurfaces();
-    void createVisibleTileBuffer();
 
     // Various calculations of quantities relevant to backing store.
     int minimumNumberOfTilesWide() const;
@@ -306,8 +307,7 @@ public:
     static Platform::IntSize tileSize();
 
     // This takes transformed contents coordinates.
-    void renderContents(BlackBerry::Platform::Graphics::Buffer*, const Platform::IntPoint& surfaceOffset, const Platform::IntRect& contentsRect) const;
-    void renderContents(Platform::Graphics::Drawable* /*drawable*/, const Platform::IntRect& /*contentsRect*/, const Platform::IntSize& /*destinationSize*/) const;
+    bool renderContents(BlackBerry::Platform::Graphics::Buffer*, const BlackBerry::Platform::IntRect& dstRect, double scale, const BlackBerry::Platform::FloatPoint& documentScrollPosition) const;
 
     void blitToWindow(const Platform::IntRect& dstRect, const BlackBerry::Platform::Graphics::Buffer* srcBuffer, const Platform::IntRect& srcRect, BlackBerry::Platform::Graphics::BlendMode, unsigned char globalAlpha);
     void fillWindow(Platform::Graphics::FillPattern, const Platform::IntRect& dstRect, const Platform::IntPoint& contentsOrigin, double contentsScale);
@@ -339,16 +339,19 @@ public:
     BlackBerry::Platform::IntSize surfaceSize() const;
     BlackBerry::Platform::Graphics::Buffer* buffer() const;
 
-    void didRenderContent(const Platform::IntRect& renderedRect);
+    void didRenderContent(const Platform::IntRectRegion& renderedRegion);
 
     static WebPage* s_currentBackingStoreOwner;
 
-    unsigned m_suspendScreenUpdates;
+    unsigned m_suspendScreenUpdateCounterWebKitThread;
     unsigned m_suspendBackingStoreUpdates;
     BackingStore::ResumeUpdateOperation m_resumeOperation;
 
+    bool m_suspendScreenUpdatesWebKitThread;
+    bool m_suspendScreenUpdatesUserInterfaceThread;
     bool m_suspendRenderJobs;
     bool m_suspendRegularRenderJobs;
+    bool m_tileMatrixContainsUsefulContent;
     bool m_tileMatrixNeedsUpdate;
     bool m_isScrollingOrZooming;
     WebPage* m_webPage;
@@ -356,7 +359,6 @@ public:
     OwnPtr<RenderQueue> m_renderQueue;
     mutable Platform::IntSize m_previousDelta;
 
-    bool m_defersBlit;
     bool m_hasBlitJobs;
 
     WebCore::Color m_webPageBackgroundColor; // for user interface thread operations such as blitting

@@ -31,8 +31,7 @@
 #include "config.h"
 #include "WebViewHost.h"
 
-#include "DRTTestRunner.h"
-#include "MockGrammarCheck.h"
+#include "DRTDevToolsAgent.h"
 #include "MockWebSpeechInputController.h"
 #include "MockWebSpeechRecognizer.h"
 #include "Task.h"
@@ -46,12 +45,9 @@
 #include "WebDeviceOrientationClientMock.h"
 #include "WebDocument.h"
 #include "WebElement.h"
-#include "WebEventSender.h"
 #include "WebFrame.h"
 #include "WebGeolocationClientMock.h"
 #include "WebHistoryItem.h"
-#include "WebIntent.h"
-#include "WebIntentServiceInfo.h"
 #include "WebKit.h"
 #include "WebNode.h"
 #include "WebPluginParams.h"
@@ -60,17 +56,16 @@
 #include "WebPrintParams.h"
 #include "WebRange.h"
 #include "WebScreenInfo.h"
+#include "WebSerializedScriptValue.h"
 #include "WebStorageNamespace.h"
-#include "WebTestPlugin.h"
-#include "WebTextCheckingCompletion.h"
-#include "WebTextCheckingResult.h"
 #include "WebUserMediaClientMock.h"
 #include "WebView.h"
 #include "WebWindowFeatures.h"
-#include "platform/WebSerializedScriptValue.h"
 #include "skia/ext/platform_canvas.h"
 #include "webkit/support/test_media_stream_client.h"
 #include "webkit/support/webkit_support.h"
+#include <cctype>
+#include <clocale>
 #include <public/WebCString.h>
 #include <public/WebCompositorOutputSurface.h>
 #include <public/WebCompositorSupport.h>
@@ -82,6 +77,7 @@
 #include <public/WebURLResponse.h>
 
 #include <wtf/Assertions.h>
+#include <wtf/OwnArrayPtr.h>
 #include <wtf/PassOwnPtr.h>
 #include <wtf/Vector.h>
 
@@ -94,162 +90,12 @@ static const int screenWidth = 1920;
 static const int screenHeight = 1080;
 static const int screenUnavailableBorder = 8;
 
-// WebNavigationType debugging strings taken from PolicyDelegate.mm.
-static const char* linkClickedString = "link clicked";
-static const char* formSubmittedString = "form submitted";
-static const char* backForwardString = "back/forward";
-static const char* reloadString = "reload";
-static const char* formResubmittedString = "form resubmitted";
-static const char* otherString = "other";
-static const char* illegalString = "illegal value";
-
 static int nextPageID = 1;
-
-// Used to write a platform neutral file:/// URL by only taking the filename
-// (e.g., converts "file:///tmp/foo.txt" to just "foo.txt").
-static string urlSuitableForTestResult(const string& url)
-{
-    if (url.empty() || string::npos == url.find("file://"))
-        return url;
-
-    size_t pos = url.rfind('/');
-    if (pos == string::npos) {
-#if OS(WINDOWS)
-        pos = url.rfind('\\');
-        if (pos == string::npos)
-            pos = 0;
-#else
-        pos = 0;
-#endif
-    }
-    string filename = url.substr(pos + 1);
-    if (filename.empty())
-        return "file:"; // A WebKit test has this in its expected output.
-    return filename;
-}
-
-// Used to write a platform neutral file:/// URL by taking the
-// filename and its directory. (e.g., converts
-// "file:///tmp/foo/bar.txt" to just "bar.txt").
-static string descriptionSuitableForTestResult(const string& url)
-{
-    if (url.empty() || string::npos == url.find("file://"))
-        return url;
-
-    size_t pos = url.rfind('/');
-    if (pos == string::npos || !pos)
-        return "ERROR:" + url;
-    pos = url.rfind('/', pos - 1);
-    if (pos == string::npos)
-        return "ERROR:" + url;
-
-    return url.substr(pos + 1);
-}
-
-// Get a debugging string from a WebNavigationType.
-static const char* webNavigationTypeToString(WebNavigationType type)
-{
-    switch (type) {
-    case WebKit::WebNavigationTypeLinkClicked:
-        return linkClickedString;
-    case WebKit::WebNavigationTypeFormSubmitted:
-        return formSubmittedString;
-    case WebKit::WebNavigationTypeBackForward:
-        return backForwardString;
-    case WebKit::WebNavigationTypeReload:
-        return reloadString;
-    case WebKit::WebNavigationTypeFormResubmitted:
-        return formResubmittedString;
-    case WebKit::WebNavigationTypeOther:
-        return otherString;
-    }
-    return illegalString;
-}
-
-static string URLDescription(const GURL& url)
-{
-    if (url.SchemeIs("file"))
-        return url.ExtractFileName();
-    return url.possibly_invalid_spec();
-}
-
-static void printResponseDescription(const WebURLResponse& response)
-{
-    if (response.isNull()) {
-        fputs("(null)", stdout);
-        return;
-    }
-    string url = response.url().spec();
-    printf("<NSURLResponse %s, http status code %d>",
-           descriptionSuitableForTestResult(url).c_str(),
-           response.httpStatusCode());
-}
-
-static void printNodeDescription(const WebNode& node, int exception)
-{
-    if (exception) {
-        fputs("ERROR", stdout);
-        return;
-    }
-    if (node.isNull()) {
-        fputs("(null)", stdout);
-        return;
-    }
-    fputs(node.nodeName().utf8().data(), stdout);
-    const WebNode& parent = node.parentNode();
-    if (!parent.isNull()) {
-        fputs(" > ", stdout);
-        printNodeDescription(parent, 0);
-    }
-}
-
-static void printRangeDescription(const WebRange& range)
-{
-    if (range.isNull()) {
-        fputs("(null)", stdout);
-        return;
-    }
-    printf("range from %d of ", range.startOffset());
-    int exception = 0;
-    WebNode startNode = range.startContainer(exception);
-    printNodeDescription(startNode, exception);
-    printf(" to %d of ", range.endOffset());
-    WebNode endNode = range.endContainer(exception);
-    printNodeDescription(endNode, exception);
-}
-
-static string editingActionDescription(WebEditingAction action)
-{
-    switch (action) {
-    case WebKit::WebEditingActionTyped:
-        return "WebViewInsertActionTyped";
-    case WebKit::WebEditingActionPasted:
-        return "WebViewInsertActionPasted";
-    case WebKit::WebEditingActionDropped:
-        return "WebViewInsertActionDropped";
-    }
-    return "(UNKNOWN ACTION)";
-}
-
-static string textAffinityDescription(WebTextAffinity affinity)
-{
-    switch (affinity) {
-    case WebKit::WebTextAffinityUpstream:
-        return "NSSelectionAffinityUpstream";
-    case WebKit::WebTextAffinityDownstream:
-        return "NSSelectionAffinityDownstream";
-    }
-    return "(UNKNOWN AFFINITY)";
-}
 
 // WebViewClient -------------------------------------------------------------
 
-WebView* WebViewHost::createView(WebFrame* creator, const WebURLRequest& request, const WebWindowFeatures&, const WebString&, WebNavigationPolicy)
+WebView* WebViewHost::createView(WebFrame* creator, const WebURLRequest&, const WebWindowFeatures&, const WebString&, WebNavigationPolicy)
 {
-    if (!testRunner()->canOpenWindows())
-        return 0;
-    if (testRunner()->shouldDumpCreateView())
-        fprintf(stdout, "createView(%s)\n", URLDescription(request.url()).c_str());
     creator->consumeUserGesture();
     return m_shell->createNewWindow(WebURL())->webView();
 }
@@ -295,152 +141,64 @@ WebCompositorOutputSurface* WebViewHost::createOutputSurface()
 
 void WebViewHost::didAddMessageToConsole(const WebConsoleMessage& message, const WebString& sourceName, unsigned sourceLine)
 {
-    // This matches win DumpRenderTree's UIDelegate.cpp.
-    if (!m_logConsoleOutput)
-        return;
-    string newMessage;
-    if (!message.text.isEmpty()) {
-        newMessage = message.text.utf8();
-        size_t fileProtocol = newMessage.find("file://");
-        if (fileProtocol != string::npos) {
-            newMessage = newMessage.substr(0, fileProtocol)
-                + urlSuitableForTestResult(newMessage.substr(fileProtocol));
-        }
-    }
-    printf("CONSOLE MESSAGE: ");
-    if (sourceLine)
-        printf("line %d: ", sourceLine);
-    printf("%s\n", newMessage.data());
 }
 
 void WebViewHost::didStartLoading()
 {
-    m_shell->setIsLoading(true);
 }
 
 void WebViewHost::didStopLoading()
 {
-    if (testRunner()->shouldDumpProgressFinishedCallback())
-        fputs("postProgressFinishedNotification\n", stdout);
-    m_shell->setIsLoading(false);
 }
-
-// The output from these methods in layout test mode should match that
-// expected by the layout tests. See EditingDelegate.m in DumpRenderTree.
 
 bool WebViewHost::shouldBeginEditing(const WebRange& range)
 {
-    if (testRunner()->shouldDumpEditingCallbacks()) {
-        fputs("EDITING DELEGATE: shouldBeginEditingInDOMRange:", stdout);
-        printRangeDescription(range);
-        fputs("\n", stdout);
-    }
     return true;
 }
 
 bool WebViewHost::shouldEndEditing(const WebRange& range)
 {
-    if (testRunner()->shouldDumpEditingCallbacks()) {
-        fputs("EDITING DELEGATE: shouldEndEditingInDOMRange:", stdout);
-        printRangeDescription(range);
-        fputs("\n", stdout);
-    }
     return true;
 }
 
 bool WebViewHost::shouldInsertNode(const WebNode& node, const WebRange& range, WebEditingAction action)
 {
-    if (testRunner()->shouldDumpEditingCallbacks()) {
-        fputs("EDITING DELEGATE: shouldInsertNode:", stdout);
-        printNodeDescription(node, 0);
-        fputs(" replacingDOMRange:", stdout);
-        printRangeDescription(range);
-        printf(" givenAction:%s\n", editingActionDescription(action).c_str());
-    }
     return true;
 }
 
 bool WebViewHost::shouldInsertText(const WebString& text, const WebRange& range, WebEditingAction action)
 {
-    if (testRunner()->shouldDumpEditingCallbacks()) {
-        printf("EDITING DELEGATE: shouldInsertText:%s replacingDOMRange:", text.utf8().data());
-        printRangeDescription(range);
-        printf(" givenAction:%s\n", editingActionDescription(action).c_str());
-    }
     return true;
 }
 
 bool WebViewHost::shouldChangeSelectedRange(
     const WebRange& fromRange, const WebRange& toRange, WebTextAffinity affinity, bool stillSelecting)
 {
-    if (testRunner()->shouldDumpEditingCallbacks()) {
-        fputs("EDITING DELEGATE: shouldChangeSelectedDOMRange:", stdout);
-        printRangeDescription(fromRange);
-        fputs(" toDOMRange:", stdout);
-        printRangeDescription(toRange);
-        printf(" affinity:%s stillSelecting:%s\n",
-               textAffinityDescription(affinity).c_str(),
-               (stillSelecting ? "TRUE" : "FALSE"));
-    }
     return true;
 }
 
 bool WebViewHost::shouldDeleteRange(const WebRange& range)
 {
-    if (testRunner()->shouldDumpEditingCallbacks()) {
-        fputs("EDITING DELEGATE: shouldDeleteDOMRange:", stdout);
-        printRangeDescription(range);
-        fputs("\n", stdout);
-    }
     return true;
 }
 
 bool WebViewHost::shouldApplyStyle(const WebString& style, const WebRange& range)
 {
-    if (testRunner()->shouldDumpEditingCallbacks()) {
-        printf("EDITING DELEGATE: shouldApplyStyle:%s toElementsInDOMRange:", style.utf8().data());
-        printRangeDescription(range);
-        fputs("\n", stdout);
-    }
     return true;
 }
 
 bool WebViewHost::isSmartInsertDeleteEnabled()
 {
-    return m_smartInsertDeleteEnabled;
+    return true;
 }
 
 bool WebViewHost::isSelectTrailingWhitespaceEnabled()
 {
-    return m_selectTrailingWhitespaceEnabled;
-}
-
-void WebViewHost::didBeginEditing()
-{
-    if (!testRunner()->shouldDumpEditingCallbacks())
-        return;
-    fputs("EDITING DELEGATE: webViewDidBeginEditing:WebViewDidBeginEditingNotification\n", stdout);
-}
-
-void WebViewHost::didChangeSelection(bool isEmptySelection)
-{
-    if (testRunner()->shouldDumpEditingCallbacks())
-        fputs("EDITING DELEGATE: webViewDidChangeSelection:WebViewDidChangeSelectionNotification\n", stdout);
-    // No need to update clipboard with the selected text in DRT.
-}
-
-void WebViewHost::didChangeContents()
-{
-    if (!testRunner()->shouldDumpEditingCallbacks())
-        return;
-    fputs("EDITING DELEGATE: webViewDidChange:WebViewDidChangeNotification\n", stdout);
-}
-
-void WebViewHost::didEndEditing()
-{
-    if (!testRunner()->shouldDumpEditingCallbacks())
-        return;
-    fputs("EDITING DELEGATE: webViewDidEndEditing:WebViewDidEndEditingNotification\n", stdout);
+#if OS(WINDOWS)
+    return true;
+#else
+    return false;
+#endif
 }
 
 bool WebViewHost::handleCurrentKeyboardEvent()
@@ -461,122 +219,23 @@ void WebViewHost::willAddPrerender(WebKit::WebPrerender*)
 }
 
 
-// WebKit::WebSpellCheckClient
-
-void WebViewHost::spellCheck(const WebString& text, int& misspelledOffset, int& misspelledLength, WebVector<WebString>* optionalSuggestions)
-{
-    // Check the spelling of the given text.
-    m_spellcheck.spellCheckWord(text, &misspelledOffset, &misspelledLength);
-}
-
-void WebViewHost::checkTextOfParagraph(const WebString& text, WebTextCheckingTypeMask mask, WebVector<WebTextCheckingResult>* webResults)
-{
-    Vector<WebTextCheckingResult> results;
-    if (mask & WebTextCheckingTypeSpelling) {
-        size_t offset = 0;
-        size_t length = text.length();
-        const WebUChar* data = text.data();
-        while (offset < length) {
-            int misspelledPosition = 0;
-            int misspelledLength = 0;
-            m_spellcheck.spellCheckWord(WebString(&data[offset], length - offset), &misspelledPosition, &misspelledLength);
-            if (!misspelledLength)
-                break;
-            WebTextCheckingResult result;
-            result.type = WebTextCheckingTypeSpelling;
-            result.location = offset + misspelledPosition;
-            result.length = misspelledLength;
-            results.append(result);
-            offset += misspelledPosition + misspelledLength;
-        }
-    }
-    if (mask & WebTextCheckingTypeGrammar)
-        MockGrammarCheck::checkGrammarOfString(text, &results);
-    webResults->assign(results);
-}
-
-void WebViewHost::requestCheckingOfText(const WebString& text, WebTextCheckingCompletion* completion)
-{
-    if (text.isEmpty()) {
-        if (completion)
-            completion->didCancelCheckingText();
-        return;
-    }
-
-    m_lastRequestedTextCheckingCompletion = completion;
-    m_lastRequestedTextCheckString = text;
-    postDelayedTask(new HostMethodTask(this, &WebViewHost::finishLastTextCheck), 0);
-}
-
-void WebViewHost::finishLastTextCheck()
-{
-    Vector<WebTextCheckingResult> results;
-    int offset = 0;
-    String text(m_lastRequestedTextCheckString.data(), m_lastRequestedTextCheckString.length());
-    while (text.length()) {
-        int misspelledPosition = 0;
-        int misspelledLength = 0;
-        m_spellcheck.spellCheckWord(WebString(text.characters(), text.length()), &misspelledPosition, &misspelledLength);
-        if (!misspelledLength)
-            break;
-        WebVector<WebString> suggestions;
-        m_spellcheck.fillSuggestionList(WebString(text.characters() + misspelledPosition, misspelledLength), &suggestions);
-        results.append(WebTextCheckingResult(WebTextCheckingTypeSpelling, offset + misspelledPosition, misspelledLength,
-                                             suggestions.isEmpty() ? WebString() : suggestions[0]));
-        text = text.substring(misspelledPosition + misspelledLength);
-        offset += misspelledPosition + misspelledLength;
-    }
-    MockGrammarCheck::checkGrammarOfString(m_lastRequestedTextCheckString, &results);
-    m_lastRequestedTextCheckingCompletion->didFinishCheckingText(results);
-    m_lastRequestedTextCheckingCompletion = 0;
-}
-
-
-WebString WebViewHost::autoCorrectWord(const WebString&)
-{
-    // Returns an empty string as Mac WebKit ('WebKitSupport/WebEditorClient.mm')
-    // does. (If this function returns a non-empty string, WebKit replaces the
-    // given misspelled string with the result one. This process executes some
-    // editor commands and causes layout-test failures.)
-    return WebString();
-}
-
 void WebViewHost::runModalAlertDialog(WebFrame*, const WebString& message)
 {
-    printf("ALERT: %s\n", message.utf8().data());
-    fflush(stdout);
 }
 
 bool WebViewHost::runModalConfirmDialog(WebFrame*, const WebString& message)
 {
-    printf("CONFIRM: %s\n", message.utf8().data());
     return true;
 }
 
 bool WebViewHost::runModalPromptDialog(WebFrame* frame, const WebString& message,
                                        const WebString& defaultValue, WebString*)
 {
-    printf("PROMPT: %s, default text: %s\n", message.utf8().data(), defaultValue.utf8().data());
     return true;
-}
-
-bool WebViewHost::runModalBeforeUnloadDialog(WebFrame*, const WebString& message)
-{
-    printf("CONFIRM NAVIGATION: %s\n", message.utf8().data());
-    return !testRunner()->shouldStayOnPageAfterHandlingBeforeUnload();
 }
 
 void WebViewHost::showContextMenu(WebFrame*, const WebContextMenuData& contextMenuData)
 {
-    m_lastContextMenuData = adoptPtr(new WebContextMenuData(contextMenuData));
-}
-
-void WebViewHost::setStatusText(const WebString& text)
-{
-    if (!testRunner()->shouldDumpStatusCallbacks())
-        return;
-    // When running tests, write to stdout.
-    printf("UI DELEGATE STATUS CALLBACK: setStatusText:%s\n", text.utf8().data());
 }
 
 void WebViewHost::didUpdateLayout()
@@ -656,11 +315,6 @@ WebDeviceOrientationClientMock* WebViewHost::deviceOrientationClientMock()
     return m_deviceOrientationClientMock.get();
 }
 
-MockSpellCheck* WebViewHost::mockSpellCheck()
-{
-    return &m_spellcheck;
-}
-
 WebDeviceOrientationClient* WebViewHost::deviceOrientationClient()
 {
     return deviceOrientationClientMock();
@@ -692,6 +346,8 @@ void WebViewHost::didAutoResize(const WebSize& newSize)
 void WebViewHost::initializeLayerTreeView(WebLayerTreeViewClient* client, const WebLayer& rootLayer, const WebLayerTreeView::Settings& settings)
 {
     m_layerTreeView = adoptPtr(Platform::current()->compositorSupport()->createLayerTreeView(client, rootLayer, settings));
+    if (m_layerTreeView)
+        m_layerTreeView->setSurfaceReady();
 }
 
 WebLayerTreeView* WebViewHost::layerTreeView()
@@ -877,9 +533,6 @@ void WebViewHost::exitFullScreen()
 
 WebPlugin* WebViewHost::createPlugin(WebFrame* frame, const WebPluginParams& params)
 {
-    if (params.mimeType == WebTestPlugin::mimeType())
-        return WebTestPlugin::create(frame, params, this);
-
     return webkit_support::CreateWebPlugin(frame, params);
 }
 
@@ -911,48 +564,16 @@ void WebViewHost::loadURLExternally(WebFrame*, const WebURLRequest& request, Web
 }
 
 WebNavigationPolicy WebViewHost::decidePolicyForNavigation(
-    WebFrame*, const WebURLRequest& request,
-    WebNavigationType type, const WebNode& originatingNode,
-    WebNavigationPolicy defaultPolicy, bool isRedirect)
+    WebFrame*, const WebURLRequest&,
+    WebNavigationType, const WebNode&,
+    WebNavigationPolicy defaultPolicy, bool)
 {
-    WebNavigationPolicy result;
-    if (!m_policyDelegateEnabled)
-        return defaultPolicy;
-
-    printf("Policy delegate: attempt to load %s with navigation type '%s'",
-           URLDescription(request.url()).c_str(), webNavigationTypeToString(type));
-    if (!originatingNode.isNull()) {
-        fputs(" originating from ", stdout);
-        printNodeDescription(originatingNode, 0);
-    }
-    fputs("\n", stdout);
-    if (m_policyDelegateIsPermissive)
-        result = WebKit::WebNavigationPolicyCurrentTab;
-    else
-        result = WebKit::WebNavigationPolicyIgnore;
-
-    if (m_policyDelegateShouldNotifyDone)
-        testRunner()->policyDelegateDone();
-    return result;
+    return defaultPolicy;
 }
 
 bool WebViewHost::canHandleRequest(WebFrame*, const WebURLRequest& request)
 {
-    GURL url = request.url();
-    // Just reject the scheme used in
-    // LayoutTests/http/tests/misc/redirect-to-external-url.html
-    return !url.SchemeIs("spaceballs");
-}
-
-WebURLError WebViewHost::cannotHandleRequestError(WebFrame*, const WebURLRequest& request)
-{
-    WebURLError error;
-    // A WebKit layout test expects the following values.
-    // unableToImplementPolicyWithError() below prints them.
-    error.domain = WebString::fromUTF8("WebKitErrorDomain");
-    error.reason = 101;
-    error.unreachableURL = request.url();
-    return error;
+    return true;
 }
 
 WebURLError WebViewHost::cancelledError(WebFrame*, const WebURLRequest& request)
@@ -962,87 +583,15 @@ WebURLError WebViewHost::cancelledError(WebFrame*, const WebURLRequest& request)
 
 void WebViewHost::unableToImplementPolicyWithError(WebFrame* frame, const WebURLError& error)
 {
-    printf("Policy delegate: unable to implement policy with error domain '%s', "
-           "error code %d, in frame '%s'\n",
-            error.domain.utf8().data(), error.reason, frame->uniqueName().utf8().data());
-}
-
-void WebViewHost::willPerformClientRedirect(WebFrame* frame, const WebURL& from, const WebURL& to,
-                                            double interval, double fire_time)
-{
-    if (m_shell->shouldDumpFrameLoadCallbacks()) {
-        printFrameDescription(frame);
-        printf(" - willPerformClientRedirectToURL: %s \n", to.spec().data());
-    }
-
-    if (m_shell->shouldDumpUserGestureInFrameLoadCallbacks())
-        printFrameUserGestureStatus(frame, " - in willPerformClientRedirect\n");
-}
-
-void WebViewHost::didCancelClientRedirect(WebFrame* frame)
-{
-    if (!m_shell->shouldDumpFrameLoadCallbacks())
-        return;
-    printFrameDescription(frame);
-    fputs(" - didCancelClientRedirectForFrame\n", stdout);
 }
 
 void WebViewHost::didCreateDataSource(WebFrame*, WebDataSource* ds)
 {
     ds->setExtraData(m_pendingExtraData.leakPtr());
-    if (!testRunner()->deferMainResourceDataLoad())
-        ds->setDeferMainResourceDataLoad(false);
-}
-
-void WebViewHost::didStartProvisionalLoad(WebFrame* frame)
-{
-    if (m_shell->shouldDumpFrameLoadCallbacks()) {
-        printFrameDescription(frame);
-        fputs(" - didStartProvisionalLoadForFrame\n", stdout);
-    }
-
-    if (m_shell->shouldDumpUserGestureInFrameLoadCallbacks())
-        printFrameUserGestureStatus(frame, " - in didStartProvisionalLoadForFrame\n");
-
-    if (!m_topLoadingFrame)
-        m_topLoadingFrame = frame;
-
-    if (testRunner()->stopProvisionalFrameLoads()) {
-        printFrameDescription(frame);
-        fputs(" - stopping load in didStartProvisionalLoadForFrame callback\n", stdout);
-        frame->stopLoading();
-    }
-    updateAddressBar(frame->view());
-}
-
-void WebViewHost::didReceiveServerRedirectForProvisionalLoad(WebFrame* frame)
-{
-    if (m_shell->shouldDumpFrameLoadCallbacks()) {
-        printFrameDescription(frame);
-        fputs(" - didReceiveServerRedirectForProvisionalLoadForFrame\n", stdout);
-    }
-    updateAddressBar(frame->view());
-}
-
-void WebViewHost::didFailProvisionalLoad(WebFrame* frame, const WebURLError& error)
-{
-    if (m_shell->shouldDumpFrameLoadCallbacks()) {
-        printFrameDescription(frame);
-        fputs(" - didFailProvisionalLoadWithError\n", stdout);
-    }
-
-    locationChangeDone(frame);
-
-    // Don't display an error page if we're running layout tests, because
-    // DumpRenderTree doesn't.
 }
 
 void WebViewHost::didCommitProvisionalLoad(WebFrame* frame, bool isNewNavigation)
 {
-    if (m_shell->shouldDumpFrameLoadCallbacks()) {
-        printFrameDescription(frame);
-        fputs(" - didCommitLoadForFrame\n", stdout);
-    }
     updateForCommittedLoad(frame, isNewNavigation);
 }
 
@@ -1053,59 +602,7 @@ void WebViewHost::didClearWindowObject(WebFrame* frame)
 
 void WebViewHost::didReceiveTitle(WebFrame* frame, const WebString& title, WebTextDirection direction)
 {
-    WebCString title8 = title.utf8();
-
-    if (m_shell->shouldDumpFrameLoadCallbacks()) {
-        printFrameDescription(frame);
-        printf(" - didReceiveTitle: %s\n", title8.data());
-    }
-
-    if (testRunner()->shouldDumpTitleChanges())
-        printf("TITLE CHANGED: '%s'\n", title8.data());
-
     setPageTitle(title);
-    testRunner()->setTitleTextDirection(direction);
-}
-
-void WebViewHost::didFinishDocumentLoad(WebFrame* frame)
-{
-    if (m_shell->shouldDumpFrameLoadCallbacks()) {
-        printFrameDescription(frame);
-        fputs(" - didFinishDocumentLoadForFrame\n", stdout);
-    } else {
-        unsigned pendingUnloadEvents = frame->unloadListenerCount();
-        if (pendingUnloadEvents) {
-            printFrameDescription(frame);
-            printf(" - has %u onunload handler(s)\n", pendingUnloadEvents);
-        }
-    }
-}
-
-void WebViewHost::didHandleOnloadEvents(WebFrame* frame)
-{
-    if (m_shell->shouldDumpFrameLoadCallbacks()) {
-        printFrameDescription(frame);
-        fputs(" - didHandleOnloadEventsForFrame\n", stdout);
-    }
-}
-
-void WebViewHost::didFailLoad(WebFrame* frame, const WebURLError& error)
-{
-    if (m_shell->shouldDumpFrameLoadCallbacks()) {
-        printFrameDescription(frame);
-        fputs(" - didFailLoadWithError\n", stdout);
-    }
-    locationChangeDone(frame);
-}
-
-void WebViewHost::didFinishLoad(WebFrame* frame)
-{
-    if (m_shell->shouldDumpFrameLoadCallbacks()) {
-        printFrameDescription(frame);
-        fputs(" - didFinishLoadForFrame\n", stdout);
-    }
-    updateAddressBar(frame->view());
-    locationChangeDone(frame);
 }
 
 void WebViewHost::didNavigateWithinPage(WebFrame* frame, bool isNewNavigation)
@@ -1115,163 +612,12 @@ void WebViewHost::didNavigateWithinPage(WebFrame* frame, bool isNewNavigation)
     updateForCommittedLoad(frame, isNewNavigation);
 }
 
-void WebViewHost::didChangeLocationWithinPage(WebFrame* frame)
+void WebViewHost::willSendRequest(WebFrame* frame, unsigned, WebURLRequest& request, const WebURLResponse&)
 {
-    if (m_shell->shouldDumpFrameLoadCallbacks()) {
-        printFrameDescription(frame);
-        fputs(" - didChangeLocationWithinPageForFrame\n", stdout);
-    }
-}
-
-void WebViewHost::assignIdentifierToRequest(WebFrame*, unsigned identifier, const WebURLRequest& request)
-{
-     if (!m_shell->shouldDumpResourceLoadCallbacks())
+    if (request.url().isEmpty())
         return;
-    ASSERT(!m_resourceIdentifierMap.contains(identifier));
-    m_resourceIdentifierMap.set(identifier, descriptionSuitableForTestResult(request.url().spec()));
-}
-
-void WebViewHost::removeIdentifierForRequest(unsigned identifier)
-{
-    m_resourceIdentifierMap.remove(identifier);
-}
-
-static void blockRequest(WebURLRequest& request)
-{
-    request.setURL(WebURL());
-}
-
-static bool isLocalhost(const string& host)
-{
-    return host == "127.0.0.1" || host == "localhost";
-}
-
-static bool hostIsUsedBySomeTestsToGenerateError(const string& host)
-{
-    return host == "255.255.255.255";
-}
-
-void WebViewHost::willRequestResource(WebKit::WebFrame* frame, const WebKit::WebCachedURLRequest& request)
-{
-    if (m_shell->shouldDumpResourceRequestCallbacks()) {
-        printFrameDescription(frame);
-        WebElement element = request.initiatorElement();
-        if (!element.isNull()) {
-            printf(" - element with ");
-            if (element.hasAttribute("id"))
-                printf("id '%s'", element.getAttribute("id").utf8().data());
-            else
-                printf("no id");
-        } else
-            printf(" - %s", request.initiatorName().utf8().data());
-        printf(" requested '%s'\n", URLDescription(request.urlRequest().url()).c_str());
-    }
-}
-
-void WebViewHost::willSendRequest(WebFrame* frame, unsigned identifier, WebURLRequest& request, const WebURLResponse& redirectResponse)
-{
-    // Need to use GURL for host() and SchemeIs()
-    GURL url = request.url();
-    string requestURL = url.possibly_invalid_spec();
-
-    GURL mainDocumentURL = request.firstPartyForCookies();
-    if (testRunner()->shouldDumpResourceLoadCallbacks()) {
-        printResourceDescription(identifier);
-        printf(" - willSendRequest <NSURLRequest URL %s, main document URL %s,"
-               " http method %s> redirectResponse ",
-               descriptionSuitableForTestResult(requestURL).c_str(),
-               URLDescription(mainDocumentURL).c_str(),
-               request.httpMethod().utf8().data());
-        printResponseDescription(redirectResponse);
-        fputs("\n", stdout);
-    }
 
     request.setExtraData(webkit_support::CreateWebURLRequestExtraData(frame->document().referrerPolicy()));
-
-    if (!redirectResponse.isNull() && m_blocksRedirects) {
-        fputs("Returning null for this redirect\n", stdout);
-        blockRequest(request);
-        return;
-    }
-
-    if (m_requestReturnNull) {
-        blockRequest(request);
-        return;
-    }
-
-    string host = url.host();
-    if (!host.empty() && (url.SchemeIs("http") || url.SchemeIs("https"))) {
-        if (!isLocalhost(host) && !hostIsUsedBySomeTestsToGenerateError(host)
-            && ((!mainDocumentURL.SchemeIs("http") && !mainDocumentURL.SchemeIs("https")) || isLocalhost(mainDocumentURL.host()))
-            && !m_shell->allowExternalPages()) {
-            printf("Blocked access to external URL %s\n", requestURL.c_str());
-            blockRequest(request);
-            return;
-        }
-    }
-
-    HashSet<String>::const_iterator end = m_clearHeaders.end();
-    for (HashSet<String>::const_iterator header = m_clearHeaders.begin(); header != end; ++header)
-        request.clearHTTPHeaderField(WebString(header->characters(), header->length()));
-
-    // Set the new substituted URL.
-    request.setURL(webkit_support::RewriteLayoutTestsURL(request.url().spec()));
-}
-
-void WebViewHost::didReceiveResponse(WebFrame*, unsigned identifier, const WebURLResponse& response)
-{
-    if (m_shell->shouldDumpResourceLoadCallbacks()) {
-        printResourceDescription(identifier);
-        fputs(" - didReceiveResponse ", stdout);
-        printResponseDescription(response);
-        fputs("\n", stdout);
-    }
-    if (m_shell->shouldDumpResourceResponseMIMETypes()) {
-        GURL url = response.url();
-        WebString mimeType = response.mimeType();
-        printf("%s has MIME type %s\n",
-            url.ExtractFileName().c_str(),
-            // Simulate NSURLResponse's mapping of empty/unknown MIME types to application/octet-stream
-            mimeType.isEmpty() ? "application/octet-stream" : mimeType.utf8().data());
-    }
-}
-
-void WebViewHost::didFinishResourceLoad(WebFrame*, unsigned identifier)
-{
-    if (m_shell->shouldDumpResourceLoadCallbacks()) {
-        printResourceDescription(identifier);
-        fputs(" - didFinishLoading\n", stdout);
-    }
-    removeIdentifierForRequest(identifier);
-}
-
-void WebViewHost::didFailResourceLoad(WebFrame*, unsigned identifier, const WebURLError& error)
-{
-    if (m_shell->shouldDumpResourceLoadCallbacks()) {
-        printResourceDescription(identifier);
-        fputs(" - didFailLoadingWithError: ", stdout);
-        fputs(webkit_support::MakeURLErrorDescription(error).c_str(), stdout);
-        fputs("\n", stdout);
-    }
-    removeIdentifierForRequest(identifier);
-}
-
-void WebViewHost::didDisplayInsecureContent(WebFrame*)
-{
-    if (m_shell->shouldDumpFrameLoadCallbacks())
-        fputs("didDisplayInsecureContent\n", stdout);
-}
-
-void WebViewHost::didRunInsecureContent(WebFrame*, const WebSecurityOrigin& origin, const WebURL& insecureURL)
-{
-    if (m_shell->shouldDumpFrameLoadCallbacks())
-        fputs("didRunInsecureContent\n", stdout);
-}
-
-void WebViewHost::didDetectXSS(WebFrame*, const WebURL&, bool)
-{
-    if (m_shell->shouldDumpFrameLoadCallbacks())
-        fputs("didDetectXSS\n", stdout);
 }
 
 void WebViewHost::openFileSystem(WebFrame* frame, WebFileSystem::Type type, long long size, bool create, WebFileSystemCallbacks* callbacks)
@@ -1286,69 +632,10 @@ void WebViewHost::deleteFileSystem(WebKit::WebFrame* frame, WebKit::WebFileSyste
 
 bool WebViewHost::willCheckAndDispatchMessageEvent(WebFrame* sourceFrame, WebFrame* targetFrame, WebSecurityOrigin target, WebDOMMessageEvent event)
 {
-    if (m_shell->testRunner()->shouldInterceptPostMessage()) {
-        fputs("intercepted postMessage\n", stdout);
-        return true;
-    }
-
     return false;
 }
 
-void WebViewHost::registerIntentService(WebKit::WebFrame*, const WebKit::WebIntentServiceInfo& service)
-{
-    printf("Registered Web Intent Service: action=%s type=%s title=%s url=%s disposition=%s\n",
-           service.action().utf8().data(), service.type().utf8().data(), service.title().utf8().data(), service.url().spec().data(), service.disposition().utf8().data());
-}
-
-void WebViewHost::dispatchIntent(WebFrame* source, const WebIntentRequest& request)
-{
-    printf("Received Web Intent: action=%s type=%s\n",
-           request.intent().action().utf8().data(),
-           request.intent().type().utf8().data());
-    WebMessagePortChannelArray* ports = request.intent().messagePortChannelsRelease();
-    m_currentRequest = request;
-    if (ports) {
-        printf("Have %d ports\n", static_cast<int>(ports->size()));
-        for (size_t i = 0; i < ports->size(); ++i)
-            (*ports)[i]->destroy();
-        delete ports;
-    }
-
-    if (!request.intent().service().isEmpty())
-        printf("Explicit intent service: %s\n", request.intent().service().spec().data());
-
-    WebVector<WebString> extras = request.intent().extrasNames();
-    for (size_t i = 0; i < extras.size(); ++i) {
-        printf("Extras[%s] = %s\n", extras[i].utf8().data(),
-               request.intent().extrasValue(extras[i]).utf8().data());
-    }
-
-    WebVector<WebURL> suggestions = request.intent().suggestions();
-    for (size_t i = 0; i < suggestions.size(); ++i)
-        printf("Have suggestion %s\n", suggestions[i].spec().data());
-}
-
-void WebViewHost::deliveredIntentResult(WebFrame* frame, int id, const WebSerializedScriptValue& data)
-{
-    printf("Web intent success for id %d\n", id);
-}
-
-void WebViewHost::deliveredIntentFailure(WebFrame* frame, int id, const WebSerializedScriptValue& data)
-{
-    printf("Web intent failure for id %d\n", id);
-}
-
 // WebTestDelegate ------------------------------------------------------------
-
-WebContextMenuData* WebViewHost::lastContextMenuData() const
-{
-    return m_lastContextMenuData.get();
-}
-
-void WebViewHost::clearContextMenuData()
-{
-    m_lastContextMenuData.clear();
-}
 
 void WebViewHost::setEditCommand(const string& name, const string& value)
 {
@@ -1360,11 +647,6 @@ void WebViewHost::clearEditCommand()
 {
     m_editCommandName.clear();
     m_editCommandValue.clear();
-}
-
-void WebViewHost::fillSpellingSuggestionList(const WebKit::WebString& word, WebKit::WebVector<WebKit::WebString>* suggestions)
-{
-    mockSpellCheck()->fillSuggestionList(word, suggestions);
 }
 
 void WebViewHost::setGamepadData(const WebGamepads& pads)
@@ -1422,43 +704,298 @@ void WebViewHost::applyPreferences()
     m_shell->applyPreferences();
 }
 
+#if ENABLE(WEB_INTENTS)
+void WebViewHost::setCurrentWebIntentRequest(const WebIntentRequest& request)
+{
+    m_currentRequest = request;
+}
+
+WebIntentRequest* WebViewHost::currentWebIntentRequest()
+{
+    return &m_currentRequest;
+}
+#endif
+
+std::string WebViewHost::makeURLErrorDescription(const WebKit::WebURLError& error)
+{
+    return webkit_support::MakeURLErrorDescription(error);
+}
+
+void WebViewHost::showDevTools()
+{
+    m_shell->showDevTools();
+}
+
+void WebViewHost::closeDevTools()
+{
+    m_shell->closeDevTools();
+}
+
+void WebViewHost::evaluateInWebInspector(long callID, const std::string& script)
+{
+    m_shell->drtDevToolsAgent()->evaluateInWebInspector(callID, script);
+}
+
+void WebViewHost::clearAllDatabases()
+{
+    webkit_support::ClearAllDatabases();
+}
+
+void WebViewHost::setDatabaseQuota(int quota)
+{
+    webkit_support::SetDatabaseQuota(quota);
+}
+
+void WebViewHost::setDeviceScaleFactor(float deviceScaleFactor)
+{
+    webView()->setDeviceScaleFactor(deviceScaleFactor);
+    discardBackingStore();
+}
+
+void WebViewHost::setFocus(bool focused)
+{
+    m_shell->setFocus(m_shell->webView(), focused);
+}
+
+void WebViewHost::setAcceptAllCookies(bool acceptCookies)
+{
+    webkit_support::SetAcceptAllCookies(acceptCookies);
+}
+
+string WebViewHost::pathToLocalResource(const string& url)
+{
+#if OS(WINDOWS)
+    if (!url.find("/tmp/")) {
+        // We want a temp file.
+        const unsigned tempPrefixLength = 5;
+        size_t bufferSize = MAX_PATH;
+        OwnArrayPtr<WCHAR> tempPath = adoptArrayPtr(new WCHAR[bufferSize]);
+        DWORD tempLength = ::GetTempPathW(bufferSize, tempPath.get());
+        if (tempLength + url.length() - tempPrefixLength + 1 > bufferSize) {
+            bufferSize = tempLength + url.length() - tempPrefixLength + 1;
+            tempPath = adoptArrayPtr(new WCHAR[bufferSize]);
+            tempLength = GetTempPathW(bufferSize, tempPath.get());
+            ASSERT(tempLength < bufferSize);
+        }
+        string resultPath(WebString(tempPath.get(), tempLength).utf8());
+        resultPath.append(url.substr(tempPrefixLength));
+        return resultPath;
+    }
+#endif
+
+    // Some layout tests use file://// which we resolve as a UNC path. Normalize
+    // them to just file:///.
+    string lowerUrl = url;
+    string result = url;
+    transform(lowerUrl.begin(), lowerUrl.end(), lowerUrl.begin(), ::tolower);
+    while (!lowerUrl.find("file:////")) {
+        result = result.substr(0, 8) + result.substr(9);
+        lowerUrl = lowerUrl.substr(0, 8) + lowerUrl.substr(9);
+    }
+    return webkit_support::RewriteLayoutTestsURL(result).spec();
+}
+
+void WebViewHost::setLocale(const std::string& locale)
+{
+    setlocale(LC_ALL, locale.c_str());
+}
+
+void WebViewHost::setDeviceOrientation(WebKit::WebDeviceOrientation& orientation)
+{
+    deviceOrientationClientMock()->setOrientation(orientation);
+}
+
+int WebViewHost::numberOfPendingGeolocationPermissionRequests()
+{
+    Vector<WebViewHost*> windowList = m_shell->windowList();
+    int numberOfRequests = 0;
+    for (size_t i = 0; i < windowList.size(); i++)
+        numberOfRequests += windowList[i]->geolocationClientMock()->numberOfPendingPermissionRequests();
+    return numberOfRequests;
+}
+
+void WebViewHost::setGeolocationPermission(bool allowed)
+{
+    Vector<WebViewHost*> windowList = m_shell->windowList();
+    for (size_t i = 0; i < windowList.size(); i++)
+        windowList[i]->geolocationClientMock()->setPermission(allowed);
+}
+
+void WebViewHost::setMockGeolocationPosition(double latitude, double longitude, double accuracy)
+{
+    Vector<WebViewHost*> windowList = m_shell->windowList();
+    for (size_t i = 0; i < windowList.size(); i++)
+        windowList[i]->geolocationClientMock()->setPosition(latitude, longitude, accuracy);
+}
+
+void WebViewHost::setMockGeolocationPositionUnavailableError(const std::string& message)
+{
+    Vector<WebViewHost*> windowList = m_shell->windowList();
+    // FIXME: Benjamin
+    for (size_t i = 0; i < windowList.size(); i++)
+        windowList[i]->geolocationClientMock()->setPositionUnavailableError(WebString::fromUTF8(message));
+}
+
+#if ENABLE(NOTIFICATIONS)
+void WebViewHost::grantWebNotificationPermission(const std::string& origin)
+{
+    m_shell->notificationPresenter()->grantPermission(WebString::fromUTF8(origin));
+}
+
+bool WebViewHost::simulateLegacyWebNotificationClick(const std::string& notificationIdentifier)
+{
+    return m_shell->notificationPresenter()->simulateClick(WebString::fromUTF8(notificationIdentifier));
+}
+#endif
+
+#if ENABLE(INPUT_SPEECH)
+void WebViewHost::addMockSpeechInputResult(const std::string& result, double confidence, const std::string& language)
+{
+    m_speechInputControllerMock->addMockRecognitionResult(WebString::fromUTF8(result), confidence, WebString::fromUTF8(language));
+}
+
+void WebViewHost::setMockSpeechInputDumpRect(bool dumpRect)
+{
+    m_speechInputControllerMock->setDumpRect(dumpRect);
+}
+#endif
+
+#if ENABLE(SCRIPTED_SPEECH)
+void WebViewHost::addMockSpeechRecognitionResult(const std::string& transcript, double confidence)
+{
+    m_mockSpeechRecognizer->addMockResult(WebString::fromUTF8(transcript), confidence);
+}
+
+void WebViewHost::setMockSpeechRecognitionError(const std::string& error, const std::string& message)
+{
+    m_mockSpeechRecognizer->setError(WebString::fromUTF8(error), WebString::fromUTF8(message));
+}
+
+bool WebViewHost::wasMockSpeechRecognitionAborted()
+{
+    return m_mockSpeechRecognizer->wasAborted();
+}
+#endif
+
+void WebViewHost::display()
+{
+    const WebKit::WebSize& size = webView()->size();
+    WebRect rect(0, 0, size.width, size.height);
+    proxy()->setPaintRect(rect);
+    paintInvalidatedRegion();
+    displayRepaintMask();
+}
+
+void WebViewHost::displayInvalidatedRegion()
+{
+    paintInvalidatedRegion();
+    displayRepaintMask();
+}
+
+void WebViewHost::testFinished()
+{
+    m_shell->testFinished(this);
+}
+
+void WebViewHost::testTimedOut()
+{
+    m_shell->testTimedOut();
+}
+
+bool WebViewHost::isBeingDebugged()
+{
+    return webkit_support::BeingDebugged();
+}
+
+int WebViewHost::layoutTestTimeout()
+{
+    return m_shell->layoutTestTimeout();
+}
+
+void WebViewHost::closeRemainingWindows()
+{
+    m_shell->closeRemainingWindows();
+}
+
+int WebViewHost::navigationEntryCount()
+{
+    return m_shell->navigationEntryCount();
+}
+
+int WebViewHost::windowCount()
+{
+    return m_shell->windowCount();
+}
+
+void WebViewHost::goToOffset(int offset)
+{
+    m_shell->goToOffset(offset);
+}
+
+void WebViewHost::reload()
+{
+    m_shell->reload();
+}
+
+void WebViewHost::loadURLForFrame(const WebURL& url, const string& frameName)
+{
+    if (!url.isValid())
+        return;
+    TestShell::resizeWindowForTest(this, url);
+    navigationController()->loadEntry(TestNavigationEntry::create(-1, url, WebString(), WebString::fromUTF8(frameName)).get());
+}
+
+bool WebViewHost::allowExternalPages()
+{
+    return m_shell->allowExternalPages();
+}
+
 // Public functions -----------------------------------------------------------
 
 WebViewHost::WebViewHost(TestShell* shell)
     : m_shell(shell)
     , m_proxy(0)
     , m_webWidget(0)
-    , m_lastRequestedTextCheckingCompletion(0)
+    , m_shutdownWasInvoked(false)
 {
     reset();
 }
 
 WebViewHost::~WebViewHost()
 {
+    ASSERT(m_shutdownWasInvoked);
+    if (m_inModalLoop)
+        webkit_support::QuitMessageLoop();
+}
+
+void WebViewHost::shutdown()
+{
+    ASSERT(!m_shutdownWasInvoked);
+
     // DevTools frontend page is supposed to be navigated only once and
     // loading another URL in that Page is an error.
     if (m_shell->devToolsWebView() != this) {
         // Navigate to an empty page to fire all the destruction logic for the
         // current page.
-        loadURLForFrame(GURL("about:blank"), WebString());
+        loadURLForFrame(GURL("about:blank"), string());
     }
 
     for (Vector<WebKit::WebWidget*>::iterator it = m_popupmenus.begin();
          it < m_popupmenus.end(); ++it)
         (*it)->close();
 
+    webWidget()->willCloseLayerTreeView();
     m_layerTreeView.clear();
     webWidget()->close();
-    if (m_inModalLoop)
-        webkit_support::QuitMessageLoop();
+    m_webWidget = 0;
+    m_shutdownWasInvoked = true;
 }
 
 void WebViewHost::setWebWidget(WebKit::WebWidget* widget)
 {
     m_webWidget = widget;
-    webView()->setSpellCheckClient(this);
+    webView()->setSpellCheckClient(proxy()->spellCheckClient());
     webView()->setPrerendererClient(this);
-    webView()->setCompositorSurfaceReady();
 }
 
 WebView* WebViewHost::webView() const
@@ -1489,23 +1026,10 @@ void WebViewHost::setProxy(WebTestProxyBase* proxy)
 
 void WebViewHost::reset()
 {
-    m_policyDelegateEnabled = false;
-    m_policyDelegateIsPermissive = false;
-    m_policyDelegateShouldNotifyDone = false;
-    m_topLoadingFrame = 0;
     m_pageId = -1;
     m_lastPageIdUpdated = -1;
     m_hasWindow = false;
     m_inModalLoop = false;
-    m_smartInsertDeleteEnabled = true;
-    m_logConsoleOutput = true;
-#if OS(WINDOWS)
-    m_selectTrailingWhitespaceEnabled = true;
-#else
-    m_selectTrailingWhitespaceEnabled = false;
-#endif
-    m_blocksRedirects = false;
-    m_requestReturnNull = false;
     m_isPainting = false;
     m_canvas.clear();
 #if ENABLE(POINTER_LOCK)
@@ -1516,8 +1040,6 @@ void WebViewHost::reset()
     m_navigationController = adoptPtr(new TestNavigationController(this));
 
     m_pendingExtraData.clear();
-    m_resourceIdentifierMap.clear();
-    m_clearHeaders.clear();
     m_editCommandName.clear();
     m_editCommandValue.clear();
 
@@ -1533,7 +1055,7 @@ void WebViewHost::reset()
     m_windowRect = WebRect();
     // m_proxy is not set when reset() is invoked from the constructor.
     if (m_proxy)
-        proxy()->setPaintRect(WebRect());
+        proxy()->reset();
 
     if (m_webWidget) {
         webView()->mainFrame()->setName(WebString());
@@ -1541,45 +1063,9 @@ void WebViewHost::reset()
     }
 }
 
-void WebViewHost::setSelectTrailingWhitespaceEnabled(bool enabled)
+void WebViewHost::setClientWindowRect(const WebKit::WebRect& rect)
 {
-    m_selectTrailingWhitespaceEnabled = enabled;
-    // In upstream WebKit, smart insert/delete is mutually exclusive with select
-    // trailing whitespace, however, we allow both because Chromium on Windows
-    // allows both.
-}
-
-void WebViewHost::setSmartInsertDeleteEnabled(bool enabled)
-{
-    m_smartInsertDeleteEnabled = enabled;
-    // In upstream WebKit, smart insert/delete is mutually exclusive with select
-    // trailing whitespace, however, we allow both because Chromium on Windows
-    // allows both.
-}
-
-void WebViewHost::setLogConsoleOutput(bool enabled)
-{
-    m_logConsoleOutput = enabled;
-}
-
-void WebViewHost::setCustomPolicyDelegate(bool isCustom, bool isPermissive)
-{
-    m_policyDelegateEnabled = isCustom;
-    m_policyDelegateIsPermissive = isPermissive;
-}
-
-void WebViewHost::waitForPolicyDelegate()
-{
-    m_policyDelegateEnabled = true;
-    m_policyDelegateShouldNotifyDone = true;
-}
-
-void WebViewHost::loadURLForFrame(const WebURL& url, const WebString& frameName)
-{
-    if (!url.isValid())
-        return;
-    TestShell::resizeWindowForTest(this, url);
-    navigationController()->loadEntry(TestNavigationEntry::create(-1, url, WebString(), frameName).get());
+    setWindowRect(rect);
 }
 
 bool WebViewHost::navigate(const TestNavigationEntry& entry, bool reload)
@@ -1626,31 +1112,6 @@ bool WebViewHost::navigate(const TestNavigationEntry& entry, bool reload)
 
 // Private functions ----------------------------------------------------------
 
-DRTTestRunner* WebViewHost::testRunner() const
-{
-    return m_shell->testRunner();
-}
-
-void WebViewHost::updateAddressBar(WebView* webView)
-{
-    WebFrame* mainFrame = webView->mainFrame();
-    WebDataSource* dataSource = mainFrame->dataSource();
-    if (!dataSource)
-        dataSource = mainFrame->provisionalDataSource();
-    if (!dataSource)
-        return;
-
-    setAddressBarURL(dataSource->request().url());
-}
-
-void WebViewHost::locationChangeDone(WebFrame* frame)
-{
-    if (frame != m_topLoadingFrame)
-        return;
-    m_topLoadingFrame = 0;
-    testRunner()->locationChangeDone();
-}
-
 void WebViewHost::updateForCommittedLoad(WebFrame* frame, bool isNewNavigation)
 {
     // Code duplicated from RenderView::DidCommitLoadForFrame.
@@ -1695,7 +1156,6 @@ void WebViewHost::updateURL(WebFrame* frame)
         entry->setContentState(historyItem);
 
     navigationController()->didNavigateToEntry(entry.get());
-    updateAddressBar(frame->view());
     m_lastPageIdUpdated = max(m_lastPageIdUpdated, m_pageId);
 }
 
@@ -1736,35 +1196,12 @@ void WebViewHost::printFrameDescription(WebFrame* webframe)
     printf("frame \"%s\"", name8.c_str());
 }
 
-void WebViewHost::printFrameUserGestureStatus(WebFrame* webframe, const char* msg)
-{
-    bool isUserGesture = webframe->isProcessingUserGesture();
-    printf("Frame with user gesture \"%s\"%s", isUserGesture ? "true" : "false", msg);
-}
-
-void WebViewHost::printResourceDescription(unsigned identifier)
-{
-    ResourceMap::iterator it = m_resourceIdentifierMap.find(identifier);
-    printf("%s", it != m_resourceIdentifierMap.end() ? it->value.c_str() : "<unknown>");
-}
-
 void WebViewHost::setPendingExtraData(PassOwnPtr<TestShellExtraData> extraData)
 {
     m_pendingExtraData = extraData;
 }
 
-void WebViewHost::setDeviceScaleFactor(float deviceScaleFactor)
-{
-    webView()->setDeviceScaleFactor(deviceScaleFactor);
-    discardBackingStore();
-}
-
 void WebViewHost::setPageTitle(const WebString&)
-{
-    // Nothing to do in layout test.
-}
-
-void WebViewHost::setAddressBarURL(const WebURL&)
 {
     // Nothing to do in layout test.
 }

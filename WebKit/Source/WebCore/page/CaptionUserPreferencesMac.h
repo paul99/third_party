@@ -40,31 +40,43 @@ public:
     static PassOwnPtr<CaptionUserPreferencesMac> create(PageGroup* group) { return adoptPtr(new CaptionUserPreferencesMac(group)); }
     virtual ~CaptionUserPreferencesMac();
 
+#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1090
     virtual bool userPrefersCaptions() const OVERRIDE;
+    virtual void setUserPrefersCaptions(bool) OVERRIDE;
     virtual bool userHasCaptionPreferences() const OVERRIDE;
-    virtual float captionFontSizeScale() const OVERRIDE;
+    virtual float captionFontSizeScale(bool&) const OVERRIDE;
     virtual String captionsStyleSheetOverride() const OVERRIDE;
     virtual void registerForCaptionPreferencesChangedCallbacks(CaptionPreferencesChangedListener*) OVERRIDE;
     virtual void unregisterForCaptionPreferencesChangedCallbacks(CaptionPreferencesChangedListener*) OVERRIDE;
 
+    virtual void setPreferredLanguage(String) const OVERRIDE;
+    virtual Vector<String> preferredLanguages() const OVERRIDE;
+
     void captionPreferencesChanged();
+#endif
+
+    virtual String displayNameForTrack(TextTrack*) const OVERRIDE;
 
 private:
     CaptionUserPreferencesMac(PageGroup*);
 
-    Color captionsWindowColor() const;
-    Color captionsBackgroundColor() const;
-    Color captionsTextColor() const;
-    String captionsDefaultFont() const;
+#if MAC_OS_X_VERSION_MIN_REQUIRED >= 1090
+    String captionsWindowCSS() const;
+    String captionsBackgroundCSS() const;
+    String captionsTextColorCSS() const;
+    Color captionsTextColor(bool&) const;
+    String captionsDefaultFontCSS() const;
     Color captionsEdgeColorForTextColor(const Color&) const;
-    String captionsTextEdgeStyle() const;
-    String cssPropertyWithTextEdgeColor(CSSPropertyID, const String&, const Color&) const;
-    String cssColorProperty(CSSPropertyID, const Color&) const;
+    String windowRoundedCornerRadiusCSS() const;
+    String captionsTextEdgeCSS() const;
+    String cssPropertyWithTextEdgeColor(CSSPropertyID, const String&, const Color&, bool) const;
+    String colorPropertyCSS(CSSPropertyID, const Color&, bool) const;
 
     void updateCaptionStyleSheetOveride();
 
     HashSet<CaptionPreferencesChangedListener*> m_captionPreferenceChangeListeners;
     bool m_listeningForPreferenceChanges;
+#endif
 };
     
 }

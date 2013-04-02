@@ -54,6 +54,7 @@
 #include "SVGZoomAndPan.h"
 #include "SearchPopupMenuBlackBerry.h"
 #include "SecurityOrigin.h"
+#include "Settings.h"
 #include "SharedPointer.h"
 #include "ViewportArguments.h"
 #include "WebPage.h"
@@ -165,7 +166,11 @@ FloatRect ChromeClientBlackBerry::windowRect()
     if (Window* window = m_webPagePrivate->m_client->window())
         windowSize = window->windowSize();
 
-    return FloatRect(0, 0, windowSize.width(), windowSize.height());
+    // Use logical (density-independent) pixels instead of physical screen pixels.
+    FloatRect rect = FloatRect(0, 0, windowSize.width(), windowSize.height());
+    if (!m_webPagePrivate->m_page->settings()->applyDeviceScaleFactorInCompositor())
+        rect.scale(1 / m_webPagePrivate->m_page->deviceScaleFactor());
+    return rect;
 }
 
 FloatRect ChromeClientBlackBerry::pageRect()
@@ -231,9 +236,6 @@ Page* ChromeClientBlackBerry::createWindow(Frame* frame, const FrameLoadRequest&
         return 0;
 #endif
 
-    PageGroupLoadDeferrer deferrer(m_webPagePrivate->m_page, true);
-    TimerBase::fireTimersInNestedEventLoop();
-
     int x = features.xSet ? features.x : 0;
     int y = features.ySet ? features.y : 0;
     int width = features.widthSet? features.width : -1;
@@ -257,7 +259,7 @@ Page* ChromeClientBlackBerry::createWindow(Frame* frame, const FrameLoadRequest&
     if (features.dialog)
         flags |= WebPageClient::FlagWindowIsDialog;
 
-    WebPage* webPage = m_webPagePrivate->m_client->createWindow(x, y, width, height, flags, BlackBerry::Platform::String::emptyString(), request.frameName());
+    WebPage* webPage = m_webPagePrivate->m_client->createWindow(x, y, width, height, flags, url.string(), request.frameName());
     if (!webPage)
         return 0;
 
@@ -480,7 +482,7 @@ void ChromeClientBlackBerry::print(Frame*)
     notImplemented();
 }
 
-void ChromeClientBlackBerry::exceededDatabaseQuota(Frame* frame, const String& name)
+void ChromeClientBlackBerry::exceededDatabaseQuota(Frame* frame, const String& name, DatabaseDetails details)
 {
 #if ENABLE(SQL_DATABASE)
     Document* document = frame->document();
@@ -498,17 +500,15 @@ void ChromeClientBlackBerry::exceededDatabaseQuota(Frame* frame, const String& n
 
     DatabaseManager& manager = DatabaseManager::manager();
 
-    unsigned long long totalUsage = manager.totalDatabaseUsage();
-    unsigned long long originUsage = manager.usageForOrigin(origin);
+    unsigned long long originUsage = tracker.usageForOrigin(origin);
+    unsigned long long currentQuota = tracker.quotaForOrigin(origin);
 
-    DatabaseDetails details = manager.detailsForNameAndOrigin(name, origin);
     unsigned long long estimatedSize = details.expectedUsage();
     const String& nameStr = details.displayName();
 
-    String originStr = origin->databaseIdentifier();
+    String originStr = origin->toString();
 
-    unsigned long long quota = m_webPagePrivate->m_client->databaseQuota(originStr.characters(), originStr.length(),
-        nameStr.characters(), nameStr.length(), totalUsage, originUsage, estimatedSize);
+    unsigned long long quota = m_webPagePrivate->m_client->databaseQuota(originStr, nameStr, originUsage, currentQuota, estimatedSize);
 
     manager.setQuota(origin, quota);
 #endif
@@ -765,14 +765,9 @@ void ChromeClientBlackBerry::exitFullScreenForElement(WebCore::Element*)
     m_fullScreenElement.clear();
 }
 
-void ChromeClientBlackBerry::fullScreenRendererChanged(RenderBox* fullScreenRenderer)
+void ChromeClientBlackBerry::fullScreenRendererChanged(RenderBox*)
 {
-    // Once we go fullscreen using the new FULLSCREEN_API code path, we have to take into account
-    // our port specific page scaling.
-    if (fullScreenRenderer) {
-        int width = m_webPagePrivate->m_mainFrame->view()->visibleContentRect().size().width();
-        fullScreenRenderer->style()->setWidth(Length(width, Fixed));
-    }
+    m_webPagePrivate->adjustFullScreenElementDimensionsIfNeeded();
 }
 #endif
 

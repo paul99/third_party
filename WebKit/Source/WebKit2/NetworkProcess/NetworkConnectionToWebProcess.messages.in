@@ -22,20 +22,13 @@
 
 #if ENABLE(NETWORK_PROCESS)
 
-messages -> NetworkConnectionToWebProcess {
+messages -> NetworkConnectionToWebProcess LegacyReceiver {
 
-    // FIXME (NetworkProcess): At least some of these synchronous messages are synchronous due to the requirement
-    // that we synchronously get an identifier for new ResourceLoaders as they are created.
-    // There's possible ResourceLoader identifier refactoring that can remove that requirement.
-    // We might also have the NetworkProcess divvy up identifiers in blocks to each WebProcess beforehand.
-    ScheduleResourceLoad(WebKit::NetworkResourceLoadParameters resourceLoadParameters) -> (uint64_t resourceLoadIdentifier)
-    AddLoadInProgress(WebCore::KURL url) -> (uint64_t resourceLoadIdentifier)
+    ScheduleResourceLoad(WebKit::NetworkResourceLoadParameters resourceLoadParameters)
+    PerformSynchronousLoad(WebKit::NetworkResourceLoadParameters resourceLoadParameters) -> (WebCore::ResourceError error, WebCore::ResourceResponse response, CoreIPC::DataReference data) Delayed
     RemoveLoadIdentifier(uint64_t resourceLoadIdentifier)
     
     ServePendingRequests(uint32_t resourceLoadPriority)
-
-    SuspendPendingRequests() -> ()
-    ResumePendingRequests() -> ()
     
     SetSerialLoadingEnabled(bool enabled) -> ()
 
@@ -47,9 +40,6 @@ messages -> NetworkConnectionToWebProcess {
     CookieRequestHeaderFieldValue(bool privateBrowsingEnabled, WebCore::KURL firstParty, WebCore::KURL url) -> (WTF::String result)
     GetRawCookies(bool privateBrowsingEnabled, WebCore::KURL firstParty, WebCore::KURL url) -> (WTF::Vector<WebCore::Cookie> cookies)
     DeleteCookie(bool privateBrowsingEnabled, WebCore::KURL url, WTF::String cookieName)
-    GetHostnamesWithCookies(bool privateBrowsingEnabled) -> (WTF::Vector<WTF::String> hostnames)
-    DeleteCookiesForHostname(bool privateBrowsingEnabled, WTF::String hostname)
-    DeleteAllCookies(bool privateBrowsingEnabled)
 }
 
 #endif // ENABLE(NETWORK_PROCESS)

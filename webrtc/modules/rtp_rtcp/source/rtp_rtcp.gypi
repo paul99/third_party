@@ -10,7 +10,7 @@
   'targets': [
     {
       'target_name': 'rtp_rtcp',
-      'type': '<(library)',
+      'type': 'static_library',
       'dependencies': [
         '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
         '<(webrtc_root)/modules/modules.gyp:remote_bitrate_estimator',
@@ -31,7 +31,7 @@
         '../interface/rtp_rtcp.h',
         '../interface/rtp_rtcp_defines.h',
         'bitrate.cc',
-        'Bitrate.h',
+        'bitrate.h',
         'rtp_rtcp_config.h',
         'rtp_rtcp_impl.cc',
         'rtp_rtcp_impl.h',
@@ -73,6 +73,10 @@
         'producer_fec.h',
         'rtp_packet_history.cc',
         'rtp_packet_history.h',
+        'rtp_payload_registry.h',
+        'rtp_payload_registry.cc',
+        'rtp_receiver_strategy.cc',
+        'rtp_receiver_strategy.h',
         'rtp_receiver_video.cc',
         'rtp_receiver_video.h',
         'rtp_sender_video.cc',
@@ -87,6 +91,8 @@
         # Mocks
         '../mocks/mock_rtp_rtcp.h',
       ], # source
+      # TODO(jschuh): Bug 1348: fix size_t to int truncations.
+      'msvs_disabled_warnings': [ 4267, ],
     },
   ],
 }

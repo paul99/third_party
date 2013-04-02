@@ -116,6 +116,7 @@ class FakeWebRtcVideoEngine
     bool remb_receive_;  // This channel receives video packets.
     int rtp_offset_send_id_;
     int rtp_offset_receive_id_;
+    int target_delay;
     bool transmission_smoothing_;
     bool nack_;
     bool hybrid_nack_fec_;
@@ -418,10 +419,8 @@ class FakeWebRtcVideoEngine
       unsigned int&, unsigned int&));
   WEBRTC_STUB_CONST(GetReceiveCodecStastistics, (const int,
       unsigned int&, unsigned int&));
-#ifdef USE_WEBRTC_DEV_BRANCH
   WEBRTC_STUB_CONST(GetReceiveSideDelay, (const int video_channel,
                                           int* delay_ms));
-#endif
   WEBRTC_FUNC_CONST(GetCodecTargetBitrate, (const int channel,
       unsigned int* codec_target_bitrate)) {
     WEBRTC_CHECK_CHANNEL(channel);
@@ -671,6 +670,7 @@ class FakeWebRtcVideoEngine
     channels_[channel]->key_frame_request_method_ = method;
     return 0;
   }
+  WEBRTC_STUB(EnableSenderStreamingMode, (int channel, int target_delay));
   WEBRTC_FUNC(SetRembStatus, (int channel, bool send, bool receive)) {
     WEBRTC_CHECK_CHANNEL(channel);
     channels_[channel]->remb_send_ = send;

@@ -55,6 +55,11 @@ bool mightInlineFunctionForCall(CodeBlock* codeBlock)
     return codeBlock->instructionCount() <= Options::maximumFunctionForCallInlineCandidateInstructionCount()
         && !codeBlock->ownerExecutable()->needsActivation();
 }
+bool mightInlineFunctionForClosureCall(CodeBlock* codeBlock)
+{
+    return codeBlock->instructionCount() <= Options::maximumFunctionForClosureCallInlineCandidateInstructionCount()
+        && !codeBlock->ownerExecutable()->needsActivation();
+}
 bool mightInlineFunctionForConstruct(CodeBlock* codeBlock)
 {
     return codeBlock->instructionCount() <= Options::maximumFunctionForConstructInlineCandidateInstructionCount()
@@ -114,7 +119,7 @@ ReturnType canHandleOpcodes(CodeBlock* codeBlock, ReturnType initialValue)
             FOR_EACH_OPCODE_ID(DEFINE_OP)
 #undef DEFINE_OP
         default:
-            ASSERT_NOT_REACHED();
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
     }

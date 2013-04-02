@@ -40,6 +40,7 @@
 #import "WebDataSourceInternal.h"
 #import "WebDocumentLoaderMac.h"
 #import "WebDynamicScrollBarsView.h"
+#import "WebElementDictionary.h"
 #import "WebFrameLoaderClient.h"
 #import "WebFrameViewInternal.h"
 #import "WebHTMLView.h"
@@ -76,6 +77,7 @@
 #import <WebCore/HTMLNames.h>
 #import <WebCore/HistoryItem.h>
 #import <WebCore/HitTestResult.h>
+#import <WebCore/JSNode.h>
 #import <WebCore/LegacyWebArchive.h>
 #import <WebCore/Page.h>
 #import <WebCore/PlatformEventFactoryMac.h>
@@ -95,7 +97,7 @@
 #import <WebKitSystemInterface.h>
 #import <runtime/JSLock.h>
 #import <runtime/JSObject.h>
-#import <runtime/JSValue.h>
+#import <runtime/JSCJSValue.h>
 #import <wtf/CurrentTime.h>
 
 using namespace std;
@@ -924,53 +926,6 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
 }
 #endif
 
-- (BOOL)_pauseAnimation:(NSString*)name onNode:(DOMNode *)node atTime:(NSTimeInterval)time
-{
-    Frame* frame = core(self);
-    if (!frame)
-        return false;
-
-    AnimationController* controller = frame->animation();
-    if (!controller)
-        return false;
-
-    Node* coreNode = core(node);
-    if (!coreNode || !coreNode->renderer())
-        return false;
-
-    return controller->pauseAnimationAtTime(coreNode->renderer(), name, time);
-}
-
-- (BOOL)_pauseTransitionOfProperty:(NSString*)name onNode:(DOMNode*)node atTime:(NSTimeInterval)time
-{
-    Frame* frame = core(self);
-    if (!frame)
-        return false;
-
-    AnimationController* controller = frame->animation();
-    if (!controller)
-        return false;
-
-    Node* coreNode = core(node);
-    if (!coreNode || !coreNode->renderer())
-        return false;
-
-    return controller->pauseTransitionAtTime(coreNode->renderer(), name, time);
-}
-
-- (unsigned) _numberOfActiveAnimations
-{
-    Frame* frame = core(self);
-    if (!frame)
-        return false;
-
-    AnimationController* controller = frame->animation();
-    if (!controller)
-        return false;
-
-    return controller->numberOfActiveAnimations(frame->document());
-}
-
 - (void)_replaceSelectionWithFragment:(DOMDocumentFragment *)fragment selectReplacement:(BOOL)selectReplacement smartReplace:(BOOL)smartReplace matchStyle:(BOOL)matchStyle
 {
     if (_private->coreFrame->selection()->isNone() || !fragment)
@@ -1241,6 +1196,27 @@ static inline WebDataSource *dataSource(DocumentLoader* loader)
     for (size_t i = 0; i < size; ++i)
         [pages addObject:[NSValue valueWithRect:NSRect(pageRects[i])]];
     return pages;
+}
+
+- (JSValueRef)jsWrapperForNode:(DOMNode *)node inScriptWorld:(WebScriptWorld *)world
+{
+    Frame* coreFrame = _private->coreFrame;
+    if (!coreFrame)
+        return 0;
+
+    JSDOMWindow* globalObject = coreFrame->script()->globalObject(core(world));
+    JSC::ExecState* exec = globalObject->globalExec();
+
+    JSC::JSLockHolder lock(exec);
+    return toRef(exec, toJS(exec, globalObject, core(node)));
+}
+
+- (NSDictionary *)elementAtPoint:(NSPoint)point
+{
+    Frame* coreFrame = _private->coreFrame;
+    if (!coreFrame)
+        return nil;
+    return [[[WebElementDictionary alloc] initWithHitTestResult:coreFrame->eventHandler()->hitTestResultAtPoint(IntPoint(point), false, true)] autorelease];
 }
 
 @end

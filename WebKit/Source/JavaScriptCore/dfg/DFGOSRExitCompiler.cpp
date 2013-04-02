@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2012 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,6 +31,7 @@
 #include "CallFrame.h"
 #include "DFGCommon.h"
 #include "LinkBuffer.h"
+#include "Operations.h"
 #include "RepatchBuffer.h"
 #include <wtf/StringPrintStream.h>
 
@@ -84,7 +85,7 @@ void compileOSRExit(ExecState* exec)
 #if DFG_ENABLE(DEBUG_VERBOSE)
     dataLog(
         "Generating OSR exit #", exitIndex, " (seq#", exit.m_streamIndex,
-        ", bc#", exit.m_codeOrigin.bytecodeIndex, ", @", exit.m_nodeIndex, ", ",
+        ", bc#", exit.m_codeOrigin.bytecodeIndex, ", ",
         exit.m_kind, ") for ", *codeBlock, ".\n");
 #endif
 
@@ -111,14 +112,14 @@ void compileOSRExit(ExecState* exec)
         exit.m_code = FINALIZE_CODE_IF(
             shouldShowDisassembly(),
             patchBuffer,
-            ("DFG OSR exit #%u (bc#%u, @%u, %s) from %s",
-                exitIndex, exit.m_codeOrigin.bytecodeIndex, exit.m_nodeIndex,
+            ("DFG OSR exit #%u (bc#%u, %s) from %s",
+                exitIndex, exit.m_codeOrigin.bytecodeIndex,
                 exitKindToString(exit.m_kind), toCString(*codeBlock).data()));
     }
     
     {
         RepatchBuffer repatchBuffer(codeBlock);
-        repatchBuffer.relink(exit.m_check.codeLocationForRepatch(codeBlock), CodeLocationLabel(exit.m_code.code()));
+        repatchBuffer.relink(exit.codeLocationForRepatch(codeBlock), CodeLocationLabel(exit.m_code.code()));
     }
     
     globalData->osrExitJumpDestination = exit.m_code.code().executableAddress();

@@ -27,7 +27,6 @@
 #define __RS_DEBUG_RSH__
 
 
-
 /**
  * Debug function.  Prints a string and value to the log.
  */
@@ -48,6 +47,21 @@ extern void __attribute__((overloadable))
  */
 extern void __attribute__((overloadable))
     rsDebug(const char *, float, float, float, float);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, float2);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, float3);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, float4);
 /**
  * Debug function.  Prints a string and value to the log.
  */
@@ -103,21 +117,151 @@ extern void __attribute__((overloadable))
  */
 extern void __attribute__((overloadable))
     rsDebug(const char *, const void *);
+
+#if (defined(RS_VERSION) && (RS_VERSION >= 17))
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, char);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, char2);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, char3);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, char4);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, unsigned char);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, uchar2);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, uchar3);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, uchar4);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, short);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, short2);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, short3);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, short4);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, unsigned short);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, ushort2);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, ushort3);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, ushort4);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, int2);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, int3);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, int4);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, uint2);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, uint3);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, uint4);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, long2);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, long3);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, long4);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, ulong2);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, ulong3);
+/**
+ * Debug function.  Prints a string and value to the log.
+ */
+extern void __attribute__((overloadable))
+    rsDebug(const char *, ulong4);
+#endif  // (defined(RS_VERSION) && (RS_VERSION >= 17))
+
 #define RS_DEBUG(a) rsDebug(#a, a)
 #define RS_DEBUG_MARKER rsDebug(__FILE__, __LINE__)
-
-
-/**
- * Debug function.  Prints a string and value to the log.
- */
-_RS_RUNTIME void __attribute__((overloadable)) rsDebug(const char *s, float2 v);
-/**
- * Debug function.  Prints a string and value to the log.
- */
-_RS_RUNTIME void __attribute__((overloadable)) rsDebug(const char *s, float3 v);
-/**
- * Debug function.  Prints a string and value to the log.
- */
-_RS_RUNTIME void __attribute__((overloadable)) rsDebug(const char *s, float4 v);
 
 #endif

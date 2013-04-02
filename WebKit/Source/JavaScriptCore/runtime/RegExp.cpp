@@ -24,15 +24,15 @@
 #include "RegExp.h"
 
 #include "Lexer.h"
+#include "Operations.h"
 #include "RegExpCache.h"
-#include "yarr/Yarr.h"
-#include "yarr/YarrJIT.h"
+#include "Yarr.h"
+#include "YarrJIT.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wtf/Assertions.h>
 #include <wtf/OwnArrayPtr.h>
-
 
 #define REGEXP_FUNC_TEST_DATA_GEN 0
 
@@ -266,7 +266,7 @@ void RegExp::compile(JSGlobalData* globalData, Yarr::YarrCharSize charSize)
 {
     Yarr::YarrPattern pattern(m_patternString, ignoreCase(), multiline(), &m_constructionError);
     if (m_constructionError) {
-        ASSERT_NOT_REACHED();
+        RELEASE_ASSERT_NOT_REACHED();
         m_state = ParseError;
         return;
     }
@@ -388,7 +388,7 @@ void RegExp::compileMatchOnly(JSGlobalData* globalData, Yarr::YarrCharSize charS
 {
     Yarr::YarrPattern pattern(m_patternString, ignoreCase(), multiline(), &m_constructionError);
     if (m_constructionError) {
-        ASSERT_NOT_REACHED();
+        RELEASE_ASSERT_NOT_REACHED();
         m_state = ParseError;
         return;
     }

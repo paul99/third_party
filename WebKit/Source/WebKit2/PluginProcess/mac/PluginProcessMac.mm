@@ -33,18 +33,18 @@
 #import "PluginProcessShim.h"
 #import "PluginProcessProxyMessages.h"
 #import "PluginProcessCreationParameters.h"
+#import "SandboxInitializationParameters.h"
 #import <CoreAudio/AudioHardware.h>
 #import <WebCore/LocalizedStrings.h>
 #import <WebKitSystemInterface.h>
 #import <dlfcn.h>
 #import <objc/runtime.h>
+#import <sysexits.h>
 #import <wtf/HashSet.h>
 
-#import "NetscapeSandboxFunctions.h"
+using namespace WebCore;
 
 namespace WebKit {
-
-static pthread_once_t shouldCallRealDebuggerOnce = PTHREAD_ONCE_INIT;
 
 class FullscreenWindowTracker {
     WTF_MAKE_NONCOPYABLE(FullscreenWindowTracker);
@@ -127,6 +127,9 @@ static FullscreenWindowTracker& fullscreenWindowTracker()
     return fullscreenWindowTracker;
 }
 
+#if defined(__i386__)
+
+static pthread_once_t shouldCallRealDebuggerOnce = PTHREAD_ONCE_INIT;
 static bool isUserbreakSet = false;
 
 static void initShouldCallRealDebugger()
@@ -179,6 +182,8 @@ static void carbonWindowHidden(WindowRef window)
 #endif
 }
 
+#endif
+
 static void setModal(bool modalWindowIsShowing)
 {
     PluginProcess::shared().setModalWindowIsShowing(modalWindowIsShowing);
@@ -221,8 +226,10 @@ static NSInteger replacedRunModalForWindow(id self, SEL _cmd, NSWindow* window)
     return result;
 }
 
-void PluginProcess::initializeShim()
+#if defined(__i386__)
+static void initializeShim()
 {
+    // Initialize the shim for 32-bit only.
     const PluginProcessShimCallbacks callbacks = {
         shouldCallRealDebugger,
         isWindowActive,
@@ -237,8 +244,9 @@ void PluginProcess::initializeShim()
     PluginProcessShimInitializeFunc initFunc = reinterpret_cast<PluginProcessShimInitializeFunc>(dlsym(RTLD_DEFAULT, "WebKitPluginProcessShimInitialize"));
     initFunc(callbacks);
 }
+#endif
 
-void PluginProcess::initializeCocoaOverrides()
+static void initializeCocoaOverrides()
 {
     // Override -[NSApplication runModalForWindow:]
     Method runModalForWindowMethod = class_getInstanceMethod(objc_getClass("NSApplication"), @selector(runModalForWindow:));
@@ -264,41 +272,47 @@ void PluginProcess::initializeCocoaOverrides()
 
 void PluginProcess::setModalWindowIsShowing(bool modalWindowIsShowing)
 {
-    m_connection->send(Messages::PluginProcessProxy::SetModalWindowIsShowing(modalWindowIsShowing), 0);
+    parentProcessConnection()->send(Messages::PluginProcessProxy::SetModalWindowIsShowing(modalWindowIsShowing), 0);
 }
 
 void PluginProcess::setFullscreenWindowIsShowing(bool fullscreenWindowIsShowing)
 {
-    m_connection->send(Messages::PluginProcessProxy::SetFullscreenWindowIsShowing(fullscreenWindowIsShowing), 0);
+    parentProcessConnection()->send(Messages::PluginProcessProxy::SetFullscreenWindowIsShowing(fullscreenWindowIsShowing), 0);
 }
 
-static void initializeSandbox(const String& pluginPath, const String& sandboxProfileDirectoryPath)
+static String loadSandboxProfile(const String& pluginPath, const String& sandboxProfileDirectoryPath)
 {
     if (sandboxProfileDirectoryPath.isEmpty())
-        return;
+        return String();
 
     RetainPtr<CFURLRef> pluginURL = adoptCF(CFURLCreateWithFileSystemPath(0, pluginPath.createCFString().get(), kCFURLPOSIXPathStyle, false));
     if (!pluginURL)
-        return;
+        return String();
 
     RetainPtr<CFBundleRef> pluginBundle = adoptCF(CFBundleCreate(kCFAllocatorDefault, pluginURL.get()));
     if (!pluginBundle)
-        return;
+        return String();
     
     CFStringRef bundleIdentifier = CFBundleGetIdentifier(pluginBundle.get());
     if (!bundleIdentifier)
-        return;
+        return String();
 
     RetainPtr<CFURLRef> sandboxProfileDirectory = adoptCF(CFURLCreateWithFileSystemPath(0, sandboxProfileDirectoryPath.createCFString().get(), kCFURLPOSIXPathStyle, TRUE));
 
     RetainPtr<CFStringRef> sandboxFileName = CFStringCreateWithFormat(0, 0, CFSTR("%@.sb"), bundleIdentifier);
     RetainPtr<CFURLRef> sandboxURL = adoptCF(CFURLCreateWithFileSystemPathRelativeToBase(0, sandboxFileName.get(), kCFURLPOSIXPathStyle, FALSE, sandboxProfileDirectory.get()));
 
-    RetainPtr<NSString> profileString = [[NSString alloc] initWithContentsOfURL:(NSURL *)sandboxURL.get() encoding:NSUTF8StringEncoding error:NULL];
+    RetainPtr<NSString> profileString = adoptNS([[NSString alloc] initWithContentsOfURL:(NSURL *)sandboxURL.get() encoding:NSUTF8StringEncoding error:NULL]);
     if (!profileString)
-        return;
+        return String();
 
-    enterSandbox([profileString.get() UTF8String], 0, 0);
+    sandboxURL = adoptCF(CFURLCreateWithFileSystemPathRelativeToBase(0, CFSTR("com.apple.WebKit.plugin-common.sb"), kCFURLPOSIXPathStyle, FALSE, sandboxProfileDirectory.get()));
+
+    RetainPtr<NSString> commonProfileString = adoptNS([[NSString alloc] initWithContentsOfURL:(NSURL *)sandboxURL.get() encoding:NSUTF8StringEncoding error:NULL]);
+    if (!commonProfileString)
+        return String();
+
+    return [commonProfileString.get() stringByAppendingString:profileString.get()];
 }
 
 static void muteAudio(void)
@@ -309,22 +323,74 @@ static void muteAudio(void)
     ASSERT_UNUSED(result, result == noErr);
 }
 
-void PluginProcess::platformInitialize(const PluginProcessCreationParameters& parameters)
+void PluginProcess::platformInitializePluginProcess(const PluginProcessCreationParameters& parameters)
 {
     m_compositingRenderServerPort = parameters.acceleratedCompositingPort.port();
-
-    NSString *applicationName = [NSString stringWithFormat:WEB_UI_STRING("%@ (%@ Internet plug-in)",
-                                                                     "visible name of the plug-in host process. The first argument is the plug-in name "
-                                                                     "and the second argument is the application name."),
-                                 [[(NSString *)parameters.pluginPath lastPathComponent] stringByDeletingPathExtension], 
-                                 (NSString *)parameters.parentProcessName];
-    
-    WKSetVisibleApplicationName((CFStringRef)applicationName);
-
-    initializeSandbox(m_pluginPath, parameters.sandboxProfileDirectoryPath);
-
     if (parameters.processType == TypeSnapshotProcess)
         muteAudio();
+}
+
+void PluginProcess::platformInitializeProcess(const ChildProcessInitializationParameters& parameters)
+{
+#if defined(__i386__)
+    // Initialize the shim.
+    initializeShim();
+#endif
+
+    // Initialize Cocoa overrides.
+    initializeCocoaOverrides();
+
+    // FIXME: It would be better to proxy SetCursor calls over to the UI process instead of
+    // allowing plug-ins to change the mouse cursor at any time.
+    WKEnableSettingCursorWhenInBackground();
+
+#if defined(__i386__)
+    NSDictionary *defaults = [[NSDictionary alloc] initWithObjectsAndKeys:[NSNumber numberWithBool:YES], @"AppleMagnifiedMode", nil];
+    [[NSUserDefaults standardUserDefaults] registerDefaults:defaults];
+    [defaults release];
+#endif
+}
+
+void PluginProcess::initializeProcessName(const ChildProcessInitializationParameters& parameters)
+{
+    NSString *applicationName = [NSString stringWithFormat:WEB_UI_STRING("%@ (%@ Internet plug-in)", "visible name of the plug-in host process. The first argument is the plug-in name and the second argument is the application name."), [[(NSString *)m_pluginPath lastPathComponent] stringByDeletingPathExtension], (NSString *)parameters.uiProcessName];
+    WKSetVisibleApplicationName((CFStringRef)applicationName);
+}
+
+void PluginProcess::initializeSandbox(const ChildProcessInitializationParameters& parameters, SandboxInitializationParameters& sandboxParameters)
+{
+    String sandboxProfile = loadSandboxProfile(m_pluginPath, parameters.extraInitializationData.get("sandbox-profile-directory-path"));
+    if (sandboxProfile.isEmpty())
+        return;
+
+    sandboxParameters.setSandboxProfile(sandboxProfile);
+
+#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1080
+    // Use private temporary and cache directories.
+    char temporaryDirectory[PATH_MAX];
+    if (!confstr(_CS_DARWIN_USER_TEMP_DIR, temporaryDirectory, sizeof(temporaryDirectory))) {
+        WTFLogAlways("PluginProcess: couldn't retrieve system temporary directory path: %d\n", errno);
+        exit(EX_OSERR);
+    }
+
+    if (strlcpy(temporaryDirectory, [[[[NSFileManager defaultManager] stringWithFileSystemRepresentation:temporaryDirectory length:strlen(temporaryDirectory)] stringByAppendingPathComponent:@"WebKitPlugin-XXXXXX"] fileSystemRepresentation], sizeof(temporaryDirectory)) >= sizeof(temporaryDirectory)
+        || !mkdtemp(temporaryDirectory)) {
+        WTFLogAlways("PluginProcess: couldn't create private temporary directory '%s'\n", temporaryDirectory);
+        exit(EX_OSERR);
+    }
+
+    sandboxParameters.setSystemDirectorySuffix([[[[NSFileManager defaultManager] stringWithFileSystemRepresentation:temporaryDirectory length:strlen(temporaryDirectory)] lastPathComponent] fileSystemRepresentation]);
+#endif
+
+    sandboxParameters.addPathParameter("PLUGIN_PATH", m_pluginPath);
+
+    RetainPtr<CFStringRef> cachePath(AdoptCF, WKCopyFoundationCacheDirectory());
+    sandboxParameters.addPathParameter("NSURL_CACHE_DIR", (NSString *)cachePath.get());
+
+    RetainPtr<NSDictionary> defaults = adoptNS([[NSDictionary alloc] initWithObjectsAndKeys:[NSNumber numberWithBool:YES], @"NSUseRemoteSavePanel", nil]);
+    [[NSUserDefaults standardUserDefaults] registerDefaults:defaults.get()];
+
+    ChildProcess::initializeSandbox(parameters, sandboxParameters);
 }
 
 } // namespace WebKit

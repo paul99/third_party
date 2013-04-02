@@ -104,9 +104,18 @@ hentry* ScopedHashEntryFactory::CreateScopedHashEntry(int index,
 }  // namespace
 #endif
 
+
+#ifdef HUNSPELL_CHROME_CLIENT
+SuggestMgr::SuggestMgr(hunspell::BDictReader* reader,
+                       const char * tryme, int maxn, 
+                       AffixMgr * aptr)
+{
+  bdict_reader = reader;
+#else
 SuggestMgr::SuggestMgr(const char * tryme, int maxn, 
                        AffixMgr * aptr)
 {
+#endif
 
   // register affix manager and check in string of chars to 
   // try when building candidate suggestions
@@ -499,6 +508,49 @@ int SuggestMgr::replchars(char** wlst, const char * word, int ns, int cpdsuggest
   int lenr, lenp;
   int wl = strlen(word);
   if (wl < 2 || ! pAMgr) return ns;
+  
+#ifdef HUNSPELL_CHROME_CLIENT
+  const char *pattern, *pattern2;
+  hunspell::ReplacementIterator iterator = bdict_reader->GetReplacementIterator();
+  while (iterator.GetNext(&pattern, &pattern2)) {
+      r = word;
+      lenr = strlen(pattern2);
+      lenp = strlen(pattern);
+      
+      // search every occurence of the pattern in the word
+      while ((r=strstr(r, pattern)) != NULL) {
+          strcpy(candidate, word);
+          if (r-word + lenr + strlen(r+lenp) >= MAXLNLEN) break;
+          strcpy(candidate+(r-word), pattern2);
+          strcpy(candidate+(r-word)+lenr, r+lenp);
+          ns = testsug(wlst, candidate, wl-lenp+lenr, ns, cpdsuggest, NULL, NULL);
+          if (ns == -1) return -1;
+          // check REP suggestions with space
+          char * sp = strchr(candidate, ' ');
+          if (sp) {
+            char * prev = candidate;
+            while (sp) {
+              *sp = '\0';
+              if (checkword(prev, strlen(prev), 0, NULL, NULL)) {
+                int oldns = ns;
+                *sp = ' ';
+                ns = testsug(wlst, sp + 1, strlen(sp + 1), ns, cpdsuggest, NULL, NULL);
+                if (ns == -1) return -1;
+                if (oldns < ns) {
+                  free(wlst[ns - 1]);
+                  wlst[ns - 1] = mystrdup(candidate);
+                  if (!wlst[ns - 1]) return -1;
+                }
+              }
+              *sp = ' ';
+              prev = sp + 1;
+              sp = strchr(prev, ' ');
+            }
+          }
+          r++; // search for the next letter
+    }
+  }
+#else
   int numrep = pAMgr->get_numrep();
   struct replentry* reptable = pAMgr->get_reptable();
   if (reptable==NULL) return ns;
@@ -540,6 +592,7 @@ int SuggestMgr::replchars(char** wlst, const char * word, int ns, int cpdsuggest
           r++; // search for the next letter
       }
    }
+#endif
    return ns;
 }
 
@@ -770,7 +823,9 @@ int SuggestMgr::extrachar(char** wlst, const char * word, int ns, int cpdsuggest
 // error is missing a letter it needs
 int SuggestMgr::forgotchar(char ** wlst, const char * word, int ns, int cpdsuggest)
 {
-   char candidate[MAXSWUTF8L];
+   // TODO(rouslan): Remove the interim change below when this patch lands:
+   // http://sf.net/tracker/?func=detail&aid=3595024&group_id=143754&atid=756395
+   char candidate[MAXSWUTF8L + 4];
    char * p;
    clock_t timelimit = clock();
    int timer = MINTIMER;
@@ -792,8 +847,10 @@ int SuggestMgr::forgotchar(char ** wlst, const char * word, int ns, int cpdsugge
 // error is missing a letter it needs
 int SuggestMgr::forgotchar_utf(char ** wlst, const w_char * word, int wl, int ns, int cpdsuggest)
 {
-   w_char  candidate_utf[MAXSWL];
-   char    candidate[MAXSWUTF8L];
+   // TODO(rouslan): Remove the interim change below when this patch lands:
+   // http://sf.net/tracker/?func=detail&aid=3595024&group_id=143754&atid=756395
+   w_char  candidate_utf[MAXSWL + 1];
+   char    candidate[MAXSWUTF8L + 4];
    w_char * p;
    clock_t timelimit = clock();
    int timer = MINTIMER;

@@ -21,6 +21,7 @@ import com.google.protobuf.ByteString;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
+
 /**
  * A class that encapsulates a (fixed size) sequence of bytes and provides a
  * equality (along with hashcode) method that considers two sequences to be
@@ -217,8 +218,19 @@ public class Bytes extends InternalBase implements Comparable<Bytes> {
     return compare(bytes, other.bytes);
   }
 
-  /** Same specs as Bytes.compareTo except for the byte[] type. */
+  /**
+   * Same specs as Bytes.compareTo except for the byte[] type. Null arrays are ordered before
+   * non-null arrays.
+   */
   public static int compare(byte[] first, byte[] second) {
+    // Order null arrays before non-null arrays.
+    if (first == null) {
+      return (second == null) ? 0 : -1;
+    }
+    if (second == null) {
+      return 1;
+    }
+
     int minLength = Math.min(first.length, second.length);
     for (int i = 0; i < minLength; i++) {
       if (first[i] != second[i]) {

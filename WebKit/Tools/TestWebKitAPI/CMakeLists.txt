@@ -34,6 +34,7 @@ add_library(TestWebKitAPIInjectedBundle SHARED
     ${TESTWEBKITAPI_DIR}/Tests/WebKit2/GetInjectedBundleInitializationUserDataCallback_Bundle.cpp
     ${TESTWEBKITAPI_DIR}/Tests/WebKit2/HitTestResultNodeHandle_Bundle.cpp
     ${TESTWEBKITAPI_DIR}/Tests/WebKit2/InjectedBundleBasic_Bundle.cpp
+    ${TESTWEBKITAPI_DIR}/Tests/WebKit2/InjectedBundleFrameHitTest_Bundle.cpp
     ${TESTWEBKITAPI_DIR}/Tests/WebKit2/InjectedBundleInitializationUserDataCallbackWins_Bundle.cpp
     ${TESTWEBKITAPI_DIR}/Tests/WebKit2/LoadCanceledNoServerRedirectCallback_Bundle.cpp
     ${TESTWEBKITAPI_DIR}/Tests/WebKit2/MouseMoveAfterCrash_Bundle.cpp
@@ -100,17 +101,12 @@ set(test_webcore_LIBRARIES
     ${WebCore_LIBRARY_NAME}
 )
 
-add_executable(test_webcore
-    ${test_main_SOURCES}
-    ${TESTWEBKITAPI_DIR}/TestsController.cpp
-    ${TESTWEBKITAPI_DIR}/Tests/WebCore/KURL.cpp
-    ${TESTWEBKITAPI_DIR}/Tests/WebCore/LayoutUnit.cpp
-)
-
-target_link_libraries(test_webcore ${test_webcore_LIBRARIES})
-add_dependencies(test_webcore ${ForwardingHeadersForTestWebKitAPI_NAME} ${ForwardingNetworkHeadersForTestWebKitAPI_NAME})
-add_test(test_webcore ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/test_webcore)
-set_tests_properties(test_webcore PROPERTIES TIMEOUT 60)
+foreach (testName ${test_webcore_BINARIES})
+    add_executable(test_webcore_${testName} ${test_main_SOURCES} ${TESTWEBKITAPI_DIR}/TestsController.cpp ${TESTWEBKITAPI_DIR}/Tests/WebCore/${testName}.cpp)
+    add_test(test_webcore_${testName} ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/test_webcore_${testName})
+    set_tests_properties(test_webcore_${testName} PROPERTIES TIMEOUT 60)
+    target_link_libraries(test_webcore_${testName} ${test_webcore_LIBRARIES})
+endforeach ()
 
 add_library(TestWebKitAPIBase
     ${test_main_SOURCES}

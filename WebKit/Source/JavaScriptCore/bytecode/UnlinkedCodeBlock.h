@@ -58,6 +58,7 @@ class UnlinkedFunctionCodeBlock;
 typedef unsigned UnlinkedValueProfile;
 typedef unsigned UnlinkedArrayProfile;
 typedef unsigned UnlinkedArrayAllocationProfile;
+typedef unsigned UnlinkedObjectAllocationProfile;
 typedef unsigned UnlinkedLLIntCallLinkInfo;
 
 struct ExecutableInfo {
@@ -398,6 +399,8 @@ public:
     unsigned numberOfArrayProfiles() { return m_arrayProfileCount; }
     UnlinkedArrayAllocationProfile addArrayAllocationProfile() { return m_arrayAllocationProfileCount++; }
     unsigned numberOfArrayAllocationProfiles() { return m_arrayAllocationProfileCount; }
+    UnlinkedObjectAllocationProfile addObjectAllocationProfile() { return m_objectAllocationProfileCount++; }
+    unsigned numberOfObjectAllocationProfiles() { return m_objectAllocationProfileCount; }
     UnlinkedValueProfile addValueProfile() { return m_valueProfileCount++; }
     unsigned numberOfValueProfiles() { return m_valueProfileCount; }
 
@@ -483,8 +486,6 @@ private:
     RefCountedArray<UnlinkedInstruction> m_unlinkedInstructions;
 
     int m_numParameters;
-    JSGlobalData* m_globalData;
-
     int m_thisRegister;
     int m_argumentsRegister;
     int m_activationRegister;
@@ -495,11 +496,21 @@ private:
     bool m_isStrictMode : 1;
     bool m_isConstructor : 1;
     bool m_hasCapturedVariables : 1;
+    CodeType m_codeType : 2;
+    CodeFeatures m_features : 16;
+
     unsigned m_firstLine;
     unsigned m_lineCount;
 
-    CodeFeatures m_features;
-    CodeType m_codeType;
+    unsigned m_resolveOperationCount;
+    unsigned m_putToBaseOperationCount;
+    unsigned m_arrayProfileCount;
+    unsigned m_arrayAllocationProfileCount;
+    unsigned m_objectAllocationProfileCount;
+    unsigned m_valueProfileCount;
+    unsigned m_llintCallLinkInfoCount;
+
+    JSGlobalData* m_globalData;
 
     Vector<unsigned> m_jumpTargets;
 
@@ -520,13 +531,6 @@ private:
     Vector<Comment>  m_bytecodeComments;
     size_t m_bytecodeCommentIterator;
 #endif
-
-    unsigned m_resolveOperationCount;
-    unsigned m_putToBaseOperationCount;
-    unsigned m_arrayProfileCount;
-    unsigned m_arrayAllocationProfileCount;
-    unsigned m_valueProfileCount;
-    unsigned m_llintCallLinkInfoCount;
 
 public:
     struct RareData {

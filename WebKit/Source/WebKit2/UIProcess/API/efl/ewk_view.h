@@ -49,8 +49,6 @@
  *   #Ewk_Form_Submission_Request and the form has not been submitted yet,
  *   ewk_form_submission_request_submit() will be called automatically.
  * - "icon,changed", void: reports that the view's favicon has changed.
- * - "intent,request,new", Ewk_Intent*: reports new Web intent request.
- * - "intent,service,register", Ewk_Intent_Service*: reports new Web intent service registration.
  * - "load,error", const Ewk_Error*: reports main frame load failed.
  * - "load,finished", void: reports load finished.
  * - "load,progress", double*: load progress has changed (value from 0.0 to 1.0).
@@ -63,11 +61,6 @@
  * - "policy,decision,new,window", Ewk_Navigation_Policy_Decision*: a new window policy decision should be taken.
  *   To make a policy decision asynchronously, simply increment the reference count of the
  *   #Ewk_Navigation_Policy_Decision object using ewk_navigation_policy_decision_ref().
- * - "resource,request,failed", const Ewk_Resource_Load_Error*: a resource failed loading.
- * - "resource,request,finished", const Ewk_Resource*: a resource finished loading.
- * - "resource,request,new", const Ewk_Resource_Request*: a resource request was initiated.
- * - "resource,request,response", Ewk_Resource_Load_Response*: a response to a resource request was received.
- * - "resource,request,sent", const Ewk_Resource_Request*: a resource request was sent.
  * - "text,found", unsigned int*: the requested text was found and it gives the number of matches.
  * - "title,changed", const char*: title of the main frame was changed.
  * - "tooltip,text,set", const char*: tooltip was set.
@@ -86,9 +79,7 @@
 #include "ewk_context_menu.h"
 #include "ewk_download_job.h"
 #include "ewk_error.h"
-#include "ewk_intent.h"
 #include "ewk_popup_menu.h"
-#include "ewk_resource.h"
 #include "ewk_security_origin.h"
 #include "ewk_settings.h"
 #include "ewk_touch.h"
@@ -106,6 +97,11 @@ typedef enum {
     EWK_TEXT_DIRECTION_RIGHT_TO_LEFT,
     EWK_TEXT_DIRECTION_LEFT_TO_RIGHT
 } Ewk_Text_Direction;
+
+/// Enum values containing page contents type values.
+typedef enum {
+    EWK_PAGE_CONTENTS_TYPE_MHTML
+} Ewk_Page_Contents_Type;
 
 typedef struct Ewk_View_Smart_Data Ewk_View_Smart_Data;
 typedef struct Ewk_View_Smart_Class Ewk_View_Smart_Class;
@@ -203,7 +199,7 @@ struct Ewk_View_Smart_Class {
  */
 #define EWK_VIEW_SMART_CLASS_INIT_NAME_VERSION(name) EWK_VIEW_SMART_CLASS_INIT(EVAS_SMART_CLASS_INIT_NAME_VERSION(name))
 
-typedef struct EwkViewImpl EwkViewImpl;
+typedef struct EwkView EwkView;
 /**
  * @brief Contains an internal View data.
  *
@@ -215,7 +211,7 @@ struct Ewk_View_Smart_Data {
     const Ewk_View_Smart_Class* api; /**< reference to casted class instance */
     Evas_Object* self; /**< reference to owner object */
     Evas_Object* image; /**< reference to evas_object_image for drawing web contents */
-    EwkViewImpl* priv; /**< should never be accessed, c++ stuff */
+    EwkView* priv; /**< should never be accessed, c++ stuff */
     struct {
         Evas_Coord x, y, w, h; /**< last used viewport */
     } view;
@@ -224,42 +220,6 @@ struct Ewk_View_Smart_Data {
         Eina_Bool size:1;
         Eina_Bool position:1;
     } changed;
-};
-
-/// Creates a type name for Ewk_Resource_Request.
-typedef struct Ewk_Resource_Request Ewk_Resource_Request;
-
-/**
- * @brief Structure containing details about a resource request.
- */
-struct Ewk_Resource_Request {
-    Ewk_Resource *resource; /**< resource being requested */
-    Ewk_Url_Request *request; /**< URL request for the resource */
-    Ewk_Url_Response *redirect_response; /**< Possible redirect response for the resource or @c NULL */
-};
-
-/// Creates a type name for Ewk_Resource_Load_Response.
-typedef struct Ewk_Resource_Load_Response Ewk_Resource_Load_Response;
-
-/**
- * @brief Structure containing details about a response to a resource request.
- */
-struct Ewk_Resource_Load_Response {
-    Ewk_Resource *resource; /**< resource requested */
-    Ewk_Url_Response *response; /**< resource load response */
-};
-
-/// Creates a type name for Ewk_Resource_Load_Error.
-typedef struct Ewk_Resource_Load_Error Ewk_Resource_Load_Error;
-
-/**
- * @brief Structure containing details about a resource load error.
- *
- * Details given about a resource load failure.
- */
-struct Ewk_Resource_Load_Error {
-    Ewk_Resource *resource; /**< resource that failed loading */
-    Ewk_Error *error; /**< load error */
 };
 
 /// Creates a type name for Ewk_Download_Job_Error.
@@ -313,6 +273,14 @@ typedef enum {
     EWK_PAGINATION_MODE_TOP_TO_BOTTOM, /**< go to the next page with scrolling top to bottom vertically. */
     EWK_PAGINATION_MODE_BOTTOM_TO_TOP /**< go to the next page with scrolling bottom to top vertically. */
 } Ewk_Pagination_Mode;
+
+/**
+ * Creates a type name for the callback function used to get the page contents.
+ *
+ * @param type type of the contents
+ * @param data string buffer of the contents
+ */
+typedef void (*Ewk_Page_Contents_Cb)(Ewk_Page_Contents_Type type, const char *data);
 
 /**
  * Sets the smart class APIs, enabling view to be inherited.
@@ -452,15 +420,6 @@ EAPI Eina_Bool    ewk_view_stop(Evas_Object *o);
  * @return the Ewk_Settings of this view or @c NULL on failure
  */
 EAPI Ewk_Settings *ewk_view_settings_get(const Evas_Object *o);
-
-/**
- * Delivers a Web intent to the view's main frame.
- *
- * @param o view object to deliver the intent to
- *
- * @return @c EINA_TRUE on success or @c EINA_FALSE otherwise.
- */
-EAPI Eina_Bool    ewk_view_intent_deliver(Evas_Object *o, Ewk_Intent *intent);
 
 /**
  * Asks the main frame to navigate back in the history.
@@ -845,6 +804,41 @@ EAPI Eina_Bool ewk_view_fullscreen_exit(Evas_Object *o);
  * @return @c EINA_TRUE on success or @c EINA_FALSE on failure
  */
 EAPI void ewk_view_draws_page_background_set(Evas_Object *o, Eina_Bool enabled);
+
+/**
+ * Get contents of the current web page.
+ *
+ * @param o view object to get the page contents
+ * @param type type of the page contents
+ * @param callback callback function to be called when the operation is finished
+ *
+ * @return @c EINA_TRUE on success or @c EINA_FALSE otherwise
+ */
+EAPI Eina_Bool ewk_view_page_contents_get(const Evas_Object *o, Ewk_Page_Contents_Type type, Ewk_Page_Contents_Cb callback);
+
+/**
+ * Sets the source mode as EINA_TRUE to display the web source code
+ * or EINA_FALSE otherwise. The default value is EINA_FALSE.
+ *
+ * This method should be called before loading new contents on web view
+ * so that the new view mode will be applied to the new contents.
+ *
+ * @param o view object to set the view source mode
+ * @param enabled a state to set view source mode
+ *
+ * @return @c EINA_TRUE on success, or @c EINA_FALSE on failure
+ */
+EAPI Eina_Bool ewk_view_source_mode_set(Evas_Object *o, Eina_Bool enabled);
+
+/**
+ * Gets the view source mode of the current web page.
+ *
+ * @param o view object to get the view source mode
+ *
+ * @return @c EINA_TRUE if the view mode is set to load source code, or
+ *         @c EINA_FALSE otherwise
+ */
+EAPI Eina_Bool ewk_view_source_mode_get(const Evas_Object *o);
 
 #ifdef __cplusplus
 }

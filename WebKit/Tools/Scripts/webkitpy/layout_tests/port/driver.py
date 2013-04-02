@@ -159,7 +159,7 @@ class Driver(object):
         the driver in an indeterminate state. The upper layers of the program
         are responsible for cleaning up and ensuring things are okay.
 
-        Returns a DriverOuput object.
+        Returns a DriverOutput object.
         """
         start_time = time.time()
         self.start(driver_input.should_run_pixel_test, driver_input.args)
@@ -381,6 +381,8 @@ class Driver(object):
         assert not driver_input.image_hash or driver_input.should_run_pixel_test
 
         # ' is the separator between arguments.
+        if self._port.supports_per_test_timeout():
+            command += "'--timeout'%s" % driver_input.timeout
         if driver_input.should_run_pixel_test:
             command += "'--pixel-test"
         if driver_input.image_hash:
@@ -540,16 +542,6 @@ class DriverProxy(object):
             self._running_drivers[cmd_line_key] = self._make_driver(pixel_tests_needed)
 
         return self._running_drivers[cmd_line_key].run_test(driver_input, stop_when_done)
-
-    def start(self):
-        # FIXME: Callers shouldn't normally call this, since this routine
-        # may not be specifying the correct combination of pixel test and
-        # per_test args.
-        #
-        # The only reason we have this routine at all is so the perftestrunner
-        # can pause before running a test; it might be better to push that
-        # into run_test() directly.
-        self._driver.start(self._port.get_option('pixel_tests'), [])
 
     def has_crashed(self):
         return any(driver.has_crashed() for driver in self._running_drivers.values())

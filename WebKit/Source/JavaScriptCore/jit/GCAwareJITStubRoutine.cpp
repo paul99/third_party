@@ -30,6 +30,7 @@
 
 #include "Heap.h"
 #include "JSGlobalData.h"
+#include "Operations.h"
 #include "SlotVisitor.h"
 #include "Structure.h"
 
@@ -59,7 +60,7 @@ void GCAwareJITStubRoutine::observeZeroRefCount()
         return;
     }
     
-    ASSERT(!m_refCount);
+    RELEASE_ASSERT(!m_refCount);
 
     m_isJettisoned = true;
 }

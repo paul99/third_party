@@ -113,6 +113,10 @@ macro cCall2(function, arg1, arg2)
         poke arg1, 0
         poke arg2, 1
         call function
+    elsif MIPS
+        move arg1, a0
+        move arg2, a1
+        call function
     elsif C_LOOP
         cloopCallSlowPath function, arg1, arg2
     else
@@ -133,6 +137,12 @@ macro cCall4(function, arg1, arg2, arg3, arg4)
         poke arg2, 1
         poke arg3, 2
         poke arg4, 3
+        call function
+    elsif MIPS
+        move arg1, a0
+        move arg2, a1
+        move arg3, a2
+        move arg4, a3
         call function
     elsif C_LOOP
         error
@@ -351,17 +361,18 @@ _llint_op_create_this:
     traceExecution()
     loadi 8[PC], t0
     loadp PayloadOffset[cfr, t0, 8], t0
-    loadp JSFunction::m_cachedInheritorID[t0], t2
-    btpz t2, .opCreateThisSlow
-    allocateBasicJSObject(JSFinalObjectSizeClassIndex, t2, t0, t1, t3, .opCreateThisSlow)
+    loadp JSFunction::m_allocationProfile + ObjectAllocationProfile::m_allocator[t0], t1
+    loadp JSFunction::m_allocationProfile + ObjectAllocationProfile::m_structure[t0], t2
+    btpz t1, .opCreateThisSlow
+    allocateJSObject(t1, t2, t0, t3, .opCreateThisSlow)
     loadi 4[PC], t1
     storei CellTag, TagOffset[cfr, t1, 8]
     storei t0, PayloadOffset[cfr, t1, 8]
-    dispatch(3)
+    dispatch(4)
 
 .opCreateThisSlow:
     callSlowPath(_llint_slow_path_create_this)
-    dispatch(3)
+    dispatch(4)
 
 
 _llint_op_get_callee:
@@ -393,18 +404,18 @@ _llint_op_convert_this:
 
 _llint_op_new_object:
     traceExecution()
-    loadp CodeBlock[cfr], t0
-    loadp CodeBlock::m_globalObject[t0], t0
-    loadp JSGlobalObject::m_emptyObjectStructure[t0], t1
-    allocateBasicJSObject(JSFinalObjectSizeClassIndex, t1, t0, t2, t3, .opNewObjectSlow)
+    loadpFromInstruction(3, t0)
+    loadp ObjectAllocationProfile::m_allocator[t0], t1
+    loadp ObjectAllocationProfile::m_structure[t0], t2
+    allocateJSObject(t1, t2, t0, t3, .opNewObjectSlow)
     loadi 4[PC], t1
     storei CellTag, TagOffset[cfr, t1, 8]
     storei t0, PayloadOffset[cfr, t1, 8]
-    dispatch(2)
+    dispatch(4)
 
 .opNewObjectSlow:
     callSlowPath(_llint_slow_path_new_object)
-    dispatch(2)
+    dispatch(4)
 
 
 _llint_op_mov:
@@ -1825,6 +1836,20 @@ macro nativeCallTrampoline(executableOffsetToFunction)
         loadi Callee + PayloadOffset[cfr], t1
         loadp JSFunction::m_executable[t1], t1
         move t2, cfr
+        call executableOffsetToFunction[t1]
+        restoreReturnAddressBeforeReturn(t3)
+        loadp JITStackFrame::globalData[sp], t3
+    elsif MIPS
+        loadp JITStackFrame::globalData[sp], t3
+        storep cfr, JSGlobalData::topCallFrame[t3]
+        move t0, t2
+        preserveReturnAddressAfterCall(t3)
+        storep t3, ReturnPC[cfr]
+        move cfr, t0
+        loadi Callee + PayloadOffset[cfr], t1
+        loadp JSFunction::m_executable[t1], t1
+        move t2, cfr
+        move t0, a0
         call executableOffsetToFunction[t1]
         restoreReturnAddressBeforeReturn(t3)
         loadp JITStackFrame::globalData[sp], t3

@@ -682,7 +682,6 @@ axs.utils.isValidTokenValue = function(propertyName, value) {
     var propertyKey = propertyName.replace(/^aria-/, '');
     var propertyDetails = axs.constants.ARIA_PROPERTIES[propertyKey];
     var possibleValues = propertyDetails.valuesSet;
-    console.log('isValidTokenValue', propertyName, value, propertyDetails, possibleValues);
     return axs.utils.isPossibleValue(value, possibleValues, propertyName);
 };
 
@@ -705,13 +704,11 @@ axs.utils.isPossibleValue = function(value, possibleValues, propertyName) {
  * @return {!Object}
  */
 axs.utils.isValidBoolean = function(value) {
-    console.log('isValidBoolean', value);
     try {
         var parsedValue = JSON.parse(value);
     } catch (e) {
         parsedValue = '';
     }
-    console.log('isValidBoolean', value, parsedValue);
     if (typeof(parsedValue) != 'boolean')
         return { 'valid': false,
                  'value': value,
@@ -766,12 +763,102 @@ axs.utils.isElementImplicitlyFocusable = function(element) {
  * @return {Array}
  */
 axs.utils.values = function(obj) {
-    console.log('axs.utils.values', obj);
     var values = [];
     for (var key in obj) {
         if (obj.hasOwnProperty(key) && typeof obj[key] != 'function')
             values.push(obj[key]);
     }
-    console.log('values', values, obj);
     return values;
+};
+
+/**
+ * Returns an object containing the same keys and values as the given
+ * JSON-compatible object. (Simply ignores any function values.)
+ * @param {Object} obj
+ * @return {Object}
+ */
+axs.utils.namedValues = function(obj) {
+    var values = {};
+    for (var key in obj) {
+        if (obj.hasOwnProperty(key) && typeof obj[key] != 'function')
+            values[key] = obj[key];
+    }
+    return values
+};
+
+/** Gets a CSS selector text for a DOM object.
+ * @param {Node} obj The DOM object.
+ * @return {string} CSS selector text for the DOM object.
+ */
+axs.utils.getQuerySelectorText = function(obj) {
+  if (obj == null || obj.tagName == 'HTML') {
+    return 'html';
+  } else if (obj.tagName == 'BODY') {
+    return 'body';
+  }
+
+  if (obj.hasAttribute) {
+    if (obj.id) {
+      return '#' + obj.id;
+    }
+
+    if (obj.className) {
+      var selector = '';
+      for (var i = 0; i < obj.classList.length; i++)
+        selector += '.' + obj.classList[i];
+
+      var total = 0;
+      if (obj.parentNode) {
+        for (i = 0; i < obj.parentNode.children.length; i++) {
+          var similar = obj.parentNode.children[i];
+          if (similar.webkitMatchesSelector(selector))
+            total++;
+          if (similar === obj)
+            break;
+        }
+      } else {
+        total = 1;
+      }
+
+      if (total == 1) {
+        return axs.utils.getQuerySelectorText(obj.parentNode) +
+               ' > ' + selector;
+      } else {
+        return axs.utils.getQuerySelectorText(obj.parentNode) +
+               ' > ' + selector + ':nth-of-type(' + total + ')';
+      }
+    }
+
+    if (obj.parentNode) {
+      var similarTags = obj.parentNode.children;
+      var total = 1;
+      var i = 0;
+      while (similarTags[i] !== obj) {
+        if (similarTags[i].tagName == obj.tagName) {
+          total++;
+        }
+        i++;
+      }
+
+      var next = '';
+      if (obj.parentNode.tagName != 'BODY') {
+        next = axs.utils.getQuerySelectorText(obj.parentNode) +
+               ' > ';
+      }
+
+      if (total == 1) {
+        return next +
+               obj.tagName;
+      } else {
+        return next +
+               obj.tagName +
+               ':nth-of-type(' + total + ')';
+      }
+    }
+
+  } else if (obj.selectorText) {
+    return obj.selectorText;
+  }
+
+  return '';
 };

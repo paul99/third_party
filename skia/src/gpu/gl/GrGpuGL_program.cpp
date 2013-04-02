@@ -9,7 +9,6 @@
 
 #include "GrEffect.h"
 #include "GrGLEffect.h"
-#include "GrGpuVertex.h"
 
 typedef GrGLUniformManager::UniformHandle UniformHandle;
 static const UniformHandle kInvalidUniformHandle = GrGLUniformManager::kInvalidUniformHandle;
@@ -92,13 +91,19 @@ void GrGpuGL::flushViewMatrix(DrawType type) {
     const SkMatrix& vm = this->getDrawState().getViewMatrix();
 
     if (kStencilPath_DrawType == type) {
-        if (fHWPathMatrixState.fViewMatrix != vm ||
+        if (fHWPathMatrixState.fLastOrigin != rt->origin() ||
+            fHWPathMatrixState.fViewMatrix != vm ||
             fHWPathMatrixState.fRTSize != viewportSize) {
             // rescale the coords from skia's "device" coords to GL's normalized coords,
-            // and perform a y-flip.
+            // and perform a y-flip if required.
             SkMatrix m;
-            m.setScale(SkIntToScalar(2) / rt->width(), SkIntToScalar(-2) / rt->height());
-            m.postTranslate(-SK_Scalar1, SK_Scalar1);
+            if (kBottomLeft_GrSurfaceOrigin == rt->origin()) {
+                m.setScale(SkIntToScalar(2) / rt->width(), SkIntToScalar(-2) / rt->height());
+                m.postTranslate(-SK_Scalar1, SK_Scalar1);
+            } else {
+                m.setScale(SkIntToScalar(2) / rt->width(), SkIntToScalar(2) / rt->height());
+                m.postTranslate(-SK_Scalar1, -SK_Scalar1);
+            }
             m.preConcat(vm);
 
             // GL wants a column-major 4x4.
@@ -128,14 +133,23 @@ void GrGpuGL::flushViewMatrix(DrawType type) {
             GL_CALL(LoadMatrixf(mv));
             fHWPathMatrixState.fViewMatrix = vm;
             fHWPathMatrixState.fRTSize = viewportSize;
+            fHWPathMatrixState.fLastOrigin = rt->origin();
         }
-    } else if (!fCurrentProgram->fViewMatrix.cheapEqualTo(vm) ||
+    } else if (fCurrentProgram->fOrigin != rt->origin() ||
+               !fCurrentProgram->fViewMatrix.cheapEqualTo(vm) ||
                fCurrentProgram->fViewportSize != viewportSize) {
         SkMatrix m;
-        m.setAll(
-            SkIntToScalar(2) / viewportSize.fWidth, 0, -SK_Scalar1,
-            0,-SkIntToScalar(2) / viewportSize.fHeight, SK_Scalar1,
+        if (kBottomLeft_GrSurfaceOrigin == rt->origin()) {
+            m.setAll(
+                SkIntToScalar(2) / viewportSize.fWidth, 0, -SK_Scalar1,
+                0,-SkIntToScalar(2) / viewportSize.fHeight, SK_Scalar1,
             0, 0, SkMatrix::I()[8]);
+        } else {
+            m.setAll(
+                SkIntToScalar(2) / viewportSize.fWidth, 0, -SK_Scalar1,
+                0, SkIntToScalar(2) / viewportSize.fHeight,-SK_Scalar1,
+            0, 0, SkMatrix::I()[8]);
+        }
         m.setConcat(m, vm);
 
         // ES doesn't allow you to pass true to the transpose param,
@@ -156,6 +170,7 @@ void GrGpuGL::flushViewMatrix(DrawType type) {
                                             mt);
         fCurrentProgram->fViewMatrix = vm;
         fCurrentProgram->fViewportSize = viewportSize;
+        fCurrentProgram->fOrigin = rt->origin();
     }
 }
 
@@ -165,7 +180,7 @@ void GrGpuGL::flushColor(GrColor color) {
     const ProgramDesc& desc = fCurrentProgram->getDesc();
     const GrDrawState& drawState = this->getDrawState();
 
-    if (this->getVertexLayout() & GrDrawState::kColor_VertexLayoutBit) {
+    if (drawState.getVertexLayout() & GrDrawState::kColor_VertexLayoutBit) {
         // color will be specified per-vertex as an attribute
         // invalidate the const vertex attrib color
         fHWConstAttribColor = GrColor_ILLEGAL;
@@ -214,7 +229,7 @@ void GrGpuGL::flushCoverage(GrColor coverage) {
     // const GrDrawState& drawState = this->getDrawState();
 
 
-    if (this->getVertexLayout() & GrDrawState::kCoverage_VertexLayoutBit) {
+    if (this->getDrawState().getVertexLayout() & GrDrawState::kCoverage_VertexLayoutBit) {
         // coverage will be specified per-vertex as an attribute
         // invalidate the const vertex attrib coverage
         fHWConstAttribCoverage = GrColor_ILLEGAL;
@@ -327,19 +342,6 @@ bool GrGpuGL::flushGraphicsState(DrawType type) {
     return true;
 }
 
-#if GR_TEXT_SCALAR_IS_USHORT
-    #define TEXT_COORDS_GL_TYPE          GR_GL_UNSIGNED_SHORT
-    #define TEXT_COORDS_ARE_NORMALIZED   1
-#elif GR_TEXT_SCALAR_IS_FLOAT
-    #define TEXT_COORDS_GL_TYPE          GR_GL_FLOAT
-    #define TEXT_COORDS_ARE_NORMALIZED   0
-#elif GR_TEXT_SCALAR_IS_FIXED
-    #define TEXT_COORDS_GL_TYPE          GR_GL_FIXED
-    #define TEXT_COORDS_ARE_NORMALIZED   0
-#else
-    #error "unknown GR_TEXT_SCALAR type"
-#endif
-
 void GrGpuGL::setupGeometry(const DrawInfo& info, int* startIndexOffset) {
 
     int newColorOffset;
@@ -347,7 +349,7 @@ void GrGpuGL::setupGeometry(const DrawInfo& info, int* startIndexOffset) {
     int newTexCoordOffsets[GrDrawState::kMaxTexCoords];
     int newEdgeOffset;
 
-    GrVertexLayout currLayout = this->getVertexLayout();
+    GrVertexLayout currLayout = this->getDrawState().getVertexLayout();
 
     GrGLsizei newStride = GrDrawState::VertexSizeAndOffsetsByIdx(currLayout,
                                                                  newTexCoordOffsets,
@@ -368,16 +370,6 @@ void GrGpuGL::setupGeometry(const DrawInfo& info, int* startIndexOffset) {
     int extraVertexOffset;
     this->setBuffers(info.isIndexed(), &extraVertexOffset, startIndexOffset);
 
-    GrGLenum scalarType;
-    bool texCoordNorm;
-    if (currLayout & GrDrawState::kTextFormat_VertexLayoutBit) {
-        scalarType = TEXT_COORDS_GL_TYPE;
-        texCoordNorm = SkToBool(TEXT_COORDS_ARE_NORMALIZED);
-    } else {
-        scalarType = GR_GL_FLOAT;
-        texCoordNorm = false;
-    }
-
     size_t vertexOffset = (info.startVertex() + extraVertexOffset) * newStride;
 
     // all the Pointers must be set if any of these are true
@@ -385,17 +377,9 @@ void GrGpuGL::setupGeometry(const DrawInfo& info, int* startIndexOffset) {
                              vertexOffset != fHWGeometryState.fVertexOffset ||
                              newStride != oldStride;
 
-    // position and tex coord offsets change if above conditions are true
-    // or the type/normalization changed based on text vs nontext type coords.
-    bool posAndTexChange = allOffsetsChange ||
-                           (((TEXT_COORDS_GL_TYPE != GR_GL_FLOAT) || TEXT_COORDS_ARE_NORMALIZED) &&
-                                (GrDrawState::kTextFormat_VertexLayoutBit &
-                                  (fHWGeometryState.fVertexLayout ^ currLayout)));
-
-    if (posAndTexChange) {
+    if (allOffsetsChange) {
         int idx = GrGLProgram::PositionAttributeIdx();
-        GL_CALL(VertexAttribPointer(idx, 2, scalarType, false, newStride,
-                                  (GrGLvoid*)vertexOffset));
+        GL_CALL(VertexAttribPointer(idx, 2, GR_GL_FLOAT, false, newStride, (GrGLvoid*)vertexOffset));
         fHWGeometryState.fVertexOffset = vertexOffset;
     }
 
@@ -405,12 +389,9 @@ void GrGpuGL::setupGeometry(const DrawInfo& info, int* startIndexOffset) {
             int idx = GrGLProgram::TexCoordAttributeIdx(t);
             if (oldTexCoordOffsets[t] <= 0) {
                 GL_CALL(EnableVertexAttribArray(idx));
-                GL_CALL(VertexAttribPointer(idx, 2, scalarType, texCoordNorm,
-                                          newStride, texCoordOffset));
-            } else if (posAndTexChange ||
-                       newTexCoordOffsets[t] != oldTexCoordOffsets[t]) {
-                GL_CALL(VertexAttribPointer(idx, 2, scalarType, texCoordNorm,
-                                          newStride, texCoordOffset));
+                GL_CALL(VertexAttribPointer(idx, 2, GR_GL_FLOAT, false, newStride, texCoordOffset));
+            } else if (allOffsetsChange || newTexCoordOffsets[t] != oldTexCoordOffsets[t]) {
+                GL_CALL(VertexAttribPointer(idx, 2, GR_GL_FLOAT, false, newStride, texCoordOffset));
             }
         } else if (oldTexCoordOffsets[t] > 0) {
             GL_CALL(DisableVertexAttribArray(GrGLProgram::TexCoordAttributeIdx(t)));
@@ -422,11 +403,9 @@ void GrGpuGL::setupGeometry(const DrawInfo& info, int* startIndexOffset) {
         int idx = GrGLProgram::ColorAttributeIdx();
         if (oldColorOffset <= 0) {
             GL_CALL(EnableVertexAttribArray(idx));
-            GL_CALL(VertexAttribPointer(idx, 4, GR_GL_UNSIGNED_BYTE,
-                                      true, newStride, colorOffset));
+            GL_CALL(VertexAttribPointer(idx, 4, GR_GL_UNSIGNED_BYTE, true, newStride, colorOffset));
         } else if (allOffsetsChange || newColorOffset != oldColorOffset) {
-            GL_CALL(VertexAttribPointer(idx, 4, GR_GL_UNSIGNED_BYTE,
-                                      true, newStride, colorOffset));
+            GL_CALL(VertexAttribPointer(idx, 4, GR_GL_UNSIGNED_BYTE, true, newStride, colorOffset));
         }
     } else if (oldColorOffset > 0) {
         GL_CALL(DisableVertexAttribArray(GrGLProgram::ColorAttributeIdx()));
@@ -452,11 +431,9 @@ void GrGpuGL::setupGeometry(const DrawInfo& info, int* startIndexOffset) {
         int idx = GrGLProgram::EdgeAttributeIdx();
         if (oldEdgeOffset <= 0) {
             GL_CALL(EnableVertexAttribArray(idx));
-            GL_CALL(VertexAttribPointer(idx, 4, scalarType,
-                                        false, newStride, edgeOffset));
+            GL_CALL(VertexAttribPointer(idx, 4, GR_GL_FLOAT, false, newStride, edgeOffset));
         } else if (allOffsetsChange || newEdgeOffset != oldEdgeOffset) {
-            GL_CALL(VertexAttribPointer(idx, 4, scalarType,
-                                        false, newStride, edgeOffset));
+            GL_CALL(VertexAttribPointer(idx, 4, GR_GL_FLOAT, false, newStride, edgeOffset));
         }
     } else if (oldEdgeOffset > 0) {
         GL_CALL(DisableVertexAttribArray(GrGLProgram::EdgeAttributeIdx()));
@@ -486,7 +463,7 @@ void GrGpuGL::buildProgram(bool isPoints,
     // to a canonical value to avoid duplicate programs with different keys.
 
     // Must initialize all fields or cache will have false negatives!
-    desc->fVertexLayout = this->getVertexLayout();
+    desc->fVertexLayout = this->getDrawState().getVertexLayout();
 
     desc->fEmitsPointSize = isPoints;
 
@@ -513,9 +490,9 @@ void GrGpuGL::buildProgram(bool isPoints,
     bool colorIsTransBlack = SkToBool(blendOpts & kEmitTransBlack_BlendOptFlag);
     bool colorIsSolidWhite = (blendOpts & kEmitCoverage_BlendOptFlag) ||
                              (!requiresAttributeColors && 0xffffffff == drawState.getColor());
-    if (GR_AGGRESSIVE_SHADER_OPTS && colorIsTransBlack) {
+    if (colorIsTransBlack) {
         desc->fColorInput = ProgramDesc::kTransBlack_ColorInput;
-    } else if (GR_AGGRESSIVE_SHADER_OPTS && colorIsSolidWhite) {
+    } else if (colorIsSolidWhite) {
         desc->fColorInput = ProgramDesc::kSolidWhite_ColorInput;
     } else if (GR_GL_NO_CONSTANT_ATTRIBUTES && !requiresAttributeColors) {
         desc->fColorInput = ProgramDesc::kUniform_ColorInput;

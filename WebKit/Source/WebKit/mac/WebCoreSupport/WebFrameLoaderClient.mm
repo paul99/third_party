@@ -108,6 +108,7 @@
 #import <WebCore/MouseEvent.h>
 #import <WebCore/Page.h>
 #import <WebCore/PluginViewBase.h>
+#import <WebCore/ProtectionSpace.h>
 #import <WebCore/ResourceError.h>
 #import <WebCore/ResourceHandle.h>
 #import <WebCore/ResourceLoader.h>
@@ -258,6 +259,10 @@ void WebFrameLoaderClient::detachedFromParent2()
     WebView *webView = getWebView(m_webFrame.get());
     [webView removePluginInstanceViewsFor:(m_webFrame.get())];
     [m_webFrame->_private->webFrameView _setWebFrame:nil]; // needed for now to be compatible w/ old behavior
+
+    WebFrameLoadDelegateImplementationCache* implementations = WebViewGetFrameLoadDelegateImplementations(webView);
+    if (implementations->didRemoveFrameFromHierarchyFunc)
+        CallFrameLoadDelegate(implementations->didRemoveFrameFromHierarchyFunc, webView, @selector(webView:didRemoveFrameFromHierarchy:), m_webFrame.get());
 }
 
 void WebFrameLoaderClient::detachedFromParent3()
@@ -846,6 +851,13 @@ void WebFrameLoaderClient::finishedLoading(DocumentLoader* loader)
     [dataSource(loader) _finishedLoading];
 }
 
+static inline NSString *nilOrNSString(const String& string)
+{
+    if (string.isNull())
+        return nil;
+    return string;
+}
+
 void WebFrameLoaderClient::updateGlobalHistory()
 {
     WebView* view = getWebView(m_webFrame.get());
@@ -855,7 +867,7 @@ void WebFrameLoaderClient::updateGlobalHistory()
         WebHistoryDelegateImplementationCache* implementations = WebViewGetHistoryDelegateImplementations(view);
         if (implementations->navigatedFunc) {
             WebNavigationData *data = [[WebNavigationData alloc] initWithURLString:loader->urlForHistory()
-                                                                             title:loader->title().string()
+                                                                             title:nilOrNSString(loader->title().string())
                                                                    originalRequest:loader->originalRequestCopy().nsURLRequest()
                                                                           response:loader->response().nsURLResponse()
                                                                  hasSubstituteData:loader->substituteData().isValid()
@@ -1569,6 +1581,12 @@ public:
             [(WebBaseNetscapePluginView *)platformWidget() handleMouseExited:currentNSEvent];
         else if (event->type() == eventNames().contextmenuEvent)
             event->setDefaultHandled(); // We don't know if the plug-in has handled mousedown event by displaying a context menu, so we never want WebKit to show a default one.
+    }
+
+    virtual void clipRectChanged()
+    {
+        // Changing the clip rect doesn't affect the view hierarchy, so the plugin must be told about the change directly.
+        [(WebBaseNetscapePluginView *)platformWidget() updateAndSetWindow];
     }
 
 private:

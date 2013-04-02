@@ -232,7 +232,7 @@ base.exportTo('tracing', function() {
         var model = that.model;
         for (var data in model.metadata) {
           metadataStrings.push(JSON.stringify(model.metadata[data].name) +
-              ': ' + JSON.stringify(model.metadata[data].value));
+                               ': ' + JSON.stringify(model.metadata[data].value, undefined, ' '));
         }
         textEl.textContent = metadataStrings.join('\n');
       }
@@ -280,7 +280,7 @@ base.exportTo('tracing', function() {
 
     set model(model) {
       var modelInstanceChanged = model != this.model;
-      var modelValid = model && model.minTimestamp !== undefined;
+      var modelValid = model && !model.bounds.isEmpty;
 
       // Remove old timeline if the model has completely changed.
       if (modelInstanceChanged) {

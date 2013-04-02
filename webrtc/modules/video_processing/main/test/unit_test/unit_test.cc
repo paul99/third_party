@@ -95,11 +95,9 @@ TEST_F(VideoProcessingModuleTest, HandleBadStats)
   scoped_array<uint8_t> video_buffer(new uint8_t[_frame_length]);
   ASSERT_EQ(_frame_length, fread(video_buffer.get(), 1, _frame_length,
                                  _sourceFile));
-  _videoFrame.CreateFrame(_size_y, video_buffer.get(),
-                          _size_uv, video_buffer.get() + _size_y,
-                          _size_uv, video_buffer.get() + _size_y + _size_uv,
-                          _width, _height,
-                          _width, _half_width, _half_width);
+  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
+                             _width, _height,
+                             0, kRotateNone, &_videoFrame));
 
   EXPECT_EQ(-1, _vpm->Deflickering(&_videoFrame, &stats));
 
@@ -139,11 +137,9 @@ TEST_F(VideoProcessingModuleTest, IdenticalResultsAfterReset)
   scoped_array<uint8_t> video_buffer(new uint8_t[_frame_length]);
   ASSERT_EQ(_frame_length, fread(video_buffer.get(), 1, _frame_length,
                                 _sourceFile));
-  ASSERT_EQ(0, _videoFrame.CreateFrame(_size_y, video_buffer.get(),
-                          _size_uv, video_buffer.get() + _size_y,
-                          _size_uv, video_buffer.get() + _size_y + _size_uv,
-                          _width, _height,
-                          _width, _half_width, _half_width));
+  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
+                             _width, _height,
+                             0, kRotateNone, &_videoFrame));
   ASSERT_EQ(0, _vpm->GetFrameStats(&stats, _videoFrame));
   ASSERT_EQ(0, videoFrame2.CopyFrame(_videoFrame));
   ASSERT_EQ(0, _vpm->Deflickering(&_videoFrame, &stats));
@@ -155,11 +151,10 @@ TEST_F(VideoProcessingModuleTest, IdenticalResultsAfterReset)
 
   ASSERT_EQ(_frame_length, fread(video_buffer.get(), 1, _frame_length,
                                  _sourceFile));
-  _videoFrame.CreateFrame(_size_y, video_buffer.get(),
-                          _size_uv, video_buffer.get() + _size_y,
-                          _size_uv, video_buffer.get() + _size_y + _size_uv,
-                          _width, _height,
-                          _width, _half_width, _half_width);
+  // Using ConvertToI420 to add stride to the image.
+  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
+                             _width, _height,
+                             0, kRotateNone, &_videoFrame));
   videoFrame2.CopyFrame(_videoFrame);
   EXPECT_TRUE(CompareFrames(_videoFrame, videoFrame2));
   ASSERT_GE(_vpm->Denoising(&_videoFrame), 0);
@@ -169,11 +164,9 @@ TEST_F(VideoProcessingModuleTest, IdenticalResultsAfterReset)
 
   ASSERT_EQ(_frame_length, fread(video_buffer.get(), 1, _frame_length,
                                  _sourceFile));
-  _videoFrame.CreateFrame(_size_y, video_buffer.get(),
-                          _size_uv, video_buffer.get() + _size_y,
-                          _size_uv, video_buffer.get() + _size_y + _size_uv,
-                          _width, _height,
-                          _width, _half_width, _half_width);
+  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
+                             _width, _height,
+                             0, kRotateNone, &_videoFrame));
   ASSERT_EQ(0, _vpm->GetFrameStats(&stats, _videoFrame));
   videoFrame2.CopyFrame(_videoFrame);
   ASSERT_EQ(0, _vpm->BrightnessDetection(_videoFrame, stats));
@@ -188,11 +181,9 @@ TEST_F(VideoProcessingModuleTest, FrameStats)
   scoped_array<uint8_t> video_buffer(new uint8_t[_frame_length]);
   ASSERT_EQ(_frame_length, fread(video_buffer.get(), 1, _frame_length,
                                  _sourceFile));
-  _videoFrame.CreateFrame(_size_y, video_buffer.get(),
-                          _size_uv, video_buffer.get() + _size_y,
-                          _size_uv, video_buffer.get() + _size_y + _size_uv,
-                          _width, _height,
-                          _width, _half_width, _half_width);
+  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
+                             _width, _height,
+                             0, kRotateNone, &_videoFrame));
 
   EXPECT_FALSE(_vpm->ValidFrameStats(stats));
   EXPECT_EQ(0, _vpm->GetFrameStats(&stats, _videoFrame));
@@ -213,20 +204,29 @@ TEST_F(VideoProcessingModuleTest, FrameStats)
 
 TEST_F(VideoProcessingModuleTest, PreprocessorLogic)
 {
-  // Disable temporal sampling
+  // Disable temporal sampling (frame dropping).
   _vpm->EnableTemporalDecimation(false);
-  ASSERT_EQ(VPM_OK, _vpm->SetMaxFrameRate(30));
-  ASSERT_EQ(VPM_OK, _vpm->SetTargetResolution(100, 100, 15));
-  // Revert
-  _vpm->EnableTemporalDecimation(true);
-  ASSERT_EQ(VPM_OK, _vpm->SetTargetResolution(100, 100, 30));
-  // Disable spatial sampling
+  int resolution = 100;
+  EXPECT_EQ(VPM_OK, _vpm->SetMaxFrameRate(30));
+  EXPECT_EQ(VPM_OK, _vpm->SetTargetResolution(resolution, resolution, 15));
+  EXPECT_EQ(VPM_OK, _vpm->SetTargetResolution(resolution, resolution, 30));
+  // Disable spatial sampling.
   _vpm->SetInputFrameResampleMode(kNoRescaling);
-  ASSERT_EQ(VPM_OK, _vpm->SetTargetResolution(100, 100, 30));
-  I420VideoFrame *outFrame = NULL;
-  ASSERT_EQ(VPM_OK, _vpm->PreprocessFrame(_videoFrame, &outFrame));
-  // No rescaling=> output frame = NULL
-  ASSERT_TRUE(outFrame == NULL);
+  EXPECT_EQ(VPM_OK, _vpm->SetTargetResolution(resolution, resolution, 30));
+  I420VideoFrame* outFrame = NULL;
+  // Set rescaling => output frame != NULL.
+  _vpm->SetInputFrameResampleMode(kFastRescaling);
+  EXPECT_EQ(VPM_OK, _vpm->SetTargetResolution(resolution, resolution, 30));
+  EXPECT_EQ(VPM_OK, _vpm->PreprocessFrame(_videoFrame, &outFrame));
+  EXPECT_FALSE(outFrame == NULL);
+  if (outFrame) {
+    EXPECT_EQ(resolution, outFrame->width());
+    EXPECT_EQ(resolution, outFrame->height());
+  }
+  // No rescaling=> output frame = NULL.
+  _vpm->SetInputFrameResampleMode(kNoRescaling);
+  EXPECT_EQ(VPM_OK, _vpm->PreprocessFrame(_videoFrame, &outFrame));
+  EXPECT_TRUE(outFrame == NULL);
 }
 
 TEST_F(VideoProcessingModuleTest, Resampler)
@@ -250,15 +250,13 @@ TEST_F(VideoProcessingModuleTest, Resampler)
   _vpm->EnableTemporalDecimation(false);
 
   // Reading test frame
-  I420VideoFrame sourceFrame;
   scoped_array<uint8_t> video_buffer(new uint8_t[_frame_length]);
   ASSERT_EQ(_frame_length, fread(video_buffer.get(), 1, _frame_length,
                                  _sourceFile));
-  sourceFrame.CreateFrame(_size_y, video_buffer.get(),
-                          _size_uv, video_buffer.get() + _size_y,
-                          _size_uv, video_buffer.get() + _size_y + _size_uv,
-                          _width, _height,
-                          _width, _half_width, _half_width);
+  // Using ConvertToI420 to add stride to the image.
+  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
+                             _width, _height,
+                             0, kRotateNone, &_videoFrame));
 
   for (WebRtc_UWord32 runIdx = 0; runIdx < NumRuns; runIdx++)
   {
@@ -266,24 +264,24 @@ TEST_F(VideoProcessingModuleTest, Resampler)
     t0 = TickTime::Now();
 
     // Init the sourceFrame with a timestamp.
-    sourceFrame.set_render_time_ms(t0.MillisecondTimestamp());
-    sourceFrame.set_timestamp(t0.MillisecondTimestamp() * 90);
+    _videoFrame.set_render_time_ms(t0.MillisecondTimestamp());
+    _videoFrame.set_timestamp(t0.MillisecondTimestamp() * 90);
 
     // Test scaling to different sizes: source is of |width|/|height| = 352/288.
     // Scaling mode in VPM is currently fixed to kScaleBox (mode = 3).
-    TestSize(sourceFrame, 100, 50, 3, 24.0, _vpm);
-    TestSize(sourceFrame, 352/4, 288/4, 3, 25.2, _vpm);
-    TestSize(sourceFrame, 352/2, 288/2, 3, 28.1, _vpm);
-    TestSize(sourceFrame, 352, 288, 3, -1, _vpm);  // no resampling.
-    TestSize(sourceFrame, 2*352, 2*288, 3, 32.2, _vpm);
-    TestSize(sourceFrame, 400, 256, 3, 31.3, _vpm);
-    TestSize(sourceFrame, 480, 640, 3, 32.15, _vpm);
-    TestSize(sourceFrame, 960, 720, 3, 32.2, _vpm);
-    TestSize(sourceFrame, 1280, 720, 3, 32.15, _vpm);
+    TestSize(_videoFrame, 100, 50, 3, 24.0, _vpm);
+    TestSize(_videoFrame, 352/4, 288/4, 3, 25.2, _vpm);
+    TestSize(_videoFrame, 352/2, 288/2, 3, 28.1, _vpm);
+    TestSize(_videoFrame, 352, 288, 3, -1, _vpm);  // no resampling.
+    TestSize(_videoFrame, 2*352, 2*288, 3, 32.2, _vpm);
+    TestSize(_videoFrame, 400, 256, 3, 31.3, _vpm);
+    TestSize(_videoFrame, 480, 640, 3, 32.15, _vpm);
+    TestSize(_videoFrame, 960, 720, 3, 32.2, _vpm);
+    TestSize(_videoFrame, 1280, 720, 3, 32.15, _vpm);
     // Upsampling to odd size.
-    TestSize(sourceFrame, 501, 333, 3, 32.05, _vpm);
+    TestSize(_videoFrame, 501, 333, 3, 32.05, _vpm);
     // Downsample to odd size.
-    TestSize(sourceFrame, 281, 175, 3, 29.3, _vpm);
+    TestSize(_videoFrame, 281, 175, 3, 29.3, _vpm);
 
     // stop timer
     t1 = TickTime::Now();

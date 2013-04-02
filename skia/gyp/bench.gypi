@@ -7,6 +7,7 @@
     '../bench/SkBenchmark.cpp',
 
     '../bench/AAClipBench.cpp',
+    '../bench/BicubicBench.cpp',
     '../bench/BitmapBench.cpp',
     '../bench/BitmapRectBench.cpp',
     '../bench/BlurBench.cpp',
@@ -42,6 +43,7 @@
     '../bench/ScalarBench.cpp',
     '../bench/ShaderMaskBench.cpp',
     '../bench/SortBench.cpp',
+    '../bench/StrokeBench.cpp',
     '../bench/TableBench.cpp',
     '../bench/TextBench.cpp',
     '../bench/TileBench.cpp',

@@ -4,6 +4,15 @@
 {
   'variables': {
     'use_system_libvpx%': 0,
+    'libvpx_build_vp9%': 1,
+    'libvpx_source%': 'source/libvpx',
+  },
+  'target_defaults': {
+    'target_conditions': [
+      ['<(libvpx_build_vp9)==0', {
+        'sources/': [ ['exclude', '(^|/)vp9/'], ],
+      }],
+    ],
   },
   'conditions': [
     ['use_system_libvpx==0', {
@@ -19,7 +28,13 @@
           ['target_arch=="arm" and arm_neon==1', {
             'target_arch_full': 'arm-neon',
           }, {
-            'target_arch_full': '<(target_arch)',
+            'conditions': [
+              ['OS=="android"', {
+                'target_arch_full': 'arm-neon-cpu-detect',
+              }, {
+               'target_arch_full': '<(target_arch)',
+              }],
+            ],
           }],
 
           ['os_posix == 1 and OS != "mac"', {
@@ -47,17 +62,17 @@
               'type': 'static_library',
               'include_dirs': [
                 'source/config/<(OS_CATEGORY)/<(target_arch)',
-                'source/libvpx',
-                'source/libvpx/vp8/common',
-                'source/libvpx/vp8/decoder',
-                'source/libvpx/vp8/encoder',
+                '<(libvpx_source)',
+                '<(libvpx_source)/vp8/common',
+                '<(libvpx_source)/vp8/decoder',
+                '<(libvpx_source)/vp8/encoder',
               ],
               'sources': [
-                'source/libvpx/vp8/encoder/x86/denoising_sse2.c',
-                'source/libvpx/vp9/common/x86/vp9_filter_sse2.c',
-                'source/libvpx/vp9/common/x86/vp9_loopfilter_x86.c',
-                'source/libvpx/vp9/common/x86/vp9_sadmxn_x86.c',
-                'source/libvpx/vp9/common/x86/vp9_filter_sse4.c',
+                '<(libvpx_source)/vp8/encoder/x86/denoising_sse2.c',
+                '<(libvpx_source)/vp9/common/x86/vp9_filter_sse2.c',
+                '<(libvpx_source)/vp9/common/x86/vp9_loopfilter_x86.c',
+                '<(libvpx_source)/vp9/common/x86/vp9_sadmxn_x86.c',
+                '<(libvpx_source)/vp9/common/x86/vp9_filter_sse4.c',
               ],
               'conditions': [
                 ['os_posix==1 and OS!="mac"', {
@@ -86,13 +101,12 @@
                   '-D', 'CHROMIUM',
                   '-I', 'source/config/<(OS_CATEGORY)/<(target_arch)',
                   '-I', 'source/config',
-                  '-I', 'source/libvpx',
+                  '-I', '<(libvpx_source)',
                   '-I', '<(shared_generated_dir)', # Generated assembly offsets
                 ],
               },
               'dependencies': [
                 'gen_asm_offsets_vp8',
-                'gen_asm_offsets_vp9',
               ],
               'includes': [
                 '../yasm/yasm_compile.gypi'
@@ -100,15 +114,15 @@
               'include_dirs': [
                 'source/config/<(OS_CATEGORY)/<(target_arch)',
                 'source/config',
-                'source/libvpx',
-                'source/libvpx/vp8/common',
-                'source/libvpx/vp8/decoder',
-                'source/libvpx/vp8/encoder',
+                '<(libvpx_source)',
+                '<(libvpx_source)/vp8/common',
+                '<(libvpx_source)/vp8/decoder',
+                '<(libvpx_source)/vp8/encoder',
                 '<(shared_generated_dir)', # Provides vpx_rtcd.h.
               ],
               'direct_dependent_settings': {
                 'include_dirs': [
-                  'source/libvpx',
+                  '<(libvpx_source)',
                 ],
               },
               # VS2010 does not correctly incrementally link obj files generated
@@ -116,13 +130,13 @@
               # avoid this problem.
               'msvs_2010_disable_uldi_when_referenced': 1,
               'conditions': [
-                [ 'target_arch=="ia32"', {
+                ['target_arch=="ia32"', {
                   'includes': [
                     'libvpx_srcs_x86.gypi',
                   ],
                   'dependencies': [ 'libvpx_intrinsics', ],
                 }],
-                [ 'target_arch=="x64"', {
+                ['target_arch=="x64"', {
                   'includes': [
                     'libvpx_srcs_x86_64.gypi',
                   ],
@@ -142,13 +156,16 @@
                     '-Wno-parentheses-equality',
                   ],
                 }],
-                [ 'chromeos == 1', {
+                ['chromeos == 1', {
                   # ChromeOS needs these files for animated WebM avatars.
                   'sources': [
-                    'source/libvpx/libmkv/EbmlIDs.h',
-                    'source/libvpx/libmkv/EbmlWriter.c',
-                    'source/libvpx/libmkv/EbmlWriter.h',
+                    '<(libvpx_source)/libmkv/EbmlIDs.h',
+                    '<(libvpx_source)/libmkv/EbmlWriter.c',
+                    '<(libvpx_source)/libmkv/EbmlWriter.h',
                   ],
+                }],
+                ['libvpx_build_vp9==1', {
+                  'dependencies': ['gen_asm_offsets_vp9',],
                 }],
               ],
             },
@@ -176,14 +193,14 @@
               'include_dirs': [
                 'source/config/<(OS)/<(target_arch)',
                 'source/config',
-                'source/libvpx',
-                'source/libvpx/vp8/common',
-                'source/libvpx/vp8/decoder',
-                'source/libvpx/vp8/encoder',
+                '<(libvpx_source)',
+                '<(libvpx_source)/vp8/common',
+                '<(libvpx_source)/vp8/decoder',
+                '<(libvpx_source)/vp8/encoder',
               ],
               'direct_dependent_settings': {
                 'include_dirs': [
-                  'source/libvpx',
+                  '<(libvpx_source)',
                 ],
               },
               'sources': [
@@ -203,7 +220,6 @@
               'type': 'static_library',
               'dependencies': [
                 'gen_asm_offsets_vp8',
-                'gen_asm_offsets_vp9',
                 'gen_asm_offsets_vpx_scale',
               ],
 
@@ -238,7 +254,7 @@
               'variables': {
                 # Location of the assembly conversion script.
                 'ads2gas_script': 'ads2gas.pl',
-                'ads2gas_script_path': 'source/libvpx/build/make/<(ads2gas_script)',
+                'ads2gas_script_path': '<(libvpx_source)/build/make/<(ads2gas_script)',
               },
               'cflags': [
                 # We need to explicitly tell the GCC assembler to look for
@@ -251,18 +267,29 @@
               'include_dirs': [
                 'source/config/<(OS_CATEGORY)/<(target_arch_full)',
                 'source/config',
-                'source/libvpx',
+                '<(libvpx_source)',
               ],
               'direct_dependent_settings': {
                 'include_dirs': [
-                  'source/libvpx',
+                  '<(libvpx_source)',
                 ],
               },
               'conditions': [
                 # Libvpx optimizations for ARMv6 or ARMv7 without NEON.
                 ['arm_neon==0', {
-                  'includes': [
-                    'libvpx_srcs_arm.gypi',
+                  'conditions': [
+                    ['OS=="android"', {
+                      'includes': [
+                        'libvpx_srcs_arm_neon_cpu_detect.gypi',
+                      ],
+                      'cflags': [
+                        '-Wa,-mfpu=neon',
+                      ],
+                    }, {
+                      'includes': [
+                        'libvpx_srcs_arm.gypi',
+                      ],
+                    }],
                   ],
                 }],
                 # Libvpx optimizations for ARMv7 with NEON.
@@ -277,13 +304,16 @@
                     '<(android_ndk_root)/sources/android/cpufeatures',
                   ],
                 }],
-                [ 'chromeos == 1', {
+                ['chromeos == 1', {
                   # ChromeOS needs these files for animated WebM avatars.
                   'sources': [
-                    'source/libvpx/libmkv/EbmlIDs.h',
-                    'source/libvpx/libmkv/EbmlWriter.c',
-                    'source/libvpx/libmkv/EbmlWriter.h',
+                    '<(libvpx_source)/libmkv/EbmlIDs.h',
+                    '<(libvpx_source)/libmkv/EbmlWriter.c',
+                    '<(libvpx_source)/libmkv/EbmlWriter.h',
                   ],
+                }],
+                ['libvpx_build_vp9==1', {
+                  'dependencies': ['gen_asm_offsets_vp9',],
                 }],
               ],
             },
@@ -299,10 +329,10 @@
           'include_dirs': [
             'source/config/<(OS_CATEGORY)/<(target_arch_full)',
             'source/config',
-            'source/libvpx',
+            '<(libvpx_source)',
           ],
           'sources': [
-            'source/libvpx/build/make/obj_int_extract.c',
+            '<(libvpx_source)/build/make/obj_int_extract.c',
           ]
         },
         {
@@ -313,7 +343,7 @@
           'include_dirs': [
             'source/config/<(OS_CATEGORY)/<(target_arch_full)',
             'source/config',
-            'source/libvpx',
+            '<(libvpx_source)',
           ],
           'conditions': [
             ['asan==1', {
@@ -323,7 +353,7 @@
             }],
           ],
           'sources': [
-            'source/libvpx/vp8/encoder/asm_enc_offsets.c',
+            '<(libvpx_source)/vp8/encoder/asm_enc_offsets.c',
           ],
         },
         {
@@ -336,7 +366,7 @@
           'include_dirs': [
             'source/config/<(OS_CATEGORY)/<(target_arch_full)',
             'source/config',
-            'source/libvpx',
+            '<(libvpx_source)',
           ],
           'conditions': [
             ['asan==1', {
@@ -348,7 +378,7 @@
             }],
           ],
           'sources': [
-            'source/libvpx/vp9/encoder/vp9_asm_enc_offsets.c',
+            '<(libvpx_source)/vp9/encoder/vp9_asm_enc_offsets.c',
           ],
         },
         {
@@ -361,7 +391,7 @@
           'include_dirs': [
             'source/config/<(OS_CATEGORY)/<(target_arch_full)',
             'source/config',
-            'source/libvpx',
+            '<(libvpx_source)',
           ],
           'conditions': [
             ['asan==1', {
@@ -373,7 +403,7 @@
             }],
           ],
           'sources': [
-            'source/libvpx/vpx_scale/vpx_scale_asm_offsets.c',
+            '<(libvpx_source)/vpx_scale/vpx_scale_asm_offsets.c',
           ],
         },
         {
@@ -391,7 +421,7 @@
           'conditions': [
             ['OS=="win"', {
               'variables': {
-                'ninja_obj_dir': '<(PRODUCT_DIR)/obj/third_party/libvpx/source/libvpx/vp8',
+                'ninja_obj_dir': '<(PRODUCT_DIR)/obj/third_party/libvpx/<(libvpx_source)/vp8',
               },
               'actions': [
                 {
@@ -403,8 +433,10 @@
                     '-d', '<@(_outputs)',
                     '-s', '<(PRODUCT_DIR)/obj/libvpx_asm_offsets/asm_enc_offsets.obj',
                     '-s', '<(ninja_obj_dir)/encoder/libvpx_asm_offsets.asm_enc_offsets.obj',
+                    '-s', '<(PRODUCT_DIR)/obj/Source/WebKit/chromium/third_party/libvpx/<(libvpx_source)/vp8/encoder/libvpx_asm_offsets.asm_enc_offsets.obj',
                   ],
                   'process_output_as_sources': 1,
+                  'msvs_cygwin_shell': 1,
                 },
               ],
               'sources': [
@@ -424,11 +456,13 @@
                   'action': [
                     '<(DEPTH)/third_party/libvpx/unpack_lib_posix.sh',
                     '-d', '<(INTERMEDIATE_DIR)',
-                    '-a', '<(LIB_DIR)/libvpx_asm_offsets.a',
+                    '-a', '<(PRODUCT_DIR)/libvpx_asm_offsets.a',
                     '-a', '<(LIB_DIR)/third_party/libvpx/libvpx_asm_offsets.a',
+                    '-a', '<(LIB_DIR)/Source/WebKit/chromium/third_party/libvpx/libvpx_asm_offsets.a',
                     '-f', 'asm_enc_offsets.o',
                   ],
                   'process_output_as_sources': 1,
+                  'msvs_cygwin_shell': 1,
                 },
               ],
               # Need this otherwise gyp won't run the rule on them.
@@ -447,7 +481,7 @@
                 'obj_int_extract.sh',
               ],
               'outputs': [
-                '<(shared_generated_dir)/<(RULE_INPUT_ROOT).asm',
+                '<(shared_generated_dir)/vp8_<(RULE_INPUT_ROOT).asm',
               ],
               'variables': {
                 'conditions': [
@@ -466,6 +500,7 @@
                 '-o', '<(shared_generated_dir)/vp8_<(RULE_INPUT_ROOT).asm',
               ],
               'message': 'Generate assembly offsets <(RULE_INPUT_PATH).',
+              'msvs_cygwin_shell': 1,
             },
           ],
         },
@@ -484,7 +519,7 @@
           'conditions': [
             ['OS=="win"', {
               'variables': {
-                'ninja_obj_dir': '<(PRODUCT_DIR)/obj/third_party/libvpx/source/libvpx/vp9',
+                'ninja_obj_dir': '<(PRODUCT_DIR)/obj/third_party/libvpx/<(libvpx_source)/vp9',
               },
               'actions': [
                 {
@@ -496,8 +531,10 @@
                     '-d', '<@(_outputs)',
                     '-s', '<(PRODUCT_DIR)/obj/libvpx_asm_offsets_vp9/vp9_asm_enc_offsets.obj',
                     '-s', '<(ninja_obj_dir)/encoder/libvpx_asm_offsets_vp9.vp9_asm_enc_offsets.obj',
+                    '-s', '<(PRODUCT_DIR)/obj/Source/WebKit/chromium/third_party/libvpx/<(libvpx_source)/vp9/encoder/libvpx_asm_offsets_vp9.vp9_asm_enc_offsets.obj',
                   ],
                   'process_output_as_sources': 1,
+                  'msvs_cygwin_shell': 1,
                 },
               ],
               'sources': [
@@ -517,8 +554,9 @@
                   'action': [
                     '<(DEPTH)/third_party/libvpx/unpack_lib_posix.sh',
                     '-d', '<(INTERMEDIATE_DIR)',
-                    '-a', '<(LIB_DIR)/libvpx_asm_offsets_vp9.a',
+                    '-a', '<(PRODUCT_DIR)/libvpx_asm_offsets_vp9.a',
                     '-a', '<(LIB_DIR)/third_party/libvpx/libvpx_asm_offsets_vp9.a',
+                    '-a', '<(LIB_DIR)/Source/WebKit/chromium/third_party/libvpx/libvpx_asm_offsets_vp9.a',
                     '-f', 'vp9_asm_enc_offsets.o',
                   ],
                   'process_output_as_sources': 1,
@@ -559,6 +597,7 @@
                 '-o', '<(shared_generated_dir)/<(RULE_INPUT_ROOT).asm',
               ],
               'message': 'Generate assembly offsets <(RULE_INPUT_PATH).',
+              'msvs_cygwin_shell': 1,
             },
           ],
         },
@@ -577,7 +616,7 @@
           'conditions': [
             ['OS=="win"', {
               'variables': {
-                'ninja_obj_dir': '<(PRODUCT_DIR)/obj/third_party/libvpx/source/libvpx/vpx_scale',
+                'ninja_obj_dir': '<(PRODUCT_DIR)/obj/third_party/libvpx/<(libvpx_source)/vpx_scale',
               },
               'actions': [
                 {
@@ -589,8 +628,10 @@
                     '-d', '<@(_outputs)',
                     '-s', '<(PRODUCT_DIR)/obj/libvpx_asm_offsets_vpx_scale/vpx_scale_asm_offsets.obj',
                     '-s', '<(ninja_obj_dir)/encoder/libvpx_asm_offsets_vpx_scale.vpx_scale_asm_offsets.obj',
+                    '-s', '<(PRODUCT_DIR)/obj/Source/WebKit/chromium/third_party/libvpx/<(libvpx_source)/vpx_scale/libvpx_asm_offsets_vpx_scale.vpx_scale_asm_offsets.obj',
                   ],
                   'process_output_as_sources': 1,
+                  'msvs_cygwin_shell': 1,
                 },
               ],
               'sources': [
@@ -610,8 +651,9 @@
                   'action': [
                     '<(DEPTH)/third_party/libvpx/unpack_lib_posix.sh',
                     '-d', '<(INTERMEDIATE_DIR)',
-                    '-a', '<(LIB_DIR)/libvpx_asm_offsets_vpx_scale.a',
+                    '-a', '<(PRODUCT_DIR)/libvpx_asm_offsets_vpx_scale.a',
                     '-a', '<(LIB_DIR)/third_party/libvpx/libvpx_asm_offsets_vpx_scale.a',
+                    '-a', '<(LIB_DIR)/Source/WebKit/chromium/third_party/libvpx/libvpx_asm_offsets_vpx_scale.a',
                     '-f', 'vpx_scale_asm_offsets.o',
                   ],
                   'process_output_as_sources': 1,
@@ -652,6 +694,7 @@
                 '-o', '<(shared_generated_dir)/<(RULE_INPUT_ROOT).asm',
               ],
               'message': 'Generate assembly offsets <(RULE_INPUT_PATH).',
+              'msvs_cygwin_shell': 1,
             },
           ],
         },
@@ -667,7 +710,7 @@
           'copies': [{
             'destination': '<(shared_generated_dir)/simple_encoder',
             'files': [
-              'source/libvpx/examples/gen_example_code.sh',
+              '<(libvpx_source)/examples/gen_example_code.sh',
             ],
           }],
 
@@ -690,7 +733,7 @@
             },
           ],
           'sources': [
-            'source/libvpx/examples/simple_encoder.txt',
+            '<(libvpx_source)/examples/simple_encoder.txt',
           ]
         },
         {
@@ -705,7 +748,7 @@
           'copies': [{
             'destination': '<(shared_generated_dir)/simple_decoder',
             'files': [
-              'source/libvpx/examples/gen_example_code.sh',
+              '<(libvpx_source)/examples/gen_example_code.sh',
             ],
           }],
 
@@ -728,7 +771,7 @@
             },
           ],
           'sources': [
-            'source/libvpx/examples/simple_decoder.txt',
+            '<(libvpx_source)/examples/simple_decoder.txt',
           ]
         },
       ],
@@ -741,10 +784,25 @@
             'cflags': [
               '<!@(pkg-config --cflags vpx)',
             ],
-            'defines': [
-              'USE_SYSTEM_LIBVPX',
+          },
+          'variables': {
+            'headers_root_path': '<(libvpx_source)',
+            'header_filenames': [
+              'vpx/vpx_codec_impl_bottom.h',
+              'vpx/vpx_image.h',
+              'vpx/vpx_decoder.h',
+              'vpx/vp8.h',
+              'vpx/vpx_codec.h',
+              'vpx/vpx_codec_impl_top.h',
+              'vpx/vp8cx.h',
+              'vpx/vpx_integer.h',
+              'vpx/vp8dx.h',
+              'vpx/vpx_encoder.h',
             ],
           },
+          'includes': [
+            '../../build/shim_headers.gypi',
+          ],
           'link_settings': {
             'ldflags': [
               '<!@(pkg-config --libs-only-L --libs-only-other vpx)',
@@ -758,9 +816,3 @@
     }],
   ],
 }
-
-# Local Variables:
-# tab-width:2
-# indent-tabs-mode:nil
-# End:
-# vim: set expandtab tabstop=2 shiftwidth=2:

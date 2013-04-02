@@ -9,7 +9,7 @@
  */
 
 
-#include "vpx_ports/config.h"
+#include "./vpx_config.h"
 #include "vp9/common/vp9_blockd.h"
 #include "vpx_mem/vpx_mem.h"
 #include "vp9/common/vp9_onyxc_int.h"
@@ -220,4 +220,8 @@ void vp9_initialize_common() {
   vp9_entropy_mode_init();
 
   vp9_entropy_mv_init();
+
+#if CONFIG_NEWCOEFCONTEXT
+  vp9_init_neighbors();
+#endif
 }

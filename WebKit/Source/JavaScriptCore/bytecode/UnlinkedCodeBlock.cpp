@@ -32,6 +32,7 @@
 #include "CodeCache.h"
 #include "Executable.h"
 #include "JSString.h"
+#include "Operations.h"
 #include "SourceProvider.h"
 #include "Structure.h"
 #include "SymbolTable.h"
@@ -149,7 +150,7 @@ String UnlinkedFunctionExecutable::paramString() const
     for (size_t pos = 0; pos < parameters.size(); ++pos) {
         if (!builder.isEmpty())
             builder.appendLiteral(", ");
-        builder.append(parameters[pos].string());
+        builder.append(parameters.at(pos).string());
     }
     return builder.toString();
 }
@@ -159,7 +160,6 @@ UnlinkedCodeBlock::UnlinkedCodeBlock(JSGlobalData* globalData, Structure* struct
     , m_numVars(0)
     , m_numCalleeRegisters(0)
     , m_numParameters(0)
-    , m_globalData(globalData)
     , m_argumentsRegister(-1)
     , m_needsFullScopeChain(info.m_needsActivation)
     , m_usesEval(info.m_usesEval)
@@ -167,16 +167,18 @@ UnlinkedCodeBlock::UnlinkedCodeBlock(JSGlobalData* globalData, Structure* struct
     , m_isStrictMode(info.m_isStrictMode)
     , m_isConstructor(info.m_isConstructor)
     , m_hasCapturedVariables(false)
+    , m_codeType(codeType)
+    , m_features(0)
     , m_firstLine(0)
     , m_lineCount(0)
-    , m_features(0)
-    , m_codeType(codeType)
     , m_resolveOperationCount(0)
     , m_putToBaseOperationCount(1)
     , m_arrayProfileCount(0)
     , m_arrayAllocationProfileCount(0)
+    , m_objectAllocationProfileCount(0)
     , m_valueProfileCount(0)
     , m_llintCallLinkInfoCount(0)
+    , m_globalData(globalData)
 #if ENABLE(BYTECODE_COMMENTS)
     , m_bytecodeCommentIterator(0)
 #endif

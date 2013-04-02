@@ -36,7 +36,9 @@
 #include "JSLock.h"
 #include "JSProxy.h"
 #include "JSString.h"
+#include "Operations.h"
 #include "SamplingTool.h"
+#include "StructureRareDataInlines.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

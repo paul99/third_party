@@ -384,7 +384,7 @@ EncodedJSValue JSCallbackObject<Parent>::construct(ExecState* exec)
         }
     }
     
-    ASSERT_NOT_REACHED(); // getConstructData should prevent us from reaching here
+    RELEASE_ASSERT_NOT_REACHED(); // getConstructData should prevent us from reaching here
     return JSValue::encode(JSValue());
 }
 
@@ -450,7 +450,7 @@ EncodedJSValue JSCallbackObject<Parent>::call(ExecState* exec)
         }
     }
     
-    ASSERT_NOT_REACHED(); // getCallData should prevent us from reaching here
+    RELEASE_ASSERT_NOT_REACHED(); // getCallData should prevent us from reaching here
     return JSValue::encode(JSValue());
 }
 
@@ -508,10 +508,10 @@ void* JSCallbackObject<Parent>::getPrivate()
 template <class Parent>
 bool JSCallbackObject<Parent>::inherits(JSClassRef c) const
 {
-    for (JSClassRef jsClass = classRef(); jsClass; jsClass = jsClass->parentClass)
+    for (JSClassRef jsClass = classRef(); jsClass; jsClass = jsClass->parentClass) {
         if (jsClass == c)
             return true;
-    
+    }
     return false;
 }
 

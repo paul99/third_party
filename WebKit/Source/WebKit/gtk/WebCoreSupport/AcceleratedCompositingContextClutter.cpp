@@ -123,9 +123,8 @@ void AcceleratedCompositingContext::setRootCompositingLayer(GraphicsLayer* graph
     if (graphicsLayer) {
         ClutterColor stageColor = { 0xFF, 0xFF, 0xFF, 0xFF };
         ClutterActor* stage = gtk_clutter_embed_get_stage(GTK_CLUTTER_EMBED(m_rootLayerEmbedder));
-        clutter_stage_set_color(CLUTTER_STAGE(stage), &stageColor);
-        clutter_container_add_actor(CLUTTER_CONTAINER(stage), m_rootLayer->platformLayer());
-        clutter_actor_show_all(stage);
+        clutter_actor_set_background_color(stage, &stageColor);
+        clutter_actor_add_child(stage, m_rootLayer->platformLayer());
     }
 
     scheduleLayerFlush();
@@ -221,6 +220,7 @@ void AcceleratedCompositingContext::flushAndRenderLayers()
     Frame* frame = core(m_webView)->mainFrame();
     if (!frame || !frame->contentRenderer() || !frame->view())
         return;
+    frame->view()->updateLayoutAndStyleIfNeededRecursive();
 
     if (!flushPendingLayerChanges())
         return;
@@ -228,11 +228,11 @@ void AcceleratedCompositingContext::flushAndRenderLayers()
 
 void AcceleratedCompositingContext::notifyAnimationStarted(const WebCore::GraphicsLayer*, double time)
 {
-    ASSERT_NOT_REACHED();
+    notImplemented();
 }
 void AcceleratedCompositingContext::notifyFlushRequired(const WebCore::GraphicsLayer*)
 {
-    ASSERT_NOT_REACHED();
+    notImplemented();
 }
 
 void AcceleratedCompositingContext::paintContents(const WebCore::GraphicsLayer*, WebCore::GraphicsContext& context, WebCore::GraphicsLayerPaintingPhase, const WebCore::IntRect& rectToPaint)

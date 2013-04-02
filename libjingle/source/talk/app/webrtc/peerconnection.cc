@@ -29,6 +29,7 @@
 
 #include <vector>
 
+#include "talk/app/webrtc/dtmfsender.h"
 #include "talk/app/webrtc/jsepicecandidate.h"
 #include "talk/app/webrtc/jsepsessiondescription.h"
 #include "talk/app/webrtc/mediastreamhandler.h"
@@ -38,6 +39,8 @@
 #include "talk/session/media/channelmanager.h"
 
 namespace {
+
+using webrtc::PeerConnectionInterface;
 
 // The min number of tokens in the ice uri.
 static const size_t kMinIceUriTokens = 2;
@@ -65,7 +68,8 @@ enum {
   MSG_SET_SESSIONDESCRIPTION_SUCCESS,
   MSG_SET_SESSIONDESCRIPTION_FAILED,
   MSG_GETSTATS,
-  MSG_ICECHANGE,
+  MSG_ICECONNECTIONCHANGE,
+  MSG_ICEGATHERINGCHANGE,
   MSG_ICECANDIDATE,
   MSG_ICECOMPLETE,
 };
@@ -111,7 +115,7 @@ typedef webrtc::PortAllocatorFactoryInterface::StunConfiguration
 typedef webrtc::PortAllocatorFactoryInterface::TurnConfiguration
     TurnConfiguration;
 
-bool ParseIceServers(const webrtc::JsepInterface::IceServers& configuration,
+bool ParseIceServers(const PeerConnectionInterface::IceServers& configuration,
                      std::vector<StunConfiguration>* stun_config,
                      std::vector<TurnConfiguration>* turn_config) {
   // draft-nandakumar-rtcweb-stun-uri-01
@@ -131,7 +135,7 @@ bool ParseIceServers(const webrtc::JsepInterface::IceServers& configuration,
 
   // TODO(ronghuawu): Handle IPV6 address
   for (size_t i = 0; i < configuration.size(); ++i) {
-    webrtc::JsepInterface::IceServer server = configuration[i];
+    webrtc::PeerConnectionInterface::IceServer server = configuration[i];
     if (server.uri.empty()) {
       LOG(WARNING) << "Empty uri.";
       continue;
@@ -233,8 +237,10 @@ namespace webrtc {
 PeerConnection::PeerConnection(PeerConnectionFactory* factory)
     : factory_(factory),
       observer_(NULL),
-      ready_state_(kNew),
+      signaling_state_(kStable),
       ice_state_(kIceNew),
+      ice_connection_state_(kIceConnectionNew),
+      ice_gathering_state_(kIceGatheringNew),
       local_media_streams_(StreamCollection::Create()) {
 }
 
@@ -242,7 +248,7 @@ PeerConnection::~PeerConnection() {
 }
 
 bool PeerConnection::Initialize(
-    const JsepInterface::IceServers& configuration,
+    const PeerConnectionInterface::IceServers& configuration,
     const MediaConstraintsInterface* constraints,
     webrtc::PortAllocatorFactoryInterface* allocator_factory,
     PeerConnectionObserver* observer) {
@@ -293,7 +299,7 @@ bool PeerConnection::DoInitialize(
 
   // Register PeerConnection as receiver of local ice candidates.
   // All the callbacks will be posted to the application from PeerConnection.
-  session_->RegisterObserver(this);
+  session_->RegisterIceObserver(this);
   session_->SignalState.connect(this, &PeerConnection::OnSessionStateChange);
   return true;
 }
@@ -327,6 +333,26 @@ void PeerConnection::RemoveStream(MediaStreamInterface* remove_stream) {
   observer_->OnRenegotiationNeeded();
 }
 
+talk_base::scoped_refptr<DtmfSenderInterface> PeerConnection::CreateDtmfSender(
+    AudioTrackInterface* track) {
+  if (!track) {
+    LOG(LS_ERROR) << "CreateDtmfSender - track is NULL.";
+    return NULL;
+  }
+  if (!local_media_streams_->FindAudioTrack(track->id())) {
+    LOG(LS_ERROR) << "CreateDtmfSender is called with a non local audio track.";
+    return NULL;
+  }
+
+  talk_base::scoped_refptr<DtmfSenderInterface> sender(
+      DtmfSender::Create(track, signaling_thread(), session_.get()));
+  if (!sender.get()) {
+    LOG(LS_ERROR) << "CreateDtmfSender failed on DtmfSender::Create.";
+    return NULL;
+  }
+  return DtmfSenderProxy::Create(signaling_thread(), sender.get());
+}
+
 bool PeerConnection::GetStats(StatsObserver* observer,
                               MediaStreamTrackInterface* track) {
   if (!VERIFY(observer != NULL)) {
@@ -343,33 +369,22 @@ bool PeerConnection::GetStats(StatsObserver* observer,
   return true;
 }
 
-PeerConnectionInterface::ReadyState PeerConnection::ready_state() {
-  return ready_state_;
+PeerConnectionInterface::SignalingState PeerConnection::signaling_state() {
+  return signaling_state_;
 }
 
 PeerConnectionInterface::IceState PeerConnection::ice_state() {
   return ice_state_;
 }
 
-bool PeerConnection::CanSendDtmf(const AudioTrackInterface* track) {
-  if (!track) {
-    return false;
-  }
-  return session_->CanSendDtmf(track->label());
+PeerConnectionInterface::IceConnectionState
+PeerConnection::ice_connection_state() {
+  return ice_connection_state_;
 }
 
-bool PeerConnection::SendDtmf(const AudioTrackInterface* send_track,
-                              const std::string& tones, int duration,
-                              const AudioTrackInterface* play_track) {
-  if (!send_track) {
-    return false;
-  }
-  std::string play_name;
-  if (play_track) {
-    play_name = play_track->label();
-  }
-
-  return session_->SendDtmf(send_track->label(), tones, duration, play_name);
+PeerConnectionInterface::IceGatheringState
+PeerConnection::ice_gathering_state() {
+  return ice_gathering_state_;
 }
 
 talk_base::scoped_refptr<DataChannelInterface>
@@ -378,19 +393,11 @@ PeerConnection::CreateDataChannel(
     const DataChannelInit* config) {
   talk_base::scoped_refptr<DataChannelInterface> channel(
       session_->CreateDataChannel(label, config));
+  if (!channel.get())
+    return NULL;
+
   observer_->OnRenegotiationNeeded();
-  return channel;
-}
-
-bool PeerConnection::StartIce(IceOptions options) {
-  // Ice will be started by default and will be removed in Jsep01.
-  // TODO: Remove this method once fully migrated to JSEP01.
-  return true;
-}
-
-SessionDescriptionInterface* PeerConnection::CreateOffer(
-    const MediaHints& hints) {
-  return session_->CreateOffer(hints);
+  return DataChannelProxy::Create(signaling_thread(), channel.get());
 }
 
 void PeerConnection::CreateOffer(CreateSessionDescriptionObserver* observer,
@@ -411,12 +418,6 @@ void PeerConnection::CreateOffer(CreateSessionDescriptionObserver* observer,
   }
 
   signaling_thread()->Post(this, MSG_CREATE_SESSIONDESCRIPTION_SUCCESS, msg);
-}
-
-SessionDescriptionInterface* PeerConnection::CreateAnswer(
-    const MediaHints& hints,
-    const SessionDescriptionInterface* offer) {
-  return session_->CreateAnswer(hints, offer);
 }
 
 void PeerConnection::CreateAnswer(
@@ -454,13 +455,6 @@ void PeerConnection::CreateAnswer(
   signaling_thread()->Post(this, MSG_CREATE_SESSIONDESCRIPTION_SUCCESS, msg);
 }
 
-bool PeerConnection::SetLocalDescription(Action action,
-                                         SessionDescriptionInterface* desc) {
-  bool result =  session_->SetLocalDescription(action, desc);
-  stream_handler_->CommitLocalStreams(local_media_streams_);
-  return result;
-}
-
 void PeerConnection::SetLocalDescription(
     SetSessionDescriptionObserver* observer,
     SessionDescriptionInterface* desc) {
@@ -475,19 +469,13 @@ void PeerConnection::SetLocalDescription(
   // Update stats here so that we have the most recent stats for tracks and
   // streams that might be removed by updating the session description.
   stats_.UpdateStats();
-  if (!SetLocalDescription(JsepSessionDescription::GetAction(desc->type()),
-                           desc)) {
+  if (!session_->SetLocalDescription(desc)) {
     PostSetSessionDescriptionFailure(observer, "SetLocalDescription failed.");
     return;
   }
   stream_handler_->CommitLocalStreams(local_media_streams_);
   SetSessionDescriptionMsg* msg =  new SetSessionDescriptionMsg(observer);
   signaling_thread()->Post(this, MSG_SET_SESSIONDESCRIPTION_SUCCESS, msg);
-}
-
-bool PeerConnection::SetRemoteDescription(Action action,
-                                          SessionDescriptionInterface* desc) {
-  return session_->SetRemoteDescription(action, desc);
 }
 
 void PeerConnection::SetRemoteDescription(
@@ -505,8 +493,7 @@ void PeerConnection::SetRemoteDescription(
   // Update stats here so that we have the most recent stats for tracks and
   // streams that might be removed by updating the session description.
   stats_.UpdateStats();
-  if (!SetRemoteDescription(JsepSessionDescription::GetAction(desc->type()),
-                            desc)) {
+  if (!session_->SetRemoteDescription(desc)) {
     PostSetSessionDescriptionFailure(observer, "SetRemoteDescription failed.");
     return;
   }
@@ -529,14 +516,9 @@ bool PeerConnection::UpdateIce(const IceServers& configuration,
   return false;
 }
 
-bool PeerConnection::ProcessIceMessage(
-    const IceCandidateInterface* ice_candidate) {
-  return session_->ProcessIceMessage(ice_candidate);
-}
-
 bool PeerConnection::AddIceCandidate(
     const IceCandidateInterface* ice_candidate) {
-  return ProcessIceMessage(ice_candidate);
+  return session_->ProcessIceMessage(ice_candidate);
 }
 
 const SessionDescriptionInterface* PeerConnection::local_description() const {
@@ -551,14 +533,22 @@ void PeerConnection::OnSessionStateChange(cricket::BaseSession* /*session*/,
                                           cricket::BaseSession::State state) {
   switch (state) {
     case cricket::BaseSession::STATE_INIT:
-      ChangeReadyState(PeerConnectionInterface::kNew);
+      ChangeSignalingState(PeerConnectionInterface::kStable);
     case cricket::BaseSession::STATE_SENTINITIATE:
+      ChangeSignalingState(PeerConnectionInterface::kHaveLocalOffer);
+      break;
+    case cricket::BaseSession::STATE_SENTPRACCEPT:
+      ChangeSignalingState(PeerConnectionInterface::kHaveLocalPrAnswer);
+      break;
     case cricket::BaseSession::STATE_RECEIVEDINITIATE:
-      ChangeReadyState(PeerConnectionInterface::kOpening);
+      ChangeSignalingState(PeerConnectionInterface::kHaveRemoteOffer);
+      break;
+    case cricket::BaseSession::STATE_RECEIVEDPRACCEPT:
+      ChangeSignalingState(PeerConnectionInterface::kHaveRemotePrAnswer);
       break;
     case cricket::BaseSession::STATE_SENTACCEPT:
     case cricket::BaseSession::STATE_RECEIVEDACCEPT:
-      ChangeReadyState(PeerConnectionInterface::kActive);
+      ChangeSignalingState(PeerConnectionInterface::kStable);
       break;
     default:
       break;
@@ -601,8 +591,12 @@ void PeerConnection::OnMessage(talk_base::Message* msg) {
       delete param;
       break;
     }
-    case MSG_ICECHANGE: {
-      observer_->OnIceChange();
+    case MSG_ICECONNECTIONCHANGE: {
+      observer_->OnIceConnectionChange(ice_connection_state_);
+      break;
+    }
+    case MSG_ICEGATHERINGCHANGE: {
+      observer_->OnIceGatheringChange(ice_gathering_state_);
       break;
     }
     case MSG_ICECANDIDATE: {
@@ -633,11 +627,20 @@ void PeerConnection::OnRemoveStream(MediaStreamInterface* stream) {
 }
 
 void PeerConnection::OnAddDataChannel(DataChannelInterface* data_channel) {
-  observer_->OnDataChannel(data_channel);
+  observer_->OnDataChannel(DataChannelProxy::Create(signaling_thread(),
+                                                    data_channel));
 }
 
-void PeerConnection::OnIceChange() {
-  signaling_thread()->Post(this, MSG_ICECHANGE);
+void PeerConnection::OnIceConnectionChange(
+    PeerConnectionInterface::IceConnectionState new_state) {
+  ice_connection_state_ = new_state;
+  signaling_thread()->Post(this, MSG_ICECONNECTIONCHANGE);
+}
+
+void PeerConnection::OnIceGatheringChange(
+    PeerConnectionInterface::IceGatheringState new_state) {
+  ice_gathering_state_ = new_state;
+  signaling_thread()->Post(this, MSG_ICEGATHERINGCHANGE);
 }
 
 void PeerConnection::OnIceCandidate(const IceCandidateInterface* candidate) {
@@ -658,10 +661,15 @@ void PeerConnection::OnIceComplete() {
   signaling_thread()->Post(this, MSG_ICECOMPLETE);
 }
 
-void PeerConnection::ChangeReadyState(
-    PeerConnectionInterface::ReadyState ready_state) {
-  ready_state_ = ready_state;
-  observer_->OnStateChange(PeerConnectionObserver::kReadyState);
+void PeerConnection::ChangeSignalingState(
+    PeerConnectionInterface::SignalingState signaling_state) {
+  signaling_state_ = signaling_state;
+  observer_->OnSignalingChange(signaling_state_);
+  observer_->OnStateChange(PeerConnectionObserver::kSignalingState);
+  if (signaling_state == kClosed) {
+    ice_connection_state_ = kIceConnectionClosed;
+    observer_->OnIceConnectionChange(ice_connection_state_);
+  }
 }
 
 }  // namespace webrtc

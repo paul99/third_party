@@ -44,12 +44,19 @@ public:
                                        int current_delay_ms,
                                        int& lengthSamples);
 
+    virtual int GetAudioFrame(int channel, int desired_sample_rate_hz,
+                              AudioFrame* frame);
+
+    virtual int SetExternalMixing(int channel, bool enable);
+
 protected:
     VoEExternalMediaImpl(voe::SharedData* shared);
     virtual ~VoEExternalMediaImpl();
 
 private:
+#ifdef WEBRTC_VOE_EXTERNAL_REC_AND_PLAYOUT
     int playout_delay_ms_;
+#endif
     voe::SharedData* shared_;
 };
 

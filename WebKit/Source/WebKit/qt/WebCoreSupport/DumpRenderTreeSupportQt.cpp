@@ -66,6 +66,7 @@
 #include "QWebPageAdapter.h"
 #include "RenderListItem.h"
 #include "RenderTreeAsText.h"
+#include "RuntimeEnabledFeatures.h"
 #include "SchemeRegistry.h"
 #include "ScriptController.h"
 #include "ScriptSourceCode.h"
@@ -76,7 +77,6 @@
 #include "TextIterator.h"
 #include "ThirdPartyCookiesQt.h"
 #include "WebCoreTestSupport.h"
-#include "WorkerThread.h"
 #include "qt_runtime.h"
 #include "qwebelement.h"
 #include "qwebhistory.h"
@@ -208,15 +208,6 @@ void DumpRenderTreeSupportQt::overwritePluginDirectories()
     db->refresh();
 }
 
-int DumpRenderTreeSupportQt::workerThreadCount()
-{
-#if ENABLE(WORKERS)
-    return WebCore::WorkerThread::workerThreadCount();
-#else
-    return 0;
-#endif
-}
-
 void DumpRenderTreeSupportQt::setDumpRenderTreeModeEnabled(bool b)
 {
     QWebPageAdapter::drtRun = b;
@@ -295,63 +286,6 @@ void DumpRenderTreeSupportQt::setValueForUser(const QWebElement& element, const 
         return;
 
     inputElement->setValueForUser(value);
-}
-
-// Pause a given CSS animation or transition on the target node at a specific time.
-// If the animation or transition is already paused, it will update its pause time.
-// This method is only intended to be used for testing the CSS animation and transition system.
-bool DumpRenderTreeSupportQt::pauseAnimation(QWebFrameAdapter *adapter, const QString &animationName, double time, const QString &elementId)
-{
-    Frame* coreFrame = adapter->frame;
-    if (!coreFrame)
-        return false;
-
-    AnimationController* controller = coreFrame->animation();
-    if (!controller)
-        return false;
-
-    Document* doc = coreFrame->document();
-    Q_ASSERT(doc);
-
-    Node* coreNode = doc->getElementById(elementId);
-    if (!coreNode || !coreNode->renderer())
-        return false;
-
-    return controller->pauseAnimationAtTime(coreNode->renderer(), animationName, time);
-}
-
-bool DumpRenderTreeSupportQt::pauseTransitionOfProperty(QWebFrameAdapter *adapter, const QString &propertyName, double time, const QString &elementId)
-{
-    Frame* coreFrame = adapter->frame;
-    if (!coreFrame)
-        return false;
-
-    AnimationController* controller = coreFrame->animation();
-    if (!controller)
-        return false;
-
-    Document* doc = coreFrame->document();
-    Q_ASSERT(doc);
-
-    Node* coreNode = doc->getElementById(elementId);
-    if (!coreNode || !coreNode->renderer())
-        return false;
-
-    return controller->pauseTransitionAtTime(coreNode->renderer(), propertyName, time);
-}
-
-// Returns the total number of currently running animations (includes both CSS transitions and CSS animations).
-int DumpRenderTreeSupportQt::numberOfActiveAnimations(QWebFrameAdapter *adapter)
-{
-    Frame* coreFrame = adapter->frame;
-    if (!coreFrame)
-        return false;
-
-    AnimationController* controller = coreFrame->animation();
-    if (!controller)
-        return false;
-
-    return controller->numberOfActiveAnimations(coreFrame->document());
 }
 
 void DumpRenderTreeSupportQt::clearFrameName(QWebFrameAdapter *adapter)
@@ -1049,10 +983,26 @@ void DumpRenderTreeSupportQt::getTrackedRepaintRects(QWebFrameAdapter* adapter, 
         result.append(rects[i]);
 }
 
+void DumpRenderTreeSupportQt::setSeamlessIFramesEnabled(bool enabled)
+{
+#if ENABLE(IFRAME_SEAMLESS)
+    WebCore::RuntimeEnabledFeatures::setSeamlessIFramesEnabled(enabled);
+#else
+    UNUSED_PARAM(enabled);
+#endif
+}
+
 QString DumpRenderTreeSupportQt::frameRenderTreeDump(QWebFrameAdapter* adapter)
 {
     if (adapter->frame->view() && adapter->frame->view()->layoutPending())
         adapter->frame->view()->layout();
 
     return externalRepresentation(adapter->frame);
+}
+
+void DumpRenderTreeSupportQt::clearNotificationPermissions()
+{
+#if ENABLE(NOTIFICATIONS) || ENABLE(LEGACY_NOTIFICATIONS)
+    WebCore::NotificationPresenterClientQt::notificationPresenter()->clearCachedPermissions();
+#endif
 }

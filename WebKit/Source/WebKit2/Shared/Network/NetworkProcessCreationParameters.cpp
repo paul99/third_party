@@ -50,32 +50,38 @@ void NetworkProcessCreationParameters::encode(CoreIPC::ArgumentEncoder& encoder)
 #if ENABLE(CUSTOM_PROTOCOLS)
     encoder << urlSchemesRegisteredForCustomProtocols;
 #endif
+    encoder << httpProxy;
+    encoder << httpsProxy;
 #endif
 }
 
-bool NetworkProcessCreationParameters::decode(CoreIPC::ArgumentDecoder* decoder, NetworkProcessCreationParameters& result)
+bool NetworkProcessCreationParameters::decode(CoreIPC::ArgumentDecoder& decoder, NetworkProcessCreationParameters& result)
 {
-    if (!decoder->decode(result.diskCacheDirectory))
+    if (!decoder.decode(result.diskCacheDirectory))
         return false;
-    if (!decoder->decode(result.diskCacheDirectoryExtensionHandle))
+    if (!decoder.decode(result.diskCacheDirectoryExtensionHandle))
         return false;
-    if (!decoder->decode(result.privateBrowsingEnabled))
+    if (!decoder.decode(result.privateBrowsingEnabled))
         return false;
-    if (!decoder->decodeEnum(result.cacheModel))
+    if (!decoder.decodeEnum(result.cacheModel))
         return false;
 #if PLATFORM(MAC)
-    if (!decoder->decode(result.parentProcessName))
+    if (!decoder.decode(result.parentProcessName))
         return false;
-    if (!decoder->decode(result.uiProcessBundleIdentifier))
+    if (!decoder.decode(result.uiProcessBundleIdentifier))
         return false;
-    if (!decoder->decode(result.nsURLCacheMemoryCapacity))
+    if (!decoder.decode(result.nsURLCacheMemoryCapacity))
         return false;
-    if (!decoder->decode(result.nsURLCacheDiskCapacity))
+    if (!decoder.decode(result.nsURLCacheDiskCapacity))
         return false;
 #if ENABLE(CUSTOM_PROTOCOLS)
-    if (!decoder->decode(result.urlSchemesRegisteredForCustomProtocols))
+    if (!decoder.decode(result.urlSchemesRegisteredForCustomProtocols))
         return false;
 #endif
+    if (!decoder.decode(result.httpProxy))
+        return false;
+    if (!decoder.decode(result.httpsProxy))
+        return false;
 #endif
 
     return true;

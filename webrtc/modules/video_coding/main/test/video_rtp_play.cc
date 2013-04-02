@@ -17,7 +17,7 @@
 #include "../source/internal_defines.h"
 #include "test_macros.h"
 #include "rtp_player.h"
-#include "modules/video_coding/main/source/mock/fake_tick_time.h"
+#include "webrtc/system_wrappers/interface/clock.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -67,8 +67,9 @@ FrameReceiveCallback::FrameToRender(I420VideoFrame& videoFrame)
         printf("New size: %ux%u\n", videoFrame.width(), videoFrame.height());
         width_ = videoFrame.width();
         height_ = videoFrame.height();
-        std::string filename_with_width_height = AppendWidthAndHeight(
-            _outFilename, width_, height_);
+        std::string filename_with_width_height = AppendWidthHeightAndCount(
+            _outFilename, width_, height_, count_);
+        ++count_;
         _outFile = fopen(filename_with_width_height.c_str(), "wb");
         if (_outFile == NULL)
         {
@@ -98,13 +99,14 @@ void FrameReceiveCallback::SplitFilename(std::string filename,
       *ending = "";
   }
 }
-std::string FrameReceiveCallback::AppendWidthAndHeight(
-    std::string filename, unsigned int width, unsigned int height) {
+std::string FrameReceiveCallback::AppendWidthHeightAndCount(
+    std::string filename, unsigned int width, unsigned int height, int count) {
   std::string basename;
   std::string ending;
   SplitFilename(filename, &basename, &ending);
   std::stringstream ss;
-  ss << basename << "." <<  width << "_" << height << "." << ending;
+  ss << basename << "_" << count << "." <<  width << "_" << height << "." <<
+      ending;
   return ss.str();
 }
 
@@ -128,7 +130,7 @@ int RtpPlay(CmdArgs& args)
     if (outFile == "")
         outFile = test::OutputPath() + "RtpPlay_decoded.yuv";
     FrameReceiveCallback receiveCallback(outFile);
-    FakeTickTime clock(0);
+    SimulatedClock clock(0);
     VideoCodingModule* vcm = VideoCodingModule::Create(1, &clock);
     RtpDataCallback dataCallback(vcm);
     RTPPlayer rtpStream(args.inputFile.c_str(), &dataCallback, &clock);
@@ -192,13 +194,14 @@ int RtpPlay(CmdArgs& args)
     vcm->SetVideoProtection(protectionMethod, protectionEnabled);
     vcm->SetRenderDelay(renderDelayMs);
     vcm->SetMinimumPlayoutDelay(minPlayoutDelayMs);
+    vcm->SetNackSettings(kMaxNackListSize, kMaxPacketAgeToNack);
 
     ret = 0;
 
     // RTP stream main loop
-    while ((ret = rtpStream.NextPacket(clock.MillisecondTimestamp())) == 0)
+    while ((ret = rtpStream.NextPacket(clock.TimeInMilliseconds())) == 0)
     {
-        if (clock.MillisecondTimestamp() % 5 == 0)
+        if (clock.TimeInMilliseconds() % 5 == 0)
         {
             ret = vcm->Decode();
             if (ret < 0)
@@ -212,28 +215,13 @@ int RtpPlay(CmdArgs& args)
         {
             vcm->Process();
         }
-        if (MAX_RUNTIME_MS > -1 && clock.MillisecondTimestamp() >=
+        if (MAX_RUNTIME_MS > -1 && clock.TimeInMilliseconds() >=
             MAX_RUNTIME_MS)
         {
             break;
         }
-        clock.IncrementDebugClock(1);
+        clock.AdvanceTimeMilliseconds(1);
     }
-
-    switch (ret)
-    {
-    case 1:
-        printf("Success\n");
-        break;
-    case -1:
-        printf("Failed\n");
-        break;
-    case 0:
-        printf("Timeout\n");
-        break;
-    }
-
-    rtpStream.Print();
 
     // Tear down
     while (!payloadTypes.empty())
@@ -243,6 +231,20 @@ int RtpPlay(CmdArgs& args)
     }
     delete vcm;
     vcm = NULL;
+    rtpStream.Print();
     Trace::ReturnTrace();
+
+    switch (ret)
+    {
+    case 1:
+        printf("Success\n");
+        return 0;
+    case -1:
+        printf("Failed\n");
+        return -1;
+    case 0:
+        printf("Timeout\n");
+        return -1;
+    }
     return 0;
 }

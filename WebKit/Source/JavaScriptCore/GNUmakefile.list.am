@@ -52,6 +52,8 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/API/JSObjectRef.cpp \
 	Source/JavaScriptCore/API/JSObjectRefPrivate.h \
 	Source/JavaScriptCore/API/JSRetainPtr.h \
+	Source/JavaScriptCore/API/JSScriptRef.cpp \
+	Source/JavaScriptCore/API/JSScriptRefPrivate.h \
 	Source/JavaScriptCore/API/JSStringRef.cpp \
 	Source/JavaScriptCore/API/JSValueRef.cpp \
 	Source/JavaScriptCore/API/JSWeakObjectMapRefInternal.h \
@@ -125,11 +127,14 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/bytecode/LineInfo.h \
 	Source/JavaScriptCore/bytecode/MethodOfGettingAValueProfile.cpp \
 	Source/JavaScriptCore/bytecode/MethodOfGettingAValueProfile.h \
+	Source/JavaScriptCore/bytecode/ObjectAllocationProfile.h \
 	Source/JavaScriptCore/bytecode/Opcode.cpp \
 	Source/JavaScriptCore/bytecode/Opcode.h \
 	Source/JavaScriptCore/bytecode/Operands.h \
 	Source/JavaScriptCore/bytecode/PolymorphicPutByIdList.cpp \
 	Source/JavaScriptCore/bytecode/PolymorphicPutByIdList.h \
+	Source/JavaScriptCore/bytecode/PreciseJumpTargets.cpp \
+	Source/JavaScriptCore/bytecode/PreciseJumpTargets.h \
 	Source/JavaScriptCore/bytecode/SpeculatedType.cpp \
 	Source/JavaScriptCore/bytecode/SpeculatedType.h \
 	Source/JavaScriptCore/bytecode/PutByIdStatus.cpp \
@@ -162,19 +167,24 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/bytecompiler/LabelScope.h \
 	Source/JavaScriptCore/bytecompiler/NodesCodegen.cpp \
 	Source/JavaScriptCore/bytecompiler/RegisterID.h \
+	Source/JavaScriptCore/bytecompiler/StaticPropertyAnalysis.h \
+	Source/JavaScriptCore/bytecompiler/StaticPropertyAnalyzer.h \
 	Source/JavaScriptCore/dfg/DFGAbstractState.cpp \
 	Source/JavaScriptCore/dfg/DFGAbstractState.h \
 	Source/JavaScriptCore/dfg/DFGAbstractValue.h \
+	Source/JavaScriptCore/dfg/DFGAdjacencyList.h \
+	Source/JavaScriptCore/dfg/DFGAllocator.h \
 	Source/JavaScriptCore/dfg/DFGArgumentPosition.h \
 	Source/JavaScriptCore/dfg/DFGArgumentsSimplificationPhase.cpp \
 	Source/JavaScriptCore/dfg/DFGArgumentsSimplificationPhase.h \
 	Source/JavaScriptCore/dfg/DFGArrayMode.cpp \
 	Source/JavaScriptCore/dfg/DFGArrayMode.h \
+	Source/JavaScriptCore/dfg/DFGArrayifySlowPathGenerator.h \
 	Source/JavaScriptCore/dfg/DFGAssemblyHelpers.cpp \
 	Source/JavaScriptCore/dfg/DFGAssemblyHelpers.h \
 	Source/JavaScriptCore/dfg/DFGBasicBlock.h \
+	Source/JavaScriptCore/dfg/DFGBasicBlockInlines.h \
 	Source/JavaScriptCore/dfg/DFGBranchDirection.h \
-	Source/JavaScriptCore/dfg/DFGByteCodeCache.h \
 	Source/JavaScriptCore/dfg/DFGByteCodeParser.cpp \
 	Source/JavaScriptCore/dfg/DFGByteCodeParser.h \
 	Source/JavaScriptCore/dfg/DFGCCallHelpers.h \
@@ -185,9 +195,10 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/dfg/DFGCapabilities.h \
 	Source/JavaScriptCore/dfg/DFGCFAPhase.cpp \
 	Source/JavaScriptCore/dfg/DFGCFAPhase.h \
+	Source/JavaScriptCore/dfg/DFGCPSRethreadingPhase.cpp \
+	Source/JavaScriptCore/dfg/DFGCPSRethreadingPhase.h \
+	Source/JavaScriptCore/dfg/DFGCommon.cpp \
 	Source/JavaScriptCore/dfg/DFGCommon.h \
-	Source/JavaScriptCore/dfg/DFGCorrectableJumpPoint.cpp \
-	Source/JavaScriptCore/dfg/DFGCorrectableJumpPoint.h \
 	Source/JavaScriptCore/dfg/DFGConstantFoldingPhase.cpp \
 	Source/JavaScriptCore/dfg/DFGConstantFoldingPhase.h \
 	Source/JavaScriptCore/dfg/DFGCSEPhase.cpp \
@@ -199,6 +210,8 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/dfg/DFGDoubleFormatState.h \
 	Source/JavaScriptCore/dfg/DFGDriver.cpp \
 	Source/JavaScriptCore/dfg/DFGDriver.h \
+	Source/JavaScriptCore/dfg/DFGEdge.cpp \
+	Source/JavaScriptCore/dfg/DFGEdge.h \
 	Source/JavaScriptCore/dfg/DFGFPRInfo.h \
 	Source/JavaScriptCore/dfg/DFGFixupPhase.cpp \
 	Source/JavaScriptCore/dfg/DFGFixupPhase.h \
@@ -209,15 +222,18 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/dfg/DFGInsertionSet.h \
 	Source/JavaScriptCore/dfg/DFGJITCompiler.cpp \
 	Source/JavaScriptCore/dfg/DFGJITCompiler.h \
+	Source/JavaScriptCore/dfg/DFGLongLivedState.cpp \
+	Source/JavaScriptCore/dfg/DFGLongLivedState.h \
 	Source/JavaScriptCore/dfg/DFGMinifiedGraph.h \
+	Source/JavaScriptCore/dfg/DFGMinifiedID.h \
 	Source/JavaScriptCore/dfg/DFGMinifiedNode.cpp \
 	Source/JavaScriptCore/dfg/DFGMinifiedNode.h \
+	Source/JavaScriptCore/dfg/DFGNode.cpp \
 	Source/JavaScriptCore/dfg/DFGNode.h \
+	Source/JavaScriptCore/dfg/DFGNodeAllocator.h \
 	Source/JavaScriptCore/dfg/DFGNodeFlags.cpp \
 	Source/JavaScriptCore/dfg/DFGNodeFlags.h \
-	Source/JavaScriptCore/dfg/DFGAdjacencyList.h \
 	Source/JavaScriptCore/dfg/DFGNodeType.h \
-	Source/JavaScriptCore/dfg/DFGEdge.h \
 	Source/JavaScriptCore/dfg/DFGOperations.cpp \
 	Source/JavaScriptCore/dfg/DFGOperations.h \
 	Source/JavaScriptCore/dfg/DFGOSREntry.cpp \
@@ -228,10 +244,15 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/dfg/DFGOSRExitCompiler.h \
 	Source/JavaScriptCore/dfg/DFGOSRExit.h \
 	Source/JavaScriptCore/dfg/DFGOSRExit.cpp \
+	Source/JavaScriptCore/dfg/DFGOSRExitCompilationInfo.h \
+	Source/JavaScriptCore/dfg/DFGOSRExitJumpPlaceholder.cpp \
+	Source/JavaScriptCore/dfg/DFGOSRExitJumpPlaceholder.h \
 	Source/JavaScriptCore/dfg/DFGPhase.cpp \
 	Source/JavaScriptCore/dfg/DFGPhase.h \
 	Source/JavaScriptCore/dfg/DFGPredictionPropagationPhase.cpp \
 	Source/JavaScriptCore/dfg/DFGPredictionPropagationPhase.h \
+	Source/JavaScriptCore/dfg/DFGPredictionInjectionPhase.cpp \
+	Source/JavaScriptCore/dfg/DFGPredictionInjectionPhase.h \
 	Source/JavaScriptCore/dfg/DFGRegisterBank.h \
 	Source/JavaScriptCore/dfg/DFGRegisterSet.h \
 	Source/JavaScriptCore/dfg/DFGRepatch.cpp \
@@ -249,6 +270,8 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/dfg/DFGStructureCheckHoistingPhase.h \
 	Source/JavaScriptCore/dfg/DFGThunks.cpp \
 	Source/JavaScriptCore/dfg/DFGThunks.h \
+	Source/JavaScriptCore/dfg/DFGUnificationPhase.cpp \
+	Source/JavaScriptCore/dfg/DFGUnificationPhase.h \
 	Source/JavaScriptCore/dfg/DFGValueRecoveryOverride.h \
 	Source/JavaScriptCore/dfg/DFGValueSource.cpp \
 	Source/JavaScriptCore/dfg/DFGValueSource.h \
@@ -261,6 +284,7 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/dfg/DFGVariableAccessData.h \
 	Source/JavaScriptCore/dfg/DFGVariableAccessDataDump.cpp \
 	Source/JavaScriptCore/dfg/DFGVariableAccessDataDump.h \
+	Source/JavaScriptCore/dfg/DFGVariadicFunction.h \
 	Source/JavaScriptCore/dfg/DFGVirtualRegisterAllocationPhase.cpp \
 	Source/JavaScriptCore/dfg/DFGVirtualRegisterAllocationPhase.h \
 	Source/JavaScriptCore/disassembler/Disassembler.cpp \
@@ -275,7 +299,6 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/heap/CopyVisitorInlines.h \
 	Source/JavaScriptCore/heap/CopyVisitor.cpp \
 	Source/JavaScriptCore/heap/CopyWorkList.h \
-	Source/JavaScriptCore/heap/CardSet.h \
 	Source/JavaScriptCore/heap/ConservativeRoots.cpp \
 	Source/JavaScriptCore/heap/ConservativeRoots.h \
 	Source/JavaScriptCore/heap/DFGCodeBlocks.cpp \
@@ -402,6 +425,7 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/jit/ClosureCallStubRoutine.h \
 	Source/JavaScriptCore/jit/ExecutableAllocator.cpp \
 	Source/JavaScriptCore/jit/ExecutableAllocator.h \
+	Source/JavaScriptCore/jit/ExecutableAllocatorFixedVMPool.cpp \
 	Source/JavaScriptCore/jit/GCAwareJITStubRoutine.cpp \
 	Source/JavaScriptCore/jit/GCAwareJITStubRoutine.h \
 	Source/JavaScriptCore/jit/HostCallReturnValue.cpp \
@@ -430,13 +454,17 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/jit/JITStubRoutine.h \
 	Source/JavaScriptCore/jit/JITStubs.cpp \
 	Source/JavaScriptCore/jit/JITStubs.h \
+	Source/JavaScriptCore/jit/JITThunks.cpp \
+	Source/JavaScriptCore/jit/JITThunks.h \
 	Source/JavaScriptCore/jit/JITWriteBarrier.h \
 	Source/JavaScriptCore/jit/JSInterfaceJIT.h \
 	Source/JavaScriptCore/jit/JumpReplacementWatchpoint.cpp \
 	Source/JavaScriptCore/jit/JumpReplacementWatchpoint.h \
 	Source/JavaScriptCore/jit/SpecializedThunkJIT.h \
+	Source/JavaScriptCore/jit/ThunkGenerator.h \
 	Source/JavaScriptCore/jit/ThunkGenerators.cpp \
 	Source/JavaScriptCore/jit/ThunkGenerators.h \
+	Source/JavaScriptCore/jit/UnusedPointer.h \
 	Source/JavaScriptCore/llint/LLIntCommon.h \
 	Source/JavaScriptCore/llint/LLIntCLoop.cpp \
 	Source/JavaScriptCore/llint/LLIntCLoop.h \
@@ -569,6 +597,8 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/runtime/ExecutionHarness.h \
 	Source/JavaScriptCore/runtime/FunctionConstructor.cpp \
 	Source/JavaScriptCore/runtime/FunctionConstructor.h \
+	Source/JavaScriptCore/runtime/FunctionExecutableDump.cpp \
+	Source/JavaScriptCore/runtime/FunctionExecutableDump.h \
 	Source/JavaScriptCore/runtime/FunctionPrototype.cpp \
 	Source/JavaScriptCore/runtime/FunctionPrototype.h \
 	Source/JavaScriptCore/runtime/GCActivityCallback.cpp \
@@ -595,8 +625,9 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/runtime/JSCell.cpp \
 	Source/JavaScriptCore/runtime/JSCell.h \
 	Source/JavaScriptCore/runtime/JSDateMath.cpp \
+	Source/JavaScriptCore/runtime/JSCellInlines.h \
 	Source/JavaScriptCore/runtime/JSDateMath.h \
-    Source/JavaScriptCore/runtime/JSDestructibleObject.h \
+	Source/JavaScriptCore/runtime/JSDestructibleObject.h \
 	Source/JavaScriptCore/runtime/JSFunction.cpp \
 	Source/JavaScriptCore/runtime/JSFunction.h \
 	Source/JavaScriptCore/runtime/JSBoundFunction.cpp \
@@ -636,9 +667,9 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/runtime/JSSymbolTableObject.h \
 	Source/JavaScriptCore/runtime/JSType.h \
 	Source/JavaScriptCore/runtime/JSTypeInfo.h \
-	Source/JavaScriptCore/runtime/JSValue.cpp \
-	Source/JavaScriptCore/runtime/JSValue.h \
-	Source/JavaScriptCore/runtime/JSValueInlines.h \
+	Source/JavaScriptCore/runtime/JSCJSValue.cpp \
+	Source/JavaScriptCore/runtime/JSCJSValue.h \
+	Source/JavaScriptCore/runtime/JSCJSValueInlines.h \
 	Source/JavaScriptCore/runtime/JSVariableObject.cpp \
 	Source/JavaScriptCore/runtime/JSVariableObject.h \
 	Source/JavaScriptCore/runtime/JSWithScope.h \
@@ -687,6 +718,8 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/runtime/PropertyOffset.h \
 	Source/JavaScriptCore/runtime/PropertySlot.cpp \
 	Source/JavaScriptCore/runtime/PropertySlot.h \
+	Source/JavaScriptCore/runtime/PrototypeMap.cpp \
+	Source/JavaScriptCore/runtime/PrototypeMap.h \
 	Source/JavaScriptCore/runtime/PropertyStorage.h \
 	Source/JavaScriptCore/runtime/Protect.h \
 	Source/JavaScriptCore/runtime/PutDirectIndexMode.h \
@@ -727,6 +760,9 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/runtime/StructureChain.h \
 	Source/JavaScriptCore/runtime/Structure.cpp \
 	Source/JavaScriptCore/runtime/Structure.h \
+	Source/JavaScriptCore/runtime/StructureRareData.cpp \
+	Source/JavaScriptCore/runtime/StructureRareData.h \
+	Source/JavaScriptCore/runtime/StructureRareDataInlines.h \
 	Source/JavaScriptCore/runtime/StructureTransitionTable.h \
 	Source/JavaScriptCore/runtime/SymbolTable.cpp \
 	Source/JavaScriptCore/runtime/SymbolTable.h \
@@ -758,12 +794,6 @@ javascriptcore_sources += \
 	Source/JavaScriptCore/yarr/YarrSyntaxChecker.cpp \
 	Source/JavaScriptCore/yarr/YarrSyntaxChecker.h
 
-if TARGET_WIN32
-else
-javascriptcore_sources += \
-	Source/JavaScriptCore/jit/ExecutableAllocatorFixedVMPool.cpp
-endif
-
 llint_nosources += \
 	Source/JavaScriptCore/llint/LowLevelInterpreter32_64.asm \
 	Source/JavaScriptCore/llint/LowLevelInterpreter64.asm \
@@ -778,6 +808,7 @@ offlineasm_nosources += \
 	Source/JavaScriptCore/offlineasm/config.rb \
 	Source/JavaScriptCore/offlineasm/generate_offset_extractor.rb \
 	Source/JavaScriptCore/offlineasm/instructions.rb \
+	Source/JavaScriptCore/offlineasm/mips.rb \
 	Source/JavaScriptCore/offlineasm/offsets.rb \
 	Source/JavaScriptCore/offlineasm/opt.rb \
 	Source/JavaScriptCore/offlineasm/parser.rb \

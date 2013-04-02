@@ -19,6 +19,7 @@ package com.google.ipc.invalidation.util;
 import com.google.protobuf.ByteString;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 
 /**
  * A {@link TextBuilder} is an abstraction that allows classes to efficiently
@@ -43,6 +44,12 @@ public class TextBuilder {
     Field[] fields = object.getClass().getDeclaredFields();
     for (Field field : fields) {
       try {
+        // Ignore static final fields, as they're uninteresting.
+        int modifiers = field.getModifiers();
+        if (Modifier.isStatic(modifiers) && Modifier.isFinal(modifiers)) {
+          continue;
+        }
+
         field.setAccessible(true);
         builder.append(field.getName() + " = ");
         Object fieldValue = field.get(object);

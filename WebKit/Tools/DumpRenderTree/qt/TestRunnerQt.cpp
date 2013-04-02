@@ -31,6 +31,7 @@
 
 #include "DumpRenderTreeQt.h"
 #include "DumpRenderTreeSupportQt.h"
+#include "NotificationPresenterClientQt.h"
 #include "WorkQueue.h"
 #include "WorkQueueItemQt.h"
 #include <QCoreApplication>
@@ -45,7 +46,6 @@ TestRunner::TestRunner(WebCore::DumpRenderTree* drt)
     , m_timeout(30000)
 {
     reset();
-    DumpRenderTreeSupportQt::dumpNotification(true);
 }
 
 void TestRunner::reset()
@@ -53,6 +53,7 @@ void TestRunner::reset()
     m_hasDumped = false;
     m_loadFinished = false;
     m_textDump = false;
+    m_audioDump = false;
     m_shouldDumpPixels = true;
     m_dumpBackForwardList = false;
     m_dumpChildrenAsText = false;
@@ -71,11 +72,11 @@ void TestRunner::reset()
     m_webHistory = 0;
     m_globalFlag = false;
     m_userStyleSheetEnabled = false;
-    m_desktopNotificationAllowedOrigins.clear();
     m_ignoreDesktopNotification = false;
     m_isGeolocationPermissionSet = false;
     m_isPrinting = false;
     m_geolocationPermission = false;
+    m_audioData.clear();
 
     DumpRenderTreeSupportQt::dumpEditingCallbacks(false);
     DumpRenderTreeSupportQt::dumpFrameLoader(false);
@@ -93,11 +94,18 @@ void TestRunner::reset()
     DumpRenderTreeSupportQt::dumpHistoryCallbacks(false);
     DumpRenderTreeSupportQt::dumpVisitedLinksCallbacks(false);
     DumpRenderTreeSupportQt::resetGeolocationMock(m_drt->pageAdapter());
+    DumpRenderTreeSupportQt::dumpNotification(false);
     setIconDatabaseEnabled(false);
     clearAllDatabases();
+    removeAllWebNotificationPermissions();
     // The default state for DRT is to block third-party cookies, mimicing the Mac port
     setAlwaysAcceptCookies(false);
     emit hidePage();
+}
+
+void TestRunner::dumpNotifications()
+{
+    DumpRenderTreeSupportQt::dumpNotification(true);
 }
 
 void TestRunner::processWork()
@@ -213,7 +221,6 @@ void TestRunner::grantWebNotificationPermission(const QString& origin)
 {
     QWebFrame* frame = m_drt->webPage()->mainFrame();
     m_drt->webPage()->setFeaturePermission(frame, QWebPage::Notifications, QWebPage::PermissionGrantedByUser);
-    m_desktopNotificationAllowedOrigins.append(origin);
 }
 
 void TestRunner::ignoreLegacyWebNotificationPermissionRequests()
@@ -223,12 +230,13 @@ void TestRunner::ignoreLegacyWebNotificationPermissionRequests()
 
 void TestRunner::denyWebNotificationPermission(const QString& origin)
 {
-    // FIXME: implement.
+    QWebFrame* frame = m_drt->webPage()->mainFrame();
+    m_drt->webPage()->setFeaturePermission(frame, QWebPage::Notifications, QWebPage::PermissionDeniedByUser);
 }
 
 void TestRunner::removeAllWebNotificationPermissions()
 {
-    // FIXME: implement.
+    DumpRenderTreeSupportQt::clearNotificationPermissions();
 }
 
 void TestRunner::simulateWebNotificationClick(const QWebElement& notification)
@@ -538,31 +546,6 @@ void TestRunner::setXSSAuditorEnabled(bool enable)
     m_drt->webPage()->settings()->setAttribute(QWebSettings::XSSAuditingEnabled, enable);
 }
 
-bool TestRunner::pauseAnimationAtTimeOnElementWithId(const QString& animationName,
-                                                               double time,
-                                                               const QString& elementId)
-{
-    QWebFrame* frame = m_drt->webPage()->mainFrame();
-    Q_ASSERT(frame);
-    return DumpRenderTreeSupportQt::pauseAnimation(frame->handle(), animationName, time, elementId);
-}
-
-bool TestRunner::pauseTransitionAtTimeOnElementWithId(const QString& propertyName,
-                                                                double time,
-                                                                const QString& elementId)
-{
-    QWebFrame* frame = m_drt->webPage()->mainFrame();
-    Q_ASSERT(frame);
-    return DumpRenderTreeSupportQt::pauseTransitionOfProperty(frame->handle(), propertyName, time, elementId);
-}
-
-unsigned TestRunner::numberOfActiveAnimations() const
-{
-    QWebFrame* frame = m_drt->webPage()->mainFrame();
-    Q_ASSERT(frame);
-    return DumpRenderTreeSupportQt::numberOfActiveAnimations(frame->handle());
-}
-
 void TestRunner::dispatchPendingLoadRequests()
 {
     // FIXME: Implement for testing fix for 6727495
@@ -677,6 +660,8 @@ void TestRunner::overridePreference(const QString& name, const QVariant& value)
         settings->setAttribute(QWebSettings::AcceleratedCompositingEnabled, value.toBool());
     else if (name == "WebKitDisplayImagesKey")
         settings->setAttribute(QWebSettings::AutoLoadImages, value.toBool());
+    else if (name == "WebKitWebAudioEnabled")
+        settings->setAttribute(QWebSettings::WebAudioEnabled, value.toBool());
     else
         printf("ERROR: TestRunner::overridePreference() does not support the '%s' preference\n",
             name.toLatin1().data());
@@ -714,11 +699,6 @@ void TestRunner::setUserStyleSheetEnabled(bool enabled)
 void TestRunner::setDomainRelaxationForbiddenForURLScheme(bool forbidden, const QString& scheme)
 {
     DumpRenderTreeSupportQt::setDomainRelaxationForbiddenForURLScheme(forbidden, scheme);
-}
-
-int TestRunner::workerThreadCount()
-{
-    return DumpRenderTreeSupportQt::workerThreadCount();
 }
 
 bool TestRunner::callShouldCloseOnWebView()
@@ -966,6 +946,12 @@ void TestRunner::setAlwaysBlockCookies(bool block)
         globalSettings->setThirdPartyCookiePolicy(QWebSettings::AlwaysBlockThirdPartyCookies);
     else
         globalSettings->setThirdPartyCookiePolicy(QWebSettings::AlwaysAllowThirdPartyCookies);
+}
+
+void TestRunner::setAudioData(const QByteArray& audioData)
+{
+    m_audioData = audioData;
+    m_audioDump = true;
 }
 
 const unsigned TestRunner::maxViewWidth = 800;

@@ -41,8 +41,6 @@
 #include <wtf/Deque.h>
 #include <wtf/Forward.h>
 
-typedef struct _Evas_Object Evas_Object;
-
 struct Ewk_Should_Insert_Node_Event {
     WebCore::Node* node;
     WebCore::Range* range;
@@ -110,7 +108,9 @@ public:
     virtual void respondToChangedContents();
     virtual void respondToChangedSelection(Frame*);
     virtual void didEndEditing();
+    virtual void willWriteSelectionToPasteboard(WebCore::Range*);
     virtual void didWriteSelectionToPasteboard();
+    virtual void getClientPasteboardDataForRange(WebCore::Range*, Vector<String>& pasteboardTypes, Vector<RefPtr<WebCore::SharedBuffer> >& pasteboardData);
     virtual void didSetSelectionTypesForPasteboard();
 
     virtual void registerUndoStep(WTF::PassRefPtr<UndoStep>);

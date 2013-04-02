@@ -27,6 +27,10 @@
 #include "modules/audio_coding/codecs/isac/fix/source/structs.h"
 #include "system_wrappers/interface/cpu_features_wrapper.h"
 
+// Declare function pointers.
+FilterMaLoopFix WebRtcIsacfix_FilterMaLoopFix;
+Spec2Time WebRtcIsacfix_Spec2Time;
+Time2Spec WebRtcIsacfix_Time2Spec;
 
 /**************************************************************************
  * WebRtcIsacfix_AssignSize(...)
@@ -182,6 +186,8 @@ WebRtc_Word16 WebRtcIsacfix_FreeInternal(ISACFIX_MainStruct *ISAC_main_inst)
 static void WebRtcIsacfix_InitNeon(void) {
   WebRtcIsacfix_AutocorrFix = WebRtcIsacfix_AutocorrNeon;
   WebRtcIsacfix_FilterMaLoopFix = WebRtcIsacfix_FilterMaLoopNeon;
+  WebRtcIsacfix_Spec2Time = WebRtcIsacfix_Spec2TimeNeon;
+  WebRtcIsacfix_Time2Spec = WebRtcIsacfix_Time2SpecNeon;
   WebRtcIsacfix_CalculateResidualEnergy =
       WebRtcIsacfix_CalculateResidualEnergyNeon;
   WebRtcIsacfix_AllpassFilter2FixDec16 =
@@ -272,8 +278,9 @@ WebRtc_Word16 WebRtcIsacfix_EncoderInit(ISACFIX_MainStruct *ISAC_main_inst,
   WebRtcIsacfix_FilterMaLoopFix = WebRtcIsacfix_FilterMaLoopC;
   WebRtcIsacfix_CalculateResidualEnergy =
       WebRtcIsacfix_CalculateResidualEnergyC;
-  WebRtcIsacfix_AllpassFilter2FixDec16 =
-      WebRtcIsacfix_AllpassFilter2FixDec16C;
+  WebRtcIsacfix_AllpassFilter2FixDec16 = WebRtcIsacfix_AllpassFilter2FixDec16C;
+  WebRtcIsacfix_Time2Spec = WebRtcIsacfix_Time2SpecC;
+  WebRtcIsacfix_Spec2Time = WebRtcIsacfix_Spec2TimeC;
 
 #ifdef WEBRTC_DETECT_ARM_NEON
   if ((WebRtc_GetCPUFeaturesARM() & kCPUFeatureNEON) != 0) {

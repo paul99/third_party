@@ -51,26 +51,6 @@ import java.util.concurrent.TimeUnit;
  * register or unregister are called for an object after a failure has occurred. Also suppresses
  * redundant register requests.
  *
- * <p>If the subclass is {@code namespace.ExampleListener}, you will need to add the following lines
- * to the <code><application></code> element in your Android manifest file:
- *
- * <p><code>
- *     <!-- Configure the listener class for the application -->
- *     <meta-data android:name="ipc.invalidation.ticl.listener_service_class"
- *          android:value="namespace.ExampleListener"/>
- *
- *     <!-- Ticl listener. -->
- *     <service android:exported="false" android:name="namespace.ExampleListener">
- *       <intent-filter>
- *         <action android:name="com.google.ipc.invalidation.AUTH_TOKEN_REQUEST"/>
- *       </intent-filter>
- *     </service>
- *
- *     <!-- Receiver for scheduler alarms. Must be exported for the AlarmManager to call it. -->
- *     <receiver android:exported="true" android:name=
- *     "com.google.ipc.invalidation.external.client.contrib.AndroidListener$AlarmReceiver"/>
- * </code>
- *
  * <p>A sample implementation of an {@link AndroidListener} is shown below:
  *
  * <p><code>
@@ -111,6 +91,8 @@ import java.util.concurrent.TimeUnit;
  * }
  * </code>
  *
+ * <p>See {@link com.google.ipc.invalidation.examples.android2} for a complete sample.
+ *
  */
 public abstract class AndroidListener extends IntentService {
 
@@ -130,10 +112,16 @@ public abstract class AndroidListener extends IntentService {
   private static final Logger logger = AndroidLogger.forPrefix("");
 
   /** Initial retry delay for exponential backoff (1 minute). */
-  private static final int INITIAL_MAX_DELAY_MS = (int) TimeUnit.SECONDS.toMillis(60);
+  
+  static int initialMaxDelayMs = (int) TimeUnit.SECONDS.toMillis(60);
 
   /** Maximum delay factor for exponential backoff (6 hours). */
-  private static final int MAX_DELAY_FACTOR = 6 * 60;
+  
+  static int maxDelayFactor = 6 * 60;
+
+  /** The last client ID passed to the ready up-call. */
+  
+  static byte[] lastClientIdForTest;
 
   /**
    * Invalidation listener implementation. We implement the interface on a private field rather
@@ -143,8 +131,9 @@ public abstract class AndroidListener extends IntentService {
   private final InvalidationListener invalidationListener = new InvalidationListener() {
     @Override
     public final void ready(final InvalidationClient client) {
-      // We rely on reissueRegistrations being called by the TICL service after ready().
-      logger.info("ready() upcall received.");
+      byte[] clientId = state.getClientId().toByteArray();
+      AndroidListener.lastClientIdForTest = clientId;
+      AndroidListener.this.ready(clientId);
     }
 
     @Override
@@ -329,6 +318,14 @@ public abstract class AndroidListener extends IntentService {
   }
 
   /**
+   * See specs for {@link InvalidationListener#ready}.
+   *
+   * @param clientId the client identifier that must be passed to {@link #createRegisterIntent}
+   *     and {@link #createUnregisterIntent}
+   */
+  public abstract void ready(byte[] clientId);
+
+  /**
    * See specs for {@link InvalidationListener#reissueRegistrations}.
    *
    * @param clientId the client identifier that must be passed to {@link #createRegisterIntent}
@@ -445,24 +442,10 @@ public abstract class AndroidListener extends IntentService {
   private void initializeState() {
     AndroidListenerProtocol.AndroidListenerState proto = getPersistentState();
     if (proto != null) {
-      state = new AndroidListenerState(getInitialMaxDelayMs(), getMaxDelayFactor(), proto);
+      state = new AndroidListenerState(initialMaxDelayMs, maxDelayFactor, proto);
     } else {
-      state = new AndroidListenerState(getInitialMaxDelayMs(), getMaxDelayFactor());
+      state = new AndroidListenerState(initialMaxDelayMs, maxDelayFactor);
     }
-  }
-
-  /** Gets initial maximum retry delay for exponential backoff. Can be overridden for tests. */
-  
-  int getInitialMaxDelayMs() {
-    return INITIAL_MAX_DELAY_MS;
-  }
-
-  /**
-   * Gets maximum delay factor for exponential backoff (relative to {@link #getInitialMaxDelayMs}).
-   */
-  
-  int getMaxDelayFactor() {
-    return MAX_DELAY_FACTOR;
   }
 
   /**
@@ -574,6 +557,9 @@ public abstract class AndroidListener extends IntentService {
         getClient().register(objectId);
       }
     } else {
+      // Remove the object ID from the desired registration collection so that subsequent attempts
+      // to re-register are not ignored.
+      state.removeDesiredRegistration(objectId);
       getClient().unregister(objectId);
     }
   }
@@ -586,7 +572,7 @@ public abstract class AndroidListener extends IntentService {
     }
     // Reset the state so that we make no assumptions about desired registrations and can ignore
     // messages directed at the wrong instance.
-    state = new AndroidListenerState(getInitialMaxDelayMs(), getMaxDelayFactor());
+    state = new AndroidListenerState(initialMaxDelayMs, maxDelayFactor);
     boolean skipStartForTest = false;
     Intent startIntent = ProtocolIntents.InternalDowncalls.newCreateClientIntent(
         command.getClientType(), command.getClientName().toByteArray(),

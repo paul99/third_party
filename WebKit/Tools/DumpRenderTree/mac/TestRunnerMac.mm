@@ -43,7 +43,6 @@
 #import <JavaScriptCore/JSStringRef.h>
 #import <JavaScriptCore/JSStringRefCF.h>
 #import <WebCore/GeolocationPosition.h>
-#import <WebCore/PageVisibilityState.h>
 #import <WebKit/DOMDocument.h>
 #import <WebKit/DOMElement.h>
 #import <WebKit/WebApplicationCache.h>
@@ -74,7 +73,6 @@
 #import <WebKit/WebTypesInternal.h>
 #import <WebKit/WebView.h>
 #import <WebKit/WebViewPrivate.h>
-#import <WebKit/WebWorkersPrivate.h>
 #import <wtf/CurrentTime.h>
 #import <wtf/HashMap.h>
 #import <wtf/RetainPtr.h>
@@ -298,11 +296,6 @@ int TestRunner::numberOfPendingGeolocationPermissionRequests()
 size_t TestRunner::webHistoryItemCount()
 {
     return [[[WebHistory optionalSharedHistory] allItems] count];
-}
-
-unsigned TestRunner::workerThreadCount() const
-{
-    return [WebWorkersPrivate workerThreadCount];
 }
 
 JSRetainPtr<JSStringRef> TestRunner::platformName() const
@@ -788,31 +781,6 @@ bool TestRunner::isCommandEnabled(JSStringRef name)
     return [validator validateUserInterfaceItem:target.get()];
 }
 
-bool TestRunner::pauseAnimationAtTimeOnElementWithId(JSStringRef animationName, double time, JSStringRef elementId)
-{
-    RetainPtr<CFStringRef> idCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, elementId));
-    NSString *idNS = (NSString *)idCF.get();
-    RetainPtr<CFStringRef> nameCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, animationName));
-    NSString *nameNS = (NSString *)nameCF.get();
-    
-    return [mainFrame _pauseAnimation:nameNS onNode:[[mainFrame DOMDocument] getElementById:idNS] atTime:time];
-}
-
-bool TestRunner::pauseTransitionAtTimeOnElementWithId(JSStringRef propertyName, double time, JSStringRef elementId)
-{
-    RetainPtr<CFStringRef> idCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, elementId));
-    NSString *idNS = (NSString *)idCF.get();
-    RetainPtr<CFStringRef> nameCF(AdoptCF, JSStringCopyCFString(kCFAllocatorDefault, propertyName));
-    NSString *nameNS = (NSString *)nameCF.get();
-    
-    return [mainFrame _pauseTransitionOfProperty:nameNS onNode:[[mainFrame DOMDocument] getElementById:idNS] atTime:time];
-}
-
-unsigned TestRunner::numberOfActiveAnimations() const
-{
-    return [mainFrame _numberOfActiveAnimations];
-}
-
 void TestRunner::waitForPolicyDelegate()
 {
     setWaitToDump(true);
@@ -1156,9 +1124,8 @@ void TestRunner::setBackingScaleFactor(double backingScaleFactor)
 void TestRunner::resetPageVisibility()
 {
     WebView *webView = [mainFrame webView];
-    if ([webView respondsToSelector:@selector(_setVisibilityState:isInitialState:)]) {
-        [webView _setVisibilityState:WebCore::PageVisibilityStateVisible isInitialState:NO];
-    }
+    if ([webView respondsToSelector:@selector(_setVisibilityState:isInitialState:)])
+        [webView _setVisibilityState:WebPageVisibilityStateVisible isInitialState:YES];
 }
 
 void TestRunner::setPageVisibility(const char* newVisibility)
@@ -1168,13 +1135,13 @@ void TestRunner::setPageVisibility(const char* newVisibility)
 
     WebView *webView = [mainFrame webView];
     if (!strcmp(newVisibility, "visible"))
-        [webView _setVisibilityState:WebCore::PageVisibilityStateVisible isInitialState:NO];
+        [webView _setVisibilityState:WebPageVisibilityStateVisible isInitialState:NO];
     else if (!strcmp(newVisibility, "hidden"))
-        [webView _setVisibilityState:WebCore::PageVisibilityStateHidden isInitialState:NO];
+        [webView _setVisibilityState:WebPageVisibilityStateHidden isInitialState:NO];
     else if (!strcmp(newVisibility, "prerender"))
-        [webView _setVisibilityState:WebCore::PageVisibilityStatePrerender isInitialState:NO];
+        [webView _setVisibilityState:WebPageVisibilityStatePrerender isInitialState:NO];
     else if (!strcmp(newVisibility, "preview"))
-        [webView _setVisibilityState:WebCore::PageVisibilityStatePreview isInitialState:NO];
+        [webView _setVisibilityState:WebPageVisibilityStatePreview isInitialState:NO];
 }
 
 void TestRunner::sendWebIntentResponse(JSStringRef)

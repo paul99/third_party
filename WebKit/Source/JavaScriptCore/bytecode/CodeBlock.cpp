@@ -31,6 +31,7 @@
 #include "CodeBlock.h"
 
 #include "BytecodeGenerator.h"
+#include "CallLinkStatus.h"
 #include "DFGCapabilities.h"
 #include "DFGCommon.h"
 #include "DFGNode.h"
@@ -40,14 +41,16 @@
 #include "JIT.h"
 #include "JITStubs.h"
 #include "JSActivation.h"
+#include "JSCJSValue.h"
 #include "JSFunction.h"
 #include "JSNameScope.h"
-#include "JSValue.h"
 #include "LowLevelInterpreter.h"
+#include "Operations.h"
 #include "ReduceWhitespace.h"
 #include "RepatchBuffer.h"
 #include "SlotVisitorInlines.h"
 #include <stdio.h>
+#include <wtf/CommaPrinter.h>
 #include <wtf/StringExtras.h>
 #include <wtf/StringPrintStream.h>
 #include <wtf/UnusedParam.h>
@@ -72,7 +75,7 @@ String CodeBlock::inferredName() const
     case EvalCode:
         return "<eval>";
     case FunctionCode:
-        return jsCast<FunctionExecutable*>(ownerExecutable())->unlinkedExecutable()->inferredName().string();
+        return jsCast<FunctionExecutable*>(ownerExecutable())->inferredName().string();
     default:
         CRASH();
         return String();
@@ -155,6 +158,15 @@ static CString idName(int id0, const Identifier& ident)
 
 void CodeBlock::dumpBytecodeCommentAndNewLine(PrintStream& out, int location)
 {
+#if ENABLE(DFG_JIT)
+    Vector<FrequentExitSite> exitSites = exitProfile().exitSitesFor(location);
+    if (!exitSites.isEmpty()) {
+        out.print(" !! frequent exits: ");
+        CommaPrinter comma;
+        for (unsigned i = 0; i < exitSites.size(); ++i)
+            out.print(comma, exitSites[i].kind());
+    }
+#endif // ENABLE(DFG_JIT)
 #if ENABLE(BYTECODE_COMMENTS)
     const char* comment = commentForBytecodeOffset(location);
     if (comment)
@@ -219,7 +231,7 @@ NEVER_INLINE static const char* debugHookName(int debugHookID)
             return "didReachBreakpoint";
     }
 
-    ASSERT_NOT_REACHED();
+    RELEASE_ASSERT_NOT_REACHED();
     return "";
 }
 
@@ -293,7 +305,7 @@ void CodeBlock::printGetByIdOp(PrintStream& out, ExecState* exec, int location, 
         op = "string_length";
         break;
     default:
-        ASSERT_NOT_REACHED();
+        RELEASE_ASSERT_NOT_REACHED();
         op = 0;
     }
     int r0 = (++it)->u.operand;
@@ -403,7 +415,7 @@ void CodeBlock::printGetByIdCacheStatus(PrintStream& out, ExecState* exec, int l
                 out.printf("string_length");
                 break;
             default:
-                ASSERT_NOT_REACHED();
+                RELEASE_ASSERT_NOT_REACHED();
                 break;
             }
             
@@ -473,6 +485,7 @@ void CodeBlock::printCallOp(PrintStream& out, ExecState* exec, int location, con
                 out.printf(" jit(%p, exec %p)", target, target->executable());
         }
 #endif
+        out.print(" status(", CallLinkStatus::computeFor(this, location), ")");
     }
     it += 2;
 }
@@ -679,6 +692,7 @@ void CodeBlock::dumpValueProfiling(PrintStream& out, const Instruction*& it, boo
     out.print(description);
 #else
     UNUSED_PARAM(out);
+    UNUSED_PARAM(hasPrintedProfiling);
 #endif
 }
 
@@ -693,6 +707,7 @@ void CodeBlock::dumpArrayProfiling(PrintStream& out, const Instruction*& it, boo
     out.print(description);
 #else
     UNUSED_PARAM(out);
+    UNUSED_PARAM(hasPrintedProfiling);
 #endif
 }
 
@@ -740,7 +755,8 @@ void CodeBlock::dumpBytecode(PrintStream& out, ExecState* exec, const Instructio
         case op_create_this: {
             int r0 = (++it)->u.operand;
             int r1 = (++it)->u.operand;
-            out.printf("[%4d] create_this %s, %s", location, registerName(exec, r0).data(), registerName(exec, r1).data());
+            unsigned inferredInlineCapacity = (++it)->u.operand;
+            out.printf("[%4d] create_this %s, %s, %u", location, registerName(exec, r0).data(), registerName(exec, r1).data(), inferredInlineCapacity);
             break;
         }
         case op_convert_this: {
@@ -751,7 +767,9 @@ void CodeBlock::dumpBytecode(PrintStream& out, ExecState* exec, const Instructio
         }
         case op_new_object: {
             int r0 = (++it)->u.operand;
-            out.printf("[%4d] new_object\t %s", location, registerName(exec, r0).data());
+            unsigned inferredInlineCapacity = (++it)->u.operand;
+            out.printf("[%4d] new_object\t %s, %u", location, registerName(exec, r0).data(), inferredInlineCapacity);
+            ++it; // Skip object allocation profile.
             break;
         }
         case op_new_array: {
@@ -1479,7 +1497,7 @@ void CodeBlock::dumpBytecode(PrintStream& out, ExecState* exec, const Instructio
         }
 #if ENABLE(LLINT_C_LOOP)
         default:
-            ASSERT(false); // We should never get here.
+            RELEASE_ASSERT_NOT_REACHED();
 #endif
     }
 
@@ -1638,9 +1656,6 @@ CodeBlock::CodeBlock(CopyParsedBlockTag, CodeBlock& other)
     , m_isStrictMode(other.m_isStrictMode)
     , m_source(other.m_source)
     , m_sourceOffset(other.m_sourceOffset)
-#if ENABLE(VALUE_PROFILER)
-    , m_executionEntryCount(0)
-#endif
     , m_identifiers(other.m_identifiers)
     , m_constantRegisters(other.m_constantRegisters)
     , m_functionDecls(other.m_functionDecls)
@@ -1687,9 +1702,6 @@ CodeBlock::CodeBlock(ScriptExecutable* ownerExecutable, UnlinkedCodeBlock* unlin
     , m_isStrictMode(unlinkedCodeBlock->isStrictMode())
     , m_source(sourceProvider)
     , m_sourceOffset(sourceOffset)
-#if ENABLE(VALUE_PROFILER)
-    , m_executionEntryCount(0)
-#endif
     , m_alternative(alternative)
     , m_osrExitCounter(0)
     , m_optimizationDelayCounter(0)
@@ -1803,14 +1815,14 @@ CodeBlock::CodeBlock(ScriptExecutable* ownerExecutable, UnlinkedCodeBlock* unlin
     if (size_t size = unlinkedCodeBlock->numberOfValueProfiles())
         m_valueProfiles.grow(size);
 #endif
+    if (size_t size = unlinkedCodeBlock->numberOfObjectAllocationProfiles())
+        m_objectAllocationProfiles.grow(size);
     if (size_t size = unlinkedCodeBlock->numberOfResolveOperations())
         m_resolveOperations.grow(size);
     size_t putToBaseCount = unlinkedCodeBlock->numberOfPutToBaseOperations();
-    m_putToBaseOperations.reserveCapacity(putToBaseCount);
+    m_putToBaseOperations.reserveInitialCapacity(putToBaseCount);
     for (size_t i = 0; i < putToBaseCount; ++i)
-        m_putToBaseOperations.append(PutToBaseOperation(isStrictMode()));
-
-    ASSERT(m_putToBaseOperations.capacity() == putToBaseCount);
+        m_putToBaseOperations.uncheckedAppend(PutToBaseOperation(isStrictMode()));
 
     // Copy and translate the UnlinkedInstructions
     size_t instructionCount = unlinkedCodeBlock->instructions().size();
@@ -1863,6 +1875,17 @@ CodeBlock::CodeBlock(ScriptExecutable* ownerExecutable, UnlinkedCodeBlock* unlin
             break;
         }
 #endif
+
+        case op_new_object: {
+            int objectAllocationProfileIndex = pc[i + opLength - 1].u.operand;
+            ObjectAllocationProfile* objectAllocationProfile = &m_objectAllocationProfiles[objectAllocationProfileIndex];
+            int inferredInlineCapacity = pc[i + opLength - 2].u.operand;
+
+            instructions[i + opLength - 1] = objectAllocationProfile;
+            objectAllocationProfile->initialize(*globalData(),
+                m_ownerExecutable.get(), m_globalObject->objectPrototype(), inferredInlineCapacity);
+            break;
+        }
 
         case op_call:
         case op_call_eval: {
@@ -2102,7 +2125,7 @@ void CodeBlock::visitAggregate(SlotVisitor& visitor)
         visitor.addWeakReferenceHarvester(this);
     
 #else // ENABLE(DFG_JIT)
-    ASSERT_NOT_REACHED();
+    RELEASE_ASSERT_NOT_REACHED();
 #endif // ENABLE(DFG_JIT)
 }
 
@@ -2218,7 +2241,7 @@ void CodeBlock::finalizeUnconditionally()
             case op_get_array_length:
                 break;
             default:
-                ASSERT_NOT_REACHED();
+                RELEASE_ASSERT_NOT_REACHED();
             }
         }
 
@@ -2381,6 +2404,8 @@ void CodeBlock::stronglyVisitStrongReferences(SlotVisitor& visitor)
         visitor.append(&m_functionExprs[i]);
     for (size_t i = 0; i < m_functionDecls.size(); ++i)
         visitor.append(&m_functionDecls[i]);
+    for (unsigned i = 0; i < m_objectAllocationProfiles.size(); ++i)
+        m_objectAllocationProfiles[i].visitAggregate(visitor);
 
     updateAllPredictions(Collection);
 }
@@ -2483,7 +2508,7 @@ void CodeBlock::dumpBytecodeComments()
 
 HandlerInfo* CodeBlock::handlerForBytecodeOffset(unsigned bytecodeOffset)
 {
-    ASSERT(bytecodeOffset < instructions().size());
+    RELEASE_ASSERT(bytecodeOffset < instructions().size());
 
     if (!m_rareData)
         return 0;
@@ -2501,7 +2526,7 @@ HandlerInfo* CodeBlock::handlerForBytecodeOffset(unsigned bytecodeOffset)
 
 int CodeBlock::lineNumberForBytecodeOffset(unsigned bytecodeOffset)
 {
-    ASSERT(bytecodeOffset < instructions().size());
+    RELEASE_ASSERT(bytecodeOffset < instructions().size());
     return m_ownerExecutable->lineNo() + m_unlinkedCode->lineNumberForBytecodeOffset(bytecodeOffset);
 }
 
@@ -2721,11 +2746,11 @@ unsigned CodeBlock::bytecodeOffset(ExecState* exec, ReturnAddressPtr returnAddre
         && returnAddress.value() <= LLInt::getCodePtr(llint_end))
 #endif
     {
-        ASSERT(exec->codeBlock());
-        ASSERT(exec->codeBlock() == this);
-        ASSERT(JITCode::isBaselineCode(getJITType()));
+        RELEASE_ASSERT(exec->codeBlock());
+        RELEASE_ASSERT(exec->codeBlock() == this);
+        RELEASE_ASSERT(JITCode::isBaselineCode(getJITType()));
         Instruction* instruction = exec->currentVPC();
-        ASSERT(instruction);
+        RELEASE_ASSERT(instruction);
 
         instruction = adjustPCIfAtCallSite(instruction);
         return bytecodeOffset(instruction);
@@ -2744,7 +2769,7 @@ unsigned CodeBlock::bytecodeOffset(ExecState* exec, ReturnAddressPtr returnAddre
         CallReturnOffsetToBytecodeOffset* result =
             binarySearch<CallReturnOffsetToBytecodeOffset, unsigned>(
                 callIndices, callIndices.size(), callReturnOffset, getCallReturnOffset);
-        ASSERT(result->callReturnOffset == callReturnOffset);
+        RELEASE_ASSERT(result->callReturnOffset == callReturnOffset);
         return result->bytecodeOffset;
     }
 
@@ -2931,6 +2956,13 @@ bool FunctionCodeBlock::jitCompileImpl(ExecState* exec)
 }
 #endif
 
+JSGlobalObject* CodeBlock::globalObjectFor(CodeOrigin codeOrigin)
+{
+    if (!codeOrigin.inlineCallFrame)
+        return globalObject();
+    return jsCast<FunctionExecutable*>(codeOrigin.inlineCallFrame->executable.get())->generatedBytecode().globalObject();
+}
+
 unsigned CodeBlock::reoptimizationRetryCounter() const
 {
     ASSERT(m_reoptimizationRetryCounter <= Options::reoptimizationRetryCounterMax());
@@ -2942,6 +2974,14 @@ void CodeBlock::countReoptimization()
     m_reoptimizationRetryCounter++;
     if (m_reoptimizationRetryCounter > Options::reoptimizationRetryCounterMax())
         m_reoptimizationRetryCounter = Options::reoptimizationRetryCounterMax();
+}
+
+int32_t CodeBlock::codeTypeThresholdMultiplier() const
+{
+    if (codeType() == EvalCode)
+        return Options::evalThresholdMultiplier();
+    
+    return 1;
 }
 
 double CodeBlock::optimizationThresholdScalingFactor()
@@ -3014,9 +3054,9 @@ double CodeBlock::optimizationThresholdScalingFactor()
     
     double result = d + a * sqrt(instructionCount + b) + c * instructionCount;
 #if ENABLE(JIT_VERBOSE_OSR)
-    dataLog(*this, ": instruction count is ", instructionCount, ", scaling execution counter by ", result, "\n");
+    dataLog(*this, ": instruction count is ", instructionCount, ", scaling execution counter by ", result, " * ", codeTypeThresholdMultiplier(), "\n");
 #endif
-    return result;
+    return result * codeTypeThresholdMultiplier();
 }
 
 static int32_t clipThreshold(double threshold)
@@ -3102,12 +3142,12 @@ uint32_t CodeBlock::adjustedExitCountThreshold(uint32_t desiredThreshold)
 
 uint32_t CodeBlock::exitCountThresholdForReoptimization()
 {
-    return adjustedExitCountThreshold(Options::osrExitCountForReoptimization());
+    return adjustedExitCountThreshold(Options::osrExitCountForReoptimization() * codeTypeThresholdMultiplier());
 }
 
 uint32_t CodeBlock::exitCountThresholdForReoptimizationFromLoop()
 {
-    return adjustedExitCountThreshold(Options::osrExitCountForReoptimizationFromLoop());
+    return adjustedExitCountThreshold(Options::osrExitCountForReoptimizationFromLoop() * codeTypeThresholdMultiplier());
 }
 
 bool CodeBlock::shouldReoptimizeNow()
@@ -3237,7 +3277,7 @@ void CodeBlock::tallyFrequentExitSites()
             continue;
         
 #if DFG_ENABLE(DEBUG_VERBOSE)
-        dataLog("OSR exit #", i, " (bc#", exit.m_codeOrigin.bytecodeIndex, ", @", exit.m_nodeIndex, ", ", exit.m_kind, ") for ", *this, " occurred frequently: counting as frequent exit site.\n");
+        dataLog("OSR exit #", i, " (bc#", exit.m_codeOrigin.bytecodeIndex, ", ", exit.m_kind, ") for ", *this, " occurred frequently: counting as frequent exit site.\n");
 #endif
     }
 }
@@ -3323,7 +3363,7 @@ bool CodeBlock::usesOpcode(OpcodeID opcodeID)
             FOR_EACH_OPCODE_ID(DEFINE_OP)
 #undef DEFINE_OP
         default:
-            ASSERT_NOT_REACHED();
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
     }

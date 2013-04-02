@@ -104,7 +104,6 @@ public:
         // http://www.w3.org/TR/2009/WD-SVGCompositing-20090430/
         kPlus_Mode,
         kModulate_Mode, // multiplies all components (= alpha and color)
-        kMultiply_Mode = kModulate_Mode,
 
         // all above modes can be expressed as pair of src/dst Coeffs
         kCoeffModesCnt,
@@ -119,8 +118,9 @@ public:
         kSoftLight_Mode,
         kDifference_Mode,
         kExclusion_Mode,
+        kMultiply_Mode,
 
-        kLastMode = kExclusion_Mode
+        kLastMode = kMultiply_Mode
     };
 
     /**

@@ -30,13 +30,12 @@
 
 #include "config.h"
 
-#if ENABLE(MUTATION_OBSERVERS)
-
 #include "JSMutationObserver.h"
 
 #include "JSMutationCallback.h"
 #include "MutationObserver.h"
 #include <runtime/Error.h>
+#include <runtime/PrivateName.h>
 
 using namespace JSC;
 
@@ -54,8 +53,11 @@ EncodedJSValue JSC_HOST_CALL JSMutationObserverConstructor::constructJSMutationO
     }
 
     JSMutationObserverConstructor* jsConstructor = jsCast<JSMutationObserverConstructor*>(exec->callee());
-    RefPtr<MutationCallback> callback = JSMutationCallback::create(object, jsConstructor->globalObject());
-    return JSValue::encode(asObject(toJS(exec, jsConstructor->globalObject(), MutationObserver::create(callback.release()))));
+    RefPtr<JSMutationCallback> callback = JSMutationCallback::create(object, jsConstructor->globalObject());
+    JSObject* jsObserver = asObject(toJS(exec, jsConstructor->globalObject(), MutationObserver::create(callback.release())));
+    PrivateName propertyName;
+    jsObserver->putDirect(jsConstructor->globalObject()->globalData(), propertyName, object);
+    return JSValue::encode(jsObserver);
 }
 
 bool JSMutationObserverOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknown> handle, void*, SlotVisitor& visitor)
@@ -70,5 +72,3 @@ bool JSMutationObserverOwner::isReachableFromOpaqueRoots(JSC::Handle<JSC::Unknow
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(MUTATION_OBSERVERS)

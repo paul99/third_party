@@ -73,6 +73,13 @@ void TouchEventHandler::doFatFingers(const Platform::TouchPoint& point)
     m_webPage->postponeDocumentStyleRecalc();
     m_lastFatFingersResult = FatFingers(m_webPage, point.documentContentPosition(), FatFingers::ClickableElement).findBestPoint();
     m_webPage->resumeDocumentStyleRecalc();
+
+    Node* nodeUnderFatFinger = m_lastFatFingersResult.node();
+    if (nodeUnderFatFinger && nodeUnderFatFinger->document()->frame() != m_webPage->focusedOrMainFrame()) {
+        m_webPage->clearFocusNode();
+        m_webPage->m_selectionHandler->cancelSelection();
+        m_webPage->m_page->focusController()->setFocusedFrame(nodeUnderFatFinger->document()->frame());
+    }
 }
 
 void TouchEventHandler::sendClickAtFatFingersPoint(unsigned modifiers)
@@ -104,12 +111,10 @@ void TouchEventHandler::handleTouchPoint(const Platform::TouchPoint& point, unsi
             if (!m_lastFatFingersResult.isValid())
                 doFatFingers(point);
 
-            Element* elementUnderFatFinger = m_lastFatFingersResult.nodeAsElementIfApplicable();
-
             // Check for text selection
             if (m_lastFatFingersResult.isTextInput()) {
-                elementUnderFatFinger = m_lastFatFingersResult.nodeAsElementIfApplicable(FatFingersResult::ShadowContentNotAllowed, true /* shouldUseRootEditableElement */);
-                m_shouldRequestSpellCheckOptions = m_webPage->m_inputHandler->shouldRequestSpellCheckingOptionsForPoint(point.documentContentPosition(), elementUnderFatFinger, m_spellCheckOptionRequest);
+                Element* elementUnderFatFinger = m_lastFatFingersResult.nodeAsElementIfApplicable(FatFingersResult::ShadowContentNotAllowed, true /* shouldUseRootEditableElement */);
+                m_shouldRequestSpellCheckOptions = m_webPage->m_inputHandler->shouldRequestSpellCheckingOptionsForPoint(m_lastFatFingersResult.adjustedPosition(), elementUnderFatFinger, m_spellCheckOptionRequest);
             }
 
             handleFatFingerPressed(shiftActive, altActive, ctrlActive);

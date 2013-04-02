@@ -71,6 +71,9 @@ private:
     virtual void updatePreferences(const WebPreferencesStore&) OVERRIDE;
     virtual void mainFrameContentSizeChanged(const WebCore::IntSize&) OVERRIDE;
 
+    virtual void setExposedRect(const WebCore::IntRect&) OVERRIDE;
+    virtual void mainFrameScrollabilityChanged(bool) OVERRIDE;
+
     virtual void dispatchAfterEnsuringUpdatedScrollPosition(const Function<void ()>&) OVERRIDE;
 
     // WebCore::GraphicsLayerClient
@@ -78,6 +81,7 @@ private:
     virtual void notifyFlushRequired(const WebCore::GraphicsLayer*) OVERRIDE;
     virtual void paintContents(const WebCore::GraphicsLayer*, WebCore::GraphicsContext&, WebCore::GraphicsLayerPaintingPhase, const WebCore::IntRect& clipRect) OVERRIDE;
     virtual float deviceScaleFactor() const OVERRIDE;
+    virtual void didCommitChangesForLayer(const WebCore::GraphicsLayer*) const OVERRIDE;
 
     // WebCore::LayerFlushSchedulerClient
     virtual bool flushLayers() OVERRIDE;
@@ -85,7 +89,7 @@ private:
     // Message handlers.
     virtual void suspendPainting() OVERRIDE;
     virtual void resumePainting() OVERRIDE;
-    virtual void updateGeometry(const WebCore::IntSize& viewSize, double minimumLayoutWidth) OVERRIDE;
+    virtual void updateGeometry(const WebCore::IntSize& viewSize) OVERRIDE;
     virtual void setDeviceScaleFactor(float) OVERRIDE;
     virtual void setLayerHostingMode(uint32_t) OVERRIDE;
     virtual void setColorSpace(const ColorSpaceData&) OVERRIDE;
@@ -110,10 +114,13 @@ private:
     RetainPtr<CALayer> m_debugInfoLayer;
 
     OwnPtr<WebCore::GraphicsLayer> m_pageOverlayLayer;
+    mutable RetainPtr<CALayer> m_pageOverlayPlatformLayer;
 
     bool m_isPaintingSuspended;
+    bool m_hasRootCompositingLayer;
 
-    double m_minimumLayoutWidth;
+    WebCore::IntRect m_exposedRect;
+
     WebCore::IntSize m_lastSentIntrinsicContentSize;
     bool m_inUpdateGeometry;
 };

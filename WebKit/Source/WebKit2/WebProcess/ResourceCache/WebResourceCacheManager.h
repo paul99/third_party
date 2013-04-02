@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 Apple Inc. All rights reserved.
+ * Copyright (C) 2011, 2013 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,35 +26,29 @@
 #ifndef WebResourceCacheManager_h
 #define WebResourceCacheManager_h
 
-#include "Arguments.h"
+#include "MessageReceiver.h"
 #include "ResourceCachesToClear.h"
+#include "WebProcessSupplement.h"
 #include <wtf/Noncopyable.h>
 #include <wtf/RetainPtr.h>
 #include <wtf/text/WTFString.h>
 
-namespace CoreIPC {
-class Connection;
-class MessageDecoder;
-class MessageID;
-}
-
 namespace WebKit {
 
+class WebProcess;
 struct SecurityOriginData;
 
-class WebResourceCacheManager {
+class WebResourceCacheManager : public WebProcessSupplement, public CoreIPC::MessageReceiver {
     WTF_MAKE_NONCOPYABLE(WebResourceCacheManager);
 public:
-    static WebResourceCacheManager& shared();
+    WebResourceCacheManager(WebProcess*);
 
-    void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
+    static const char* supplementName();
 
 private:
-    WebResourceCacheManager();
-    virtual ~WebResourceCacheManager();
-
+    // CoreIPC::MessageReceiver
     // Implemented in generated WebResourceCacheManagerMessageReceiver.cpp
-    void didReceiveWebResourceCacheManagerMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder&);
+    virtual void didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageDecoder&) OVERRIDE;
 
     void getCacheOrigins(uint64_t callbackID) const;
     void clearCacheForOrigin(SecurityOriginData, uint32_t cachesToClear) const;
@@ -64,6 +58,8 @@ private:
     static RetainPtr<CFArrayRef> cfURLCacheHostNames();
     static void clearCFURLCacheForHostNames(CFArrayRef);
 #endif
+
+    WebProcess* m_process;
 };
 
 } // namespace WebKit

@@ -94,7 +94,12 @@ class NackLoopBackTransport : public webrtc::Transport {
 
 class RtpRtcpNackTest : public ::testing::Test {
  protected:
-  RtpRtcpNackTest() {}
+  RtpRtcpNackTest()
+      : video_module_(NULL),
+        transport_(NULL),
+        nack_receiver_(NULL),
+        payload_data_length(sizeof(payload_data)),
+        fake_clock(123456) {}
   ~RtpRtcpNackTest() {}
 
   virtual void SetUp() {
@@ -111,8 +116,8 @@ class RtpRtcpNackTest : public ::testing::Test {
 
     EXPECT_EQ(0, video_module_->SetRTCPStatus(kRtcpCompound));
     EXPECT_EQ(0, video_module_->SetSSRC(kTestSsrc));
-    EXPECT_EQ(0, video_module_->SetNACKStatus(kNackRtcp));
-    EXPECT_EQ(0, video_module_->SetStorePacketsStatus(true));
+    EXPECT_EQ(0, video_module_->SetNACKStatus(kNackRtcp, 450));
+    EXPECT_EQ(0, video_module_->SetStorePacketsStatus(true, 600));
     EXPECT_EQ(0, video_module_->SetSendingStatus(true));
     EXPECT_EQ(0, video_module_->SetSequenceNumber(kTestSequenceNumber));
     EXPECT_EQ(0, video_module_->SetStartTimestamp(111111));
@@ -126,8 +131,6 @@ class RtpRtcpNackTest : public ::testing::Test {
 
     EXPECT_EQ(0, video_module_->RegisterSendPayload(video_codec));
     EXPECT_EQ(0, video_module_->RegisterReceivePayload(video_codec));
-
-    payload_data_length = sizeof(payload_data);
 
     for (int n = 0; n < payload_data_length; n++) {
       payload_data[n] = n % 10;
@@ -145,7 +148,7 @@ class RtpRtcpNackTest : public ::testing::Test {
   VerifyingNackReceiver* nack_receiver_;
   WebRtc_UWord8  payload_data[65000];
   int payload_data_length;
-  FakeRtpRtcpClock fake_clock;
+  SimulatedClock fake_clock;
 };
 
 TEST_F(RtpRtcpNackTest, RTCP) {
@@ -185,7 +188,7 @@ TEST_F(RtpRtcpNackTest, RTCP) {
       nack_list[n++] = (*it);
     }
     video_module_->SendNACK(nack_list, n);
-    fake_clock.IncrementTime(33);
+    fake_clock.AdvanceTimeMilliseconds(33);
     video_module_->Process();
 
     // Prepare next frame.
@@ -242,7 +245,7 @@ TEST_F(RtpRtcpNackTest, RTX) {
       nack_list[n++] = (*it);
     }
     video_module_->SendNACK(nack_list, n);
-    fake_clock.IncrementTime(33);
+    fake_clock.AdvanceTimeMilliseconds(33);
     video_module_->Process();
 
     // Prepare next frame.

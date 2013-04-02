@@ -25,6 +25,7 @@
 #include "CookieManager.h"
 #include "Credential.h"
 #include "CredentialStorage.h"
+#include "ExceptionCodePlaceholder.h"
 #include "Frame.h"
 #include "FrameView.h"
 #include "GraphicsContext.h"
@@ -130,16 +131,21 @@ MediaPlayerPrivate::~MediaPlayerPrivate()
     if (m_isAuthenticationChallenging)
         AuthenticationChallengeManager::instance()->cancelAuthenticationChallenge(this);
 
-    if (isFullscreen()) {
+    if (isFullscreen())
         m_webCorePlayer->mediaPlayerClient()->mediaPlayerExitFullscreen();
-    }
 #if USE(ACCELERATED_COMPOSITING)
     // Remove media player from platform layer.
     if (m_platformLayer)
         static_cast<VideoLayerWebKitThread*>(m_platformLayer.get())->setMediaPlayer(0);
 #endif
 
-    deleteGuardedObject(m_platformPlayer);
+    if (m_platformPlayer) {
+        if (m_platformPlayer->dialogState() == PlatformPlayer::DialogShown) {
+            m_platformPlayer->setDialogState(PlatformPlayer::MediaPlayerPrivateDestroyed);
+            m_platformPlayer->stop();
+        } else
+            deleteGuardedObject(m_platformPlayer);
+    }
 }
 
 void MediaPlayerPrivate::load(const WTF::String& url)
@@ -313,6 +319,19 @@ void MediaPlayerPrivate::setVolume(float volume)
 {
     if (m_platformPlayer)
         m_platformPlayer->setVolume(volume);
+}
+
+void MediaPlayerPrivate::setMuted(bool muted)
+{
+    if (m_platformPlayer)
+        m_platformPlayer->setMuted(muted);
+}
+
+bool MediaPlayerPrivate::muted() const
+{
+    if (m_platformPlayer)
+        return m_platformPlayer->muted();
+    return false;
 }
 
 MediaPlayer::NetworkState MediaPlayerPrivate::networkState() const
@@ -489,9 +508,8 @@ float MediaPlayerPrivate::percentLoaded()
     float buffered = 0;
     RefPtr<TimeRanges> timeRanges = this->buffered();
     for (unsigned i = 0; i < timeRanges->length(); ++i) {
-        ExceptionCode ignoredException;
-        float start = timeRanges->start(i, ignoredException);
-        float end = timeRanges->end(i, ignoredException);
+        float start = timeRanges->start(i, IGNORE_EXCEPTION);
+        float end = timeRanges->end(i, IGNORE_EXCEPTION);
         buffered += end - start;
     }
 
@@ -680,9 +698,9 @@ void MediaPlayerPrivate::onWaitMetadataNotified(bool hasFinished, int timeWaited
 void MediaPlayerPrivate::waitMetadataTimerFired(Timer<MediaPlayerPrivate>*)
 {
     if (m_platformPlayer->isMetadataReady()) {
-        m_platformPlayer->playWithMetadataReady();
         conditionallyGoFullscreenAfterPlay();
         m_waitMetadataPopDialogCounter = 0;
+        m_platformPlayer->playWithMetadataReady();
         return;
     }
 
@@ -694,8 +712,10 @@ void MediaPlayerPrivate::waitMetadataTimerFired(Timer<MediaPlayerPrivate>*)
     }
     m_waitMetadataPopDialogCounter = 0;
 
-    int wait = showErrorDialog(PlatformPlayer::MediaMetaDataTimeoutError);
-    if (!wait)
+    PlatformPlayer::DialogResult wait = m_platformPlayer->showErrorDialog(PlatformPlayer::MediaMetaDataTimeoutError);
+    if (wait == PlatformPlayer::DialogEmergencyExit)
+        return;
+    if (wait == PlatformPlayer::DialogResponse0)
         onPauseNotified();
     else {
         if (m_platformPlayer->isMetadataReady()) {
@@ -719,9 +739,9 @@ static ProtectionSpace generateProtectionSpaceFromMMRAuthChallenge(const MMRAuth
     ASSERT(url.isValid());
 
     return ProtectionSpace(url.host(), url.port(),
-                           static_cast<ProtectionSpaceServerType>(authChallenge.serverType()),
-                           authChallenge.realm().c_str(),
-                           static_cast<ProtectionSpaceAuthenticationScheme>(authChallenge.authScheme()));
+        static_cast<ProtectionSpaceServerType>(authChallenge.serverType()),
+        authChallenge.realm().c_str(),
+        static_cast<ProtectionSpaceAuthenticationScheme>(authChallenge.authScheme()));
 }
 
 void MediaPlayerPrivate::onAuthenticationNeeded(MMRAuthChallenge& authChallenge)
@@ -753,8 +773,8 @@ void MediaPlayerPrivate::notifyChallengeResult(const KURL& url, const Protection
         return;
 
     m_platformPlayer->reloadWithCredential(credential.user().utf8(String::StrictConversion).data(),
-                                        credential.password().utf8(String::StrictConversion).data(),
-                                        static_cast<MMRAuthChallenge::CredentialPersistence>(credential.persistence()));
+        credential.password().utf8(String::StrictConversion).data(),
+        static_cast<MMRAuthChallenge::CredentialPersistence>(credential.persistence()));
 }
 
 void MediaPlayerPrivate::onAuthenticationAccepted(const MMRAuthChallenge& authChallenge) const
@@ -769,7 +789,7 @@ void MediaPlayerPrivate::onAuthenticationAccepted(const MMRAuthChallenge& authCh
         CredentialStorage::set(Credential(authChallenge.username().c_str(), authChallenge.password().c_str(), static_cast<CredentialPersistence>(authChallenge.persistence())), protectionSpace, url);
 }
 
-int MediaPlayerPrivate::showErrorDialog(PlatformPlayer::Error type)
+int MediaPlayerPrivate::onShowErrorDialog(PlatformPlayer::Error type)
 {
     using namespace BlackBerry::WebKit;
 
@@ -933,9 +953,9 @@ void MediaPlayerPrivate::setBuffering(bool buffering)
     }
 }
 
-static unsigned int allocateTextureId()
+static unsigned allocateTextureId()
 {
-    unsigned int texid;
+    unsigned texid;
     glGenTextures(1, &texid);
     glBindTexture(GL_TEXTURE_2D, texid);
     // Do basic linear filtering on resize.
@@ -958,7 +978,7 @@ void MediaPlayerPrivate::drawBufferingAnimation(const TransformationMatrix& matr
         renderMatrix.rotate(time.tv_nsec / 1000000000.0 * 360.0);
 
         static bool initialized = false;
-        static unsigned int texId = allocateTextureId();
+        static unsigned texId = allocateTextureId();
         glBindTexture(GL_TEXTURE_2D, texId);
         if (!initialized) {
             initialized = true;

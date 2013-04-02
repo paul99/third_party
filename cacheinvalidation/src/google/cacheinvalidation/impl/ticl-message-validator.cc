@@ -196,6 +196,7 @@ DEFINE_VALIDATOR(InvalidationP) {
   REQUIRE(version);
   NON_NEGATIVE(version);
   ALLOW(payload);
+  ALLOW(bridge_arrival_time_ms)
 }
 
 DEFINE_VALIDATOR(RegistrationP) {
@@ -276,7 +277,9 @@ DEFINE_VALIDATOR(ClientConfigP) {
   ALLOW(smear_percent);
   ALLOW(is_transient);
   ALLOW(initial_persistent_heartbeat_delay_ms);
+  ALLOW(channel_supports_offline_delivery);
   REQUIRE(protocol_handler_config);
+  ALLOW(offline_heartbeat_threshold_ms);
 }
 
 DEFINE_VALIDATOR(InfoMessage) {

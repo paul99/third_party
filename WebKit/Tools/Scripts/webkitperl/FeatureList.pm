@@ -44,9 +44,10 @@ BEGIN {
 my (
     $threeDRenderingSupport,
     $accelerated2DCanvasSupport,
-    $animationAPISupport,
     $batteryStatusSupport,
     $blobSupport,
+    $canvasPathSupport,
+    $canvasProxySupport,
     $channelMessagingSupport,
     $cspNextSupport,
     $css3BackgroundSupport,
@@ -61,7 +62,9 @@ my (
     $cssImageResolutionSupport,
     $cssRegionsSupport,
     $cssShadersSupport,
+    $cssStickyPositionSupport,
     $cssCompositingSupport,
+    $cssAnimationsTransformsUnprefixedSupport,
     $cssVariablesSupport,
     $customSchemeHandlerSupport,
     $dataTransferItemsSupport,
@@ -70,6 +73,7 @@ my (
     $deviceOrientationSupport,
     $dialogElementSupport,
     $directoryUploadSupport,
+    $dom4EventsConstructor,
     $downloadAttributeSupport,
     $fileSystemSupport,
     $filtersSupport,
@@ -109,20 +113,24 @@ my (
     $mutationObserversSupport,
     $netscapePluginAPISupport,
     $networkInfoSupport,
+    $nosniffSupport,
     $notificationsSupport,
     $orientationEventsSupport,
     $pageVisibilityAPISupport,
+    $performanceTimelineSupport,
     $progressTagSupport,
     $proximityEventsSupport,
     $quotaSupport,
     $resolutionMediaQuerySupport,
     $registerProtocolHandlerSupport,
     $requestAnimationFrameSupport,
+    $resourceTimingSupport,
     $scriptedSpeechSupport,
     $shadowDOMSupport,
     $sharedWorkersSupport,
     $sqlDatabaseSupport,
     $styleScopedSupport,
+    $suidLinuxSandbox,
     $svgDOMObjCBindingsSupport,
     $svgFontsSupport,
     $svgSupport,
@@ -133,6 +141,7 @@ my (
     $touchEventsSupport,
     $touchSliderSupport,
     $touchIconLoadingSupport,
+    $userTimingSupport,
     $vibrationSupport,
     $videoSupport,
     $videoTrackSupport,
@@ -155,14 +164,17 @@ my @features = (
     { option => "accelerated-2d-canvas", desc => "Toggle Accelerated 2D Canvas support",
       define => "ENABLE_ACCELERATED_2D_CANVAS", default => 0, value => \$accelerated2DCanvasSupport },
 
-    { option => "animation-api", desc => "Toggle Animation API support",
-      define => "ENABLE_ANIMATION_API", default => (isBlackBerry() || isEfl()), value => \$animationAPISupport },
-
     { option => "battery-status", desc => "Toggle Battery Status support",
       define => "ENABLE_BATTERY_STATUS", default => (isEfl() || isBlackBerry()), value => \$batteryStatusSupport },
 
     { option => "blob", desc => "Toggle Blob support",
       define => "ENABLE_BLOB", default => (isAppleMacWebKit() || isGtk() || isChromium() || isBlackBerry() || isEfl()), value => \$blobSupport },
+
+    { option => "canvas-path", desc => "Toggle Canvas Path support",
+      define => "ENABLE_CANVAS_PATH", default => 0, value => \$canvasPathSupport },
+
+    { option => "canvas-proxy", desc => "Toggle CanvasProxy support",
+      define => "ENABLE_CANVAS_PROXY", default => 0, value => \$canvasProxySupport },
 
     { option => "channel-messaging", desc => "Toggle Channel Messaging support",
       define => "ENABLE_CHANNEL_MESSAGING", default => 1, value => \$channelMessagingSupport },
@@ -189,10 +201,10 @@ my @features = (
       define => "ENABLE_CSS_BOX_DECORATION_BREAK", default => 1, value => \$cssBoxDecorationBreakSupport },
 
     { option => "css-image-orientation", desc => "Toggle CSS image-orientation support",
-      define => "ENABLE_CSS_IMAGE_ORIENTATION", default => 0, value => \$cssImageOrientationSupport },
+      define => "ENABLE_CSS_IMAGE_ORIENTATION", default => isGtk(), value => \$cssImageOrientationSupport },
 
     { option => "css-image-resolution", desc => "Toggle CSS image-resolution support",
-      define => "ENABLE_CSS_IMAGE_RESOLUTION", default => isBlackBerry(), value => \$cssImageResolutionSupport },
+      define => "ENABLE_CSS_IMAGE_RESOLUTION", default => (isBlackBerry() || isGtk()), value => \$cssImageResolutionSupport },
 
     { option => "css-regions", desc => "Toggle CSS Regions support",
       define => "ENABLE_CSS_REGIONS", default => 1, value => \$cssRegionsSupport },
@@ -200,8 +212,14 @@ my @features = (
     { option => "css-shaders", desc => "Toggle CSS Shaders support",
       define => "ENABLE_CSS_SHADERS", default => isAppleMacWebKit(), value => \$cssShadersSupport },
 
+    { option => "css-sticky-position", desc => "Toggle CSS sticky position support",
+      define => "ENABLE_CSS_STICKY_POSITION", default => (isGtk() || isEfl()), value => \$cssStickyPositionSupport },
+
     { option => "css-compositing", desc => "Toggle CSS Compositing support",
       define => "ENABLE_CSS_COMPOSITING", default => isAppleWebKit(), value => \$cssCompositingSupport },
+
+    { option => "css-transforms-animations-unprefixed", desc => "Toggle support for unprefixed CSS animations and transforms",
+      define => "ENABLE_CSS_TRANSFORMS_ANIMATIONS_UNPREFIXED", default => 1, value => \$cssAnimationsTransformsUnprefixedSupport },
 
     { option => "css-variables", desc => "Toggle CSS Variable support",
       define => "ENABLE_CSS_VARIABLES", default => (isBlackBerry() || isEfl()), value => \$cssVariablesSupport },
@@ -226,6 +244,9 @@ my @features = (
 
     { option => "directory-upload", desc => "Toggle Directory Upload support",
       define => "ENABLE_DIRECTORY_UPLOAD", default => 0, value => \$directoryUploadSupport },
+
+    { option => "dom4-events-constructor", desc => "Expose DOM4 Events constructors",
+      define => "ENABLE_DOM4_EVENTS_CONSTRUCTOR", default => isAppleWebKit(), value => \$dom4EventsConstructor },
 
     { option => "download-attribute", desc => "Toggle Download Attribute support",
       define => "ENABLE_DOWNLOAD_ATTRIBUTE", default => (isBlackBerry() || isEfl()), value => \$downloadAttributeSupport },
@@ -258,7 +279,7 @@ my @features = (
       define => "ENABLE_IFRAME_SEAMLESS", default => 1, value => \$iframeSeamlessSupport },
 
     { option => "indexed-database", desc => "Toggle Indexed Database support",
-      define => "ENABLE_INDEXED_DATABASE", default => 0, value => \$indexedDatabaseSupport },
+      define => "ENABLE_INDEXED_DATABASE", default => isGtk(), value => \$indexedDatabaseSupport },
 
     { option => "input-speech", desc => "Toggle Input Speech support",
       define => "ENABLE_INPUT_SPEECH", default => 0, value => \$inputSpeechSupport },
@@ -324,16 +345,13 @@ my @features = (
       define => "ENABLE_METER_ELEMENT", default => !isAppleWinWebKit(), value => \$meterTagSupport },
 
     { option => "mhtml", desc => "Toggle MHTML support",
-      define => "ENABLE_MHTML", default => isGtk(), value => \$mhtmlSupport },
+      define => "ENABLE_MHTML", default => (isGtk() || isEfl()), value => \$mhtmlSupport },
 
     { option => "microdata", desc => "Toggle Microdata support",
       define => "ENABLE_MICRODATA", default => (isEfl() || isBlackBerry() || isGtk()), value => \$microdataSupport },
 
     { option => "mouse-cursor-scale", desc => "Toggle Scaled mouse cursor support",
       define => "ENABLE_MOUSE_CURSOR_SCALE", default => 0, value => \$mouseCursorScaleSupport },
-
-    { option => "mutation-observers", desc => "Toggle Mutation Observers support",
-      define => "ENABLE_MUTATION_OBSERVERS", default => 1, value => \$mutationObserversSupport },
 
     { option => "navigator-content-utils", desc => "Toggle Navigator Content Utils support",
       define => "ENABLE_NAVIGATOR_CONTENT_UTILS", default => (isBlackBerry() || isEfl()), value => \$registerProtocolHandlerSupport },
@@ -344,6 +362,9 @@ my @features = (
     { option => "network-info", desc => "Toggle Network Info support",
       define => "ENABLE_NETWORK_INFO", default => (isEfl() || isBlackBerry()), value => \$networkInfoSupport },
 
+    { option => "nosniff", desc => "Toggle support for 'X-Content-Type-Options: nosniff'",
+      define => "ENABLE_NOSNIFF", default => 0, value => \$nosniffSupport },
+
     { option => "notifications", desc => "Toggle Notifications support",
       define => "ENABLE_NOTIFICATIONS", default => isBlackBerry(), value => \$notificationsSupport },
 
@@ -352,6 +373,9 @@ my @features = (
 
     { option => "page-visibility-api", desc => "Toggle Page Visibility API support",
       define => "ENABLE_PAGE_VISIBILITY_API", default => (isBlackBerry() || isEfl()), value => \$pageVisibilityAPISupport },
+
+    { option => "performance-timeline", desc => "Toggle Performance Timeline support",
+      define => "ENABLE_PERFORMANCE_TIMELINE", default => isGtk(), value => \$performanceTimelineSupport },
 
     { option => "progress-tag", desc => "Toggle Progress Tag support",
       define => "ENABLE_PROGRESS_ELEMENT", default => 1, value => \$progressTagSupport },
@@ -364,6 +388,9 @@ my @features = (
 
     { option => "resolution-media-query", desc => "Toggle resolution media query support",
       define => "ENABLE_RESOLUTION_MEDIA_QUERY", default => (isEfl() || isQt()), value => \$resolutionMediaQuerySupport },
+
+    { option => "resource-timing", desc => "Toggle Resource Timing support",
+      define => "ENABLE_RESOURCE_TIMING", default => isGtk(), value => \$resourceTimingSupport },
 
     { option => "request-animation-frame", desc => "Toggle Request Animation Frame support",
       define => "ENABLE_REQUEST_ANIMATION_FRAME", default => (isAppleMacWebKit() || isGtk() || isEfl() || isBlackBerry()), value => \$requestAnimationFrameSupport },
@@ -383,6 +410,9 @@ my @features = (
     { option => "style-scoped", desc => "Toggle Style Scoped support",
       define => "ENABLE_STYLE_SCOPED", default => (isBlackBerry() || isGtk()), value => \$styleScopedSupport },
 
+    { option => "suid-linux-sandbox", desc => "Toggle suid sandbox for linux",
+      define => "ENABLE_SUID_SANDBOX_LINUX", default => 0, value => \$suidLinuxSandbox },
+
     { option => "svg", desc => "Toggle SVG support",
       define => "ENABLE_SVG", default => 1, value => \$svgSupport },
 
@@ -396,7 +426,7 @@ my @features = (
       define => "USE_SYSTEM_MALLOC", default => isWinCE(), value => \$systemMallocSupport },
 
     { option => "template-element", desc => "Toggle HTMLTemplateElement support",
-      define => "ENABLE_TEMPLATE_ELEMENT", default => 0, value => \$templateElementSupport },
+      define => "ENABLE_TEMPLATE_ELEMENT", default => (isEfl() || isGtk()), value => \$templateElementSupport },
 
     { option => "text-autosizing", desc => "Toggle Text Autosizing support",
       define => "ENABLE_TEXT_AUTOSIZING", default => 0, value => \$textAutosizingSupport },
@@ -413,6 +443,9 @@ my @features = (
     { option => "touch-icon-loading", desc => "Toggle Touch Icon Loading Support",
       define => "ENABLE_TOUCH_ICON_LOADING", default => 0, value => \$touchIconLoadingSupport },
 
+    { option => "user-timing", desc => "Toggle User Timing support",
+      define => "ENABLE_USER_TIMING", default => isGtk(), value => \$userTimingSupport },
+
     { option => "vibration", desc => "Toggle Vibration support",
       define => "ENABLE_VIBRATION", default => (isEfl() || isBlackBerry()), value => \$vibrationSupport },
 
@@ -426,13 +459,13 @@ my @features = (
       define => "ENABLE_WEBGL", default => (isAppleMacWebKit() || isGtk() || isEfl()), value => \$webglSupport },
 
     { option => "web-audio", desc => "Toggle Web Audio support",
-      define => "ENABLE_WEB_AUDIO", default => 0, value => \$webAudioSupport },
+      define => "ENABLE_WEB_AUDIO", default => (isEfl()), value => \$webAudioSupport },
 
     { option => "web-intents", desc => "Toggle Web Intents support",
-      define => "ENABLE_WEB_INTENTS", default => isEfl(), value => \$webIntentsSupport },
+      define => "ENABLE_WEB_INTENTS", default => 0, value => \$webIntentsSupport },
 
     { option => "web-intents-tag", desc => "Toggle Web Intents Tag support",
-      define => "ENABLE_WEB_INTENTS_TAG", default => isEfl(), value => \$webIntentsTagSupport },
+      define => "ENABLE_WEB_INTENTS_TAG", default => 0, value => \$webIntentsTagSupport },
 
     { option => "web-sockets", desc => "Toggle Web Sockets support",
       define => "ENABLE_WEB_SOCKETS", default => 1, value => \$webSocketsSupport },

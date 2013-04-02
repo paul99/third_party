@@ -27,7 +27,6 @@
 
 #include "FileChooser.h"
 #include "HTMLTextFormControlElement.h"
-#include "ImageLoaderClient.h"
 #include "StepRange.h"
 
 namespace WebCore {
@@ -36,6 +35,7 @@ class CheckedRadioButtons;
 class DragData;
 class FileList;
 class HTMLDataListElement;
+class HTMLImageLoader;
 class HTMLOptionElement;
 class Icon;
 class InputType;
@@ -43,7 +43,7 @@ class KURL;
 class ListAttributeTargetObserver;
 struct DateTimeChooserParameters;
 
-class HTMLInputElement : public HTMLTextFormControlElement, public ImageLoaderClientBase<HTMLInputElement> {
+class HTMLInputElement : public HTMLTextFormControlElement {
 public:
     static PassRefPtr<HTMLInputElement> create(const QualifiedName&, Document*, HTMLFormElement*, bool createdByParser);
     virtual ~HTMLInputElement();
@@ -96,6 +96,10 @@ public:
     bool isPasswordField() const;
     bool isCheckbox() const;
     bool isRangeControl() const;
+
+#if ENABLE(INPUT_TYPE_COLOR)
+    bool isColorControl() const;
+#endif
 
     // FIXME: It's highly likely that any call site calling this function should instead
     // be using a different one. Many input elements behave like text fields, and in addition
@@ -277,8 +281,7 @@ public:
 
     virtual void blur() OVERRIDE;
     void defaultBlur();
-    void defaultFocus(bool restorePreviousSelection);
-    virtual void focus(bool restorePreviousSelection = true) OVERRIDE;
+    virtual void focus(bool restorePreviousSelection = true, FocusDirection = FocusDirectionNone) OVERRIDE;
 
     virtual const AtomicString& name() const OVERRIDE;
 
@@ -291,6 +294,9 @@ public:
     virtual void setRangeText(const String& replacement, ExceptionCode&) OVERRIDE;
     virtual void setRangeText(const String& replacement, unsigned start, unsigned end, const String& selectionMode, ExceptionCode&) OVERRIDE;
 
+    bool hasImageLoader() const { return m_imageLoader; }
+    HTMLImageLoader* imageLoader();
+
 #if ENABLE(DATE_AND_TIME_INPUT_TYPES)
     bool setupDateTimeChooserParameters(DateTimeChooserParameters&);
 #endif
@@ -298,14 +304,17 @@ public:
 
 protected:
     HTMLInputElement(const QualifiedName&, Document*, HTMLFormElement*, bool createdByParser);
-    void createShadowSubtree();
+
     virtual void defaultEventHandler(Event*);
+
+private:
+    enum AutoCompleteSetting { Uninitialized, On, Off };
+
     // FIXME: Author shadows should be allowed
     // https://bugs.webkit.org/show_bug.cgi?id=92608
     virtual bool areAuthorShadowsAllowed() const OVERRIDE { return false; }
 
-private:
-    enum AutoCompleteSetting { Uninitialized, On, Off };
+    virtual void didAddUserAgentShadowRoot(ShadowRoot*) OVERRIDE;
 
     virtual void willChangeForm() OVERRIDE;
     virtual void didChangeForm() OVERRIDE;
@@ -354,7 +363,6 @@ private:
     virtual void postDispatchEventHandler(Event*, void* dataFromPreDispatch);
 
     virtual bool isURLAttribute(const Attribute&) const OVERRIDE;
-
     virtual bool isInRange() const;
     virtual bool isOutOfRange() const;
 
@@ -374,7 +382,7 @@ private:
     virtual void updatePlaceholderText();
     virtual bool isEmptyValue() const OVERRIDE { return innerTextValue().isEmpty(); }
     virtual bool isEmptySuggestedValue() const { return suggestedValue().isEmpty(); }
-    virtual void handleFocusEvent();
+    virtual void handleFocusEvent(FocusDirection) OVERRIDE;
     virtual void handleBlurEvent();
 
     virtual bool isOptionalFormControl() const { return !isRequiredFormControl(); }
@@ -425,6 +433,10 @@ private:
     bool m_hasTouchEventHandler : 1;
 #endif
     OwnPtr<InputType> m_inputType;
+    // The ImageLoader must be owned by this element because the loader code assumes
+    // that it lives as long as its owning element lives. If we move the loader into
+    // the ImageInput object we may delete the loader while this element lives on.
+    OwnPtr<HTMLImageLoader> m_imageLoader;
 #if ENABLE(DATALIST_ELEMENT)
     OwnPtr<ListAttributeTargetObserver> m_listAttributeTargetObserver;
 #endif

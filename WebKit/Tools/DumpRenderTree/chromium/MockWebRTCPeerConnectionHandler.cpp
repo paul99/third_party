@@ -34,11 +34,12 @@
 #include "MockWebRTCPeerConnectionHandler.h"
 
 #include "MockConstraints.h"
+#include "MockWebRTCDTMFSenderHandler.h"
 #include "MockWebRTCDataChannelHandler.h"
 #include "Task.h"
 #include <public/WebMediaConstraints.h>
-#include <public/WebMediaStreamComponent.h>
-#include <public/WebMediaStreamDescriptor.h>
+#include <public/WebMediaStream.h>
+#include <public/WebMediaStreamTrack.h>
 #include <public/WebRTCPeerConnectionHandlerClient.h>
 #include <public/WebRTCSessionDescription.h>
 #include <public/WebRTCSessionDescriptionRequest.h>
@@ -129,23 +130,26 @@ private:
     bool m_succeeded;
 };
 
-class RTCPeerConnectionReadyStateTask : public WebMethodTask<MockWebRTCPeerConnectionHandler> {
+class RTCPeerConnectionStateTask : public WebMethodTask<MockWebRTCPeerConnectionHandler> {
 public:
-    RTCPeerConnectionReadyStateTask(MockWebRTCPeerConnectionHandler* object, WebRTCPeerConnectionHandlerClient* client, WebRTCPeerConnectionHandlerClient::ReadyState state)
+    RTCPeerConnectionStateTask(MockWebRTCPeerConnectionHandler* object, WebRTCPeerConnectionHandlerClient* client, WebRTCPeerConnectionHandlerClient::ICEConnectionState connectionState, WebRTCPeerConnectionHandlerClient::ICEGatheringState gatheringState)
         : WebMethodTask<MockWebRTCPeerConnectionHandler>(object)
         , m_client(client)
-        , m_state(state)
+        , m_connectionState(connectionState)
+        , m_gatheringState(gatheringState)
     {
     }
 
     virtual void runIfValid() OVERRIDE
     {
-        m_client->didChangeReadyState(m_state);
+        m_client->didChangeICEGatheringState(m_gatheringState);
+        m_client->didChangeICEConnectionState(m_connectionState);
     }
 
 private:
     WebRTCPeerConnectionHandlerClient* m_client;
-    WebRTCPeerConnectionHandlerClient::ReadyState m_state;
+    WebRTCPeerConnectionHandlerClient::ICEConnectionState m_connectionState;
+    WebRTCPeerConnectionHandlerClient::ICEGatheringState m_gatheringState;
 };
 
 class RemoteDataChannelTask : public WebMethodTask<MockWebRTCPeerConnectionHandler> {
@@ -178,7 +182,7 @@ MockWebRTCPeerConnectionHandler::MockWebRTCPeerConnectionHandler(WebRTCPeerConne
 bool MockWebRTCPeerConnectionHandler::initialize(const WebRTCConfiguration&, const WebMediaConstraints& constraints)
 {
     if (MockConstraints::verifyConstraints(constraints)) {
-        postTask(new RTCPeerConnectionReadyStateTask(this, m_client, WebRTCPeerConnectionHandlerClient::ReadyStateActive));
+        postTask(new RTCPeerConnectionStateTask(this, m_client, WebRTCPeerConnectionHandlerClient::ICEConnectionStateCompleted, WebRTCPeerConnectionHandlerClient::ICEGatheringStateComplete));
         return true;
     }
 
@@ -236,7 +240,6 @@ WebRTCSessionDescription MockWebRTCPeerConnectionHandler::remoteDescription()
 
 bool MockWebRTCPeerConnectionHandler::updateICE(const WebRTCConfiguration&, const WebMediaConstraints&)
 {
-    m_client->didChangeICEState(WebRTCPeerConnectionHandlerClient::ICEStateGathering);
     return true;
 }
 
@@ -246,7 +249,7 @@ bool MockWebRTCPeerConnectionHandler::addICECandidate(const WebRTCICECandidate& 
     return true;
 }
 
-bool MockWebRTCPeerConnectionHandler::addStream(const WebMediaStreamDescriptor& stream, const WebMediaConstraints&)
+bool MockWebRTCPeerConnectionHandler::addStream(const WebMediaStream& stream, const WebMediaConstraints&)
 {
     m_streamCount += 1;
     m_client->didAddRemoteStream(stream);
@@ -254,7 +257,7 @@ bool MockWebRTCPeerConnectionHandler::addStream(const WebMediaStreamDescriptor& 
     return true;
 }
 
-void MockWebRTCPeerConnectionHandler::removeStream(const WebMediaStreamDescriptor& stream)
+void MockWebRTCPeerConnectionHandler::removeStream(const WebMediaStream& stream)
 {
     m_streamCount -= 1;
     m_client->didRemoveRemoteStream(stream);
@@ -266,8 +269,7 @@ void MockWebRTCPeerConnectionHandler::getStats(const WebRTCStatsRequest& request
     WebRTCStatsResponse response = request.createResponse();
     double currentDate = WTF::jsCurrentTime();
     if (request.hasSelector()) {
-        WebMediaStreamDescriptor stream = request.stream();
-        WebMediaStreamComponent component = request.component();
+        WebMediaStream stream = request.stream();
         // FIXME: There is no check that the fetched values are valid.
         size_t reportIndex = response.addReport();
         response.addElement(reportIndex, true, currentDate);
@@ -280,6 +282,8 @@ void MockWebRTCPeerConnectionHandler::getStats(const WebRTCStatsRequest& request
             reportIndex = response.addReport();
             response.addElement(reportIndex, true, currentDate);
             response.addStatistic(reportIndex, true, "type", "video");
+            // We add an empty remote report element.
+            response.addElement(reportIndex, false, currentDate);
         }
     }
     postTask(new RTCStatsRequestSucceededTask(this, request, response));
@@ -290,6 +294,11 @@ WebRTCDataChannelHandler* MockWebRTCPeerConnectionHandler::createDataChannel(con
     postTask(new RemoteDataChannelTask(this, m_client));
 
     return new MockWebRTCDataChannelHandler(label, reliable);
+}
+
+WebRTCDTMFSenderHandler* MockWebRTCPeerConnectionHandler::createDTMFSender(const WebMediaStreamTrack& track)
+{
+    return new MockWebRTCDTMFSenderHandler(track);
 }
 
 void MockWebRTCPeerConnectionHandler::stop()

@@ -31,6 +31,7 @@
 #include "WKAPICast.h"
 #include "WKBundleAPICast.h"
 #include "WKBundlePrivate.h"
+#include "WebData.h"
 
 using namespace WebKit;
 
@@ -268,6 +269,12 @@ void WKBundleSetMinimumTimerInterval(WKBundleRef bundleRef, WKBundlePageGroupRef
     toImpl(bundleRef)->setMinimumTimerInterval(toImpl(pageGroupRef), seconds);
 }
 
+WKDataRef WKBundleCreateWKDataFromUInt8Array(WKBundleRef bundle, JSContextRef context, JSValueRef data)
+{
+    RefPtr<WebData> webData = toImpl(bundle)->createWebDataFromUint8Array(context, data);
+    return toAPI(webData.release().leakRef());
+}
+
 int WKBundleNumberOfPages(WKBundleRef bundleRef, WKBundleFrameRef frameRef, double pageWidthInPixels, double pageHeightInPixels)
 {
     return toImpl(bundleRef)->numberOfPages(toImpl(frameRef), pageWidthInPixels, pageHeightInPixels);
@@ -291,17 +298,6 @@ bool WKBundleIsPageBoxVisible(WKBundleRef bundleRef, WKBundleFrameRef frameRef, 
 bool WKBundleIsProcessingUserGesture(WKBundleRef)
 {
     return InjectedBundle::isProcessingUserGesture();
-}
-
-void WKBundleSetPageVisibilityState(WKBundleRef bundleRef, WKBundlePageRef pageRef, int state, bool isInitialState)
-{
-    toImpl(bundleRef)->setPageVisibilityState(toImpl(pageRef), state, isInitialState);
-}
-
-size_t WKBundleGetWorkerThreadCount(WKBundleRef)
-{
-    // Actually do not need argument here, keeping it however for consistency.
-    return InjectedBundle::workerThreadCount();
 }
 
 void WKBundleSetUserStyleSheetLocation(WKBundleRef bundleRef, WKBundlePageGroupRef pageGroupRef, WKStringRef location)
@@ -337,6 +333,11 @@ void WKBundleSetSerialLoadingEnabled(WKBundleRef bundleRef, bool enabled)
 void WKBundleSetShadowDOMEnabled(WKBundleRef bundleRef, bool enabled)
 {
     toImpl(bundleRef)->setShadowDOMEnabled(enabled);
+}
+
+void WKBundleSetSeamlessIFramesEnabled(WKBundleRef bundleRef, bool enabled)
+{
+    toImpl(bundleRef)->setSeamlessIFramesEnabled(enabled);
 }
 
 void WKBundleDispatchPendingLoadRequests(WKBundleRef bundleRef)

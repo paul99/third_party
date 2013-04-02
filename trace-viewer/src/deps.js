@@ -9,6 +9,9 @@
  */
 base.addModuleDependency(
     'timeline_slice_group',
+    'range');
+base.addModuleDependency(
+    'timeline_slice_group',
     'timeline_slice');
 base.addModuleDependency(
     'timeline_slice_group',
@@ -18,7 +21,16 @@ base.addModuleDependency(
     'timeline_filter');
 base.addModuleDependency(
     'timeline_async_slice_group',
+    'range');
+base.addModuleDependency(
+    'timeline_async_slice_group',
     'timeline_slice');
+base.addModuleDependency(
+    'timeline_thread',
+    'range');
+base.addModuleDependency(
+    'timeline_thread',
+    'timeline_guid');
 base.addModuleDependency(
     'timeline_thread',
     'timeline_slice');
@@ -29,11 +41,32 @@ base.addModuleDependency(
     'timeline_thread',
     'timeline_async_slice_group');
 base.addModuleDependency(
-    'timeline_process',
+    'timeline_counter',
+    'timeline_guid');
+base.addModuleDependency(
+    'timeline_counter',
+    'range');
+base.addModuleDependency(
+    'timeline_process_base',
+    'range');
+base.addModuleDependency(
+    'timeline_process_base',
+    'timeline_guid');
+base.addModuleDependency(
+    'timeline_process_base',
     'timeline_thread');
 base.addModuleDependency(
-    'timeline_process',
+    'timeline_process_base',
     'timeline_counter');
+base.addModuleDependency(
+    'timeline_process',
+    'timeline_process_base');
+base.addModuleDependency(
+    'timeline_kernel',
+    'timeline_process_base');
+base.addModuleDependency(
+    'timeline_cpu',
+    'range');
 base.addModuleDependency(
     'timeline_cpu',
     'timeline_slice');
@@ -42,16 +75,25 @@ base.addModuleDependency(
     'timeline_counter');
 base.addModuleDependency(
     'timeline_model',
+    'range');
+base.addModuleDependency(
+    'timeline_model',
     'event_target');
 base.addModuleDependency(
     'timeline_model',
     'timeline_process');
 base.addModuleDependency(
     'timeline_model',
+    'timeline_kernel');
+base.addModuleDependency(
+    'timeline_model',
     'timeline_cpu');
 base.addModuleDependency(
     'timeline_model',
     'timeline_filter');
+base.addModuleDependency(
+    'timeline_selection',
+    'range');
 base.addModuleDependency(
     'timeline_selection',
     'event_target');

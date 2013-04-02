@@ -475,7 +475,7 @@ public abstract class InvalidationClientCore extends InternalBase
     this.registrationManager = new RegistrationManager(logger, statistics, digestFn,
         regManagerState);
     this.protocolHandler = new ProtocolHandler(config.getProtocolHandlerConfig(), resources,
-        smearer, statistics, applicationName, this, msgValidator, protocolHandlerState);
+        smearer, statistics, clientType, applicationName, this, msgValidator, protocolHandlerState);
   }
 
   /**
@@ -769,7 +769,10 @@ public abstract class InvalidationClientCore extends InternalBase
   public void start() {
     Preconditions.checkState(resources.isStarted(), "Resources must be started before starting " +
         "the Ticl");
-    Preconditions.checkState(!ticlState.isStarted(), "Already started");
+    if (ticlState.isStarted()) {
+      logger.severe("Ignoring start call since already started: client = %s", this);
+      return;
+    }
 
     // Initialize the nonce so that we can maintain the invariant that exactly one of
     // "nonce" and "clientToken" is non-null.
@@ -941,14 +944,21 @@ public abstract class InvalidationClientCore extends InternalBase
     Preconditions.checkState(internalScheduler.isRunningOnThread(),
         "Not running on internal thread");
 
-    Preconditions.checkState(ticlState.isStarted() || ticlState.isStopped(),
-      "Cannot call %s for object %s when the Ticl has not been started (currently in state %s)." +
-      "If start has been called, caller must wait for InvalidationListener.ready",
-      ticlState, regOpType, objectIds);
     if (ticlState.isStopped()) {
       // The Ticl has been stopped. This might be some old registration op coming in. Just ignore
       // instead of crashing.
-      logger.warning("Ticl stopped: register (%s) of %s ignored.", regOpType, objectIds);
+      logger.severe("Ticl stopped: register (%s) of %s ignored.", regOpType, objectIds);
+      return;
+    }
+    if (!ticlState.isStarted()) {
+      // We must be in the NOT_STARTED state, since we can't be in STOPPED or STARTED (since the
+      // previous if-check didn't succeeded, and isStarted uses a != STARTED test).
+      logger.severe(
+          "Ticl is not yet started; failing registration call; client = %s, objects = %s, op = %s",
+          this, objectIds, regOpType);
+      for (ObjectId objectId : objectIds) {
+        listener.informRegistrationFailure(this, objectId, true, "Client not yet ready");
+      }
       return;
     }
 
@@ -1133,12 +1143,20 @@ public abstract class InvalidationClientCore extends InternalBase
   private void handleTokenChanged(ByteString headerToken, final ByteString newToken) {
     Preconditions.checkState(internalScheduler.isRunningOnThread(), "Not on internal thread");
 
-    // If we have a new token, then we know that the nonce matched. Accept the token and clear
-    // the nonce.
+    // The server is either supplying a new token in response to an InitializeMessage, spontaneously
+    // destroying a token we hold, or spontaneously upgrading a token we hold.
+
     if (newToken != null) {
-      Preconditions.checkArgument(TypedUtil.<ByteString>equals(headerToken, nonce),
-          "Provided with new token and mismatched nonce: header = %s, nonce = %s",
-          headerToken, nonce);
+      // Note: headerToken cannot be null, so a null nonce or clientToken will always be non-equal.
+      boolean headerTokenMatchesNonce = TypedUtil.<ByteString>equals(headerToken, nonce);
+      boolean headerTokenMatchesExistingToken =
+          TypedUtil.<ByteString>equals(headerToken, clientToken);
+      boolean shouldAcceptToken = headerTokenMatchesNonce || headerTokenMatchesExistingToken;
+      if (!shouldAcceptToken) {
+        logger.info("Ignoring new token; %s does not match nonce = %s or existing token = %s",
+            newToken, nonce, clientToken);
+        return;
+      }
       logger.info("New token being assigned at client: %s, Old = %s",
           CommonProtoStrings2.toLazyCompactString(newToken),
           CommonProtoStrings2.toLazyCompactString(clientToken));
@@ -1194,12 +1212,18 @@ public abstract class InvalidationClientCore extends InternalBase
       } else {
         // Regular object. Could be unknown version or not.
         Invalidation inv = ProtoConverter.convertFromInvalidationProto(invalidation);
-        logger.info("Issuing invalidate (known-version = %s): %s", invalidation.getIsKnownVersion(),
-            inv);
-        if (invalidation.getIsKnownVersion()) {
+
+        boolean isSuppressed = invalidation.getIsTrickleRestart();
+        logger.info("Issuing invalidate (known-version = %s, is-trickle-restart = %s): %s",
+            invalidation.getIsKnownVersion(), isSuppressed, inv);
+
+        // Issue invalidate if the invalidation had a known version AND either no suppression has
+        // occurred or the client allows suppression.
+        if (invalidation.getIsKnownVersion() &&
+            (!isSuppressed || InvalidationClientCore.this.config.getAllowSuppression())) {
           listener.invalidate(InvalidationClientCore.this, inv, ackHandle);
         } else {
-          // Unknown version
+          // Otherwise issue invalidateUnknownVersion.
           listener.invalidateUnknownVersion(InvalidationClientCore.this, inv.getObjectId(),
               ackHandle);
         }
@@ -1489,8 +1513,8 @@ public abstract class InvalidationClientCore extends InternalBase
 
   @Override
   public void toCompactString(TextBuilder builder) {
-    builder.appendFormat("Client: %s, %s", applicationClientId,
-        CommonProtoStrings2.toLazyCompactString(clientToken));
+    builder.appendFormat("Client: %s, %s, %s", applicationClientId,
+        CommonProtoStrings2.toLazyCompactString(clientToken), ticlState);
   }
 
   @Override

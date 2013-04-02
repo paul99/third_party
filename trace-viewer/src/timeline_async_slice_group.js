@@ -7,6 +7,7 @@
 /**
  * @fileoverview Provides the TimelineAsyncSliceGroup class.
  */
+base.require('range');
 base.require('timeline_slice');
 base.exportTo('tracing', function() {
 
@@ -34,7 +35,7 @@ base.exportTo('tracing', function() {
         if (typeof this[key] == 'function')
           continue;
         if (key == 'startThread' || key == 'endThread') {
-          obj[key] = this[key].ptid;
+          obj[key] = this[key].guid;
           continue;
         }
         obj[key] = this[key];
@@ -55,9 +56,9 @@ base.exportTo('tracing', function() {
    * A group of AsyncSlices.
    * @constructor
    */
-  function TimelineAsyncSliceGroup(name) {
-    this.name = name;
+  function TimelineAsyncSliceGroup() {
     this.slices = [];
+    this.bounds = new base.Range();
   }
 
   TimelineAsyncSliceGroup.prototype = {
@@ -94,20 +95,10 @@ base.exportTo('tracing', function() {
      * Updates the bounds for this group based on the slices it contains.
      */
     updateBounds: function() {
-      if (this.slices.length) {
-        var minTimestamp = Number.MAX_VALUE;
-        var maxTimestamp = -Number.MAX_VALUE;
-        for (var i = 0; i < this.slices.length; i++) {
-          if (this.slices[i].start < minTimestamp)
-            minTimestamp = this.slices[i].start;
-          if (this.slices[i].end > maxTimestamp)
-            maxTimestamp = this.slices[i].end;
-        }
-        this.minTimestamp = minTimestamp;
-        this.maxTimestamp = maxTimestamp;
-      } else {
-        this.minTimestamp = undefined;
-        this.maxTimestamp = undefined;
+      this.bounds.reset();
+      for (var i = 0; i < this.slices.length; i++) {
+        this.bounds.addValue(this.slices[i].start);
+        this.bounds.addValue(this.slices[i].end);
       }
     },
 
@@ -118,17 +109,17 @@ base.exportTo('tracing', function() {
      * slices that started on the same thread.
      */
     computeSubGroups: function() {
-      var subGroupsByPTID = {};
+      var subGroupsByGUID = {};
       for (var i = 0; i < this.slices.length; ++i) {
         var slice = this.slices[i];
-        var slicePTID = slice.startThread.ptid;
-        if (!subGroupsByPTID[slicePTID])
-          subGroupsByPTID[slicePTID] = new TimelineAsyncSliceGroup(this.name);
-        subGroupsByPTID[slicePTID].slices.push(slice);
+        var sliceGUID = slice.startThread.guid;
+        if (!subGroupsByGUID[sliceGUID])
+          subGroupsByGUID[sliceGUID] = new TimelineAsyncSliceGroup();
+        subGroupsByGUID[sliceGUID].slices.push(slice);
       }
       var groups = [];
-      for (var ptid in subGroupsByPTID) {
-        var group = subGroupsByPTID[ptid];
+      for (var guid in subGroupsByGUID) {
+        var group = subGroupsByGUID[guid];
         group.updateBounds();
         groups.push(group);
       }

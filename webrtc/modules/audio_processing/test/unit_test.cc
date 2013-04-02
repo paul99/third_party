@@ -438,8 +438,7 @@ bool ApmTest::ReadFrame(FILE* file, AudioFrame* frame) {
 
 void ApmTest::ProcessWithDefaultStreamParameters(AudioFrame* frame) {
   EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(0));
-  EXPECT_EQ(apm_->kNoError,
-      apm_->echo_cancellation()->set_stream_drift_samples(0));
+  apm_->echo_cancellation()->set_stream_drift_samples(0);
   EXPECT_EQ(apm_->kNoError,
       apm_->gain_control()->set_stream_analog_level(127));
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame));
@@ -451,7 +450,8 @@ void ApmTest::ChangeTriggersInit(F f, AudioProcessing* ap, int initial_value,
   EnableAllComponents();
   Init(16000, 2, 2, 2, false);
   SetFrameTo(frame_, 1000);
-  AudioFrame frame_copy = *frame_;
+  AudioFrame frame_copy;
+  frame_copy.CopyFrom(*frame_);
   ProcessWithDefaultStreamParameters(frame_);
   // Verify the processing has actually changed the frame.
   EXPECT_FALSE(FrameDataAreEqual(*frame_, frame_copy));
@@ -464,13 +464,14 @@ void ApmTest::ChangeTriggersInit(F f, AudioProcessing* ap, int initial_value,
 
   apm_->Initialize();
   SetFrameTo(frame_, 1000);
-  AudioFrame initial_frame = *frame_;
+  AudioFrame initial_frame;
+  initial_frame.CopyFrom(*frame_);
   ProcessWithDefaultStreamParameters(frame_);
   ProcessWithDefaultStreamParameters(frame_);
   // Verify the processing has actually changed the frame.
   EXPECT_FALSE(FrameDataAreEqual(*frame_, initial_frame));
 
-  frame_copy = initial_frame;
+  frame_copy.CopyFrom(initial_frame);
   apm_->Initialize();
   ProcessWithDefaultStreamParameters(&frame_copy);
   // Verify an init here would result in different output.
@@ -478,7 +479,7 @@ void ApmTest::ChangeTriggersInit(F f, AudioProcessing* ap, int initial_value,
   ProcessWithDefaultStreamParameters(&frame_copy);
   EXPECT_FALSE(FrameDataAreEqual(*frame_, frame_copy));
 
-  frame_copy = initial_frame;
+  frame_copy.CopyFrom(initial_frame);
   apm_->Initialize();
   ProcessWithDefaultStreamParameters(&frame_copy);
   // Test that the same value does not trigger an init.
@@ -508,8 +509,7 @@ TEST_F(ApmTest, StreamParameters) {
   EXPECT_EQ(apm_->kNoError,
             apm_->echo_cancellation()->enable_drift_compensation(true));
   EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(100));
-  EXPECT_EQ(apm_->kNoError,
-            apm_->echo_cancellation()->set_stream_drift_samples(0));
+  apm_->echo_cancellation()->set_stream_drift_samples(0);
   EXPECT_EQ(apm_->kStreamParameterNotSetError,
             apm_->ProcessStream(frame_));
   EXPECT_EQ(apm_->kNoError, apm_->gain_control()->Enable(false));
@@ -530,8 +530,7 @@ TEST_F(ApmTest, StreamParameters) {
   EXPECT_EQ(apm_->kNoError, apm_->gain_control()->Enable(true));
   EXPECT_EQ(apm_->kNoError,
             apm_->echo_cancellation()->enable_drift_compensation(true));
-  EXPECT_EQ(apm_->kNoError,
-            apm_->echo_cancellation()->set_stream_drift_samples(0));
+  apm_->echo_cancellation()->set_stream_drift_samples(0);
   EXPECT_EQ(apm_->kNoError,
             apm_->gain_control()->set_stream_analog_level(127));
   EXPECT_EQ(apm_->kStreamParameterNotSetError, apm_->ProcessStream(frame_));
@@ -543,8 +542,7 @@ TEST_F(ApmTest, StreamParameters) {
 
   // Resets after successful ProcessStream().
   EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(100));
-  EXPECT_EQ(apm_->kNoError,
-            apm_->echo_cancellation()->set_stream_drift_samples(0));
+  apm_->echo_cancellation()->set_stream_drift_samples(0);
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
   EXPECT_EQ(apm_->kStreamParameterNotSetError, apm_->ProcessStream(frame_));
 
@@ -565,8 +563,7 @@ TEST_F(ApmTest, StreamParameters) {
   // -- All there --
   EXPECT_EQ(apm_->kNoError, apm_->Initialize());
   EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(100));
-  EXPECT_EQ(apm_->kNoError,
-            apm_->echo_cancellation()->set_stream_drift_samples(0));
+  apm_->echo_cancellation()->set_stream_drift_samples(0);
   EXPECT_EQ(apm_->kNoError,
             apm_->gain_control()->set_stream_analog_level(127));
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
@@ -721,6 +718,11 @@ TEST_F(ApmTest, EchoControlMobile) {
   // AECM won't use super-wideband.
   EXPECT_EQ(apm_->kNoError, apm_->set_sample_rate_hz(32000));
   EXPECT_EQ(apm_->kBadSampleRateError, apm_->echo_control_mobile()->Enable(true));
+  EXPECT_EQ(apm_->kNoError, apm_->set_sample_rate_hz(16000));
+  EXPECT_EQ(apm_->kNoError,
+            apm_->echo_control_mobile()->Enable(true));
+  EXPECT_EQ(apm_->kUnsupportedComponentError, apm_->set_sample_rate_hz(32000));
+
   // Turn AECM on (and AEC off)
   Init(16000, 2, 2, 2, false);
   EXPECT_EQ(apm_->kNoError, apm_->echo_control_mobile()->Enable(true));
@@ -1078,7 +1080,8 @@ TEST_F(ApmTest, NoProcessingWhenAllComponentsDisabled) {
   for (size_t i = 0; i < kSampleRatesSize; i++) {
     Init(kSampleRates[i], 2, 2, 2, false);
     SetFrameTo(frame_, 1000, 2000);
-    AudioFrame frame_copy = *frame_;
+    AudioFrame frame_copy;
+    frame_copy.CopyFrom(*frame_);
     for (int j = 0; j < 1000; j++) {
       EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
       EXPECT_TRUE(FrameDataAreEqual(*frame_, frame_copy));
@@ -1103,8 +1106,7 @@ TEST_F(ApmTest, IdenticalInputChannelsResultInIdenticalOutputChannels) {
       frame_->vad_activity_ = AudioFrame::kVadUnknown;
 
       EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(0));
-      EXPECT_EQ(apm_->kNoError,
-          apm_->echo_cancellation()->set_stream_drift_samples(0));
+      apm_->echo_cancellation()->set_stream_drift_samples(0);
       EXPECT_EQ(apm_->kNoError,
           apm_->gain_control()->set_stream_analog_level(analog_level));
       EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
@@ -1119,14 +1121,15 @@ TEST_F(ApmTest, SplittingFilter) {
   // Verify the filter is not active through undistorted audio when:
   // 1. No components are enabled...
   SetFrameTo(frame_, 1000);
-  AudioFrame frame_copy = *frame_;
+  AudioFrame frame_copy;
+  frame_copy.CopyFrom(*frame_);
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
   EXPECT_TRUE(FrameDataAreEqual(*frame_, frame_copy));
 
   // 2. Only the level estimator is enabled...
   SetFrameTo(frame_, 1000);
-  frame_copy = *frame_;
+  frame_copy.CopyFrom(*frame_);
   EXPECT_EQ(apm_->kNoError, apm_->level_estimator()->Enable(true));
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
@@ -1135,7 +1138,7 @@ TEST_F(ApmTest, SplittingFilter) {
 
   // 3. Only VAD is enabled...
   SetFrameTo(frame_, 1000);
-  frame_copy = *frame_;
+  frame_copy.CopyFrom(*frame_);
   EXPECT_EQ(apm_->kNoError, apm_->voice_detection()->Enable(true));
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
@@ -1144,7 +1147,7 @@ TEST_F(ApmTest, SplittingFilter) {
 
   // 4. Both VAD and the level estimator are enabled...
   SetFrameTo(frame_, 1000);
-  frame_copy = *frame_;
+  frame_copy.CopyFrom(*frame_);
   EXPECT_EQ(apm_->kNoError, apm_->level_estimator()->Enable(true));
   EXPECT_EQ(apm_->kNoError, apm_->voice_detection()->Enable(true));
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
@@ -1164,14 +1167,12 @@ TEST_F(ApmTest, SplittingFilter) {
   // behavior of the AEC. Think of something more robust.
   EXPECT_EQ(apm_->kNoError, apm_->echo_cancellation()->Enable(true));
   SetFrameTo(frame_, 1000);
-  frame_copy = *frame_;
+  frame_copy.CopyFrom(*frame_);
   EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(0));
-  EXPECT_EQ(apm_->kNoError,
-            apm_->echo_cancellation()->set_stream_drift_samples(0));
+  apm_->echo_cancellation()->set_stream_drift_samples(0);
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
   EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(0));
-  EXPECT_EQ(apm_->kNoError,
-            apm_->echo_cancellation()->set_stream_drift_samples(0));
+  apm_->echo_cancellation()->set_stream_drift_samples(0);
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
   EXPECT_TRUE(FrameDataAreEqual(*frame_, frame_copy));
 
@@ -1182,10 +1183,9 @@ TEST_F(ApmTest, SplittingFilter) {
   frame_->num_channels_ = 2;
   frame_->sample_rate_hz_ = 32000;
   SetFrameTo(frame_, 1000);
-  frame_copy = *frame_;
+  frame_copy.CopyFrom(*frame_);
   EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(0));
-  EXPECT_EQ(apm_->kNoError,
-            apm_->echo_cancellation()->set_stream_drift_samples(0));
+  apm_->echo_cancellation()->set_stream_drift_samples(0);
   EXPECT_EQ(apm_->kNoError, apm_->ProcessStream(frame_));
   EXPECT_FALSE(FrameDataAreEqual(*frame_, frame_copy));
 }
@@ -1277,8 +1277,7 @@ TEST_F(ApmTest, Process) {
       frame_->vad_activity_ = AudioFrame::kVadUnknown;
 
       EXPECT_EQ(apm_->kNoError, apm_->set_stream_delay_ms(0));
-      EXPECT_EQ(apm_->kNoError,
-          apm_->echo_cancellation()->set_stream_drift_samples(0));
+      apm_->echo_cancellation()->set_stream_drift_samples(0);
       EXPECT_EQ(apm_->kNoError,
           apm_->gain_control()->set_stream_analog_level(analog_level));
 

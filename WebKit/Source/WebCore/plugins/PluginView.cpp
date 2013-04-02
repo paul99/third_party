@@ -76,8 +76,8 @@
 #include "JSDOMWindow.h"
 #include "c_instance.h"
 #include "runtime_root.h"
+#include <runtime/JSCJSValue.h>
 #include <runtime/JSLock.h>
-#include <runtime/JSValue.h>
 
 using JSC::ExecState;
 using JSC::JSLock;
@@ -154,6 +154,11 @@ void PluginView::setFrameRect(const IntRect& rect)
 }
 
 void PluginView::frameRectsChanged()
+{
+    updatePluginWidget();
+}
+
+void PluginView::clipRectChanged()
 {
     updatePluginWidget();
 }

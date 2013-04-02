@@ -12,7 +12,7 @@
         {
           'target_name': 'libflac',
           'product_name': 'flac',
-          'type': '<(library)',
+          'type': 'static_library',
           'sources': [
             'include/FLAC/all.h',
             'include/FLAC/assert.h',
@@ -94,11 +94,23 @@
         {
           'target_name': 'libflac',
           'type': 'none',
-          'direct_dependent_settings': {
-            'defines': [
-              'USE_SYSTEM_FLAC',
+          'variables': {
+            'headers_root_path': 'include',
+            'header_filenames': [
+              'FLAC/callback.h',
+              'FLAC/metadata.h',
+              'FLAC/assert.h',
+              'FLAC/export.h',
+              'FLAC/format.h',
+              'FLAC/stream_decoder.h',
+              'FLAC/stream_encoder.h',
+              'FLAC/ordinals.h',
+              'FLAC/all.h',
             ],
           },
+          'includes': [
+            '../../build/shim_headers.gypi',
+          ],
           'link_settings': {
             'ldflags': [
               '<!@(pkg-config --libs-only-L --libs-only-other flac)',

@@ -34,6 +34,7 @@
 #include "JSDOMWrapper.h"
 #include "WebCoreMemoryInstrumentation.h"
 #include <heap/Weak.h>
+#include <runtime/Operations.h>
 
 namespace WebCore {
 
@@ -58,7 +59,7 @@ public:
     void reportMemoryUsage(MemoryObjectInfo* memoryObjectInfo) const
     {
         MemoryClassInfo info(memoryObjectInfo, this, WebCoreMemoryTypes::DOM);
-        info.addMember(m_wrapper);
+        info.addMember(m_wrapper, "wrapper");
     }
 
 private:

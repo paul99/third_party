@@ -150,6 +150,10 @@ void QWebSettingsPrivate::apply()
         settings->setAcceleratedCompositingForAnimationEnabled(value);
         settings->setAcceleratedCompositingForVideoEnabled(false);
         settings->setAcceleratedCompositingForPluginsEnabled(false);
+
+        bool showDebugVisuals = qgetenv("WEBKIT_SHOW_COMPOSITING_DEBUG_VISUALS") == "1";
+        settings->setShowDebugBorders(showDebugVisuals);
+        settings->setShowRepaintCounter(showDebugVisuals);
 #endif
 #if ENABLE(WEBGL)
         value = attributes.value(QWebSettings::WebGLEnabled,
@@ -163,6 +167,10 @@ void QWebSettingsPrivate::apply()
 #if USE(ACCELERATED_COMPOSITING)
         settings->setAcceleratedCompositingForCanvasEnabled(value);
 #endif
+#endif
+#if ENABLE(WEB_AUDIO)
+        value = attributes.value(QWebSettings::WebAudioEnabled, global->attributes.value(QWebSettings::WebAudioEnabled));
+        settings->setWebAudioEnabled(value);
 #endif
 
         value = attributes.value(QWebSettings::CSSRegionsEnabled,
@@ -534,6 +542,7 @@ QWebSettings::QWebSettings()
     d->attributes.insert(QWebSettings::LocalContentCanAccessFileUrls, true);
     d->attributes.insert(QWebSettings::AcceleratedCompositingEnabled, true);
     d->attributes.insert(QWebSettings::WebGLEnabled, true);
+    d->attributes.insert(QWebSettings::WebAudioEnabled, false);
     d->attributes.insert(QWebSettings::CSSRegionsEnabled, true);
     d->attributes.insert(QWebSettings::CSSGridLayoutEnabled, false);
     d->attributes.insert(QWebSettings::HyperlinkAuditingEnabled, false);

@@ -18,6 +18,7 @@
 #endif
 #include "libyuv/planar_functions.h"
 #include "libyuv/rotate.h"
+#include "libyuv/scale.h"  // For ScalePlane()
 #include "libyuv/video_common.h"
 #include "libyuv/row.h"
 
@@ -215,12 +216,7 @@ int I444ToI420(const uint8* src_y, int src_stride_y,
   return 0;
 }
 
-// use Bilinear for upsampling chroma
-void ScalePlaneBilinear(int src_width, int src_height,
-                        int dst_width, int dst_height,
-                        int src_stride, int dst_stride,
-                        const uint8* src_ptr, uint8* dst_ptr);
-
+// TODO(fbarchard): Enable bilinear when fast enough or specialized upsampler.
 // 411 chroma is 1/4 width, 1x height
 // 420 chroma is 1/2 width, 1/2 height
 LIBYUV_API
@@ -256,19 +252,15 @@ int I411ToI420(const uint8* src_y, int src_stride_y,
   int halfheight = (height + 1) >> 1;
   int quarterwidth = (width + 3) >> 2;
 
-  // Resample U plane.
-  ScalePlaneBilinear(quarterwidth, height,  // from 1/4 width, 1x height
-                     halfwidth, halfheight,  // to 1/2 width, 1/2 height
-                     src_stride_u,
-                     dst_stride_u,
-                     src_u, dst_u);
+  // Resample U plane from 1/4 width, 1x height to 1/2 width, 1/2 height.
+  ScalePlane(src_u, src_stride_u, quarterwidth, height,
+             dst_u, dst_stride_u, halfwidth, halfheight,
+             kFilterNone);
 
   // Resample V plane.
-  ScalePlaneBilinear(quarterwidth, height,  // from 1/4 width, 1x height
-                     halfwidth, halfheight,  // to 1/2 width, 1/2 height
-                     src_stride_v,
-                     dst_stride_v,
-                     src_v, dst_v);
+  ScalePlane(src_v, src_stride_v, quarterwidth, height,
+             dst_v, dst_stride_v, halfwidth, halfheight,
+             kFilterNone);
   return 0;
 }
 
@@ -365,56 +357,51 @@ static int X420ToI420(const uint8* src_y,
   }
 
   int halfwidth = (width + 1) >> 1;
-  void (*SplitUV)(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix) =
-      SplitUV_C;
-#if defined(HAS_SPLITUV_SSE2)
+  void (*SplitUVRow)(const uint8* src_uv, uint8* dst_u, uint8* dst_v, int pix) =
+      SplitUVRow_C;
+#if defined(HAS_SPLITUVROW_SSE2)
   if (TestCpuFlag(kCpuHasSSE2) && halfwidth >= 16) {
-    SplitUV = SplitUV_Any_SSE2;
+    SplitUVRow = SplitUVRow_Any_SSE2;
     if (IS_ALIGNED(halfwidth, 16)) {
-      SplitUV = SplitUV_Unaligned_SSE2;
+      SplitUVRow = SplitUVRow_Unaligned_SSE2;
       if (IS_ALIGNED(src_uv, 16) && IS_ALIGNED(src_stride_uv, 16) &&
           IS_ALIGNED(dst_u, 16) && IS_ALIGNED(dst_stride_u, 16) &&
           IS_ALIGNED(dst_v, 16) && IS_ALIGNED(dst_stride_v, 16)) {
-        SplitUV = SplitUV_SSE2;
+        SplitUVRow = SplitUVRow_SSE2;
       }
     }
   }
 #endif
-#if defined(HAS_SPLITUV_AVX2)
+#if defined(HAS_SPLITUVROW_AVX2)
   if (TestCpuFlag(kCpuHasAVX2) && halfwidth >= 32) {
-    SplitUV = SplitUV_Any_AVX2;
+    SplitUVRow = SplitUVRow_Any_AVX2;
     if (IS_ALIGNED(halfwidth, 32)) {
-      SplitUV = SplitUV_Unaligned_AVX2;
+      SplitUVRow = SplitUVRow_Unaligned_AVX2;
       if (IS_ALIGNED(src_uv, 32) && IS_ALIGNED(src_stride_uv, 32) &&
           IS_ALIGNED(dst_u, 32) && IS_ALIGNED(dst_stride_u, 32) &&
           IS_ALIGNED(dst_v, 32) && IS_ALIGNED(dst_stride_v, 32)) {
-        SplitUV = SplitUV_AVX2;
+        SplitUVRow = SplitUVRow_AVX2;
       }
     }
   }
 #endif
-#if defined(HAS_SPLITUV_NEON)
+#if defined(HAS_SPLITUVROW_NEON)
   if (TestCpuFlag(kCpuHasNEON) && halfwidth >= 16) {
-    SplitUV = SplitUV_Any_NEON;
+    SplitUVRow = SplitUVRow_Any_NEON;
     if (IS_ALIGNED(halfwidth, 16)) {
-      SplitUV = SplitUV_Unaligned_NEON;
-      if (IS_ALIGNED(src_uv, 16) && IS_ALIGNED(src_stride_uv, 16) &&
-          IS_ALIGNED(dst_u, 16) && IS_ALIGNED(dst_stride_u, 16) &&
-          IS_ALIGNED(dst_v, 16) && IS_ALIGNED(dst_stride_v, 16)) {
-        SplitUV = SplitUV_NEON;
-      }
+      SplitUVRow = SplitUVRow_NEON;
     }
   }
 #endif
-#if defined(HAS_SPLITUV_MIPS_DSPR2)
+#if defined(HAS_SPLITUVROW_MIPS_DSPR2)
   if (TestCpuFlag(kCpuHasMIPS_DSPR2) && halfwidth >= 16) {
-    SplitUV = SplitUV_Any_MIPS_DSPR2;
+    SplitUVRow = SplitUVRow_Any_MIPS_DSPR2;
     if (IS_ALIGNED(halfwidth, 16)) {
-      SplitUV = SplitUV_Unaligned_MIPS_DSPR2;
+      SplitUVRow = SplitUVRow_Unaligned_MIPS_DSPR2;
       if (IS_ALIGNED(src_uv, 4) && IS_ALIGNED(src_stride_uv, 4) &&
           IS_ALIGNED(dst_u, 4) && IS_ALIGNED(dst_stride_u, 4) &&
           IS_ALIGNED(dst_v, 4) && IS_ALIGNED(dst_stride_v, 4)) {
-        SplitUV = SplitUV_MIPS_DSPR2;
+        SplitUVRow = SplitUVRow_MIPS_DSPR2;
       }
     }
   }
@@ -428,7 +415,7 @@ static int X420ToI420(const uint8* src_y,
   int halfheight = (height + 1) >> 1;
   for (int y = 0; y < halfheight; ++y) {
     // Copy a row of UV.
-    SplitUV(src_uv, dst_u, dst_v, halfwidth);
+    SplitUVRow(src_uv, dst_u, dst_v, halfwidth);
     dst_u += dst_stride_u;
     dst_v += dst_stride_v;
     src_uv += src_stride_uv;
@@ -579,59 +566,6 @@ int Q420ToI420(const uint8* src_y, int src_stride_y,
   return 0;
 }
 
-// Test if over reading on source is safe.
-// TODO(fbarchard): Find more efficient solution to safely do odd sizes.
-// Macros to control read policy, from slowest to fastest:
-// READSAFE_NEVER - disables read ahead on systems with strict memory reads
-// READSAFE_ODDHEIGHT - last row of odd height done with C.
-//   This policy assumes that the caller handles the last row of an odd height
-//   image using C.
-// READSAFE_PAGE - enable read ahead within same page.
-//   A page is 4096 bytes. When reading ahead, if the last pixel is near the
-//   end the page, and a read spans the page into the next page, a memory
-//   exception can occur if that page has not been allocated, or is a guard
-//   page. This setting ensures the overread is within the same page.
-// READSAFE_ALWAYS - enables read ahead on systems without memory exceptions
-//   or where buffers are padded by 64 bytes.
-
-#if defined(HAS_RGB24TOARGBROW_SSSE3) || \
-    defined(HAS_RGB24TOARGBROW_SSSE3) || \
-    defined(HAS_RAWTOARGBROW_SSSE3) || \
-    defined(HAS_RGB565TOARGBROW_SSE2) || \
-    defined(HAS_ARGB1555TOARGBROW_SSE2) || \
-    defined(HAS_ARGB4444TOARGBROW_SSE2)
-
-#define READSAFE_ODDHEIGHT
-
-static bool TestReadSafe(const uint8* src_yuy2, int src_stride_yuy2,
-                        int width, int height, int bpp, int overread) {
-  if (width > kMaxStride) {
-    return false;
-  }
-#if defined(READSAFE_ALWAYS)
-  return true;
-#elif defined(READSAFE_NEVER)
-  return false;
-#elif defined(READSAFE_ODDHEIGHT)
-  if (!(width & 15) ||
-      (src_stride_yuy2 >= 0 && (height & 1) && width * bpp >= overread)) {
-    return true;
-  }
-  return false;
-#elif defined(READSAFE_PAGE)
-  if (src_stride_yuy2 >= 0) {
-    src_yuy2 += (height - 1) * src_stride_yuy2;
-  }
-  uintptr_t last_adr = (uintptr_t)(src_yuy2) + width * bpp - 1;
-  uintptr_t last_read_adr = last_adr + overread - 1;
-  if (((last_adr ^ last_read_adr) & ~4095) == 0) {
-    return true;
-  }
-  return false;
-#endif
-}
-#endif
-
 // Convert YUY2 to I420.
 LIBYUV_API
 int YUY2ToI420(const uint8* src_yuy2, int src_stride_yuy2,
@@ -754,149 +688,6 @@ int UYVYToI420(const uint8* src_uyvy, int src_stride_uyvy,
   if (height & 1) {
     UYVYToUVRow(src_uyvy, 0, dst_u, dst_v, width);
     UYVYToYRow(src_uyvy, dst_y, width);
-  }
-  return 0;
-}
-
-// Visual C x86 or GCC little endian.
-#if defined(__x86_64__) || defined(_M_X64) || \
-  defined(__i386__) || defined(_M_IX86) || \
-  defined(__arm__) || defined(_M_ARM) || \
-  (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
-#define LIBYUV_LITTLE_ENDIAN
-#endif
-
-#ifdef LIBYUV_LITTLE_ENDIAN
-#define READWORD(p) (*reinterpret_cast<const uint32*>(p))
-#else
-static inline uint32 READWORD(const uint8* p) {
-  return static_cast<uint32>(p[0]) |
-      (static_cast<uint32>(p[1]) << 8) |
-      (static_cast<uint32>(p[2]) << 16) |
-      (static_cast<uint32>(p[3]) << 24);
-}
-#endif
-
-// Must be multiple of 6 pixels. Will over convert to handle remainder.
-// https://developer.apple.com/quicktime/icefloe/dispatch019.html#v210
-static void V210ToUYVYRow_C(const uint8* src_v210, uint8* dst_uyvy, int width) {
-  for (int x = 0; x < width; x += 6) {
-    uint32 w = READWORD(src_v210 + 0);
-    dst_uyvy[0] = (w >> 2) & 0xff;
-    dst_uyvy[1] = (w >> 12) & 0xff;
-    dst_uyvy[2] = (w >> 22) & 0xff;
-
-    w = READWORD(src_v210 + 4);
-    dst_uyvy[3] = (w >> 2) & 0xff;
-    dst_uyvy[4] = (w >> 12) & 0xff;
-    dst_uyvy[5] = (w >> 22) & 0xff;
-
-    w = READWORD(src_v210 + 8);
-    dst_uyvy[6] = (w >> 2) & 0xff;
-    dst_uyvy[7] = (w >> 12) & 0xff;
-    dst_uyvy[8] = (w >> 22) & 0xff;
-
-    w = READWORD(src_v210 + 12);
-    dst_uyvy[9] = (w >> 2) & 0xff;
-    dst_uyvy[10] = (w >> 12) & 0xff;
-    dst_uyvy[11] = (w >> 22) & 0xff;
-
-    src_v210 += 16;
-    dst_uyvy += 12;
-  }
-}
-
-// Convert V210 to I420.
-// V210 is 10 bit version of UYVY. 16 bytes to store 6 pixels.
-// Width is multiple of 48 pixels = 128 bytes.
-LIBYUV_API
-int V210ToI420(const uint8* src_v210, int src_stride_v210,
-               uint8* dst_y, int dst_stride_y,
-               uint8* dst_u, int dst_stride_u,
-               uint8* dst_v, int dst_stride_v,
-               int width, int height) {
-  if (!src_v210 || !dst_y || !dst_u || !dst_v ||
-      width <= 0 || height == 0 ||
-      width * 2 * 2 > kMaxStride) {
-    return -1;
-  }
-  // Negative height means invert the image.
-  if (height < 0) {
-    height = -height;
-    src_v210 = src_v210 + (height - 1) * src_stride_v210;
-    src_stride_v210 = -src_stride_v210;
-  }
-  SIMD_ALIGNED(uint8 row[kMaxStride * 2]);
-  void (*V210ToUYVYRow)(const uint8* src_v210, uint8* dst_uyvy, int pix);
-  V210ToUYVYRow = V210ToUYVYRow_C;
-
-  void (*UYVYToUVRow)(const uint8* src_uyvy, int src_stride_uyvy,
-                      uint8* dst_u, uint8* dst_v, int pix);
-  void (*UYVYToYRow)(const uint8* src_uyvy,
-                     uint8* dst_y, int pix);
-  UYVYToYRow = UYVYToYRow_C;
-  UYVYToUVRow = UYVYToUVRow_C;
-#if defined(HAS_UYVYTOYROW_SSE2)
-  if (TestCpuFlag(kCpuHasSSE2) && IS_ALIGNED(width, 16)) {
-    UYVYToUVRow = UYVYToUVRow_SSE2;
-    UYVYToYRow = UYVYToYRow_Unaligned_SSE2;
-    if (IS_ALIGNED(dst_y, 16) && IS_ALIGNED(dst_stride_y, 16)) {
-      UYVYToYRow = UYVYToYRow_SSE2;
-    }
-  }
-#elif defined(HAS_UYVYTOYROW_NEON)
-  if (TestCpuFlag(kCpuHasNEON) && width >= 8) {
-    UYVYToYRow = UYVYToYRow_Any_NEON;
-    if (width >= 16) {
-      UYVYToUVRow = UYVYToUVRow_Any_NEON;
-    }
-    if (IS_ALIGNED(width, 16)) {
-      UYVYToYRow = UYVYToYRow_NEON;
-      UYVYToUVRow = UYVYToUVRow_NEON;
-    }
-  }
-#endif
-
-#if defined(HAS_UYVYTOYROW_SSE2)
-  if (TestCpuFlag(kCpuHasSSE2) && width >= 16) {
-    UYVYToUVRow = UYVYToUVRow_Any_SSE2;
-    UYVYToYRow = UYVYToYRow_Any_SSE2;
-    if (IS_ALIGNED(width, 16)) {
-      UYVYToYRow = UYVYToYRow_Unaligned_SSE2;
-      UYVYToUVRow = UYVYToUVRow_SSE2;
-      if (IS_ALIGNED(dst_y, 16) && IS_ALIGNED(dst_stride_y, 16)) {
-        UYVYToYRow = UYVYToYRow_SSE2;
-      }
-    }
-  }
-#elif defined(HAS_UYVYTOYROW_NEON)
-  if (TestCpuFlag(kCpuHasNEON) && width >= 8) {
-    UYVYToYRow = UYVYToYRow_Any_NEON;
-    if (width >= 16) {
-      UYVYToUVRow = UYVYToUVRow_Any_NEON;
-    }
-    if (IS_ALIGNED(width, 16)) {
-      UYVYToYRow = UYVYToYRow_NEON;
-      UYVYToUVRow = UYVYToUVRow_NEON;
-    }
-  }
-#endif
-
-  for (int y = 0; y < height - 1; y += 2) {
-    V210ToUYVYRow(src_v210, row, width);
-    V210ToUYVYRow(src_v210 + src_stride_v210, row + kMaxStride, width);
-    UYVYToUVRow(row, kMaxStride, dst_u, dst_v, width);
-    UYVYToYRow(row, dst_y, width);
-    UYVYToYRow(row + kMaxStride, dst_y + dst_stride_y, width);
-    src_v210 += src_stride_v210 * 2;
-    dst_y += dst_stride_y * 2;
-    dst_u += dst_stride_u;
-    dst_v += dst_stride_v;
-  }
-  if (height & 1) {
-    V210ToUYVYRow(src_v210, row, width);
-    UYVYToUVRow(row, 0, dst_u, dst_v, width);
-    UYVYToYRow(row, dst_y, width);
   }
   return 0;
 }
@@ -1796,7 +1587,6 @@ static void JpegI400ToI420(void* opaque,
 LIBYUV_API
 int MJPGSize(const uint8* sample, size_t sample_size,
              int* width, int* height) {
-  // TODO(fbarchard): Port to C
   MJpegDecoder mjpeg_decoder;
   bool ret = mjpeg_decoder.LoadFrame(sample, sample_size);
   if (ret) {
@@ -1822,7 +1612,7 @@ int MJPGToI420(const uint8* sample,
     return -1;
   }
 
-  // TODO(fbarchard): Port to C
+  // TODO(fbarchard): Port MJpeg to C.
   MJpegDecoder mjpeg_decoder;
   bool ret = mjpeg_decoder.LoadFrame(sample, sample_size);
   if (ret && (mjpeg_decoder.GetWidth() != w ||
@@ -1915,7 +1705,8 @@ int ConvertToI420(const uint8* sample,
                   int src_width, int src_height,
                   int dst_width, int dst_height,
                   RotationMode rotation,
-                  uint32 format) {
+                  uint32 fourcc) {
+  uint32 format = CanonicalFourCC(fourcc);
   if (!y || !u || !v || !sample ||
       src_width <= 0 || dst_width <= 0  ||
       src_height == 0 || dst_height == 0) {
@@ -1974,17 +1765,6 @@ int ConvertToI420(const uint8* sample,
     case FOURCC_UYVY:
       src = sample + (aligned_src_width * crop_y + crop_x) * 2;
       r = UYVYToI420(src, aligned_src_width * 2,
-                     y, y_stride,
-                     u, u_stride,
-                     v, v_stride,
-                     dst_width, inv_dst_height);
-      break;
-    case FOURCC_V210:
-      // stride is multiple of 48 pixels (128 bytes).
-      // pixels come in groups of 6 = 16 bytes
-      src = sample + (aligned_src_width + 47) / 48 * 128 * crop_y +
-            crop_x / 6 * 16;
-      r = V210ToI420(src, (aligned_src_width + 47) / 48 * 128,
                      y, y_stride,
                      u, u_stride,
                      v, v_stride,

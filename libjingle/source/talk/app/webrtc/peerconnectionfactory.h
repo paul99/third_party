@@ -41,38 +41,43 @@ class PeerConnectionFactory : public PeerConnectionFactoryInterface,
                               public talk_base::MessageHandler {
  public:
   virtual talk_base::scoped_refptr<PeerConnectionInterface>
-      CreatePeerConnection(const JsepInterface::IceServers& configuration,
-                           const MediaConstraintsInterface* constraints,
-                           PeerConnectionObserver* observer);
+      CreatePeerConnection(
+          const PeerConnectionInterface::IceServers& configuration,
+          const MediaConstraintsInterface* constraints,
+          PeerConnectionObserver* observer);
 
   virtual talk_base::scoped_refptr<PeerConnectionInterface>
-      CreatePeerConnection(const JsepInterface::IceServers& configuration,
-                           const MediaConstraintsInterface* constraints,
-                           PortAllocatorFactoryInterface* allocator_factory,
-                           PeerConnectionObserver* observer);
+      CreatePeerConnection(
+          const PeerConnectionInterface::IceServers& configuration,
+          const MediaConstraintsInterface* constraints,
+          PortAllocatorFactoryInterface* allocator_factory,
+          PeerConnectionObserver* observer);
   bool Initialize();
 
   virtual talk_base::scoped_refptr<LocalMediaStreamInterface>
       CreateLocalMediaStream(const std::string& label);
+
+  virtual talk_base::scoped_refptr<AudioSourceInterface> CreateAudioSource(
+      const MediaConstraintsInterface* constraints);
 
   virtual talk_base::scoped_refptr<VideoSourceInterface> CreateVideoSource(
       cricket::VideoCapturer* capturer,
       const MediaConstraintsInterface* constraints);
 
   virtual talk_base::scoped_refptr<VideoTrackInterface>
-      CreateVideoTrack(const std::string& label,
+      CreateVideoTrack(const std::string& id,
                        VideoSourceInterface* video_source);
 
   virtual talk_base::scoped_refptr<AudioTrackInterface>
-      CreateAudioTrack(const std::string& label,
+      CreateAudioTrack(const std::string& id,
                        AudioSourceInterface* audio_source);
   // Deprecated:
   virtual talk_base::scoped_refptr<LocalVideoTrackInterface>
-      CreateLocalVideoTrack(const std::string& label,
+      CreateLocalVideoTrack(const std::string& id,
                             cricket::VideoCapturer* video_device);
   // Deprecated:
   virtual talk_base::scoped_refptr<LocalAudioTrackInterface>
-      CreateLocalAudioTrack(const std::string& label,
+      CreateLocalAudioTrack(const std::string& id,
                             AudioDeviceModule* audio_device);
 
   virtual cricket::ChannelManager* channel_manager();
@@ -91,11 +96,13 @@ class PeerConnectionFactory : public PeerConnectionFactoryInterface,
  private:
   bool Initialize_s();
   void Terminate_s();
+  talk_base::scoped_refptr<AudioSourceInterface> CreateAudioSource_s(
+      const MediaConstraintsInterface* constraints);
   talk_base::scoped_refptr<VideoSourceInterface> CreateVideoSource_s(
       cricket::VideoCapturer* capturer,
       const MediaConstraintsInterface* constraints);
   talk_base::scoped_refptr<PeerConnectionInterface> CreatePeerConnection_s(
-      const JsepInterface::IceServers& configuration,
+      const PeerConnectionInterface::IceServers& configuration,
       const MediaConstraintsInterface* constraints,
       PortAllocatorFactoryInterface* allocator_factory,
       PeerConnectionObserver* observer);

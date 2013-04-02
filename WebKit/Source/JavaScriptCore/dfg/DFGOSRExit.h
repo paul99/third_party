@@ -32,7 +32,6 @@
 
 #include "CodeOrigin.h"
 #include "DFGCommon.h"
-#include "DFGCorrectableJumpPoint.h"
 #include "DFGExitProfile.h"
 #include "DFGGPRInfo.h"
 #include "DFGValueRecoveryOverride.h"
@@ -84,15 +83,14 @@ private:
 // This structure describes how to exit the speculative path by
 // going into baseline code.
 struct OSRExit {
-    OSRExit(ExitKind, JSValueSource, MethodOfGettingAValueProfile, MacroAssembler::Jump, SpeculativeJIT*, unsigned streamIndex, unsigned recoveryIndex = 0);
+    OSRExit(ExitKind, JSValueSource, MethodOfGettingAValueProfile, SpeculativeJIT*, unsigned streamIndex, unsigned recoveryIndex = 0);
     
     MacroAssemblerCodeRef m_code;
     
     JSValueSource m_jsValueSource;
     MethodOfGettingAValueProfile m_valueProfile;
-    
-    CorrectableJumpPoint m_check;
-    NodeIndex m_nodeIndex;
+
+    unsigned m_patchableCodeOffset;
     CodeOrigin m_codeOrigin;
     CodeOrigin m_codeOriginForExitProfile;
     
@@ -108,7 +106,12 @@ struct OSRExit {
             return false;
         return considerAddingAsFrequentExitSiteSlow(dfgCodeBlock, profiledCodeBlock);
     }
-    
+
+    void setPatchableCodeOffset(MacroAssembler::PatchableJump);
+    MacroAssembler::Jump getPatchableCodeOffsetAsJump() const;
+    CodeLocationJump codeLocationForRepatch(CodeBlock*) const;
+    void correctJump(LinkBuffer&);
+
     unsigned m_streamIndex;
     int m_lastSetOperand;
     
@@ -118,12 +121,9 @@ private:
     bool considerAddingAsFrequentExitSiteSlow(CodeBlock* dfgCodeBlock, CodeBlock* profiledCodeBlock);
 };
 
-#if DFG_ENABLE(VERBOSE_SPECULATION_FAILURE)
 struct SpeculationFailureDebugInfo {
     CodeBlock* codeBlock;
-    NodeIndex nodeIndex;
 };
-#endif
 
 } } // namespace JSC::DFG
 

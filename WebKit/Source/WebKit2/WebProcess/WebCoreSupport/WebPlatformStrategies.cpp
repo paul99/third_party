@@ -29,29 +29,37 @@
 #if USE(PLATFORM_STRATEGIES)
 
 #include "BlockingResponseMap.h"
+#include "DataReference.h"
+#include "NetworkResourceLoadParameters.h"
 #include "PluginInfoStore.h"
+#include "StorageNamespaceProxy.h"
 #include "WebContextMessages.h"
 #include "WebCookieManager.h"
 #include "WebCoreArgumentCoders.h"
+#include "WebErrors.h"
+#include "WebPage.h"
 #include "WebProcess.h"
 #include "WebProcessProxyMessages.h"
 #include <WebCore/Color.h>
 #include <WebCore/KURL.h>
 #include <WebCore/LoaderStrategy.h>
+#include <WebCore/NetworkStorageSession.h>
+#include <WebCore/NetworkingContext.h>
 #include <WebCore/Page.h>
 #include <WebCore/PlatformCookieJar.h>
 #include <WebCore/PlatformPasteboard.h>
+#include <WebCore/ResourceError.h>
+#include <WebCore/StorageNamespace.h>
 #include <wtf/Atomics.h>
 
 #if ENABLE(NETWORK_PROCESS)
 #include "NetworkConnectionToWebProcessMessages.h"
 #include "NetworkProcessConnection.h"
+#include "WebResourceLoadScheduler.h"
 #endif
 
-#if PLATFORM(WIN) && USE(CFNETWORK)
-#include "WebFrameNetworkingContext.h"
-#include <WebKitSystemInterface/WebKitSystemInterface.h>
-#endif
+// FIXME: Remove this once it works well enough to be the default.
+#define ENABLE_UI_PROCESS_STORAGE 0
 
 using namespace WebCore;
 
@@ -101,6 +109,11 @@ SharedWorkerStrategy* WebPlatformStrategies::createSharedWorkerStrategy()
     return this;
 }
 
+StorageStrategy* WebPlatformStrategies::createStorageStrategy()
+{
+    return this;
+}
+
 VisitedLinkStrategy* WebPlatformStrategies::createVisitedLinkStrategy()
 {
     return this;
@@ -108,134 +121,83 @@ VisitedLinkStrategy* WebPlatformStrategies::createVisitedLinkStrategy()
 
 // CookiesStrategy
 
-void WebPlatformStrategies::notifyCookiesChanged()
-{
-    WebCookieManager::shared().dispatchCookiesDidChange();
-}
-
-#if PLATFORM(WIN) && USE(CFNETWORK)
-RetainPtr<CFHTTPCookieStorageRef> WebPlatformStrategies::defaultCookieStorage()
-{
-    return 0;
-}
-#endif
-
-String WebPlatformStrategies::cookiesForDOM(NetworkingContext* context, const KURL& firstParty, const KURL& url)
+String WebPlatformStrategies::cookiesForDOM(const NetworkStorageSession& session, const KURL& firstParty, const KURL& url)
 {
 #if ENABLE(NETWORK_PROCESS)
     if (WebProcess::shared().usesNetworkProcess()) {
         String result;
-        if (!WebProcess::shared().networkConnection()->connection()->sendSync(Messages::NetworkConnectionToWebProcess::CookiesForDOM(context && context->inPrivateBrowsingMode(), firstParty, url), Messages::NetworkConnectionToWebProcess::CookiesForDOM::Reply(result), 0))
+        if (!WebProcess::shared().networkConnection()->connection()->sendSync(Messages::NetworkConnectionToWebProcess::CookiesForDOM(session.isPrivateBrowsingSession(), firstParty, url), Messages::NetworkConnectionToWebProcess::CookiesForDOM::Reply(result), 0))
             return String();
         return result;
     }
 #endif
 
-    return WebCore::cookiesForDOM(context, firstParty, url);
+    return WebCore::cookiesForDOM(session, firstParty, url);
 }
 
-void WebPlatformStrategies::setCookiesFromDOM(NetworkingContext* context, const KURL& firstParty, const KURL& url, const String& cookieString)
+void WebPlatformStrategies::setCookiesFromDOM(const NetworkStorageSession& session, const KURL& firstParty, const KURL& url, const String& cookieString)
 {
 #if ENABLE(NETWORK_PROCESS)
     if (WebProcess::shared().usesNetworkProcess()) {
-        WebProcess::shared().networkConnection()->connection()->send(Messages::NetworkConnectionToWebProcess::SetCookiesFromDOM(context && context->inPrivateBrowsingMode(), firstParty, url, cookieString), 0);
+        WebProcess::shared().networkConnection()->connection()->send(Messages::NetworkConnectionToWebProcess::SetCookiesFromDOM(session.isPrivateBrowsingSession(), firstParty, url, cookieString), 0);
         return;
     }
 #endif
 
-    WebCore::setCookiesFromDOM(context, firstParty, url, cookieString);
+    WebCore::setCookiesFromDOM(session, firstParty, url, cookieString);
 }
 
-bool WebPlatformStrategies::cookiesEnabled(NetworkingContext* context, const KURL& firstParty, const KURL& url)
+bool WebPlatformStrategies::cookiesEnabled(const NetworkStorageSession& session, const KURL& firstParty, const KURL& url)
 {
 #if ENABLE(NETWORK_PROCESS)
     if (WebProcess::shared().usesNetworkProcess()) {
         bool result;
-        if (!WebProcess::shared().networkConnection()->connection()->sendSync(Messages::NetworkConnectionToWebProcess::CookiesEnabled(context && context->inPrivateBrowsingMode(), firstParty, url), Messages::NetworkConnectionToWebProcess::CookiesEnabled::Reply(result), 0))
+        if (!WebProcess::shared().networkConnection()->connection()->sendSync(Messages::NetworkConnectionToWebProcess::CookiesEnabled(session.isPrivateBrowsingSession(), firstParty, url), Messages::NetworkConnectionToWebProcess::CookiesEnabled::Reply(result), 0))
             return false;
         return result;
     }
 #endif
 
-    return WebCore::cookiesEnabled(context, firstParty, url);
+    return WebCore::cookiesEnabled(session, firstParty, url);
 }
 
-String WebPlatformStrategies::cookieRequestHeaderFieldValue(NetworkingContext* context, const KURL& firstParty, const KURL& url)
+String WebPlatformStrategies::cookieRequestHeaderFieldValue(const NetworkStorageSession& session, const KURL& firstParty, const KURL& url)
 {
 #if ENABLE(NETWORK_PROCESS)
     if (WebProcess::shared().usesNetworkProcess()) {
         String result;
-        if (!WebProcess::shared().networkConnection()->connection()->sendSync(Messages::NetworkConnectionToWebProcess::CookieRequestHeaderFieldValue(context && context->inPrivateBrowsingMode(), firstParty, url), Messages::NetworkConnectionToWebProcess::CookieRequestHeaderFieldValue::Reply(result), 0))
+        if (!WebProcess::shared().networkConnection()->connection()->sendSync(Messages::NetworkConnectionToWebProcess::CookieRequestHeaderFieldValue(session.isPrivateBrowsingSession(), firstParty, url), Messages::NetworkConnectionToWebProcess::CookieRequestHeaderFieldValue::Reply(result), 0))
             return String();
         return result;
     }
 #endif
 
-    return WebCore::cookieRequestHeaderFieldValue(context, firstParty, url);
+    return WebCore::cookieRequestHeaderFieldValue(session, firstParty, url);
 }
 
-bool WebPlatformStrategies::getRawCookies(NetworkingContext* context, const KURL& firstParty, const KURL& url, Vector<Cookie>& rawCookies)
+bool WebPlatformStrategies::getRawCookies(const NetworkStorageSession& session, const KURL& firstParty, const KURL& url, Vector<Cookie>& rawCookies)
 {
 #if ENABLE(NETWORK_PROCESS)
     if (WebProcess::shared().usesNetworkProcess()) {
-        if (!WebProcess::shared().networkConnection()->connection()->sendSync(Messages::NetworkConnectionToWebProcess::GetRawCookies(context && context->inPrivateBrowsingMode(), firstParty, url), Messages::NetworkConnectionToWebProcess::GetRawCookies::Reply(rawCookies), 0))
+        if (!WebProcess::shared().networkConnection()->connection()->sendSync(Messages::NetworkConnectionToWebProcess::GetRawCookies(session.isPrivateBrowsingSession(), firstParty, url), Messages::NetworkConnectionToWebProcess::GetRawCookies::Reply(rawCookies), 0))
             return false;
         return true;
     }
 #endif
 
-    return WebCore::getRawCookies(context, firstParty, url, rawCookies);
+    return WebCore::getRawCookies(session, firstParty, url, rawCookies);
 }
 
-void WebPlatformStrategies::deleteCookie(NetworkingContext* context, const KURL& url, const String& cookieName)
+void WebPlatformStrategies::deleteCookie(const NetworkStorageSession& session, const KURL& url, const String& cookieName)
 {
 #if ENABLE(NETWORK_PROCESS)
     if (WebProcess::shared().usesNetworkProcess()) {
-        WebProcess::shared().networkConnection()->connection()->send(Messages::NetworkConnectionToWebProcess::DeleteCookie(context && context->inPrivateBrowsingMode(), url, cookieName), 0);
+        WebProcess::shared().networkConnection()->connection()->send(Messages::NetworkConnectionToWebProcess::DeleteCookie(session.isPrivateBrowsingSession(), url, cookieName), 0);
         return;
     }
 #endif
 
-    WebCore::deleteCookie(context, url, cookieName);
-}
-
-void WebPlatformStrategies::getHostnamesWithCookies(NetworkingContext* context, HashSet<String>& hostnames)
-{
-#if ENABLE(NETWORK_PROCESS)
-    if (WebProcess::shared().usesNetworkProcess()) {
-        Vector<String> hostnamesVector;
-        WebProcess::shared().networkConnection()->connection()->sendSync(Messages::NetworkConnectionToWebProcess::GetHostnamesWithCookies(context && context->inPrivateBrowsingMode()), Messages::NetworkConnectionToWebProcess::GetHostnamesWithCookies::Reply(hostnamesVector), 0);
-        for (unsigned i = 0; i != hostnamesVector.size(); ++i)
-            hostnames.add(hostnamesVector[i]);
-        return;
-    }
-#endif
-
-    WebCore::getHostnamesWithCookies(context, hostnames);
-}
-
-void WebPlatformStrategies::deleteCookiesForHostname(NetworkingContext* context, const String& hostname)
-{
-#if ENABLE(NETWORK_PROCESS)
-    if (WebProcess::shared().usesNetworkProcess()) {
-        WebProcess::shared().networkConnection()->connection()->send(Messages::NetworkConnectionToWebProcess::DeleteCookiesForHostname(context && context->inPrivateBrowsingMode(), hostname), 0);
-        return;
-    }
-#endif
-
-    WebCore::deleteCookiesForHostname(context, hostname);
-}
-
-void WebPlatformStrategies::deleteAllCookies(NetworkingContext* context)
-{
-#if ENABLE(NETWORK_PROCESS)
-    if (WebProcess::shared().usesNetworkProcess()) {
-        WebProcess::shared().networkConnection()->connection()->send(Messages::NetworkConnectionToWebProcess::DeleteAllCookies(context && context->inPrivateBrowsingMode()), 0);
-        return;
-    }
-#endif
-
-    WebCore::deleteAllCookies(context);
+    WebCore::deleteCookie(session, url, cookieName);
 }
 
 // DatabaseStrategy
@@ -262,6 +224,29 @@ ResourceLoadScheduler* WebPlatformStrategies::resourceLoadScheduler()
     
     return scheduler;
 }
+
+void WebPlatformStrategies::loadResourceSynchronously(NetworkingContext* context, unsigned long resourceLoadIdentifier, const ResourceRequest& request, StoredCredentials storedCredentials, ResourceError& error, ResourceResponse& response, Vector<char>& data)
+{
+    if (!WebProcess::shared().usesNetworkProcess()) {
+        LoaderStrategy::loadResourceSynchronously(context, resourceLoadIdentifier, request, storedCredentials, error, response, data);
+        return;
+    }
+
+    CoreIPC::DataReference dataReference;
+
+    NetworkResourceLoadParameters loadParameters(resourceLoadIdentifier, 0, 0, request, ResourceLoadPriorityHighest, SniffContent, storedCredentials, context->storageSession().isPrivateBrowsingSession(), context->shouldClearReferrerOnHTTPSToHTTPRedirect());
+    if (!WebProcess::shared().networkConnection()->connection()->sendSync(Messages::NetworkConnectionToWebProcess::PerformSynchronousLoad(loadParameters), Messages::NetworkConnectionToWebProcess::PerformSynchronousLoad::Reply(error, response, dataReference), 0)) {
+        response = ResourceResponse();
+        error = internalError(request.url());
+        data.resize(0);
+
+        return;
+    }
+
+    data.resize(dataReference.size());
+    memcpy(data.data(), dataReference.data(), dataReference.size());
+}
+
 #endif
 
 // PluginStrategy
@@ -286,23 +271,6 @@ void WebPlatformStrategies::getPluginInfo(const WebCore::Page*, Vector<WebCore::
 }
 
 #if ENABLE(NETSCAPE_PLUGIN_API)
-static BlockingResponseMap<Vector<WebCore::PluginInfo> >& responseMap()
-{
-    AtomicallyInitializedStatic(BlockingResponseMap<Vector<WebCore::PluginInfo> >&, responseMap = *new BlockingResponseMap<Vector<WebCore::PluginInfo> >);
-    return responseMap;
-}
-
-void handleDidGetPlugins(uint64_t requestID, const Vector<WebCore::PluginInfo>& plugins)
-{
-    responseMap().didReceiveResponse(requestID, adoptPtr(new Vector<WebCore::PluginInfo>(plugins)));
-}
-
-static uint64_t generateRequestID()
-{
-    static int uniqueID;
-    return atomicIncrement(&uniqueID);
-}
-
 void WebPlatformStrategies::populatePluginCache()
 {
     if (m_pluginCacheIsPopulated)
@@ -311,15 +279,29 @@ void WebPlatformStrategies::populatePluginCache()
     ASSERT(m_cachedPlugins.isEmpty());
     
     // FIXME: Should we do something in case of error here?
-    uint64_t requestID = generateRequestID();
-    WebProcess::shared().connection()->send(Messages::WebProcessProxy::GetPlugins(requestID, m_shouldRefreshPlugins), 0);
+    if (!WebProcess::shared().connection()->sendSync(Messages::WebProcessProxy::GetPlugins(m_shouldRefreshPlugins), Messages::WebProcessProxy::GetPlugins::Reply(m_cachedPlugins), 0))
+        return;
 
-    m_cachedPlugins = *responseMap().waitForResponse(requestID);
-    
     m_shouldRefreshPlugins = false;
     m_pluginCacheIsPopulated = true;
 }
 #endif // ENABLE(NETSCAPE_PLUGIN_API)
+
+// StorageStrategy
+
+PassRefPtr<StorageNamespace> WebPlatformStrategies::localStorageNamespace(const String& path, unsigned quota)
+{
+    return StorageStrategy::localStorageNamespace(path, quota);
+}
+
+PassRefPtr<StorageNamespace> WebPlatformStrategies::sessionStorageNamespace(Page* page, unsigned quota)
+{
+#if ENABLE(UI_PROCESS_STORAGE)
+    return StorageNamespaceProxy::createSessionStorageNamespace(WebPage::fromCorePage(page));
+#else
+    return StorageStrategy::sessionStorageNamespace(page, quota);
+#endif
+}
 
 // VisitedLinkStrategy
 

@@ -10,7 +10,7 @@
   'targets': [
     {
       'target_name': 'udp_transport',
-      'type': '<(library)',
+      'type': 'static_library',
       'dependencies': [
         '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
       ],
@@ -96,6 +96,10 @@
             'udp_transport_unittest.cc',
             'udp_socket_manager_unittest.cc',
             'udp_socket_wrapper_unittest.cc',
+          ],
+          # Disable warnings to enable Win64 build, issue 1323.
+          'msvs_disabled_warnings': [
+            4267,  # size_t to int truncation.
           ],
         }, # udp_transport_unittests
       ], # targets

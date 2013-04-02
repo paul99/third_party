@@ -446,7 +446,7 @@ void WebChromeClient::contentsSizeChanged(Frame* frame, const IntSize& size) con
     if (frame->page()->mainFrame() != frame)
         return;
 
-#if PLATFORM(QT) || (PLATFORM(EFL) && USE(TILED_BACKING_STORE))
+#if PLATFORM(QT) || PLATFORM(EFL)
     if (m_page->useFixedLayout()) {
         // The below method updates the size().
         m_page->resizeToContentsIfNeeded();
@@ -454,8 +454,6 @@ void WebChromeClient::contentsSizeChanged(Frame* frame, const IntSize& size) con
     }
 
     m_page->send(Messages::WebPageProxy::DidChangeContentsSize(m_page->size()));
-#elif PLATFORM(EFL)
-    m_page->send(Messages::WebPageProxy::DidChangeContentsSize(size));
 #endif
 
     m_page->drawingArea()->mainFrameContentSizeChanged(size);
@@ -544,13 +542,12 @@ void WebChromeClient::print(Frame* frame)
 }
 
 #if ENABLE(SQL_DATABASE)
-void WebChromeClient::exceededDatabaseQuota(Frame* frame, const String& databaseName)
+void WebChromeClient::exceededDatabaseQuota(Frame* frame, const String& databaseName, DatabaseDetails details)
 {
     WebFrame* webFrame = static_cast<WebFrameLoaderClient*>(frame->loader()->client())->webFrame();
     SecurityOrigin* origin = frame->document()->securityOrigin();
 
     DatabaseManager& dbManager = DatabaseManager::manager();
-    DatabaseDetails details = dbManager.detailsForNameAndOrigin(databaseName, origin);
     uint64_t currentQuota = dbManager.quotaForOrigin(origin);
     uint64_t currentOriginUsage = dbManager.usageForOrigin(origin);
     uint64_t newQuota = 0;
@@ -676,7 +673,7 @@ void WebChromeClient::formStateDidChange(const Node*)
 
 bool WebChromeClient::selectItemWritingDirectionIsNatural()
 {
-#if PLATFORM(WIN) || PLATFORM(EFL)
+#if PLATFORM(EFL)
     return true;
 #else
     return false;
@@ -685,11 +682,7 @@ bool WebChromeClient::selectItemWritingDirectionIsNatural()
 
 bool WebChromeClient::selectItemAlignmentFollowsMenuWritingDirection()
 {
-#if PLATFORM(WIN)
-    return false;
-#else
     return true;
-#endif
 }
 
 bool WebChromeClient::hasOpenedPopup() const
@@ -735,25 +728,10 @@ void WebChromeClient::scheduleCompositingLayerFlush()
 
 #endif
 
-#if PLATFORM(WIN) && USE(AVFOUNDATION)
-WebCore::GraphicsDeviceAdapter* WebChromeClient::graphicsDeviceAdapter() const
-{
-    if (!m_page->drawingArea())
-        return 0;
-    return m_page->drawingArea()->layerTreeHost()->graphicsDeviceAdapter();
-}
-#endif
-
 #if ENABLE(TOUCH_EVENTS)
 void WebChromeClient::needTouchEvents(bool needTouchEvents)
 {
     m_page->send(Messages::WebPageProxy::NeedTouchEvents(needTouchEvents));
-}
-#endif
-
-#if PLATFORM(WIN)
-void WebChromeClient::setLastSetCursorToCurrentCursor()
-{
 }
 #endif
 
@@ -823,6 +801,21 @@ void WebChromeClient::logDiagnosticMessage(const String& message, const String& 
 PassRefPtr<Image> WebChromeClient::plugInStartLabelImage(RenderSnapshottedPlugIn::LabelSize size) const
 {
     return m_page->injectedBundleUIClient().plugInStartLabelImage(size)->bitmap()->createImage();
+}
+
+String WebChromeClient::plugInStartLabelTitle() const
+{
+    return m_page->injectedBundleUIClient().plugInStartLabelTitle();
+}
+
+String WebChromeClient::plugInStartLabelSubtitle() const
+{
+    return m_page->injectedBundleUIClient().plugInStartLabelSubtitle();
+}
+
+String WebChromeClient::plugInExtraStyleSheet() const
+{
+    return m_page->injectedBundleUIClient().plugInExtraStyleSheet();
 }
 
 } // namespace WebKit

@@ -42,7 +42,6 @@
 #include <JavaScriptCore/JSContextRef.h>
 #include <JavaScriptCore/JSLock.h>
 #include <JavaScriptCore/JSValueRef.h>
-#include <WebCore/AnimationController.h>
 #include <WebCore/ArchiveResource.h>
 #include <WebCore/CSSComputedStyleDeclaration.h>
 #include <WebCore/Chrome.h>
@@ -55,6 +54,7 @@
 #include <WebCore/JSElement.h>
 #include <WebCore/JSRange.h>
 #include <WebCore/MainResourceLoader.h>
+#include <WebCore/NetworkingContext.h>
 #include <WebCore/NodeTraversal.h>
 #include <WebCore/Page.h>
 #include <WebCore/PluginDocument.h>
@@ -65,15 +65,7 @@
 #include <WebCore/TextResourceDecoder.h>
 #include <wtf/text/StringBuilder.h>
 
-#if ENABLE(WEB_INTENTS)
-#include "IntentData.h"
-#include <WebCore/DOMWindowIntents.h>
-#include <WebCore/DeliveredIntent.h>
-#include <WebCore/Intent.h>
-#include <WebCore/PlatformMessagePortChannel.h>
-#endif
-
-#if PLATFORM(MAC) || PLATFORM(WIN)
+#if PLATFORM(MAC)
 #include <WebCore/LegacyWebArchive.h>
 #endif
 
@@ -121,8 +113,7 @@ PassRefPtr<WebFrame> WebFrame::createSubframe(WebPage* page, const String& frame
 {
     RefPtr<WebFrame> frame = create();
 
-    WebFrame* parentFrame = static_cast<WebFrameLoaderClient*>(ownerElement->document()->frame()->loader()->client())->webFrame();
-    page->send(Messages::WebPageProxy::DidCreateSubframe(frame->frameID(), parentFrame->frameID()));
+    page->send(Messages::WebPageProxy::DidCreateSubframe(frame->frameID()));
 
     frame->init(page, frameName, ownerElement);
 
@@ -184,8 +175,8 @@ WebPage* WebFrame::page() const
     if (!m_coreFrame)
         return 0;
     
-    if (WebCore::Page* page = m_coreFrame->page())
-        return static_cast<WebChromeClient*>(page->chrome()->client())->page();
+    if (Page* page = m_coreFrame->page())
+        return WebPage::fromCorePage(page);
 
     return 0;
 }
@@ -248,7 +239,7 @@ void WebFrame::startDownload(const WebCore::ResourceRequest& request)
 
 #if ENABLE(NETWORK_PROCESS)
     if (WebProcess::shared().usesNetworkProcess()) {
-        bool privateBrowsingEnabled = m_coreFrame->loader()->networkingContext()->inPrivateBrowsingMode();
+        bool privateBrowsingEnabled = m_coreFrame->loader()->networkingContext()->storageSession().isPrivateBrowsingSession();
         WebProcess::shared().networkConnection()->connection()->send(Messages::NetworkConnectionToWebProcess::StartDownload(privateBrowsingEnabled, policyDownloadID, request), 0);
         return;
     }
@@ -273,45 +264,6 @@ void WebFrame::convertMainResourceLoadToDownload(MainResourceLoader* mainResourc
 
     WebProcess::shared().downloadManager().convertHandleToDownload(policyDownloadID, mainResourceLoader->loader()->handle(), request, response);
 }
-
-#if ENABLE(WEB_INTENTS)
-void WebFrame::deliverIntent(const IntentData& intentData)
-{
-    OwnPtr<DeliveredIntentClient> dummyClient;
-    Vector<uint8_t> dataCopy = intentData.data;
-
-    OwnPtr<WebCore::MessagePortChannelArray> channels;
-    if (!intentData.messagePorts.isEmpty()) {
-        channels = adoptPtr(new WebCore::MessagePortChannelArray(intentData.messagePorts.size()));
-        for (size_t i = 0; i < intentData.messagePorts.size(); ++i)
-            (*channels)[i] = MessagePortChannel::create(WebProcess::shared().messagePortChannel(intentData.messagePorts.at(i)));
-    }
-    OwnPtr<WebCore::MessagePortArray> messagePorts = WebCore::MessagePort::entanglePorts(*m_coreFrame->document()->domWindow()->scriptExecutionContext(), channels.release());
-
-    RefPtr<DeliveredIntent> deliveredIntent = DeliveredIntent::create(m_coreFrame, dummyClient.release(), intentData.action, intentData.type,
-                                                                      SerializedScriptValue::adopt(dataCopy), messagePorts.release(),
-                                                                      intentData.extras);
-    WebCore::DOMWindowIntents::from(m_coreFrame->document()->domWindow())->deliver(deliveredIntent.release());
-}
-
-void WebFrame::deliverIntent(WebCore::Intent* intent)
-{
-    OwnPtr<DeliveredIntentClient> dummyClient;
-
-    OwnPtr<WebCore::MessagePortChannelArray> channels;
-    WebCore::MessagePortChannelArray* origChannels = intent->messagePorts();
-    if (origChannels && origChannels->size()) {
-        channels = adoptPtr(new WebCore::MessagePortChannelArray(origChannels->size()));
-        for (size_t i = 0; i < origChannels->size(); ++i)
-            (*channels)[i] = origChannels->at(i).release();
-    }
-    OwnPtr<WebCore::MessagePortArray> messagePorts = WebCore::MessagePort::entanglePorts(*m_coreFrame->document()->domWindow()->scriptExecutionContext(), channels.release());
-
-    RefPtr<DeliveredIntent> deliveredIntent = DeliveredIntent::create(m_coreFrame, dummyClient.release(), intent->action(), intent->type(),
-                                                                      intent->data(), messagePorts.release(), intent->extras());
-    WebCore::DOMWindowIntents::from(m_coreFrame->document()->domWindow())->deliver(deliveredIntent.release());
-}
-#endif
 
 String WebFrame::source() const 
 {
@@ -462,80 +414,6 @@ PassRefPtr<ImmutableArray> WebFrame::childFrames()
     }
 
     return ImmutableArray::adopt(vector);
-}
-
-unsigned WebFrame::numberOfActiveAnimations() const
-{
-    if (!m_coreFrame)
-        return 0;
-
-    AnimationController* controller = m_coreFrame->animation();
-    if (!controller)
-        return 0;
-
-    return controller->numberOfActiveAnimations(m_coreFrame->document());
-}
-
-bool WebFrame::pauseAnimationOnElementWithId(const String& animationName, const String& elementID, double time)
-{
-    if (!m_coreFrame)
-        return false;
-
-    AnimationController* controller = m_coreFrame->animation();
-    if (!controller)
-        return false;
-
-    if (!m_coreFrame->document())
-        return false;
-
-    Node* coreNode = m_coreFrame->document()->getElementById(elementID);
-    if (!coreNode || !coreNode->renderer())
-        return false;
-
-    return controller->pauseAnimationAtTime(coreNode->renderer(), animationName, time);
-}
-
-bool WebFrame::pauseTransitionOnElementWithId(const String& propertyName, const String& elementID, double time)
-{
-    if (!m_coreFrame)
-        return false;
-
-    AnimationController* controller = m_coreFrame->animation();
-    if (!controller)
-        return false;
-
-    if (!m_coreFrame->document())
-        return false;
-
-    Node* coreNode = m_coreFrame->document()->getElementById(elementID);
-    if (!coreNode || !coreNode->renderer())
-        return false;
-
-    return controller->pauseTransitionAtTime(coreNode->renderer(), propertyName, time);
-}
-
-void WebFrame::suspendAnimations()
-{
-    if (!m_coreFrame)
-        return;
-
-    AnimationController* controller = m_coreFrame->animation();
-    if (!controller)
-        return;
-
-    controller->suspendAnimations();
-}
-
-void WebFrame::resumeAnimations()
-{
-    if (!m_coreFrame)
-        return;
-
-    AnimationController* controller = m_coreFrame->animation();
-    if (!controller)
-        return;
-
-    controller->resumeAnimations();
 }
 
 String WebFrame::layerTreeAsText() const
@@ -839,7 +717,7 @@ void WebFrame::setTextDirection(const String& direction)
         m_coreFrame->editor()->setBaseWritingDirection(RightToLeftWritingDirection);
 }
 
-#if PLATFORM(MAC) || PLATFORM(WIN)
+#if PLATFORM(MAC)
 
 class WebFrameFilter : public FrameFilter {
 public:

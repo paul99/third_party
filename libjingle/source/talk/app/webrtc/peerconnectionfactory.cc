@@ -28,6 +28,7 @@
 #include "talk/app/webrtc/peerconnectionfactory.h"
 
 #include "talk/app/webrtc/audiotrack.h"
+#include "talk/app/webrtc/localaudiosource.h"
 #include "talk/app/webrtc/localvideosource.h"
 #include "talk/app/webrtc/mediastreamproxy.h"
 #include "talk/app/webrtc/mediastreamtrackproxy.h"
@@ -47,7 +48,7 @@ typedef talk_base::TypedMessageData<bool> InitMessageData;
 
 struct CreatePeerConnectionParams : public talk_base::MessageData {
   CreatePeerConnectionParams(
-      const webrtc::JsepInterface::IceServers& configuration,
+      const webrtc::PeerConnectionInterface::IceServers& configuration,
       const webrtc::MediaConstraintsInterface* constraints,
       webrtc::PortAllocatorFactoryInterface* allocator_factory,
       webrtc::PeerConnectionObserver* observer)
@@ -57,7 +58,7 @@ struct CreatePeerConnectionParams : public talk_base::MessageData {
         observer(observer) {
   }
   scoped_refptr<webrtc::PeerConnectionInterface> peerconnection;
-  const webrtc::JsepInterface::IceServers& configuration;
+  const webrtc::PeerConnectionInterface::IceServers& configuration;
   const webrtc::MediaConstraintsInterface* constraints;
   scoped_refptr<webrtc::PortAllocatorFactoryInterface> allocator_factory;
   webrtc::PeerConnectionObserver* observer;
@@ -78,6 +79,15 @@ struct CreatePeerConnectionParamsDeprecated : public talk_base::MessageData {
   webrtc::PeerConnectionObserver* observer;
 };
 
+struct CreateAudioSourceParams : public talk_base::MessageData {
+  explicit CreateAudioSourceParams(
+      const webrtc::MediaConstraintsInterface* constraints)
+      : constraints(constraints) {
+  }
+  const webrtc::MediaConstraintsInterface* constraints;
+  scoped_refptr<webrtc::AudioSourceInterface> source;
+};
+
 struct CreateVideoSourceParams : public talk_base::MessageData {
   CreateVideoSourceParams(cricket::VideoCapturer* capturer,
                           const webrtc::MediaConstraintsInterface* constraints)
@@ -93,6 +103,7 @@ enum {
   MSG_INIT_FACTORY = 1,
   MSG_TERMINATE_FACTORY,
   MSG_CREATE_PEERCONNECTION,
+  MSG_CREATE_AUDIOSOURCE,
   MSG_CREATE_VIDEOSOURCE,
 };
 
@@ -102,12 +113,11 @@ namespace webrtc {
 
 scoped_refptr<PeerConnectionFactoryInterface>
 CreatePeerConnectionFactory() {
-  talk_base::RefCountedObject<PeerConnectionFactory>* pc_factory =
-      new talk_base::RefCountedObject<PeerConnectionFactory>();
+  scoped_refptr<PeerConnectionFactory> pc_factory(
+      new talk_base::RefCountedObject<PeerConnectionFactory>());
 
   if (!pc_factory->Initialize()) {
-    delete pc_factory;
-    pc_factory = NULL;
+    return NULL;
   }
   return pc_factory;
 }
@@ -116,12 +126,11 @@ scoped_refptr<PeerConnectionFactoryInterface>
 CreatePeerConnectionFactory(talk_base::Thread* worker_thread,
                             talk_base::Thread* signaling_thread,
                             AudioDeviceModule* default_adm) {
-  talk_base::RefCountedObject<PeerConnectionFactory>* pc_factory =
+  scoped_refptr<PeerConnectionFactory> pc_factory(
       new talk_base::RefCountedObject<PeerConnectionFactory>(
-          worker_thread, signaling_thread, default_adm);
+          worker_thread, signaling_thread, default_adm));
   if (!pc_factory->Initialize()) {
-    delete pc_factory;
-    pc_factory = NULL;
+    return NULL;
   }
   return pc_factory;
 }
@@ -186,6 +195,12 @@ void PeerConnectionFactory::OnMessage(talk_base::Message* msg) {
                                                      pdata->observer);
       break;
     }
+    case MSG_CREATE_AUDIOSOURCE: {
+      CreateAudioSourceParams* pdata =
+          static_cast<CreateAudioSourceParams*>(msg->pdata);
+      pdata->source = CreateAudioSource_s(pdata->constraints);
+      break;
+    }
     case MSG_CREATE_VIDEOSOURCE: {
       CreateVideoSourceParams* pdata =
           static_cast<CreateVideoSourceParams*> (msg->pdata);
@@ -228,6 +243,14 @@ void PeerConnectionFactory::Terminate_s() {
   }
 }
 
+talk_base::scoped_refptr<AudioSourceInterface>
+PeerConnectionFactory::CreateAudioSource_s(
+    const MediaConstraintsInterface* constraints) {
+  talk_base::scoped_refptr<LocalAudioSource> source(
+      LocalAudioSource::Create(constraints));
+  return source;
+}
+
 talk_base::scoped_refptr<VideoSourceInterface>
 PeerConnectionFactory::CreateVideoSource_s(
     cricket::VideoCapturer* capturer,
@@ -240,7 +263,7 @@ PeerConnectionFactory::CreateVideoSource_s(
 
 scoped_refptr<PeerConnectionInterface>
 PeerConnectionFactory::CreatePeerConnection(
-    const JsepInterface::IceServers& configuration,
+    const PeerConnectionInterface::IceServers& configuration,
     const MediaConstraintsInterface* constraints,
     PortAllocatorFactoryInterface* allocator_factory,
     PeerConnectionObserver* observer) {
@@ -252,7 +275,7 @@ PeerConnectionFactory::CreatePeerConnection(
 
 scoped_refptr<PeerConnectionInterface>
 PeerConnectionFactory::CreatePeerConnection(
-    const JsepInterface::IceServers& configuration,
+    const PeerConnectionInterface::IceServers& configuration,
     const MediaConstraintsInterface* constraints,
     PeerConnectionObserver* observer) {
   return CreatePeerConnection(configuration, constraints, NULL, observer);
@@ -260,19 +283,18 @@ PeerConnectionFactory::CreatePeerConnection(
 
 talk_base::scoped_refptr<PeerConnectionInterface>
 PeerConnectionFactory::CreatePeerConnection_s(
-    const JsepInterface::IceServers& configuration,
+    const PeerConnectionInterface::IceServers& configuration,
     const MediaConstraintsInterface* constraints,
     PortAllocatorFactoryInterface* allocator_factory,
     PeerConnectionObserver* observer) {
   ASSERT(allocator_factory || allocator_factory_);
-  talk_base::RefCountedObject<PeerConnection>* pc(
+  talk_base::scoped_refptr<PeerConnection> pc(
       new talk_base::RefCountedObject<PeerConnection>(this));
   if (!pc->Initialize(
       configuration,
       constraints,
       allocator_factory ? allocator_factory : allocator_factory_.get(),
       observer)) {
-    delete pc;
     return NULL;
   }
   return PeerConnectionProxy::Create(signaling_thread(), pc);
@@ -282,6 +304,14 @@ scoped_refptr<LocalMediaStreamInterface>
 PeerConnectionFactory::CreateLocalMediaStream(
       const std::string& label) {
   return MediaStreamProxy::Create(label, signaling_thread_);
+}
+
+talk_base::scoped_refptr<AudioSourceInterface>
+PeerConnectionFactory::CreateAudioSource(
+    const MediaConstraintsInterface* constraints) {
+  CreateAudioSourceParams params(constraints);
+  signaling_thread_->Send(this, MSG_CREATE_AUDIOSOURCE, &params);
+  return params.source;
 }
 
 talk_base::scoped_refptr<VideoSourceInterface>
@@ -297,10 +327,10 @@ PeerConnectionFactory::CreateVideoSource(
 
 talk_base::scoped_refptr<VideoTrackInterface>
 PeerConnectionFactory::CreateVideoTrack(
-    const std::string& label,
+    const std::string& id,
     VideoSourceInterface* source) {
   talk_base::scoped_refptr<VideoTrackInterface> track(
-      VideoTrack::Create(label, source));
+      VideoTrack::Create(id, source));
   return VideoTrackProxy::Create(track, signaling_thread_);
 }
 
@@ -308,18 +338,18 @@ PeerConnectionFactory::CreateVideoTrack(
 // TODO(perkj) Remove when Chrome does not make use of this.
 scoped_refptr<LocalVideoTrackInterface>
 PeerConnectionFactory::CreateLocalVideoTrack(
-    const std::string& label,
+    const std::string& id,
     cricket::VideoCapturer* video_device) {
   talk_base::scoped_refptr<VideoSourceInterface> source(
       CreateVideoSource(video_device, NULL));
-  return CreateVideoTrack(label, source);
+  return CreateVideoTrack(id, source);
 }
 
 scoped_refptr<AudioTrackInterface> PeerConnectionFactory::CreateAudioTrack(
-    const std::string& label,
+    const std::string& id,
     AudioSourceInterface* source) {
   talk_base::scoped_refptr<AudioTrackInterface> track(
-      AudioTrack::Create(label, source));
+      AudioTrack::Create(id, source));
   return AudioTrackProxy::Create(track, signaling_thread_);
 }
 
@@ -327,10 +357,10 @@ scoped_refptr<AudioTrackInterface> PeerConnectionFactory::CreateAudioTrack(
 // TODO(perkj): Remove when Chrome does not make use of this.
 scoped_refptr<LocalAudioTrackInterface>
 PeerConnectionFactory::CreateLocalAudioTrack(
-    const std::string& label,
+    const std::string& id,
     AudioDeviceModule* audio_device) {
   // |audio_device| have never been used in an audio track.
-  return CreateAudioTrack(label, NULL);
+  return CreateAudioTrack(id, NULL);
 }
 
 cricket::ChannelManager* PeerConnectionFactory::channel_manager() {

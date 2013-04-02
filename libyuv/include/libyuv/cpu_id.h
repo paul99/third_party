@@ -34,6 +34,7 @@ static const int kCpuHasSSE41 = 0x80;
 static const int kCpuHasSSE42 = 0x100;
 static const int kCpuHasAVX = 0x200;
 static const int kCpuHasAVX2 = 0x400;
+static const int kCpuHasMOVBE = 0x800;  // For test purposes.
 
 // These flags are only valid on MIPS processors.
 static const int kCpuHasMIPS = 0x1000;
@@ -53,7 +54,7 @@ int ArmCpuCaps(const char* cpuinfo_name);
 // returns non-zero if instruction set is detected
 static __inline int TestCpuFlag(int test_flag) {
   LIBYUV_API extern int cpu_info_;
-  return (cpu_info_ == 1 ? InitCpuFlags() : cpu_info_) & test_flag;
+  return (cpu_info_ == kCpuInit ? InitCpuFlags() : cpu_info_) & test_flag;
 }
 
 // For testing, allow CPU flags to be disabled.

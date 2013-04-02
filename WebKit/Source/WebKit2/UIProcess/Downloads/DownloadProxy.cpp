@@ -97,16 +97,6 @@ void DownloadProxy::processDidClose()
     m_webContext->downloadClient().processDidCrash(m_webContext.get(), this);
 }
 
-void DownloadProxy::didReceiveMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder)
-{
-    didReceiveDownloadProxyMessage(connection, messageID, decoder);
-}
-
-void DownloadProxy::didReceiveSyncMessage(CoreIPC::Connection* connection, CoreIPC::MessageID messageID, CoreIPC::MessageDecoder& decoder, OwnPtr<CoreIPC::MessageEncoder>& replyEncoder)
-{
-    didReceiveSyncDownloadProxyMessage(connection, messageID, decoder, replyEncoder);
-}
-
 void DownloadProxy::didStart(const ResourceRequest& request)
 {
     m_request = request;
@@ -122,19 +112,7 @@ void DownloadProxy::didReceiveAuthenticationChallenge(const AuthenticationChalle
     if (!m_webContext)
         return;
 
-    RefPtr<CoreIPC::Connection> connection;
-
-    if (m_webContext->usesNetworkProcess()) {
-#if ENABLE(NETWORK_PROCESS)
-        if (NetworkProcessProxy* networkProcess = m_webContext->networkProcess())
-            connection = networkProcess->connection();
-#endif
-    } else {
-        // FIXME: Remove WebContext::deprecatedSharedProcess().
-        connection = m_webContext->deprecatedSharedProcess()->connection();
-    }
-
-    RefPtr<AuthenticationChallengeProxy> authenticationChallengeProxy = AuthenticationChallengeProxy::create(authenticationChallenge, challengeID, connection.get());
+    RefPtr<AuthenticationChallengeProxy> authenticationChallengeProxy = AuthenticationChallengeProxy::create(authenticationChallenge, challengeID, m_webContext->networkingProcessConnection());
 
     m_webContext->downloadClient().didReceiveAuthenticationChallenge(m_webContext.get(), this, authenticationChallengeProxy.get());
 }
@@ -171,7 +149,7 @@ void DownloadProxy::decideDestinationWithSuggestedFilename(const String& filenam
     destination = m_webContext->downloadClient().decideDestinationWithSuggestedFilename(m_webContext.get(), this, filename, allowOverwrite);
 
     if (!destination.isNull())
-        SandboxExtension::createHandle(destination, SandboxExtension::WriteOnly, sandboxExtensionHandle);
+        SandboxExtension::createHandle(destination, SandboxExtension::ReadWrite, sandboxExtensionHandle);
 }
 
 void DownloadProxy::didCreateDestination(const String& path)

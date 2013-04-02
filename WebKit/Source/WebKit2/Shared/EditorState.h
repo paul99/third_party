@@ -65,7 +65,6 @@ struct EditorState {
     unsigned anchorPosition;
 
     WebCore::IntRect editorRect;
-    WebCore::IntRect cursorRect;
     WebCore::IntRect compositionRect;
 
     uint64_t inputMethodHints;
@@ -74,8 +73,12 @@ struct EditorState {
     WTF::String surroundingText;
 #endif
 
+#if PLATFORM(QT) || PLATFORM(GTK)
+    WebCore::IntRect cursorRect;
+#endif
+
     void encode(CoreIPC::ArgumentEncoder&) const;
-    static bool decode(CoreIPC::ArgumentDecoder*, EditorState&);
+    static bool decode(CoreIPC::ArgumentDecoder&, EditorState&);
 };
 
 }

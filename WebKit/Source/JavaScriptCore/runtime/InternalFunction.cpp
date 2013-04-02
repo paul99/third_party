@@ -26,6 +26,7 @@
 #include "FunctionPrototype.h"
 #include "JSGlobalObject.h"
 #include "JSString.h"
+#include "Operations.h"
 
 namespace JSC {
 
@@ -63,7 +64,7 @@ const String InternalFunction::displayName(ExecState* exec)
 
 CallType InternalFunction::getCallData(JSCell*, CallData&)
 {
-    ASSERT_NOT_REACHED();
+    RELEASE_ASSERT_NOT_REACHED();
     return CallTypeNone;
 }
 

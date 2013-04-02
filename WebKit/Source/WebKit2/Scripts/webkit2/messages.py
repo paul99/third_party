@@ -24,6 +24,7 @@ import collections
 import re
 from webkit2 import parser
 
+LEGACY_RECEIVER_ATTRIBUTE = 'LegacyReceiver'
 DELAYED_ATTRIBUTE = 'Delayed'
 DISPATCH_ON_CONNECTION_QUEUE_ATTRIBUTE = 'DispatchOnConnectionQueue'
 VARIADIC_ATTRIBUTE = 'Variadic'
@@ -64,13 +65,6 @@ def surround_in_condition(string, condition):
         return string
     return '#if %s\n%s#endif\n' % (condition, string)
 
-
-def messages_to_kind_enum(messages):
-    result = []
-    result.append('enum Kind {\n')
-    result += [surround_in_condition('    %s,\n' % message.id(), message.condition) for message in messages]
-    result.append('};\n')
-    return ''.join(result)
 
 def function_parameter_type(type):
     # Don't use references for built-in types.
@@ -128,7 +122,6 @@ def message_to_struct_declaration(message):
     function_parameters = [(function_parameter_type(x.type), x.name) for x in message.parameters]
     result.append('struct %s : %s' % (message.name, base_class(message)))
     result.append(' {\n')
-    result.append('    static const Kind messageID = %s;\n' % message.id())
     result.append('    static CoreIPC::StringReference receiverName() { return messageReceiverName(); }\n')
     result.append('    static CoreIPC::StringReference name() { return CoreIPC::StringReference("%s"); }\n' % message.name)
     result.append('    static const bool isSync = %s;\n' % ('false', 'true')[message.reply_parameters != None])
@@ -230,7 +223,6 @@ def forward_declarations_and_headers(receiver):
     headers = set([
         '"Arguments.h"',
         '"MessageEncoder.h"',
-        '"MessageID.h"',
         '"StringReference.h"',
     ])
 
@@ -292,18 +284,9 @@ def generate_messages_header(file):
     result.append('    return CoreIPC::StringReference("%s");\n' % receiver.name)
     result.append('}\n')
     result.append('\n')
-
-    result.append(messages_to_kind_enum(receiver.messages))
-    result.append('\n')
     result.append('\n'.join([message_to_struct_declaration(x) for x in receiver.messages]))
     result.append('\n')
     result.append('} // namespace %s\n} // namespace Messages\n' % receiver.name)
-
-    result.append('\nnamespace CoreIPC {\n\n')
-    result.append('template<> struct MessageKindTraits<Messages::%s::Kind> {\n' % receiver.name)
-    result.append('    static const MessageClass messageClass = MessageClass%s;\n' % receiver.name)
-    result.append('};\n')
-    result.append('\n} // namespace CoreIPC\n')
 
     if receiver.condition:
         result.append('\n#endif // %s\n' % receiver.condition)
@@ -319,20 +302,25 @@ def handler_function(receiver, message):
     return '%s::%s' % (receiver.name, message.name[0].lower() + message.name[1:])
 
 
+def connection_work_queue_message_statement(receiver, message):
+    dispatch_function_args = ['connection', '*decoder', 'this', '&%s' % handler_function(receiver, message)]
+    result = []
+    result.append('    if (decoder->messageName() == Messages::%s::%s::name()) {\n' % (receiver.name, message.name))
+    result.append('        CoreIPC::handleMessageOnConnectionQueue<Messages::%s::%s>(%s);\n' % (receiver.name, message.name, ', '.join(dispatch_function_args)))
+    result.append('        decoder = nullptr;\n')
+    result.append('        return;\n')
+    result.append('    }\n')
+    return surround_in_condition(''.join(result), message.condition)
+
 def async_message_statement(receiver, message):
     dispatch_function_args = ['decoder', 'this', '&%s' % handler_function(receiver, message)]
     dispatch_function = 'handleMessage'
     if message.has_attribute(VARIADIC_ATTRIBUTE):
         dispatch_function += 'Variadic'
-    if message.has_attribute(DISPATCH_ON_CONNECTION_QUEUE_ATTRIBUTE):
-        dispatch_function += 'OnConnectionQueue'
-        dispatch_function_args.insert(0, 'connection')
-        
+
     result = []
     result.append('    if (decoder.messageName() == Messages::%s::%s::name()) {\n' % (receiver.name, message.name))
     result.append('        CoreIPC::%s<Messages::%s::%s>(%s);\n' % (dispatch_function, receiver.name, message.name, ', '.join(dispatch_function_args)))
-    if message.has_attribute(DISPATCH_ON_CONNECTION_QUEUE_ATTRIBUTE):
-        result.append('        didHandleMessage = true;\n')
     result.append('        return;\n')
     result.append('    }\n')
     return surround_in_condition(''.join(result), message.condition)
@@ -388,6 +376,7 @@ def headers_for_type(type):
     special_cases = {
         'WTF::String': ['<wtf/text/WTFString.h>'],
         'WebCore::CompositionUnderline': ['<WebCore/Editor.h>'],
+        'WebCore::CoordinatedLayerID': ['<WebCore/CoordinatedLayerInfo.h>'],
         'WebCore::GrammarDetail': ['<WebCore/TextCheckerClient.h>'],
         'WebCore::GraphicsLayerAnimations': ['<WebCore/GraphicsLayerAnimation.h>'],
         'WebCore::KeyframeValueList': ['<WebCore/GraphicsLayer.h>'],
@@ -396,7 +385,6 @@ def headers_for_type(type):
         'WebCore::PluginInfo': ['<WebCore/PluginData.h>'],
         'WebCore::TextCheckingResult': ['<WebCore/TextCheckerClient.h>'],
         'WebCore::ViewportAttributes': ['<WebCore/ViewportArguments.h>'],
-        'WebKit::CoordinatedLayerID': ['"CoordinatedLayerInfo.h"'],
         'WebKit::InjectedBundleUserMessageEncoder': [],
         'WebKit::WebContextUserMessageEncoder': [],
         'WebKit::WebGestureEvent': ['"WebEvent.h"'],
@@ -547,20 +535,24 @@ def generate_message_handler(file):
                 async_messages.append(message)
 
     if async_dispatch_on_connection_queue_messages:
-        result.append('void %s::didReceive%sMessageOnConnectionWorkQueue(CoreIPC::Connection* connection, CoreIPC::MessageID, CoreIPC::MessageDecoder& decoder, bool& didHandleMessage)\n' % (receiver.name, receiver.name))
+        result.append('void %s::didReceive%sMessageOnConnectionWorkQueue(CoreIPC::Connection* connection, OwnPtr<CoreIPC::MessageDecoder>& decoder)\n' % (receiver.name, receiver.name))
         result.append('{\n')
         result.append('#if COMPILER(MSVC)\n')
         result.append('#pragma warning(push)\n')
         result.append('#pragma warning(disable: 4065)\n')
         result.append('#endif\n')
-        result += [async_message_statement(receiver, message) for message in async_dispatch_on_connection_queue_messages]
+        result += [connection_work_queue_message_statement(receiver, message) for message in async_dispatch_on_connection_queue_messages]
         result.append('#if COMPILER(MSVC)\n')
         result.append('#pragma warning(pop)\n')
         result.append('#endif\n')
         result.append('}\n\n')
 
     if async_messages:
-        result.append('void %s::didReceive%sMessage(CoreIPC::Connection*, CoreIPC::MessageID, CoreIPC::MessageDecoder& decoder)\n' % (receiver.name, receiver.name))
+        if receiver.has_attribute(LEGACY_RECEIVER_ATTRIBUTE):
+            result.append('void %s::didReceive%sMessage(CoreIPC::Connection*, CoreIPC::MessageDecoder& decoder)\n' % (receiver.name, receiver.name))
+        else:
+            result.append('void %s::didReceiveMessage(CoreIPC::Connection*, CoreIPC::MessageDecoder& decoder)\n' % (receiver.name))
+
         result.append('{\n')
         result += [async_message_statement(receiver, message) for message in async_messages]
         result.append('    ASSERT_NOT_REACHED();\n')
@@ -568,7 +560,10 @@ def generate_message_handler(file):
 
     if sync_messages:
         result.append('\n')
-        result.append('void %s::didReceiveSync%sMessage(CoreIPC::Connection*%s, CoreIPC::MessageID, CoreIPC::MessageDecoder& decoder, OwnPtr<CoreIPC::MessageEncoder>& replyEncoder)\n' % (receiver.name, receiver.name, ' connection' if sync_delayed_messages else ''))
+        if receiver.has_attribute(LEGACY_RECEIVER_ATTRIBUTE):
+            result.append('void %s::didReceiveSync%sMessage(CoreIPC::Connection*%s, CoreIPC::MessageDecoder& decoder, OwnPtr<CoreIPC::MessageEncoder>& replyEncoder)\n' % (receiver.name, receiver.name, ' connection' if sync_delayed_messages else ''))
+        else:
+            result.append('void %s::didReceiveSyncMessage(CoreIPC::Connection*%s, CoreIPC::MessageDecoder& decoder, OwnPtr<CoreIPC::MessageEncoder>& replyEncoder)\n' % (receiver.name, ' connection' if sync_delayed_messages else ''))
         result.append('{\n')
         result += [sync_message_statement(receiver, message) for message in sync_messages]
         result.append('    ASSERT_NOT_REACHED();\n')

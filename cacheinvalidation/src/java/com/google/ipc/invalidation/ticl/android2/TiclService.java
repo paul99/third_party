@@ -82,10 +82,6 @@ public class TiclService extends IntentService {
   protected void onHandleIntent(Intent intent) {
     // TODO: We may want to use wakelocks to prevent the phone from sleeping
     // before we have finished handling the Intent.
-    if (intent == null) {
-      resources.getLogger().fine("Ignoring null intent");
-      return;
-    }
 
     // We create resources anew each time.
     resources = createResources();
@@ -93,22 +89,29 @@ public class TiclService extends IntentService {
     resources.getLogger().fine("onHandleIntent(%s)", AndroidStrings.toLazyCompactString(intent));
     validator = new AndroidIntentProtocolValidator(resources.getLogger());
 
-    // Dispatch the appropriate handler function based on which extra key is set.
-    if (intent.hasExtra(ProtocolIntents.CLIENT_DOWNCALL_KEY)) {
-      handleClientDowncall(intent.getByteArrayExtra(ProtocolIntents.CLIENT_DOWNCALL_KEY));
-    } else if (intent.hasExtra(ProtocolIntents.INTERNAL_DOWNCALL_KEY)) {
-      handleInternalDowncall(intent.getByteArrayExtra(ProtocolIntents.INTERNAL_DOWNCALL_KEY));
-    } else if (intent.hasExtra(ProtocolIntents.SCHEDULER_KEY)) {
-      handleSchedulerEvent(intent.getByteArrayExtra(ProtocolIntents.SCHEDULER_KEY));
-    } else {
-      resources.getLogger().warning("Received Intent without any recognized extras: %s", intent);
+    try {
+      if (intent == null) {
+        resources.getLogger().fine("Ignoring null intent");
+        return;
+      }
+  
+      // Dispatch the appropriate handler function based on which extra key is set.
+      if (intent.hasExtra(ProtocolIntents.CLIENT_DOWNCALL_KEY)) {
+        handleClientDowncall(intent.getByteArrayExtra(ProtocolIntents.CLIENT_DOWNCALL_KEY));
+      } else if (intent.hasExtra(ProtocolIntents.INTERNAL_DOWNCALL_KEY)) {
+        handleInternalDowncall(intent.getByteArrayExtra(ProtocolIntents.INTERNAL_DOWNCALL_KEY));
+      } else if (intent.hasExtra(ProtocolIntents.SCHEDULER_KEY)) {
+        handleSchedulerEvent(intent.getByteArrayExtra(ProtocolIntents.SCHEDULER_KEY));
+      } else {
+        resources.getLogger().warning("Received Intent without any recognized extras: %s", intent);
+      }
+    } finally {
+      // Null out resources and validator to prevent accidentally using them in the future before
+      // they have been properly re-created.
+      resources.stop();
+      resources = null;
+      validator = null;
     }
-    resources.stop();
-
-    // Null out resources and validator to prevent accidentally using them in the future before they
-    // have been properly re-created.
-    resources = null;
-    validator = null;
   }
 
   /** Handles a request to call a function on the ticl. */

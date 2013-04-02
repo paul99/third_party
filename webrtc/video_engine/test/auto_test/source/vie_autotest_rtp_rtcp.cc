@@ -164,8 +164,11 @@ void ViEAutoTest::ViERtpRtcpStandardTest()
     EXPECT_EQ(0, ViE.base->StopSend(tbChannel.videoChannel));
 
     myTransport.ClearStats();
-    int rate = 20;
-    myTransport.SetPacketLoss(rate);
+    const int kPacketLossRate = 20;
+    NetworkParameters network;
+    network.packet_loss_rate = kPacketLossRate;
+    network.loss_model = kUniformLoss;
+    myTransport.SetNetworkParameters(network);
 
     // Start send to verify sending stats
 
@@ -174,7 +177,7 @@ void ViEAutoTest::ViERtpRtcpStandardTest()
     EXPECT_EQ(0, ViE.base->StartSend(tbChannel.videoChannel));
     EXPECT_EQ(0, ViE.base->StartReceive(tbChannel.videoChannel));
 
-    AutoTestSleep(KAutoTestSleepTimeMs);
+    AutoTestSleep(kAutoTestSleepTimeMs);
 
     unsigned short sentFractionsLost = 0;
     unsigned int sentCumulativeLost = 0;
@@ -243,14 +246,15 @@ void ViEAutoTest::ViERtpRtcpStandardTest()
     //
 
     myTransport.ClearStats();
-    myTransport.SetPacketLoss(rate);
+    network.packet_loss_rate = kPacketLossRate;
+    myTransport.SetNetworkParameters(network);
 
     EXPECT_EQ(0, ViE.rtp_rtcp->SetFECStatus(
         tbChannel.videoChannel, true, 96, 97));
     EXPECT_EQ(0, ViE.base->StartReceive(tbChannel.videoChannel));
     EXPECT_EQ(0, ViE.base->StartSend(tbChannel.videoChannel));
 
-    AutoTestSleep(KAutoTestSleepTimeMs);
+    AutoTestSleep(kAutoTestSleepTimeMs);
 
     EXPECT_EQ(0, ViE.rtp_rtcp->GetBandwidthUsage(
         tbChannel.videoChannel, sentTotalBitrate, sentVideoBitrate,
@@ -268,7 +272,7 @@ void ViEAutoTest::ViERtpRtcpStandardTest()
     EXPECT_EQ(0, ViE.rtp_rtcp->SetNACKStatus(tbChannel.videoChannel, true));
     EXPECT_EQ(0, ViE.base->StartSend(tbChannel.videoChannel));
 
-    AutoTestSleep(KAutoTestSleepTimeMs);
+    AutoTestSleep(kAutoTestSleepTimeMs);
 
     EXPECT_EQ(0, ViE.rtp_rtcp->GetBandwidthUsage(
         tbChannel.videoChannel, sentTotalBitrate, sentVideoBitrate,
@@ -287,7 +291,8 @@ void ViEAutoTest::ViERtpRtcpStandardTest()
 
 
     // Test to set SSRC
-    myTransport.SetPacketLoss(0);
+    network.packet_loss_rate = 0;
+    myTransport.SetNetworkParameters(network);
     myTransport.ClearStats();
 
     unsigned int setSSRC = 0x01234567;
@@ -331,7 +336,7 @@ void ViEAutoTest::ViERtpRtcpStandardTest()
 
     EXPECT_EQ(0, ViE.base->StartSend(tbChannel.videoChannel));
 
-    AutoTestSleep(KAutoTestSleepTimeMs);
+    AutoTestSleep(kAutoTestSleepTimeMs);
 
     EXPECT_EQ(0, ViE.base->StopSend(tbChannel.videoChannel));
 
@@ -413,7 +418,7 @@ void ViEAutoTest::ViERtpRtcpExtendedTest()
         tbChannel.videoChannel, subType, name, data, numBytes));
 
     ViETest::Log("Sending RTCP application data...\n");
-    AutoTestSleep(KAutoTestSleepTimeMs);
+    AutoTestSleep(kAutoTestSleepTimeMs);
 
     EXPECT_EQ(subType, rtcpObserver._subType);
     EXPECT_STRCASEEQ(data, rtcpObserver._data);
@@ -658,7 +663,7 @@ void ViEAutoTest::ViERtpRtcpAPITest()
         tbChannel.videoChannel, true, 15));
     EXPECT_EQ(0, ViE.rtp_rtcp->SetReceiveTimestampOffsetStatus(
         tbChannel.videoChannel, true, 3));
-    EXPECT_EQ(-1, ViE.rtp_rtcp->SetReceiveTimestampOffsetStatus(
+    EXPECT_EQ(0, ViE.rtp_rtcp->SetReceiveTimestampOffsetStatus(
         tbChannel.videoChannel, true, 3));
     EXPECT_EQ(0, ViE.rtp_rtcp->SetReceiveTimestampOffsetStatus(
             tbChannel.videoChannel, false, 3));
@@ -681,6 +686,21 @@ void ViEAutoTest::ViERtpRtcpAPITest()
         tbChannel.videoChannel, false));
     EXPECT_EQ(0, ViE.rtp_rtcp->SetTransmissionSmoothingStatus(
         tbChannel.videoChannel, false));
+
+    // Streaming Mode.
+    EXPECT_EQ(-1, ViE.rtp_rtcp->EnableSenderStreamingMode(
+        invalid_channel_id, 0));
+    int invalid_delay = -1;
+    EXPECT_EQ(-1, ViE.rtp_rtcp->EnableSenderStreamingMode(
+        tbChannel.videoChannel, invalid_delay));
+    invalid_delay = 15000;
+    EXPECT_EQ(-1, ViE.rtp_rtcp->EnableSenderStreamingMode(
+        tbChannel.videoChannel, invalid_delay));
+    EXPECT_EQ(0, ViE.rtp_rtcp->EnableSenderStreamingMode(
+        tbChannel.videoChannel, 5000));
+    // Real-time mode.
+    EXPECT_EQ(0, ViE.rtp_rtcp->EnableSenderStreamingMode(
+        tbChannel.videoChannel, 0));
 
     //***************************************************************
     //  Testing finished. Tear down Video Engine

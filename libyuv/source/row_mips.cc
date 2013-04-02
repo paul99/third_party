@@ -16,16 +16,18 @@ extern "C" {
 #endif
 
 #if !defined(YUV_DISABLE_ASM) && defined(__mips__)
-#if defined HAS_COPYROW_MIPS
+#ifdef HAS_COPYROW_MIPS
 extern "C" void  memcpy_MIPS(uint8* dst, const uint8* src, int count);
 void CopyRow_MIPS(const uint8* src, uint8* dst, int count) {
   memcpy_MIPS(dst, src, count);
 }
-#endif
+#endif  // HAS_COPYROW_MIPS
+#endif  // __mips__
 
-#ifdef HAS_SPLITUV_MIPS_DSPR2
-void SplitUV_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
-                        int width) {
+// MIPS DSPR2 functions
+#if !defined(YUV_DISABLE_ASM) && defined(__mips_dsp) && (__mips_dsp_rev >= 2)
+void SplitUVRow_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
+                           int width) {
   __asm__ __volatile__ (
     ".set push                                     \n"
     ".set noreorder                                \n"
@@ -90,8 +92,8 @@ void SplitUV_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
   );
 }
 
-void SplitUV_Unaligned_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u,
-                                  uint8* dst_v, int width) {
+void SplitUVRow_Unaligned_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u,
+                                     uint8* dst_v, int width) {
   __asm__ __volatile__ (
     ".set push                                     \n"
     ".set noreorder                                \n"
@@ -171,9 +173,7 @@ void SplitUV_Unaligned_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u,
        "t4", "t5", "t6", "t7", "t8", "t9"
   );
 }
-#endif  // HAS_SPLITUV_MIPS_DSPR2
 
-#ifdef HAS_MIRRORROW_MIPS_DSPR2
 void MirrorRow_MIPS_DSPR2(const uint8* src, uint8* dst, int width) {
   __asm__ __volatile__ (
       ".set push                             \n"
@@ -223,9 +223,7 @@ void MirrorRow_MIPS_DSPR2(const uint8* src, uint8* dst, int width) {
       : "t0", "t1", "t2", "t3", "t4", "t5"
   );
 }
-#endif  // HAS_MIRRORROW_MIPS_DSPR2
 
-#ifdef HAS_MirrorUVRow_MIPS_DSPR2
 void MirrorUVRow_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
                             int width) {
   int x = 0;
@@ -315,9 +313,6 @@ void MirrorUVRow_MIPS_DSPR2(const uint8* src_uv, uint8* dst_u, uint8* dst_v,
         "t5", "t7", "t8", "t9"
   );
 }
-#endif  // HAS_MirrorUVRow_MIPS_DSPR2
-
-
 
 // Convert (4 Y and 2 VU) I422 and arrange RGB values into
 // t5 = | 0 | B0 | 0 | b0 |
@@ -566,8 +561,7 @@ void I422ToBGRARow_MIPS_DSPR2(const uint8* y_buf,
         "s4", "s5", "s6"
   );
 }
-
-#endif  // __mips__
+#endif  // __mips_dsp_rev >= 2
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -55,6 +55,7 @@ ScriptDebugServer::ScriptDebugServer()
     , m_pauseOnExceptionsState(DontPauseOnExceptions)
     , m_pauseOnNextStatement(false)
     , m_paused(false)
+    , m_runningNestedMessageLoop(false)
     , m_doneProcessingDebuggerEvents(true)
     , m_breakpointsActivated(true)
     , m_pauseOnCallFrame(0)
@@ -440,8 +441,10 @@ void ScriptDebugServer::pauseIfNeeded(JSGlobalObject* dynamicGlobalObject)
 
     TimerBase::fireTimersInNestedEventLoop();
 
+    m_runningNestedMessageLoop = true;
     m_doneProcessingDebuggerEvents = false;
     runEventLoopWhilePaused();
+    m_runningNestedMessageLoop = false;
 
     didContinue(dynamicGlobalObject);
     dispatchFunctionToListeners(&ScriptDebugServer::dispatchDidContinue, dynamicGlobalObject);
@@ -507,8 +510,13 @@ void ScriptDebugServer::didExecuteProgram(const DebuggerCallFrame& debuggerCallF
     updateCallFrameAndPauseIfNeeded(debuggerCallFrame, sourceID, lineNumber, columnNumber);
 
     // Treat stepping over the end of a program like stepping out.
-    if (m_currentCallFrame == m_pauseOnCallFrame)
+    if (!m_currentCallFrame)
+        return;
+    if (m_currentCallFrame == m_pauseOnCallFrame) {
         m_pauseOnCallFrame = m_currentCallFrame->caller();
+        if (!m_currentCallFrame)
+            return;
+    }
     m_currentCallFrame = m_currentCallFrame->caller();
 }
 

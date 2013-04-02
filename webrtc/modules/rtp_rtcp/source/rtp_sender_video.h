@@ -22,7 +22,7 @@
 
 #include "video_codec_information.h"
 #include "forward_error_correction.h"
-#include "Bitrate.h"
+#include "bitrate.h"
 #include "rtp_sender.h"
 #include "producer_fec.h"
 
@@ -33,7 +33,7 @@ struct RtpPacket;
 class RTPSenderVideo
 {
 public:
-    RTPSenderVideo(const WebRtc_Word32 id, RtpRtcpClock* clock,
+    RTPSenderVideo(const WebRtc_Word32 id, Clock* clock,
                    RTPSenderInterface* rtpSender);
     virtual ~RTPSenderVideo();
 

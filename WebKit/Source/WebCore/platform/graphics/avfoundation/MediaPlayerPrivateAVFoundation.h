@@ -36,6 +36,7 @@
 namespace WebCore {
 
 class InbandTextTrackPrivateAVF;
+class GenericCueData;
 
 class MediaPlayerPrivateAVFoundation : public MediaPlayerPrivateInterface {
 public:
@@ -58,25 +59,30 @@ public:
 
     class Notification {
     public:
+#define FOR_EACH_MEDIAPLAYERPRIVATEAVFOUNDATION_NOTIFICATION_TYPE(macro) \
+    macro(None) \
+    macro(ItemDidPlayToEndTime) \
+    macro(ItemTracksChanged) \
+    macro(ItemStatusChanged) \
+    macro(ItemSeekableTimeRangesChanged) \
+    macro(ItemLoadedTimeRangesChanged) \
+    macro(ItemPresentationSizeChanged) \
+    macro(ItemIsPlaybackLikelyToKeepUpChanged) \
+    macro(ItemIsPlaybackBufferEmptyChanged) \
+    macro(ItemIsPlaybackBufferFullChanged) \
+    macro(AssetMetadataLoaded) \
+    macro(AssetPlayabilityKnown) \
+    macro(PlayerRateChanged) \
+    macro(PlayerTimeChanged) \
+    macro(SeekCompleted) \
+    macro(DurationChanged) \
+    macro(ContentsNeedsDisplay) \
+    macro(InbandTracksNeedConfiguration) \
+
         enum Type {
-            None,
-            ItemDidPlayToEndTime,
-            ItemTracksChanged,
-            ItemStatusChanged,
-            ItemSeekableTimeRangesChanged,
-            ItemLoadedTimeRangesChanged,
-            ItemPresentationSizeChanged,
-            ItemIsPlaybackLikelyToKeepUpChanged,
-            ItemIsPlaybackBufferEmptyChanged,
-            ItemIsPlaybackBufferFullChanged,
-            AssetMetadataLoaded,
-            AssetPlayabilityKnown,
-            PlayerRateChanged,
-            PlayerTimeChanged,
-            SeekCompleted,
-            DurationChanged,
-            ContentsNeedsDisplay,
-            InbandTracksNeedConfiguration
+#define DEFINE_TYPE_ENUM(type) type,
+            FOR_EACH_MEDIAPLAYERPRIVATEAVFOUNDATION_NOTIFICATION_TYPE(DEFINE_TYPE_ENUM)
+#undef DEFINE_TYPE_ENUM
         };
         
         Notification()
@@ -118,7 +124,7 @@ public:
     void clearMainThreadPendingFlag();
 
 #if HAVE(AVFOUNDATION_TEXT_TRACK_SUPPORT)
-    void flushCurrentCue(InbandTextTrackPrivateAVF*);
+    void addGenericCue(InbandTextTrackPrivateAVF*, GenericCueData*);
     void trackModeChanged();
 #endif
 

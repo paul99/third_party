@@ -25,6 +25,7 @@ const char kCryptohomeCheckKey[] = "CheckKey";
 const char kCryptohomeMigrateKey[] = "MigrateKey";
 const char kCryptohomeRemove[] = "Remove";
 const char kCryptohomeGetSystemSalt[] = "GetSystemSalt";
+const char kCryptohomeGetSanitizedUsername[] = "GetSanitizedUsername";
 const char kCryptohomeIsMounted[] = "IsMounted";
 const char kCryptohomeMount[] = "Mount";
 const char kCryptohomeMountGuest[] = "MountGuest";
@@ -193,10 +194,6 @@ namespace power_manager {
 const char kPowerManagerInterface[] = "org.chromium.PowerManager";
 const char kPowerManagerServicePath[] = "/org/chromium/PowerManager";
 const char kPowerManagerServiceName[] = "org.chromium.PowerManager";
-// powerm
-const char kRootPowerManagerInterface[] = "org.chromium.RootPowerManager";
-const char kRootPowerManagerServicePath[] = "/org/chromium/RootPowerManager";
-const char kRootPowerManagerServiceName[] = "org.chromium.RootPowerManager";
 // powerd methods
 const char kDecreaseScreenBrightness[] = "DecreaseScreenBrightness";
 const char kIncreaseScreenBrightness[] = "IncreaseScreenBrightness";
@@ -214,6 +211,7 @@ const char kGetPowerAccumulationMethod[] = "GetPowerAccumulation";
 const char kHandleUserActivityMethod[] = "HandleUserActivity";
 const char kHandleVideoActivityMethod[] = "HandleVideoActivity";
 const char kSetIsProjectingMethod[] = "SetIsProjecting";
+const char kSetPolicyMethod[] = "SetPolicy";
 const char kRegisterSuspendDelayMethod[] = "RegisterSuspendDelay";
 const char kUnregisterSuspendDelayMethod[] = "UnregisterSuspendDelay";
 const char kHandleSuspendReadinessMethod[] = "HandleSuspendReadiness";
@@ -226,31 +224,18 @@ const char kActiveNotifySignal[] = "ActiveNotify";
 const char kKeyboardBrightnessChangedSignal[] = "KeyboardBrightnessChanged";
 const char kPowerStateChangedSignal[] = "PowerStateChanged";
 const char kPowerSupplyPollSignal[] = "PowerSupplyPoll";
-const char kButtonEventSignal[] = "ButtonEvent";
 const char kStateOverrideCancel[] = "StateOverrideCancel";
 const char kSoftwareScreenDimmingRequestedSignal[] =
     "SoftwareScreenDimmingRequested";
 const char kSetScreenPowerSignal[] = "SetScreenPowerSignal";
 const char kSuspendImminentSignal[] = "SuspendImminent";
-// Signals emitted by powerm.
 const char kInputEventSignal[] = "InputEvent";
 const char kSuspendStateChangedSignal[] = "SuspendStateChanged";
 // Values
-const char kPowerButtonName[] = "power";
-const char kLockButtonName[] = "lock";
 const int  kBrightnessTransitionGradual = 1;
 const int  kBrightnessTransitionInstant = 2;
 const int  kSoftwareScreenDimmingNone = 1;
 const int  kSoftwareScreenDimmingIdle = 2;
-// DEPRECATED
-const char kRegisterSuspendDelay[] = "RegisterSuspendDelay";
-const char kUnregisterSuspendDelay[] = "UnregisterSuspendDelay";
-const char kSuspendDelay[] = "SuspendDelay";
-const char kSuspendReady[] = "SuspendReady";
-const char kRequestLockScreenSignal[] = "RequestLockScreen";
-const char kRequestRestartSignal[] = "RequestRestart";
-const char kRequestShutdownSignal[] = "RequestShutdown";
-const char kRequestUnlockScreenSignal[] = "RequestUnlockScreen";
 }  // namespace power_manager
 
 namespace chromeos {
@@ -668,8 +653,15 @@ const char kUnknownString[] = "UNKNOWN";
 namespace shill {
 // Function names.
 const char kClearPropertiesFunction[] = "ClearProperties";
+const char kCompleteCellularActivationFunction[] = "CompleteCellularActivation";
+const char kGetNetworksForGeolocation[] = "GetNetworksForGeolocation";
 const char kRefreshFunction[] = "Refresh";
+const char kResetFunction[] = "Reset";
 const char kSetCarrierFunction[] = "SetCarrier";
+const char kVerifyAndEncryptCredentialsFunction[] =
+    "VerifyAndEncryptCredentials";
+const char kVerifyAndEncryptDataFunction[] = "VerifyAndEncryptData";
+const char kVerifyDestinationFunction[] = "VerifyDestination";
 
 // Device property names.
 const char kReceiveByteCountProperty[] = "ReceiveByteCount";
@@ -695,16 +687,21 @@ const char kIgnoredDNSSearchPathsProperty[] = "IgnoredDNSSearchPaths";
 const char kLinkMonitorTechnologiesProperty[] =
     "LinkMonitorTechnologies";
 const char kPortalCheckIntervalProperty[] = "PortalCheckInterval";
+const char kServiceCompleteListProperty[] = "ServiceCompleteList";
 const char kShortDNSTimeoutTechnologiesProperty[] =
     "ShortDNSTimeoutTechnologies";
+const char kUninitializedTechnologiesProperty[] = "UninitializedTechnologies";
 
 // Service property names.
 const char kActivateOverNonCellularNetworkProperty[] =
     "Cellular.ActivateOverNonCellularNetwork";
+const char kDiagnosticsDisconnectsProperty[] = "Diagnostics.Disconnects";
+const char kDiagnosticsMisconnectsProperty[] = "Diagnostics.Misconnects";
 const char kEapRemoteCertificationProperty[] = "EAP.RemoteCertification";
 const char kEapSubjectMatchProperty[] = "EAP.SubjectMatch";
 const char kHTTPProxyPortProperty[] = "HTTPProxyPort";
 const char kIPConfigProperty[] = "IPConfig";
+const char kOutOfCreditsProperty[] = "Cellular.OutOfCredits";
 const char kPhysicalTechnologyProperty[] = "PhysicalTechnology";
 const char kStaticIPAddressProperty[] = "StaticIP.Address";
 const char kStaticIPGatewayProperty[] = "StaticIP.Gateway";
@@ -719,6 +716,8 @@ const char kSavedIPNameServersProperty[] = "SavedIP.NameServers";
 const char kSavedIPPeerAddressProperty[] = "SavedIP.PeerAddress";
 const char kSavedIPPrefixlenProperty[] = "SavedIP.Prefixlen";
 const char kWifiVendorInformationProperty[] = "WiFi.VendorInformation";
+const char kWifiProtectedManagementFrameRequiredProperty[] =
+    "WiFi.ProtectedManagementFrameRequired";
 
 // WiFi Service Vendor Information dictionary properties.
 const char kVendorWPSManufacturerProperty[] = "Manufacturer";
@@ -755,35 +754,6 @@ const char kGeoSignalToNoiseRatioProperty[] = "signalToNoiseRatio";
 const char kGeoAgeProperty[] = "age";
 const char kGeoSignalStrengthProperty[] = "signalStrength";
 }  // namespace shill
-
-namespace cashew {
-// Cashew D-Bus service identifiers.
-const char kCashewServiceName[] = "org.chromium.Cashew";
-const char kCashewServicePath[] = "/org/chromium/Cashew";
-const char kCashewServiceInterface[] = "org.chromium.Cashew";
-
-// Cashew function names.
-const char kRequestDataPlanFunction[] = "RequestDataPlansUpdate";
-const char kRetrieveDataPlanFunction[] = "GetDataPlans";
-const char kRequestCellularUsageFunction[] = "RequestCellularUsageInfo";
-
-// Cashew signals.
-const char kMonitorDataPlanUpdate[] = "DataPlansUpdate";
-
-// Cashew data plan properties
-const char kCellularPlanNameProperty[] = "CellularPlanName";
-const char kCellularPlanTypeProperty[] = "CellularPlanType";
-const char kCellularPlanUpdateTimeProperty[] = "CellularPlanUpdateTime";
-const char kCellularPlanStartProperty[] = "CellularPlanStart";
-const char kCellularPlanEndProperty[] = "CellularPlanEnd";
-const char kCellularPlanDataBytesProperty[] = "CellularPlanDataBytes";
-const char kCellularDataBytesUsedProperty[] = "CellularDataBytesUsed";
-
-// Cashew Data Plan types
-const char kCellularDataPlanUnlimited[] = "UNLIMITED";
-const char kCellularDataPlanMeteredPaid[] = "METERED_PAID";
-const char kCellularDataPlanMeteredBase[] = "METERED_BASE";
-}  // namespace cashew
 
 namespace modemmanager {
 // ModemManager D-Bus service identifiers
@@ -901,11 +871,7 @@ const char kDevicesProperty[] = "Devices";
 const char kUUIDsProperty[] = "UUIDs";
 
 // Bluetooth Adapter errors.
-const char kErrorFailed[] = "org.bluez.Error.Failed";
-const char kErrorInProgress[] = "org.bluez.Error.InProgress";
 const char kErrorAlreadyExists[] = "org.bluez.Error.AlreadyExists";
-const char kErrorConnectionAttemptFailed[] =
-    "org.bluez.Error.ConnectionAttemptFailed";
 const char kErrorAuthenticationCanceled[] =
     "org.bluez.Error.AuthenticationCanceled";
 const char kErrorAuthenticationFailed[] =
@@ -914,6 +880,11 @@ const char kErrorAuthenticationRejected[] =
     "org.bluez.Error.AuthenticationRejected";
 const char kErrorAuthenticationTimeout[] =
     "org.bluez.Error.AuthenticationTimeout";
+const char kErrorConnectionAttemptFailed[] =
+    "org.bluez.Error.ConnectionAttemptFailed";
+const char kErrorFailed[] = "org.bluez.Error.Failed";
+const char kErrorInProgress[] = "org.bluez.Error.InProgress";
+const char kErrorNotSupported[] = "org.bluez.Error.NotSupported";
 const char kErrorRepeatedAttempts[] = "org.bluez.Error.RepeatedAttempts";
 }  // namespace bluetooth_adapter
 
@@ -1204,6 +1175,7 @@ const char kGetDebugLogs[] = "GetDebugLogs";
 const char kGetInterfaces[] = "GetInterfaces";
 const char kGetModemStatus[] = "GetModemStatus";
 const char kGetNetworkStatus[] = "GetNetworkStatus";
+const char kGetPerfData[] = "GetPerfData";
 const char kGetRoutes[] = "GetRoutes";
 const char kSetDebugMode[] = "SetDebugMode";
 const char kSystraceStart[] = "SystraceStart";

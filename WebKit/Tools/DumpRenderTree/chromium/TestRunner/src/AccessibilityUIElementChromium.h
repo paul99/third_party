@@ -34,7 +34,6 @@
 #include "CppBoundClass.h"
 #include "WebAccessibilityObject.h"
 #include <vector>
-#include <wtf/Vector.h>
 
 namespace WebTestRunner {
 
@@ -94,6 +93,8 @@ private:
     void isValidGetterCallback(CppVariant*);
     void isReadOnlyGetterCallback(CppVariant*);
     void orientationGetterCallback(CppVariant*);
+    void clickPointXGetterCallback(CppVariant*);
+    void clickPointYGetterCallback(CppVariant*);
 
     // Bound methods.
     void allAttributesCallback(const CppArgumentList&, CppVariant*);
@@ -166,7 +167,7 @@ public:
     AccessibilityUIElement* createRoot(const WebKit::WebAccessibilityObject&);
 
 private:
-    typedef Vector<AccessibilityUIElement*> ElementList;
+    typedef std::vector<AccessibilityUIElement*> ElementList;
     ElementList m_elements;
 };
 

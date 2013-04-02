@@ -80,6 +80,10 @@ InRegionScrollerPrivate::InRegionScrollerPrivate(WebPagePrivate* webPagePrivate)
 
 void InRegionScrollerPrivate::reset()
 {
+    // Notify the client side to clear InRegion scrollable areas before we destroy them here.
+    std::vector<Platform::ScrollViewBase*> emptyInRegionScrollableAreas;
+    m_webPage->m_client->notifyInRegionScrollableAreasChanged(emptyInRegionScrollableAreas);
+
     m_needsActiveScrollableAreaCalculation = false;
     for (size_t i = 0; i < m_activeInRegionScrollableAreas.size(); ++i)
         delete m_activeInRegionScrollableAreas[i];
@@ -259,8 +263,10 @@ void InRegionScrollerPrivate::calculateInRegionScrollableAreasForPoint(const Web
 
         InRegionScrollableArea* curr = static_cast<InRegionScrollableArea*>(*rit);
         RenderLayer* layer = curr->layer();
+        if (!layer)
+            continue;
 
-        if (layer && layer->renderer()->isRenderView()) { // #document case
+        if (layer->renderer()->isRenderView()) { // #document case
             FrameView* view = toRenderView(layer->renderer())->frameView();
             ASSERT(view);
             ASSERT(canScrollInnerFrame(view->frame()));
@@ -311,10 +317,10 @@ bool InRegionScrollerPrivate::setLayerScrollPosition(RenderLayer* layer, const I
     } else {
 
         // RenderBox-based elements case (scrollable boxes (div's, p's, textarea's, etc)).
-        layer->scrollToOffset(toSize(scrollPosition));
+        layer->scrollToOffset(toIntSize(scrollPosition));
     }
 
-    m_webPage->m_selectionHandler->selectionPositionChanged();
+    layer->renderer()->frame()->selection()->updateAppearance();
     // FIXME: We have code in place to handle scrolling and clipping tap highlight
     // on in-region scrolling. As soon as it is fast enough (i.e. we have it backed by
     // a backing store), we can reliably make use of it in the real world.

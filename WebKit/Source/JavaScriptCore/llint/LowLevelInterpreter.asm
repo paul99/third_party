@@ -182,10 +182,8 @@ macro assert(assertion)
 end
 
 macro preserveReturnAddressAfterCall(destinationRegister)
-    if C_LOOP
-        # In our case, we're only preserving the bytecode vPC. 
-        move lr, destinationRegister
-    elsif ARMv7
+    if C_LOOP or ARMv7 or MIPS
+        # In C_LOOP case, we're only preserving the bytecode vPC.
         move lr, destinationRegister
     elsif X86 or X86_64
         pop destinationRegister
@@ -195,10 +193,8 @@ macro preserveReturnAddressAfterCall(destinationRegister)
 end
 
 macro restoreReturnAddressBeforeReturn(sourceRegister)
-    if C_LOOP
-        # In our case, we're only restoring the bytecode vPC. 
-        move sourceRegister, lr
-    elsif ARMv7
+    if C_LOOP or ARMv7 or MIPS
+        # In C_LOOP case, we're only restoring the bytecode vPC.
         move sourceRegister, lr
     elsif X86 or X86_64
         push sourceRegister
@@ -373,32 +369,21 @@ macro functionInitialization(profileArgSkip)
 .stackHeightOK:
 end
 
-macro allocateBasicJSObject(sizeClassIndex, structure, result, scratch1, scratch2, slowCase)
+macro allocateJSObject(allocator, structure, result, scratch1, slowCase)
     if ALWAYS_ALLOCATE_SLOW
         jmp slowCase
     else
-        const offsetOfMySizeClass =
-            JSGlobalData::heap +
-            Heap::m_objectSpace +
-            MarkedSpace::m_normalSpace +
-            MarkedSpace::Subspace::preciseAllocators +
-            sizeClassIndex * sizeof MarkedAllocator
-        
         const offsetOfFirstFreeCell = 
             MarkedAllocator::m_freeList + 
             MarkedBlock::FreeList::head
 
-        # FIXME: we can get the global data in one load from the stack.
-        loadp CodeBlock[cfr], scratch1
-        loadp CodeBlock::m_globalData[scratch1], scratch1
-        
         # Get the object from the free list.   
-        loadp offsetOfMySizeClass + offsetOfFirstFreeCell[scratch1], result
+        loadp offsetOfFirstFreeCell[allocator], result
         btpz result, slowCase
         
         # Remove the object from the free list.
-        loadp [result], scratch2
-        storep scratch2, offsetOfMySizeClass + offsetOfFirstFreeCell[scratch1]
+        loadp [result], scratch1
+        storep scratch1, offsetOfFirstFreeCell[allocator]
     
         # Initialize the object.
         storep structure, JSCell::m_structure[result]

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2008, 2009, 2013 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,16 +34,20 @@
 #include "ExecutableAllocator.h"
 #include "Heap.h"
 #include "Intrinsic.h"
-#include "JITStubs.h"
+#include "JITThunks.h"
+#include "JITThunks.h"
+#include "JSCJSValue.h"
 #include "JSLock.h"
-#include "JSValue.h"
 #include "LLIntData.h"
+#include "MacroAssemblerCodeRef.h"
 #include "NumericStrings.h"
 #include "ProfilerDatabase.h"
 #include "PrivateName.h"
+#include "PrototypeMap.h"
 #include "SmallStrings.h"
 #include "Strong.h"
 #include "Terminator.h"
+#include "ThunkGenerators.h"
 #include "TimeoutChecker.h"
 #include "TypedArrayDescriptor.h"
 #include "WeakRandom.h"
@@ -66,6 +70,7 @@ namespace JSC {
     class CodeBlock;
     class CodeCache;
     class CommonIdentifiers;
+    class ExecState;
     class HandleStack;
     class IdentifierTable;
     class Interpreter;
@@ -86,6 +91,12 @@ namespace JSC {
     class UnlinkedEvalCodeBlock;
     class UnlinkedFunctionExecutable;
     class UnlinkedProgramCodeBlock;
+
+#if ENABLE(DFG_JIT)
+    namespace DFG {
+    class LongLivedState;
+    }
+#endif // ENABLE(DFG_JIT)
 
     struct HashTable;
     struct Instruction;
@@ -185,10 +196,14 @@ namespace JSC {
         // The heap should be just after executableAllocator and before other members to ensure that it's
         // destructed after all the objects that reference it.
         Heap heap;
+        
+#if ENABLE(DFG_JIT)
+        OwnPtr<DFG::LongLivedState> m_dfgState;
+#endif // ENABLE(DFG_JIT)
 
         GlobalDataType globalDataType;
         ClientData* clientData;
-        CallFrame* topCallFrame;
+        ExecState* topCallFrame;
 
         const HashTable* arrayConstructorTable;
         const HashTable* arrayPrototypeTable;
@@ -211,6 +226,7 @@ namespace JSC {
         const HashTable* stringConstructorTable;
         
         Strong<Structure> structureStructure;
+        Strong<Structure> structureRareDataStructure;
         Strong<Structure> debuggerActivationStructure;
         Strong<Structure> interruptedExecutionErrorStructure;
         Strong<Structure> terminatedExecutionErrorStructure;
@@ -283,7 +299,7 @@ namespace JSC {
         bool canUseRegExpJIT() { return false; } // interpreter only
 #endif
 
-        PrivateName m_inheritorIDKey;
+        PrototypeMap prototypeMap;
 
         OwnPtr<ParserArena> parserArena;
         OwnPtr<Keywords> keywords;
@@ -308,7 +324,7 @@ namespace JSC {
 
         ReturnAddressPtr exceptionLocation;
         JSValue hostCallReturnValue;
-        CallFrame* callFrameForThrow;
+        ExecState* callFrameForThrow;
         void* targetMachinePCForThrow;
         Instruction* targetInterpreterPCForThrow;
 #if ENABLE(DFG_JIT)
@@ -451,6 +467,8 @@ namespace JSC {
         CodeCache* codeCache() { return m_codeCache.get(); }
 
         JS_EXPORT_PRIVATE void discardAllCode();
+
+        void *m_apiData;
 
     private:
         friend class LLIntOffsetsExtractor;

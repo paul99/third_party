@@ -24,11 +24,11 @@
 #error "Please #include \"WKAPICast.h\" instead of this file directly."
 #endif
 
-typedef struct _Evas_Object Evas_Object;
-
 namespace WebKit {
 
-WK_ADD_API_MAPPING(WKViewRef, Evas_Object)
+class WebView;
+
+WK_ADD_API_MAPPING(WKViewRef, WebView)
 
 }
 

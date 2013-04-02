@@ -31,6 +31,8 @@
 #include "config.h"
 #include "WebKitAccessibleUtil.h"
 
+#if HAVE(ACCESSIBILITY)
+
 #include "AccessibilityObject.h"
 #include "FrameView.h"
 #include "IntRect.h"
@@ -162,8 +164,9 @@ bool selectionBelongsToObject(AccessibilityObject* coreObject, VisibleSelection&
     // node is actually inside the region, at least partially.
     Node* node = coreObject->node();
     Node* lastDescendant = node->lastDescendant();
-    ExceptionCode ec = 0;
-    return (range->intersectsNode(node, ec)
+    return (range->intersectsNode(node, IGNORE_EXCEPTION)
         && (range->endContainer() != node || range->endOffset())
         && (range->startContainer() != lastDescendant || range->startOffset() != lastOffsetInNode(lastDescendant)));
 }
+
+#endif

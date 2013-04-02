@@ -14,10 +14,10 @@
 #include <cassert> //assert
 
 namespace webrtc {
-RTPSenderAudio::RTPSenderAudio(const WebRtc_Word32 id, RtpRtcpClock* clock,
+RTPSenderAudio::RTPSenderAudio(const WebRtc_Word32 id, Clock* clock,
                                RTPSenderInterface* rtpSender) :
     _id(id),
-    _clock(*clock),
+    _clock(clock),
     _rtpSender(rtpSender),
     _audioFeedbackCritsect(CriticalSectionWrapper::CreateCriticalSection()),
     _audioFeedback(NULL),
@@ -217,7 +217,8 @@ RTPSenderAudio::SendTelephoneEventActive(WebRtc_Word8& telephoneEvent) const
         telephoneEvent = _dtmfKey;
         return true;
     }
-    WebRtc_Word64 delaySinceLastDTMF = _clock.GetTimeInMS() - _dtmfTimeLastSent;
+    WebRtc_Word64 delaySinceLastDTMF = _clock->TimeInMilliseconds() -
+        _dtmfTimeLastSent;
     if(delaySinceLastDTMF < 100)
     {
         telephoneEvent = _dtmfKey;
@@ -245,7 +246,8 @@ WebRtc_Word32 RTPSenderAudio::SendAudio(
   if (!_dtmfEventIsOn && PendingDTMF()) {
     CriticalSectionScoped cs(_sendAudioCritsect);
 
-    WebRtc_Word64 delaySinceLastDTMF = _clock.GetTimeInMS() - _dtmfTimeLastSent;
+    WebRtc_Word64 delaySinceLastDTMF = _clock->TimeInMilliseconds() -
+        _dtmfTimeLastSent;
 
     if (delaySinceLastDTMF > 100) {
       // New tone to play
@@ -295,7 +297,7 @@ WebRtc_Word32 RTPSenderAudio::SendAudio(
       } else {
         ended = true;
         _dtmfEventIsOn = false;
-        _dtmfTimeLastSent = _clock.GetTimeInMS();
+        _dtmfTimeLastSent = _clock->TimeInMilliseconds();
       }
       // don't hold the critsect while calling SendTelephoneEventPacket
       _sendAudioCritsect->Leave();

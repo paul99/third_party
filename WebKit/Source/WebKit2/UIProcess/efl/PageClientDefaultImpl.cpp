@@ -26,79 +26,64 @@
 
 #include "config.h"
 #include "PageClientDefaultImpl.h"
-
-#include "EwkViewImpl.h"
-#include "ewk_view.h"
-
-#if USE(TILED_BACKING_STORE)
 #include "PageViewportController.h"
 #include "PageViewportControllerClientEfl.h"
-#endif
+
+#include "EwkView.h"
+#include "ewk_view.h"
 
 using namespace WebCore;
 using namespace EwkViewCallbacks;
 
 namespace WebKit {
 
-PageClientDefaultImpl::PageClientDefaultImpl(EwkViewImpl* viewImpl)
-    : PageClientBase(viewImpl)
+PageClientDefaultImpl::PageClientDefaultImpl(EwkView* view)
+    : PageClientBase(view)
 {
 }
 
 void PageClientDefaultImpl::didCommitLoad()
 {
-#if USE(TILED_BACKING_STORE)
     ASSERT(m_pageViewportController);
     m_pageViewportController->didCommitLoad();
-#endif
 }
 
 void PageClientDefaultImpl::updateViewportSize()
 {
-#if USE(TILED_BACKING_STORE)
     if (!m_pageViewportControllerClient) {
-        m_pageViewportControllerClient = PageViewportControllerClientEfl::create(m_viewImpl);
-        m_pageViewportController = adoptPtr(new PageViewportController(m_viewImpl->page(), m_pageViewportControllerClient.get()));
+        m_pageViewportControllerClient = PageViewportControllerClientEfl::create(m_view);
+        m_pageViewportController = adoptPtr(new PageViewportController(m_view->page(), m_pageViewportControllerClient.get()));
     }
     m_pageViewportControllerClient->updateViewportSize();
-#endif
 }
 
 FloatRect PageClientDefaultImpl::convertToDeviceSpace(const FloatRect& userRect)
 {
     FloatRect result = userRect;
-    result.scale(m_viewImpl->page()->deviceScaleFactor());
+    result.scale(m_view->page()->deviceScaleFactor());
     return result;
 }
 
 FloatRect PageClientDefaultImpl::convertToUserSpace(const FloatRect& deviceRect)
 {
     FloatRect result = deviceRect;
-    result.scale(1 / m_viewImpl->page()->deviceScaleFactor());
+    result.scale(1 / m_view->page()->deviceScaleFactor());
     return result;
 }
 
 void PageClientDefaultImpl::didChangeViewportProperties(const WebCore::ViewportAttributes& attr)
 {
-#if USE(TILED_BACKING_STORE)
     ASSERT(m_pageViewportController);
     m_pageViewportController->didChangeViewportAttributes(attr);
-#else
-    UNUSED_PARAM(attr);
-#endif
 }
 
 void PageClientDefaultImpl::didChangeContentsSize(const WebCore::IntSize& size)
 {
-#if USE(TILED_BACKING_STORE)
     ASSERT(m_pageViewportController);
     m_pageViewportController->didChangeContentsSize(size);
-#endif
-
-    m_viewImpl->smartCallback<ContentsSizeChanged>().call(size);
+    m_view->smartCallback<ContentsSizeChanged>().call(size);
 }
 
-#if USE(TILED_BACKING_STORE)
 void PageClientDefaultImpl::pageDidRequestScroll(const IntPoint& position)
 {
     ASSERT(m_pageViewportController);
@@ -116,6 +101,5 @@ void PageClientDefaultImpl::pageTransitionViewportReady()
     ASSERT(m_pageViewportController);
     m_pageViewportController->pageTransitionViewportReady();
 }
-#endif
 
 } // namespace WebKit

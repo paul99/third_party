@@ -67,8 +67,7 @@ modules = [
             "ContentProvider.js",
             "ContentProviders.js",
             "CookieParser.js",
-            "CSSCompletions.js",
-            "CSSKeywordCompletions.js",
+            "CSSMetadata.js",
             "CSSStyleModel.js",
             "BreakpointManager.js",
             "Database.js",
@@ -77,31 +76,38 @@ modules = [
             "DebuggerModel.js",
             "DebuggerScriptMapping.js",
             "FileManager.js",
+            "FileMapping.js",
+            "FileSystemMapping.js",
             "FileSystemModel.js",
+            "FileSystemWorkspaceProvider.js",
             "FileUtils.js",
             "HAREntry.js",
             "IndexedDBModel.js",
             "InspectorBackend.js",
+            "IsolatedFileSystemModel.js",
             "Linkifier.js",
             "NetworkLog.js",
             "NetworkUISourceCodeProvider.js",
-            "NetworkWorkspaceProvider.js",
             "PresentationConsoleMessageHelper.js",
             "RuntimeModel.js",
             "SASSSourceMapping.js",
             "Script.js",
             "ScriptFormatter.js",
             "ScriptSnippetModel.js",
+            "SimpleWorkspaceProvider.js",
             "SnippetStorage.js",
             "SourceMapping.js",
             "StylesSourceMapping.js",
             "TimelineManager.js",
             "RemoteObject.js",
             "Resource.js",
+            "DefaultScriptMapping.js",
             "ResourceScriptMapping.js",
+            "LiveEditSupport.js",
             "ResourceTreeModel.js",
             "ResourceType.js",
             "ResourceUtils.js",
+            "SourceMap.js",
             "NetworkManager.js",
             "NetworkRequest.js",
             "UISourceCode.js",
@@ -154,6 +160,7 @@ modules = [
             "Toolbar.js",
             "UIUtils.js",
             "View.js",
+            "ViewportControl.js",
             "treeoutline.js",
         ]
     },
@@ -331,6 +338,8 @@ modules = [
             "HeapSnapshotView.js",
             "HeapSnapshotWorker.js",
             "HeapSnapshotWorkerDispatcher.js",
+            "JSHeapSnapshot.js",
+            "NativeHeapSnapshot.js",
             "NativeMemorySnapshotView.js",
             "ProfileDataGridTree.js",
             "ProfilesPanel.js",
@@ -413,6 +422,7 @@ if not process_recursively:
     os.system("cat  " + inspector_path + "/" + "InjectedScriptSource.js" + " >> " + inspector_path + "/" + "InjectedScriptSourceTmp.js")
     command = compiler_command
     command += "    --externs " + inspector_path + "/" + "InjectedScriptExterns.js" + " \\\n"
+    command += "    --externs " + protocol_externs_path + " \\\n"
     command += "    --module " + jsmodule_name_prefix + "injected_script" + ":" + "1" + " \\\n"
     command += "        --js " + inspector_path + "/" + "InjectedScriptSourceTmp.js" + " \\\n"
     command += "\n"
@@ -424,6 +434,7 @@ if not process_recursively:
     os.system("cat  " + inspector_path + "/" + "InjectedScriptCanvasModuleSource.js" + " >> " + inspector_path + "/" + "InjectedScriptCanvasModuleSourceTmp.js")
     command = compiler_command
     command += "    --externs " + inspector_path + "/" + "InjectedScriptExterns.js" + " \\\n"
+    command += "    --externs " + protocol_externs_path + " \\\n"
     command += "    --module " + jsmodule_name_prefix + "injected_script" + ":" + "1" + " \\\n"
     command += "        --js " + inspector_path + "/" + "InjectedScriptCanvasModuleSourceTmp.js" + " \\\n"
     command += "\n"

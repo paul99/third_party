@@ -27,7 +27,7 @@
 #define ProfilerCompilation_h
 
 #include "ExitKind.h"
-#include "JSValue.h"
+#include "JSCJSValue.h"
 #include "ProfilerCompilationKind.h"
 #include "ProfilerCompiledBytecode.h"
 #include "ProfilerExecutionCounter.h"
@@ -60,7 +60,7 @@ public:
     
     void addDescription(const CompiledBytecode&);
     ExecutionCounter* executionCounterFor(const OriginStack&);
-    void addOSRExitSite(const void* codeAddress);
+    void addOSRExitSite(const Vector<const void*>& codeAddresses);
     OSRExit* addOSRExit(unsigned id, const OriginStack&, ExitKind, bool isWatchpoint);
     
     JSValue toJS(ExecState*) const;

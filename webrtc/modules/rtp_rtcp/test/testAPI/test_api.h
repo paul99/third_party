@@ -14,28 +14,6 @@
 
 namespace webrtc {
 
-class FakeRtpRtcpClock : public RtpRtcpClock {
- public:
-  FakeRtpRtcpClock() {
-    time_in_ms_ = 123456;
-  }
-  // Return a timestamp in milliseconds relative to some arbitrary
-  // source; the source is fixed for this clock.
-  virtual WebRtc_Word64 GetTimeInMS() {
-    return time_in_ms_;
-  }
-  // Retrieve an NTP absolute timestamp.
-  virtual void CurrentNTP(WebRtc_UWord32& secs, WebRtc_UWord32& frac) {
-    secs = time_in_ms_ / 1000;
-    frac = (time_in_ms_ % 1000) * 4294967;
-  }
-  void IncrementTime(WebRtc_UWord32 time_increment_ms) {
-    time_in_ms_ += time_increment_ms;
-  }
- private:
-  WebRtc_Word64 time_in_ms_;
-};
-
 // This class sends all its packet straight to the provided RtpRtcp module.
 // with optional packet loss.
 class LoopBackTransport : public webrtc::Transport {

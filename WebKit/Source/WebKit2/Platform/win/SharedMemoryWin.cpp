@@ -84,21 +84,21 @@ static bool getDuplicatedHandle(HANDLE sourceHandle, DWORD sourcePID, HANDLE& du
     return success;
 }
 
-bool SharedMemory::Handle::decode(CoreIPC::ArgumentDecoder* decoder, Handle& handle)
+bool SharedMemory::Handle::decode(CoreIPC::ArgumentDecoder& decoder, Handle& handle)
 {
     ASSERT_ARG(handle, !handle.m_handle);
     ASSERT_ARG(handle, !handle.m_size);
 
     uint64_t size;
-    if (!decoder->decodeUInt64(size))
+    if (!decoder.decode(size))
         return false;
 
     uint64_t sourceHandle;
-    if (!decoder->decodeUInt64(sourceHandle))
+    if (!decoder.decode(sourceHandle))
         return false;
 
     uint32_t sourcePID;
-    if (!decoder->decodeUInt32(sourcePID))
+    if (!decoder.decode(sourcePID))
         return false;
 
     HANDLE duplicatedHandle;
@@ -183,7 +183,7 @@ SharedMemory::~SharedMemory()
     ::UnmapViewOfFile(m_data);
     ::CloseHandle(m_handle);
 }
-    
+
 bool SharedMemory::createHandle(Handle& handle, Protection protection)
 {
     ASSERT_ARG(handle, !handle.m_handle);

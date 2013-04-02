@@ -30,7 +30,7 @@
 #include "PageClient.h"
 #include <Evas.h>
 
-class EwkViewImpl;
+class EwkView;
 
 namespace WebKit {
 
@@ -38,20 +38,20 @@ class PageClientBase : public PageClient {
 public:
     virtual ~PageClientBase();
 
-    // Called from the view
     virtual void didCommitLoad() = 0;
     virtual void updateViewportSize() = 0;
     virtual void didChangeContentsSize(const WebCore::IntSize&) = 0;
 
-    EwkViewImpl* viewImpl() const;
+    EwkView* view() const;
 
 protected:
-    explicit PageClientBase(EwkViewImpl*);
+    explicit PageClientBase(EwkView*);
 
     // PageClient
     virtual PassOwnPtr<DrawingAreaProxy> createDrawingAreaProxy();
     virtual void setViewNeedsDisplay(const WebCore::IntRect&);
     virtual void displayView();
+    virtual bool canScrollView() { return false; }
     virtual void scrollView(const WebCore::IntRect&, const WebCore::IntSize&);
     virtual WebCore::IntSize viewSize();
     virtual bool isViewWindowActive();
@@ -94,11 +94,9 @@ protected:
 #endif
 
     virtual void setFindIndicator(PassRefPtr<FindIndicator>, bool, bool);
-#if USE(ACCELERATED_COMPOSITING)
     virtual void enterAcceleratedCompositingMode(const LayerTreeContext&);
     virtual void exitAcceleratedCompositingMode();
     virtual void updateAcceleratedCompositingMode(const LayerTreeContext&);
-#endif
 
     virtual void didCommitLoadForMainFrame(bool);
     virtual void didFinishLoadingDataForCustomRepresentation(const String&, const CoreIPC::DataReference&);
@@ -109,14 +107,12 @@ protected:
     virtual void findStringInCustomRepresentation(const String&, FindOptions, unsigned);
     virtual void countStringMatchesInCustomRepresentation(const String&, FindOptions, unsigned);
 
-#if USE(TILED_BACKING_STORE)
     virtual void pageDidRequestScroll(const WebCore::IntPoint&) = 0;
     virtual void didRenderFrame(const WebCore::IntSize& contentsSize, const WebCore::IntRect& coveredRect) = 0;
     virtual void pageTransitionViewportReady() = 0;
-#endif
 
 protected:
-    EwkViewImpl* m_viewImpl;
+    EwkView* m_view;
     DefaultUndoController m_undoController;
 };
 

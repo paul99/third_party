@@ -304,27 +304,9 @@ void TestRunner::setAppCacheMaximumSize(unsigned long long size)
     // FIXME: implement
 }
 
-unsigned TestRunner::numberOfActiveAnimations() const
-{
-    // FIXME: implement
-    return 0;
-}
-
-unsigned TestRunner::workerThreadCount() const
-{
-    // FIXME: implement
-    return 0;
-}
-
 void TestRunner::setSelectTrailingWhitespaceEnabled(bool flag)
 {
     // FIXME: implement
-}
-
-bool TestRunner::pauseTransitionAtTimeOnElementWithId(JSStringRef propertyName, double time, JSStringRef elementId)
-{
-    // FIXME: implement
-    return false;
 }
 
 void TestRunner::setMockDeviceOrientation(bool canProvideAlpha, double alpha, bool canProvideBeta, double beta, bool canProvideGamma, double gamma)
@@ -378,12 +360,6 @@ void TestRunner::startSpeechInput(JSContextRef inputElement)
 void TestRunner::setIconDatabaseEnabled(bool iconDatabaseEnabled)
 {
     // FIXME: implement
-}
-
-bool TestRunner::pauseAnimationAtTimeOnElementWithId(JSStringRef animationName, double time, JSStringRef elementId)
-{
-    // FIXME: implement
-    return false;
 }
 
 void TestRunner::setCacheModel(int)
